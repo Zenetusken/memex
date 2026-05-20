@@ -1,0 +1,7 @@
+{# View mode of the markdown body. HTMX target = #md-pane.
+   When the context provides `just_saved` (an ISO timestamp string),
+   includes a fading "saved" indicator that auto-dismisses after ~3.4s. #}
+{% if just_saved %}
+<div class="saved-flash">saved {{ just_saved }}</div>
+{% endif %}
+<pre class="whitespace-pre-wrap break-words font-mono text-sm leading-relaxed text-zinc-200">{{ document.body }}</pre>

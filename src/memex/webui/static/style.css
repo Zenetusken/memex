@@ -1,0 +1,177 @@
+/* Memex local web UI — supplements Tailwind from CDN. */
+
+/* HTMX indicator visibility — only show while a request is in flight. */
+.htmx-indicator {
+  opacity: 0;
+  transition: opacity 150ms ease-in-out;
+}
+.htmx-request .htmx-indicator,
+.htmx-request.htmx-indicator {
+  opacity: 1;
+}
+
+/* Slightly tighter `code` styling inside text. */
+code {
+  font-size: 0.875em;
+  padding: 0.05rem 0.25rem;
+  border-radius: 0.25rem;
+  background: rgb(39 39 42 / 0.6);
+}
+
+/* Disabled buttons (HTMX hx-disabled-elt) get a subtle look. */
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* WCAG focus visibility — explicit ring matching the accent. */
+a:focus-visible,
+button:focus-visible,
+textarea:focus-visible,
+input:focus-visible,
+summary:focus-visible {
+  outline: 2px solid rgb(59 130 246);   /* blue-500 */
+  outline-offset: 2px;
+  border-radius: 0.125rem;
+}
+
+/* Tabular-numerals utility — used for any counts, timestamps, sha digits. */
+.tabular { font-variant-numeric: tabular-nums; }
+
+/* ─── Phase-4 instrument-panel motif ─────────────────────────────────── */
+/* Hairline horizontal rule with small endpoint ticks. Used inside the
+   graph inspector and document edit toolbar as a section break. */
+.tick-rule {
+  position: relative;
+  height: 1px;
+  background: rgb(63 63 70);            /* zinc-700 */
+  margin: 0.75rem 0;
+}
+.tick-rule::before,
+.tick-rule::after {
+  content: '';
+  position: absolute;
+  top: -2px;
+  width: 1px;
+  height: 5px;
+  background: rgb(63 63 70);
+}
+.tick-rule::before { left: 0; }
+.tick-rule::after  { right: 0; }
+
+/* Uniform label/value rows for the inspector and document-ref blocks. */
+.dl-row {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  gap: 0.75rem;
+  padding: 0.2rem 0;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+.dl-row > dt {
+  color: rgb(113 113 122);              /* zinc-500 */
+  letter-spacing: 0.02em;
+}
+.dl-row > dd {
+  color: rgb(212 212 216);              /* zinc-300 */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  word-break: break-all;
+}
+
+/* Two-pane split (PDF source + extracted markdown). */
+.pane-split {
+  display: grid;
+  grid-template-columns: 1fr 1px 1fr;
+  height: calc(100vh - 13rem);
+  min-height: 32rem;
+  border: 1px solid rgb(39 39 42);      /* zinc-800 */
+  border-radius: 0.375rem;
+  overflow: hidden;
+  background: rgb(24 24 27);            /* zinc-900 */
+}
+.pane-divider { background: rgb(39 39 42); }
+.pane-scroll {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  background: rgb(24 24 27);
+}
+.pane-scroll > .pane-body { flex: 1 1 auto; overflow: auto; }
+
+.pane-header {
+  flex: 0 0 auto;
+  background: rgb(24 24 27);
+  border-bottom: 1px solid rgb(39 39 42);
+  padding: 0.55rem 0.875rem;
+  font-size: 0.625rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgb(113 113 122);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+.pane-header a { color: rgb(161 161 170); }
+.pane-header a:hover { color: rgb(244 244 245); }
+
+.pdf-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: rgb(24 24 27);
+}
+
+/* Single-column variant when there is no PDF source. */
+.pane-solo {
+  border: 1px solid rgb(39 39 42);
+  border-radius: 0.375rem;
+  overflow: hidden;
+  background: rgb(24 24 27);
+}
+
+/* "Saved" toast above the markdown view — fades after a beat. */
+.saved-flash {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.7rem;
+  color: rgb(161 161 170);
+  margin-bottom: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  animation: memex-fade-out 2.4s ease-in 1s forwards;
+}
+.saved-flash::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgb(37 99 235);           /* blue-600 */
+}
+@keyframes memex-fade-out {
+  0%   { opacity: 1; }
+  60%  { opacity: 1; }
+  100% { opacity: 0; visibility: hidden; }
+}
+
+/* Tertiary action button — bordered, low contrast, used for "edit"/"graph". */
+.btn-quiet {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.75rem;
+  line-height: 1;
+  color: rgb(161 161 170);
+  background: transparent;
+  border: 1px solid rgb(39 39 42);
+  border-radius: 0.25rem;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+.btn-quiet:hover {
+  color: rgb(244 244 245);
+  border-color: rgb(63 63 70);
+}
+.btn-quiet[disabled] { opacity: 0.5; pointer-events: none; }

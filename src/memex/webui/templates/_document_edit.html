@@ -1,0 +1,38 @@
+{# Edit mode of the markdown body. HTMX target = #md-pane.
+   Save POSTs to /documents/{doc_id}/review with form field `body`;
+   cancel re-fetches the view-mode partial via /documents/{doc_id}/body. #}
+<form
+  hx-post="/documents/{{ document.ref.doc_id }}/review"
+  hx-target="#md-pane"
+  hx-swap="innerHTML"
+  hx-disabled-elt="button[name='save']"
+  class="space-y-3">
+  <textarea
+    name="body"
+    spellcheck="false"
+    autofocus
+    rows="22"
+    class="block w-full bg-zinc-950 border border-zinc-700 focus:border-blue-600 focus:outline-none rounded p-3 font-mono text-sm leading-relaxed text-zinc-100 resize-y"
+    aria-label="Document markdown body"
+  >{{ document.body }}</textarea>
+
+  <div class="tick-rule"></div>
+
+  <div class="flex items-center gap-2 text-xs">
+    <button name="save" type="submit"
+            class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded font-medium text-white">
+      save
+    </button>
+    <button type="button"
+            class="btn-quiet"
+            hx-get="/documents/{{ document.ref.doc_id }}/body"
+            hx-target="#md-pane"
+            hx-swap="innerHTML">
+      cancel
+    </button>
+    <span class="htmx-indicator ml-2 text-zinc-500">saving…</span>
+    <span class="ml-auto text-zinc-600 tabular">
+      sha <span class="font-mono">{{ document.ref.content_sha256[:7] }}</span>
+    </span>
+  </div>
+</form>

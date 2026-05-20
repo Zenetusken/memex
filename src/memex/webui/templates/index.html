@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Memex — Ask{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-2">Ask the vault</h1>
+<p class="text-zinc-400 text-sm mb-6">Every answer is grounded in retrieved chunks. The agent refuses rather than guess.</p>
+
+<form hx-post="/ask"
+      hx-target="#answer"
+      hx-swap="innerHTML"
+      hx-indicator="#loading"
+      hx-disabled-elt="button"
+      class="space-y-3">
+  <textarea name="question"
+            placeholder="What does Smith 2024 say about reflexivity?"
+            autofocus
+            required
+            rows="3"
+            class="w-full p-3 bg-zinc-900 border border-zinc-700 rounded-md text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-blue-600"></textarea>
+  <div class="flex items-center gap-3">
+    <button type="submit"
+            class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-md font-medium text-sm transition">
+      Ask
+    </button>
+    <span id="loading" class="htmx-indicator text-sm text-zinc-500">thinking…</span>
+  </div>
+</form>
+
+<section id="answer" class="mt-8"></section>
+{% endblock %}

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Memex — Documents{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-6">Documents <span class="text-zinc-500 text-base font-normal">({{ documents|length }})</span></h1>
+
+{% if documents %}
+<ul class="space-y-2">
+  {% for ref in documents %}
+  <li class="border border-zinc-800 rounded-md">
+    <a href="/documents/{{ ref.doc_id }}" class="block p-3 hover:bg-zinc-900 transition">
+      <p class="font-mono text-sm">{{ ref.doc_id }}</p>
+      <p class="text-xs text-zinc-500 mt-1">sha256: <code>{{ ref.content_sha256[:16] }}…</code></p>
+    </a>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="text-zinc-500">No documents in the vault yet. Run <code class="text-zinc-300">memex ingest path/to/doc</code> to add one.</p>
+{% endif %}
+{% endblock %}

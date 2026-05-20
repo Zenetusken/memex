@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}graph · {{ document.ref.doc_id }} — Memex{% endblock %}
+{% block content %}
+{# Break out of the base.html max-w-4xl constraint for this view only. #}
+<style>main { max-width: 100% !important; }</style>
+<link rel="stylesheet" href="/static/graph.css">
+
+<nav class="text-sm text-zinc-500 mb-3">
+  <a href="/documents" class="hover:text-zinc-300">Documents</a>
+  <span class="mx-2 text-zinc-700">/</span>
+  <a href="/documents/{{ document.ref.doc_id }}"
+     class="text-zinc-300 font-mono hover:text-zinc-100">{{ document.ref.doc_id }}</a>
+  <span class="mx-2 text-zinc-700">/</span>
+  <span class="text-zinc-200">graph</span>
+</nav>
+
+<header class="flex items-end justify-between gap-6 mb-4">
+  <div class="min-w-0">
+    <p class="text-[0.625rem] uppercase tracking-widest text-zinc-500 mb-1">
+      one-hop entity graph
+    </p>
+    <h1 class="text-xl font-semibold truncate">
+      {{ document.frontmatter.title or document.ref.doc_id }}
+    </h1>
+  </div>
+  <div class="text-xs text-zinc-500 shrink-0">
+    {% if graph_available %}
+      <a href="/documents/{{ document.ref.doc_id }}" class="btn-quiet">back to document</a>
+    {% else %}
+      <span class="px-2.5 py-1.5 text-amber-400/90 border border-amber-900/50 rounded">
+        graph store unavailable
+      </span>
+    {% endif %}
+  </div>
+</header>
+
+<div class="graph-layout">
+  <div id="cy" class="cy-canvas" aria-label="document graph"></div>
+  <aside class="inspector-panel" aria-label="node inspector">
+    <div class="inspector-header">
+      <span>inspector</span>
+      <span class="tabular text-zinc-600">{{ neighbor_count }} neighbor{{ '' if neighbor_count == 1 else 's' }}</span>
+    </div>
+    <div id="inspector-body" class="inspector-body">
+      <p class="text-xs text-zinc-500 italic">select a node to inspect.</p>
+    </div>
+  </aside>
+</div>
+
+<div class="graph-stats">
+  <div><span>vault</span><span class="font-mono text-zinc-400">{{ document.ref.doc_id }}</span></div>
+  <div><span>neighbors</span><span class="text-zinc-400">{{ neighbor_count }}</span></div>
+  <div class="ml-auto text-zinc-700">scroll to zoom · drag to pan</div>
+</div>
+
+<script id="graph-data" type="application/json">{{ graph_data | tojson }}</script>
+<script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js" defer></script>
+<script src="/static/graph.js" defer></script>
+{% endblock %}
