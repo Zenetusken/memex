@@ -29,8 +29,9 @@ htmlcov/
 Thumbs.db
 
 # Memex-specific
-# User vault data — never commit
-vault/
+# User vault data — never commit. Anchored to project root so the
+# `src/memex/vault/` source module isn't accidentally swept up.
+/vault/
 # Local Langfuse trace exports
 .langfuse/
 # Local model cache
