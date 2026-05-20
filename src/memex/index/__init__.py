@@ -1,0 +1,35 @@
+"""Index stage — writers for LanceDB (vectors), SQLite FTS5 (BM25), RyuGraph (graph).
+
+This stage is idempotent and fully regenerable from the Markdown vault
+(ADR-0003). `memex reindex` deletes the index files and rebuilds from
+`vault/documents/`. Content-derived chunk IDs (`sha1(text)[:10]`)
+enable incremental partial re-indexing: a one-paragraph edit only
+rewrites the changed chunk, not the whole document. See GUIDELINES.md
+Part II and Part IV.
+"""
+
+from memex.index.chunker import chunk_document
+from memex.index.fts_store import FTSStore
+from memex.index.graph_store import GraphNeighbor, GraphStore
+from memex.index.pipeline import (
+    IndexResult,
+    ReindexReport,
+    index_document,
+    reindex_vault,
+    remove_document,
+)
+from memex.index.vector_store import EMBEDDING_DIM, VectorStore
+
+__all__ = [
+    "EMBEDDING_DIM",
+    "FTSStore",
+    "GraphNeighbor",
+    "GraphStore",
+    "IndexResult",
+    "ReindexReport",
+    "VectorStore",
+    "chunk_document",
+    "index_document",
+    "reindex_vault",
+    "remove_document",
+]

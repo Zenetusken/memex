@@ -1,0 +1,306 @@
+"""Enrich stage — entity extraction + citation resolution + wikilink insertion.
+
+Per-chunk LLM calls extract `Entity` and `CitationCandidate` records;
+the document-level pass deduplicates entities by `(lower(name), kind)`,
+resolves citations against the vault's other documents via a heuristic
+matcher (`memex.enrich.citations.resolve_candidate`), writes `MENTIONS`
++ `CITES` edges to the graph store, substitutes high-confidence
+`[[doc_id]]` wikilinks into the canonical markdown, and updates the
+manifest's `EnrichStage` with `entity_count`, `citation_count`,
+`wikilinks_inserted`, and the prompt versions in play.
+
+Citation resolution doesn't go through the LLM a second time — the
+graph + frontmatter authoritatively own the matching. See
+`memex/enrich/citations.py` for the resolver design (title /
+author-year / token-overlap scoring with a 0.70 threshold).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import time
+from pathlib import Path
+
+import structlog
+import ulid
+from pydantic import BaseModel, Field
+
+from memex.core.config import get_settings
+from memex.core.errors import ModelCallError
+from memex.core.manifest import EnrichStage, now_utc, update_manifest
+from memex.core.types import Chunk
+from memex.enrich.citations import (
+    CitationCandidate,
+    CitationIndex,
+    CitationList,
+    ResolvedCitation,
+    insert_wikilinks,
+    make_signature,
+    resolve_candidate,
+)
+from memex.enrich.entities import (
+    Entity,
+    EntityList,
+    dedupe,
+    merge_entities,
+)
+from memex.index.chunker import chunk_document
+from memex.index.graph_store import GraphStore
+from memex.models.client import complete_structured
+from memex.prompts import render_prompt
+from memex.vault.store import (
+    VaultDocument,
+    list_documents,
+    make_ref,
+    read_document,
+    write_document,
+)
+
+logger = structlog.get_logger(__name__)
+
+_ENTITY_PROMPT_NAME = "extract_entities"
+_ENTITY_PROMPT_VERSION = "v1"
+_CITATION_PROMPT_NAME = "extract_citations"
+_CITATION_PROMPT_VERSION = "v1"
+
+_MAX_CONCURRENT = 4  # per-chunk extraction parallelism
+
+
+class EnrichResult(BaseModel):
+    doc_id: str
+    correlation_id: str
+    entities: list[Entity] = Field(default_factory=list)
+    citations: list[ResolvedCitation] = Field(default_factory=list)
+    wikilinks_inserted: int = 0
+    chunk_count: int = 0
+    duration_ms: int = 0
+
+
+async def _build_citation_index(
+    vault_path: Path, *, skip_doc_id: str
+) -> CitationIndex:
+    """Index every other document in the vault for citation matching."""
+    idx = CitationIndex()
+    async for ref in list_documents(vault_path):
+        if ref.doc_id == skip_doc_id:
+            continue
+        doc = await read_document(vault_path, ref.doc_id)
+        idx.by_id[ref.doc_id] = make_signature(ref.doc_id, doc.frontmatter)
+    return idx
+
+
+async def _extract_chunk(
+    chunk: Chunk, title: str
+) -> tuple[list[Entity], list[CitationCandidate]]:
+    """One LLM call for entities, one for citations. Parallel.
+
+    Both calls go through `complete_structured` which is generic over
+    its `schema` parameter — pyright keeps the chain typed without
+    runtime asserts.
+    """
+    entity_prompt = render_prompt(
+        _ENTITY_PROMPT_NAME, document_title=title, passage=chunk.text
+    )
+    citation_prompt = render_prompt(
+        _CITATION_PROMPT_NAME, document_title=title, passage=chunk.text
+    )
+
+    entity_task = complete_structured(
+        prompt=entity_prompt,
+        schema=EntityList,
+        prompt_tag=f"{_ENTITY_PROMPT_NAME}@{_ENTITY_PROMPT_VERSION}",
+    )
+    citation_task = complete_structured(
+        prompt=citation_prompt,
+        schema=CitationList,
+        prompt_tag=f"{_CITATION_PROMPT_NAME}@{_CITATION_PROMPT_VERSION}",
+    )
+    (entity_raw, _), (citation_raw, _) = await asyncio.gather(
+        entity_task, citation_task
+    )
+    if not isinstance(entity_raw, EntityList):
+        # `complete_structured` is typed to return the schema instance,
+        # so this can only fire if a test fake or vendored plugin breaks
+        # the contract — surface explicitly rather than crash under `-O`.
+        raise ModelCallError(
+            "Entity extraction returned unexpected payload type",
+            context={"got": type(entity_raw).__name__, "expected": "EntityList"},
+        )
+    if not isinstance(citation_raw, CitationList):
+        raise ModelCallError(
+            "Citation extraction returned unexpected payload type",
+            context={"got": type(citation_raw).__name__, "expected": "CitationList"},
+        )
+    return merge_entities(chunk, entity_raw), list(citation_raw.citations)
+
+
+async def enrich_document(doc_id: str) -> EnrichResult:
+    """Extract entities + citations, write graph edges + wikilinks +
+    manifest.
+
+    Wikilinks are inserted only for high-confidence resolutions; the
+    write goes through `vault.write_document` (atomic) and the
+    manifest's `content_sha256` is updated in the same call so the
+    watcher's `_confirm_user_edit` correctly treats the self-write as
+    Memex's own (per IMPLEMENTATION-PLAN §2.3).
+    """
+    settings = get_settings()
+    correlation_id = str(ulid.ULID())
+    log = logger.bind(doc_id=doc_id, correlation_id=correlation_id)
+    log.info("enrich.start")
+
+    start = time.monotonic()
+
+    doc = await read_document(settings.vault_path, doc_id)
+    chunks = chunk_document(doc)
+    title = doc.frontmatter.title or doc_id
+
+    # Citation index excludes the current doc (we don't link to ourself).
+    citation_index = await _build_citation_index(
+        settings.vault_path, skip_doc_id=doc_id
+    )
+
+    semaphore = asyncio.Semaphore(_MAX_CONCURRENT)
+
+    async def _run(c: Chunk) -> tuple[list[Entity], list[CitationCandidate]]:
+        async with semaphore:
+            return await _extract_chunk(c, title)
+
+    # `return_exceptions=True` so one bad chunk doesn't abort the whole
+    # document mid-enrich. We log per-chunk failures, treat them as
+    # "this chunk contributed no entities and no citations," and let
+    # the partial result through. Aborting the whole doc would leave
+    # the graph in a half-enriched state (some chunks' MENTIONS/CITES
+    # written, others not).
+    raw_results = await asyncio.gather(
+        *(_run(c) for c in chunks), return_exceptions=True
+    )
+
+    # Flatten entities + citations, keep chunk attribution on candidates.
+    entities_flat: list[Entity] = []
+    citation_candidates: list[tuple[str, CitationCandidate]] = []
+    chunk_failures = 0
+    for chunk, result in zip(chunks, raw_results, strict=True):
+        if isinstance(result, BaseException):
+            chunk_failures += 1
+            log.warning(
+                "enrich.chunk_failed",
+                chunk_id=chunk.chunk_id,
+                error_type=type(result).__name__,
+                error=str(result)[:200],
+            )
+            continue
+        ents, cits = result
+        entities_flat.extend(ents)
+        for c in cits:
+            citation_candidates.append((chunk.chunk_id, c))
+
+    entities = dedupe(entities_flat)
+
+    # Resolve citations against the vault index. Each candidate resolves
+    # independently; unresolved candidates are dropped from the output
+    # (they go into structlog at debug level for forensics).
+    resolved: list[ResolvedCitation] = []
+    for chunk_id, candidate in citation_candidates:
+        match = resolve_candidate(
+            candidate, chunk_id, citation_index, skip_doc_id=doc_id
+        )
+        if match is not None:
+            resolved.append(match)
+        else:
+            log.debug(
+                "enrich.citation_unresolved",
+                surface=candidate.surface_text[:80],
+                model_confidence=candidate.confidence,
+            )
+
+    # Wikilink insertion: rewrites the body atomically.
+    new_body, wikilinks_inserted = insert_wikilinks(doc.body, resolved)
+    if new_body != doc.body:
+        updated_ref = make_ref(
+            settings.vault_path,
+            doc_id,
+            content_sha256=doc.ref.content_sha256,  # placeholder; write recomputes
+            source_path=doc.ref.source_path,
+        )
+        updated = VaultDocument(
+            ref=updated_ref,
+            frontmatter=doc.frontmatter,
+            body=new_body,
+            mtime_ns=doc.mtime_ns,
+        )
+        written = await write_document(settings.vault_path, updated)
+        new_content_sha = written.content_sha256
+    else:
+        new_content_sha = doc.ref.content_sha256
+
+    # Write to the graph. We open + close per call so concurrent
+    # enrich runs don't share a connection.
+    try:
+        graph = await GraphStore.open(settings.vault_path)
+    except ImportError:
+        log.warning(
+            "enrich.graph_unavailable",
+            fix="install ryugraph to persist enrich output",
+        )
+        graph = None
+
+    if graph is not None:
+        try:
+            await graph.upsert_document(doc_id, title)
+            for ent in entities:
+                eid = await graph.upsert_entity(ent.name, ent.kind)
+                await graph.link_mentions(doc_id, eid, ent.confidence)
+            for cit in resolved:
+                # Ensure the target document node exists before linking.
+                await graph.upsert_document(
+                    cit.target_doc_id, cit.target_title
+                )
+                await graph.link_cites(
+                    from_doc_id=doc_id,
+                    to_doc_id=cit.target_doc_id,
+                    surface_text=cit.surface_text[:200],
+                    confidence=cit.confidence,
+                )
+        finally:
+            await graph.close()
+
+    duration_ms = int((time.monotonic() - start) * 1000)
+    await update_manifest(
+        settings.vault_path,
+        doc_id,
+        content_sha256=new_content_sha,
+        enrich=EnrichStage(
+            correlation_id=correlation_id,
+            enriched_at=now_utc(),
+            entity_count=len(entities),
+            citation_count=len(resolved),
+            wikilinks_inserted=wikilinks_inserted,
+            prompt_versions={
+                _ENTITY_PROMPT_NAME: _ENTITY_PROMPT_VERSION,
+                _CITATION_PROMPT_NAME: _CITATION_PROMPT_VERSION,
+            },
+            duration_ms=duration_ms,
+        ),
+        correlation_id=correlation_id,
+    )
+
+    log.info(
+        "enrich.done",
+        chunk_count=len(chunks),
+        chunk_failures=chunk_failures,
+        entity_count=len(entities),
+        citation_count=len(resolved),
+        wikilinks_inserted=wikilinks_inserted,
+        duration_ms=duration_ms,
+    )
+
+    return EnrichResult(
+        doc_id=doc_id,
+        correlation_id=correlation_id,
+        entities=entities,
+        citations=resolved,
+        wikilinks_inserted=wikilinks_inserted,
+        chunk_count=len(chunks),
+        duration_ms=duration_ms,
+    )

@@ -1,0 +1,215 @@
+"""RyuGraph-backed entity and citation graph — see ADR-0005.
+
+The graph stores nodes (Document, Entity, Concept, Citation) and edges
+(MENTIONS, CITES, DEFINES, RELATES_TO). RyuGraph is the maintained
+fork of Kuzu after upstream archival; the Cypher dialect and on-disk
+format lineage are preserved, so this module's interface is the same
+shape an eventual return to upstream Kuzu (or any successor) would
+need to honour.
+
+Schema is the cypher file in `index/schemas/graph.cypher`, applied
+idempotently on first connection.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import re
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import structlog
+from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    pass
+
+logger = structlog.get_logger(__name__)
+
+_SCHEMA_PATH = Path(__file__).parent / "schemas" / "graph.cypher"
+_STMT_SPLIT = re.compile(r";\s*\n")
+
+
+def _strip_cypher_comments(schema: str) -> str:
+    """Remove `//`-prefixed line comments so the statement splitter
+    doesn't see them as part of the first statement.
+
+    The schema file begins with three banner-comment lines; if those
+    survive into the first split chunk, the chunk gets dropped by
+    the `not stmt.startswith("//")` check and the very first
+    `CREATE NODE TABLE Document` never runs. Subsequent `CREATE REL
+    TABLE` statements that reference Document then fail with
+    "Binder exception: Table Document does not exist."
+    """
+    lines = []
+    for line in schema.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith("//"):
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
+
+class GraphNeighbor(BaseModel):
+    """One related document, surfaced by the graph for the `graph` CLI."""
+
+    doc_id: str
+    title: str
+    relation: str
+    via: str | None = None  # e.g. shared entity name
+
+
+def entity_id(name: str, kind: str) -> str:
+    """Stable, content-derived entity id. Same (name, kind) ⇒ same id."""
+    norm = f"{kind}::{name.strip().lower()}"
+    return "ent_" + hashlib.sha1(norm.encode("utf-8")).hexdigest()[:16]
+
+
+class GraphStore:
+    """Async wrapper around RyuGraph. Use `await GraphStore.open(vault_path)`."""
+
+    def __init__(self, conn: object) -> None:
+        self._conn = conn
+
+    @classmethod
+    async def open(cls, vault_path: Path) -> GraphStore:
+        path = vault_path / ".memex" / "graph.ryu"
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+        def _connect() -> object:
+            # The active fork's distribution is `ryugraph` (ADR-0005).
+            # If the import name differs in practice, adjust here.
+            import ryugraph  # type: ignore[import-not-found]
+
+            db = ryugraph.Database(str(path))
+            conn = ryugraph.Connection(db)
+            schema = _strip_cypher_comments(
+                _SCHEMA_PATH.read_text(encoding="utf-8")
+            )
+            for stmt in _STMT_SPLIT.split(schema):
+                # If the file doesn't end with a newline after the final
+                # `;`, the last split chunk retains its trailing `;` —
+                # strip it so the re-append below doesn't produce `;;`
+                # (which ryugraph's parser rejects).
+                stmt = stmt.strip().rstrip(";").strip()
+                if stmt:
+                    conn.execute(stmt + ";")
+            return conn
+
+        conn = await asyncio.to_thread(_connect)
+        return cls(conn)
+
+    async def upsert_document(self, doc_id: str, title: str) -> None:
+        def _run() -> None:
+            self._conn.execute(  # type: ignore[attr-defined]
+                "MERGE (d:Document {doc_id: $id}) SET d.title = $title;",
+                {"id": doc_id, "title": title},
+            )
+
+        await asyncio.to_thread(_run)
+        logger.info("graph.upsert_document", doc_id=doc_id)
+
+    async def upsert_entity(self, name: str, kind: str) -> str:
+        """Insert or update the entity. Returns the stable entity_id."""
+        eid = entity_id(name, kind)
+
+        def _run() -> None:
+            self._conn.execute(  # type: ignore[attr-defined]
+                "MERGE (e:Entity {entity_id: $id}) "
+                "SET e.name = $name, e.kind = $kind;",
+                {"id": eid, "name": name, "kind": kind},
+            )
+
+        await asyncio.to_thread(_run)
+        return eid
+
+    async def link_mentions(
+        self, doc_id: str, entity_id_: str, confidence: float
+    ) -> None:
+        def _run() -> None:
+            self._conn.execute(  # type: ignore[attr-defined]
+                "MATCH (d:Document {doc_id: $doc_id}), "
+                "(e:Entity {entity_id: $entity_id}) "
+                "MERGE (d)-[r:MENTIONS]->(e) SET r.confidence = $confidence;",
+                {
+                    "doc_id": doc_id,
+                    "entity_id": entity_id_,
+                    "confidence": confidence,
+                },
+            )
+
+        await asyncio.to_thread(_run)
+
+    async def link_cites(
+        self,
+        from_doc_id: str,
+        to_doc_id: str,
+        surface_text: str,
+        confidence: float,
+    ) -> None:
+        def _run() -> None:
+            self._conn.execute(  # type: ignore[attr-defined]
+                "MATCH (a:Document {doc_id: $from_id}), "
+                "(b:Document {doc_id: $to_id}) "
+                "MERGE (a)-[r:CITES]->(b) "
+                "SET r.surface_text = $surface, r.confidence = $confidence;",
+                {
+                    "from_id": from_doc_id,
+                    "to_id": to_doc_id,
+                    "surface": surface_text,
+                    "confidence": confidence,
+                },
+            )
+
+        await asyncio.to_thread(_run)
+
+    async def delete_document(self, doc_id: str) -> None:
+        """Drop the Document node and every edge incident to it.
+
+        Entities, concepts, and citations are not removed (they may
+        still be referenced by other documents). `memex doctor` is the
+        place that prunes orphaned nodes later.
+        """
+
+        def _run() -> None:
+            # Detach-delete unbinds and deletes the node in one statement.
+            self._conn.execute(  # type: ignore[attr-defined]
+                "MATCH (d:Document {doc_id: $id}) DETACH DELETE d;",
+                {"id": doc_id},
+            )
+
+        await asyncio.to_thread(_run)
+        logger.info("graph.delete_document", doc_id=doc_id)
+
+    async def neighbors(self, doc_id: str, *, limit: int = 50) -> list[GraphNeighbor]:
+        """Documents that share entities with `doc_id` (one-hop)."""
+
+        def _run() -> list[GraphNeighbor]:
+            result = self._conn.execute(  # type: ignore[attr-defined]
+                "MATCH (d:Document {doc_id: $id})-[:MENTIONS]->(e:Entity)"
+                "<-[:MENTIONS]-(other:Document) "
+                "WHERE other.doc_id <> $id "
+                "RETURN DISTINCT other.doc_id AS doc_id, "
+                "other.title AS title, e.name AS via "
+                "LIMIT $limit;",
+                {"id": doc_id, "limit": limit},
+            )
+            out: list[GraphNeighbor] = []
+            while result.has_next():  # type: ignore[attr-defined]
+                row = result.get_next()  # type: ignore[attr-defined]
+                out.append(
+                    GraphNeighbor(
+                        doc_id=row[0],
+                        title=row[1] or row[0],
+                        relation="shares_entity",
+                        via=row[2],
+                    )
+                )
+            return out
+
+        return await asyncio.to_thread(_run)
+
+    async def close(self) -> None:
+        # RyuGraph manages connection lifecycle; no explicit close needed.
+        await asyncio.sleep(0)
