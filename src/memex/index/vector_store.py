@@ -150,10 +150,13 @@ class VectorStore:
         self, query_embedding: list[float], *, k: int
     ) -> list[Chunk]:
         table = await self._db.open_table(_TABLE)
-        # `_distance` is LanceDB's distance column; score = -distance so larger is better.
-        results = (
-            await table.search(query_embedding).limit(k).to_pydantic(_ChunkRow)
-        )
+        # LanceDB 0.30+ split the surface: `table.search(...)` is async
+        # and returns an `AsyncVectorQuery`; the builders (`.limit`,
+        # `.where`) are sync and chain; the terminal `.to_pydantic`
+        # is async again. `_distance` is LanceDB's distance column;
+        # score = rank-descending so larger is better.
+        query = await table.search(query_embedding)
+        results = await query.limit(k).to_pydantic(_ChunkRow)
         # to_pydantic drops `_distance`; we lose the per-row score but the
         # downstream RRF only needs rank order. Return rank as a descending score.
         return [
@@ -183,12 +186,8 @@ class VectorStore:
         # filename with apostrophe, etc.).
         ids_sql = ",".join(_sql_quote(d) for d in doc_ids)
         where = f"document_id IN ({ids_sql})"
-        results = (
-            await table.search(query_embedding)
-            .where(where)
-            .limit(k)
-            .to_pydantic(_ChunkRow)
-        )
+        query = await table.search(query_embedding)
+        results = await query.where(where).limit(k).to_pydantic(_ChunkRow)
         return [
             _chunk_from_row(r, score=float(k - i) / max(k, 1))
             for i, r in enumerate(results)

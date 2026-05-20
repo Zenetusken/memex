@@ -57,22 +57,35 @@ dependencies = [
 # declared below — the default PyPI wheel is CPU-only on Linux.
 models = [
     "sentence-transformers>=5.0",
-    "transformers>=4.57",
+    # transformers v5 breaks `from transformers import PreTrainedModel`
+    # — the symbol moved and downstream code (sentence-transformers
+    # internals, our VLMHandle type) can't resolve it via the lazy
+    # import map. Pin to <5 until the ecosystem catches up.
+    "transformers>=4.57,<5",
     "torch>=2.7",
+    # torchvision is a *direct* dep (not transitive via transformers)
+    # so the `[tool.uv.sources]` override below routes it to the
+    # cu128 index — uv ignores source overrides on transitive deps
+    # (see astral-sh/uv#13774, #8253, #11388).
+    "torchvision>=0.22",
     "accelerate>=1.0",
 ]
-# Heavy parser/VLM stack; layers on top of [models].
+# Heavy parser stack; layers on top of [models].
+#
 # pypdfium2 lets the VLM rasterise PDF pages without a system poppler dep.
-# flash-attn provides FA2 for the VLM on Ada (sm_89) — FA3 is unavailable
-# (see ADR-0006). Linux-only marker because the prebuilt wheel matrix
-# only covers Linux + CUDA.
 # pyseccomp powers the worker's network-egress sandbox (GUIDELINES
 # Part VI). Linux-only — seccomp is a kernel feature; the sandbox
 # gracefully no-ops on other platforms.
+#
+# flash-attn is *not* in this extra because its setup.py imports torch
+# to detect the CUDA version, which means it can't build before torch
+# is installed. The VLM falls back to SDPA without FA2 (slower but
+# functional). To enable FA2 on Ada (sm_89), install separately:
+#     uv pip install flash-attn --no-build-isolation
+# See ADR-0006 for why FA3 is unavailable on sm_89.
 parse = [
     "docling>=2.0",
     "pypdfium2>=4.30",
-    "flash-attn>=2.6 ; sys_platform == 'linux'",
     "pyseccomp>=0.1 ; sys_platform == 'linux'",
 ]
 dev = [
@@ -166,3 +179,20 @@ explicit = true
 
 [tool.uv.sources]
 torch = [{ index = "pytorch-cu128", marker = "sys_platform == 'linux'" }]
+# torchvision must come from the same cu128 index so its custom ops
+# (NMS, RoI) register against the matching torch ABI. The default PyPI
+# torchvision on Linux is CPU-only and silently fails at
+# `from transformers import PreTrainedModel` because modeling_utils
+# transitively imports torchvision's loss code, which can't register
+# `torchvision::nms` against a cu128 torch.
+torchvision = [{ index = "pytorch-cu128", marker = "sys_platform == 'linux'" }]
+
+# flash-attn imports torch in its setup.py at build time. To install
+# it on top of a normal `uv sync`, drop it through uv's pip surface
+# after the main sync, with build isolation disabled so it can see
+# the already-installed torch:
+#     uv pip install flash-attn --no-build-isolation
+# `no-build-isolation-package` makes that one-shot command find torch
+# in the target venv rather than insisting on a clean build env.
+[tool.uv]
+no-build-isolation-package = ["flash-attn"]
