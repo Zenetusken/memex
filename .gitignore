@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+# Virtual envs and tool caches
+.venv/
+.uv/
+.ruff_cache/
+.pyright/
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Editors and OS cruft
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Memex-specific
+# User vault data — never commit
+vault/
+# Local Langfuse trace exports
+.langfuse/
+# Local model cache
+.cache/
+# Local config (may contain machine-specific paths / keys)
+.memex/
+*.local.toml
+
+# Eval run outputs
+tests/eval-results/

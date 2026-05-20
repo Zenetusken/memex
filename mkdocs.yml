@@ -1,0 +1,71 @@
+site_name: Memex
+site_description: Local-first, fully agentic system for turning documents into a queryable Markdown knowledge vault.
+site_author: Memex contributors
+site_url: ""  # local-only; no canonical hostname
+
+# Read the existing markdown tree as-is. No copies, no preprocessing.
+docs_dir: docs
+
+# Local-first applies to the docs too — disable Google Fonts (`font: false`)
+# so the site renders identically on an air-gapped machine.
+theme:
+  name: material
+  font: false
+  icon:
+    logo: material/file-document-multiple-outline
+  palette:
+    - scheme: slate
+      primary: blue
+      accent: blue
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - content.code.copy
+    - content.code.annotate
+    - search.suggest
+    - search.highlight
+    - toc.follow
+
+nav:
+  - Home: index.md
+  - Vision: VISION.md
+  - Engineering guidelines: GUIDELINES.md
+  - Roadmap: ROADMAP.md
+  - Implementation plan: IMPLEMENTATION-PLAN.md
+  - Eval corpus plan: eval-corpus-plan.md
+  - Architecture decisions:
+      - adr/0000-adr-template.md
+      - adr/0001-vllm-as-sole-inference-engine.md
+      - adr/0002-single-package-over-monorepo.md
+      - adr/0003-markdown-vault-as-source-of-truth.md
+      - adr/0004-observability-structlog-langfuse.md
+      - adr/0005-ryugraph-replaces-kuzu.md
+      - adr/0006-cuda-dispatch-and-dtype.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - tables
+  - md_in_html
+  - pymdownx.details
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - toc:
+      permalink: ¶
+      toc_depth: 3
+
+extra:
+  generator: false   # hide "Made with Material for MkDocs" footer

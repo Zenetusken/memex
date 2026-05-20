@@ -1,0 +1,51 @@
+name: Benchmarks
+
+# Fake-mode benchmarks only — they don't need a GPU and run on the
+# standard ubuntu-latest runner. Real-mode benchmarks (cold start,
+# embedding throughput, first-token latency) need vLLM + a CUDA GPU;
+# run those on the reference rig nightly and commit the resulting
+# `tests/benchmarks/baseline.real.json`.
+
+on:
+  pull_request:
+    paths:
+      - "src/memex/**"
+      - "scripts/benchmark.py"
+      - "tests/benchmarks/baseline.json"
+      - "pyproject.toml"
+  push:
+    branches: [main]
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        # `--no-extra models` skips the cu128 torch wheel (no GPU on CI).
+        # The fake-mode benchmark only needs core deps.
+        run: uv sync --no-default-groups
+
+      - name: Run benchmarks
+        run: uv run python scripts/benchmark.py --output current.json
+
+      - name: Gate against baseline
+        if: hashFiles('tests/benchmarks/baseline.json') != ''
+        run: |
+          uv run python scripts/benchmark.py --output current.json \
+            --gate tests/benchmarks/baseline.json
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-report
+          path: current.json
+          retention-days: 30
