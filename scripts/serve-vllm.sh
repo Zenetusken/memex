@@ -50,6 +50,12 @@ PORT="${MEMEX_VLLM_PORT:-8000}"
 QUANTIZATION="${MEMEX_VLLM_QUANTIZATION-awq_marlin}"
 MAX_MODEL_LEN="${MEMEX_VLLM_MAX_MODEL_LEN:-6144}"
 GPU_FRACTION="${MEMEX_VLLM_GPU_FRACTION:-0.72}"
+# KV-cache dtype. Default `fp8_e5m2` halves KV memory and is fine for
+# AWQ-int4 checkpoints (the model weights and the KV cache use different
+# numerical formats). FP8-checkpoint models (e.g. IBM Granite 4.1 FP8)
+# refuse fp8_e5m2 KV cache at startup — set this env var to `auto` for
+# them and vLLM picks a compatible default.
+KV_CACHE_DTYPE="${MEMEX_VLLM_KV_CACHE_DTYPE:-fp8_e5m2}"
 
 # Explicit single-device — skips the multi-GPU discovery codepath at
 # startup (~1–2 s faster cold start on a single-card rig).
@@ -111,7 +117,7 @@ if command -v uv >/dev/null 2>&1; then
         --gpu-memory-utilization "$GPU_FRACTION" \
         --max-num-seqs 8 \
         --max-model-len "$MAX_MODEL_LEN" \
-        --kv-cache-dtype fp8_e5m2 \
+        --kv-cache-dtype "$KV_CACHE_DTYPE" \
         --enable-prefix-caching \
         ${MEMEX_VLLM_EAGER:+--enforce-eager}
 else
@@ -126,7 +132,7 @@ else
         --gpu-memory-utilization "$GPU_FRACTION" \
         --max-num-seqs 8 \
         --max-model-len "$MAX_MODEL_LEN" \
-        --kv-cache-dtype fp8_e5m2 \
+        --kv-cache-dtype "$KV_CACHE_DTYPE" \
         --enable-prefix-caching \
         ${MEMEX_VLLM_EAGER:+--enforce-eager}
 fi
