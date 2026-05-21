@@ -19,14 +19,13 @@ exercise them directly without spinning up an MCP transport.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import structlog
 from mcp.server.fastmcp import FastMCP
 
 from memex.agents.answering import FinalResponse, answer_query
 from memex.core.config import get_settings
 from memex.core.types import Chunk
+from memex.index.graph_store import GraphNeighbor
 from memex.mcp.auth import BearerAuthMiddleware, validate_bind
 from memex.retrieve import cross_encoder_rerank, hybrid_search
 from memex.vault.store import (
@@ -35,9 +34,6 @@ from memex.vault.store import (
     list_documents,
     read_document,
 )
-
-if TYPE_CHECKING:
-    from memex.index.graph_store import GraphNeighbor
 
 logger = structlog.get_logger(__name__)
 
@@ -124,7 +120,7 @@ async def list_documents_tool() -> list[DocumentRef]:
 
 async def get_graph_neighbors(
     doc_id: str, limit: int = 50
-) -> list["GraphNeighbor"]:
+) -> list[GraphNeighbor]:
     """Documents one hop away in the entity graph.
 
     Surfaces documents that share entities with `doc_id` via the

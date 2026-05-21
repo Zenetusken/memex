@@ -135,7 +135,7 @@ When bored, working from `docs/audits/00-synthesis.md`:
 - **N6** — `_COMPILED_GRAPH` thread-safety on first compile
 - **N7** — `pypdfium2.to_pil` lifetime vs `doc.close()` ordering
 - **N8** — Docling breaker `lambda` coroutine handling — verify the `await` path
-- **N9** — FastMCP startup logs `PydanticUserError: get_graph_neighborsOutput is not fully defined` (forward-ref to `GraphNeighbor` in `mcp/server.py`'s `get_graph_neighbors` return type). Cosmetic — the tool still works — but worth a `from memex.index.graph_store import GraphNeighbor` at module level to silence it.
+- ~~**N9**~~ — ✅ **Fixed 2026-05-21**: lifted the `GraphNeighbor` import out of `TYPE_CHECKING` in `mcp/server.py` and removed the forward-ref quotes from `get_graph_neighbors`'s return annotation. MCP startup is now warning-free.
 
 ---
 
