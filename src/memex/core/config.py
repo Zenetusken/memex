@@ -38,6 +38,12 @@ class ModelSettings(BaseModel):
     vlm_quantization: Literal["awq_int4", "bf16"] = "awq_int4"
     embedder: str = "google/embeddinggemma-300m"
     reranker: str = "BAAI/bge-reranker-v2-m3"
+    # P3.3 chart-OCR model — default `google/deplot` per Session 1
+    # verdict (Apache 2.0, fine-tuned for plot→linearised-table,
+    # ~2.3 GB live in BF16). Disabled by default via
+    # `ParseSettings.disable_chart_ocr` (the model is opt-in until
+    # Session 5's eval validates HARD GATES).
+    chart_ocr: str = "google/deplot"
     # Reranker backend selector. `cross_encoder` (default) loads the
     # `sentence_transformers.CrossEncoder` model named in `reranker`
     # (today: bge-reranker-v2-m3). `qwen3` loads a Qwen3-Reranker
@@ -90,6 +96,13 @@ class ParseSettings(BaseModel):
     # confirmed your rig has the headroom; bootstrap's VRAM-fit check
     # will refuse to load it otherwise.
     disable_vlm: bool = True
+    # P3.3 chart-OCR pass over Docling figures. Default-off: the pass
+    # adds ~2.3 GB of VRAM (Pix2Struct/DePlot BF16) during parse plus
+    # ~30s parse-call overhead (vLLM is paused, chart-OCR loaded,
+    # figures processed, model unloaded, vLLM restarted). Opt in once
+    # Session 5's eval verifies HARD GATES + Q4/Q16/Q21 flips.
+    # Set via `MEMEX_PARSE__DISABLE_CHART_OCR=false` to enable.
+    disable_chart_ocr: bool = True
     # 1200s headroom (20 min). The original 300s default fit 30-page
     # papers; 600s was still tight on 100-page slide decks because the
     # layout model is CPU-bound. Most slide decks finish in 3-5 min

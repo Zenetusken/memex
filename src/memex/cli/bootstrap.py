@@ -90,6 +90,14 @@ _VRAM_GB: dict[tuple[str, str | None], float] = {
     ("reranker", "qwen3"): 2.1,
     ("vlm", "awq_int4"): 7.0,
     ("vlm", "bf16"): 16.0,
+    # P3.3 chart-OCR: DePlot (Pix2Struct-large derivative) in BF16 ≈
+    # 2.3 GB live (1.13 GB safetensors on disk + ~1.2 GB forward-pass
+    # workspace at batch=1). Loaded transiently — only resident during
+    # parse, unloaded after. vLLM is paused (~8.5 GB freed) while
+    # chart-OCR runs, so the budget the manager needs is ~2.5 GB on top
+    # of embedder + reranker. Counted in the estimate only when
+    # `disable_chart_ocr=False` (opt-in flag).
+    ("chart_ocr", "bf16"): 2.5,
 }
 # KV cache + processor + activations headroom. Empirical from the GUIDELINES
 # Part III VRAM table.
@@ -125,6 +133,14 @@ def _verify_vram_fit(settings: MemexSettings) -> None:
     # Only count the VLM if it's actually going to be loaded.
     if not settings.parse.disable_vlm:
         estimated += _VRAM_GB[("vlm", settings.models.vlm_quantization)]
+    # P3.3 chart-OCR is opt-in via disable_chart_ocr. When enabled, it
+    # loads alongside the other parse-stage models BUT vLLM is paused
+    # during parse — so the orchestrator's ~5 GB doesn't compete for
+    # the same window. The estimate added here reflects the parse-time
+    # peak (without vLLM resident) which is what governs whether the
+    # parse pass OOMs.
+    if not settings.parse.disable_chart_ocr:
+        estimated += _VRAM_GB[("chart_ocr", "bf16")]
 
     if estimated > budget_gb:
         log.warning(

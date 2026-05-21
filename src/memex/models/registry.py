@@ -41,6 +41,24 @@ class VLMHandle:
         self.processor = processor
 
 
+class ChartOCRHandle:
+    """Bundled (model, processor) pair for the chart-OCR pass over
+    Docling figures (P3.3). The model is a Pix2Struct-derivative
+    fine-tuned for plot→linearised-table extraction — default
+    `google/deplot` per the P3.3 Session 1 verdict.
+
+    Lives in the orchestrator process (NOT the Docling worker) so it
+    can re-use the orchestrator's GPU when vLLM is paused for parse.
+    `parse/chart_ocr_backend.py::chart_ocr_extract` is the only
+    consumer; the handle shape is private to the registry ↔ backend
+    contract.
+    """
+
+    def __init__(self, model: PreTrainedModel, processor: ProcessorMixin):
+        self.model = model
+        self.processor = processor
+
+
 class Qwen3RerankerHandle:
     """Bundled tokenizer + decoder + cached yes/no token ids for the
     Qwen3-Reranker autoregressive scoring backend (P2.1).
@@ -72,7 +90,7 @@ def _is_oom(exc: BaseException) -> bool:
     msg = str(exc).lower()
     return "out of memory" in msg or "cuda oom" in msg
 
-ModelName = Literal["embedder", "reranker", "vlm"]
+ModelName = Literal["embedder", "reranker", "vlm", "chart_ocr"]
 
 
 class ModelHandle(BaseModel):
@@ -95,6 +113,7 @@ class ModelRegistry:
             "embedder": asyncio.Lock(),
             "reranker": asyncio.Lock(),
             "vlm": asyncio.Lock(),
+            "chart_ocr": asyncio.Lock(),
         }
         self._handles: dict[ModelName, ModelHandle] = {}
         self._models: dict[ModelName, Any] = {}
@@ -147,6 +166,10 @@ class ModelRegistry:
             elif name == "vlm":
                 self._models[name] = await asyncio.to_thread(
                     self._load_vlm, self._settings.vlm
+                )
+            elif name == "chart_ocr":
+                self._models[name] = await asyncio.to_thread(
+                    self._load_chart_ocr, self._settings.chart_ocr
                 )
             else:
                 raise ModelNotConfigured(
@@ -322,6 +345,49 @@ class ModelRegistry:
         )
         model.eval()
         return VLMHandle(model=model, processor=processor)
+
+    @staticmethod
+    def _load_chart_ocr(model_id: str) -> ChartOCRHandle:
+        """Load the chart-OCR model + its processor (P3.3 Session 3).
+
+        Default `google/deplot` per P3.3 Session 1: 1.13 GB safetensors
+        on disk (~2.3 GB live in BF16); fine-tuned for plot→linearised-
+        table extraction; Apache 2.0; vLLM-not-required (runs via plain
+        transformers).
+
+        Decisions mirror `_load_vlm`:
+        - `Pix2StructForConditionalGeneration` is the model class (NOT
+          `AutoModelForImageTextToText` — DePlot is a Pix2Struct
+          derivative and the auto-class can miss its image-encoder).
+        - `Pix2StructProcessor` handles image preprocessing + tokeniser
+          bundling; the model card's example pairs them explicitly.
+        - `torch_dtype=torch.bfloat16` — ADR-0006 stack-wide BF16 on Ada.
+        - `device_map={"": "cuda:0"}` — deterministic single-GPU
+          placement.
+        - No `attn_implementation="flash_attention_2"` — Pix2Struct
+          uses T5-style attention; FA2 isn't applicable. SDPA is the
+          default.
+        - `model.eval()` — no training-mode dropout.
+
+        The Docling worker itself remains CPU-only; this handle lives
+        in the orchestrator process and is invoked only when vLLM is
+        paused for parse (P3.3 Session 4).
+        """
+        import torch
+        from transformers import (
+            Pix2StructForConditionalGeneration,
+            Pix2StructProcessor,
+        )
+
+        processor = Pix2StructProcessor.from_pretrained(model_id)
+        model = Pix2StructForConditionalGeneration.from_pretrained(
+            model_id,
+            torch_dtype=torch.bfloat16,
+            device_map={"": "cuda:0"},
+            low_cpu_mem_usage=True,
+        )
+        model.eval()
+        return ChartOCRHandle(model=model, processor=processor)
 
 
 _REGISTRY: ModelRegistry | None = None
