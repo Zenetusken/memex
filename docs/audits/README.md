@@ -10,6 +10,7 @@ of fixes survives long after the commits land.
 | 2026-05-20 | CUDA dispatch | four parallel agents → ADR-0006 |
 | 2026-05-20 | Multi-agent bug-hunt | four parallel agents (resource/concurrency, error/edge, wiring/signatures, quality) — see `00-synthesis.md` through `04-wiring.md` |
 | 2026-05-20 | E2E + load test on RTX 4070 | live verification of every audit fix — see `05-e2e-loadtest.md` |
+| 2026-05-20 | 8B-AWQ load test on RTX 4070 | post-tuning verification of the production-target orchestrator — see `06-8b-loadtest.md` |
 
 ## Pattern
 
