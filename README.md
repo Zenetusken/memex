@@ -80,6 +80,8 @@ Tools the server exposes:
 - 📚 `list_documents()` — what's in the vault
 - 🌐 `get_graph_neighbors(doc_id)` — related documents
 
+Network-facing setup (HTTP transport + bearer-token auth): see [`docs/deploy/mcp-http.md`](docs/deploy/mcp-http.md).
+
 ---
 
 ## 🛡️ Privacy & offline guarantees
