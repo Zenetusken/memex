@@ -23,13 +23,14 @@ from pydantic_settings import (
 
 
 class ModelSettings(BaseModel):
-    orchestrator: str = "Qwen/Qwen3-8B-Instruct"
+    orchestrator: str = "Qwen/Qwen3-8B-AWQ"
     # vLLM's GGUF path is flagged experimental; AWQ/GPTQ are the production
-    # path on Ada (see ADR-0001 Revisit + ADR-0006). The literal is open
-    # for that swap — change the orchestrator string in tandem.
+    # path on Ada (see ADR-0001 Revisit + ADR-0006). Default matches the
+    # `Qwen/Qwen3-8B-AWQ` model id above. The Q*_K_M variants are kept in
+    # the literal for users running gguf-via-vLLM experimentally.
     orchestrator_quantization: Literal[
-        "Q4_K_M", "Q5_K_M", "Q8_0", "AWQ", "GPTQ"
-    ] = "Q4_K_M"
+        "AWQ", "GPTQ", "Q4_K_M", "Q5_K_M", "Q8_0"
+    ] = "AWQ"
     # Default VLM is the AWQ-Int4 build that fits 12 GB on the reference
     # rig. Qwen3-VL-8B is the eval-gated successor (see ADR-0001 Revisit);
     # swap the string + adjust vlm_quantization in tandem.

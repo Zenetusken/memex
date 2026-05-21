@@ -54,8 +54,8 @@ def _configure_cuda(settings: MemexSettings) -> None:
             "CUDA is not available; Memex requires an NVIDIA GPU per ADR-0001.",
             context={
                 "fix": (
-                    "install NVIDIA driver R570+, CUDA 12.8 toolkit, "
-                    "and run `uv sync --extra models` to get the cu128 torch wheel"
+                    "install NVIDIA driver R570+, CUDA 12.9 toolkit, "
+                    "and run `uv sync --extra models` to get the cu129 torch wheel"
                 ),
             },
         )

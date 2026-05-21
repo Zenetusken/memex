@@ -135,6 +135,13 @@ async def complete_structured(
     span name; if absent, the schema class name is used.
     """
     client = get_client()
+    if model is None:
+        # vLLM 0.21+ requires the served model name in chat completions
+        # ("default" is no longer accepted as a fallback). The orchestrator
+        # string in settings is the same id `vllm serve` was launched with.
+        from memex.core.config import get_settings
+
+        model = get_settings().models.orchestrator
     log = logger.bind(
         prompt_tag=prompt_tag or schema.__name__,
         schema=schema.__name__,
@@ -149,7 +156,7 @@ async def complete_structured(
 
     try:
         response = await client.chat.completions.create(
-            model=model or "default",
+            model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=temperature,
             max_tokens=max_tokens,

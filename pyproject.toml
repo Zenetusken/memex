@@ -88,6 +88,14 @@ parse = [
     "pypdfium2>=4.30",
     "pyseccomp>=0.1 ; sys_platform == 'linux'",
 ]
+# vLLM orchestrator. Memex talks to it over the OpenAI-compatible HTTP
+# endpoint (ADR-0001); the daemon is started/stopped via
+# `scripts/serve-vllm.sh` (which `memex daemon start` shells into). Pin
+# to a vLLM that shares torch 2.11+cu128 so installing this extra into
+# the same venv doesn't downgrade or fork the torch ABI.
+serve = [
+    "vllm>=0.21,<0.22",
+]
 dev = [
     "ruff>=0.6",
     "pyright>=1.1.380",
@@ -167,25 +175,40 @@ markers = [
 
 # ----- uv wheel resolution — see ADR-0006 -----
 # The default PyPI torch wheel on Linux is CPU-only. The PyTorch project
-# publishes CUDA wheels at https://download.pytorch.org/whl/cu128 (paired
-# with NVIDIA driver R570+). uv picks them up via the explicit index +
-# source declarations below; without these, `uv sync --extra models`
-# silently lands every model on CPU.
+# publishes CUDA wheels at https://download.pytorch.org/whl/cu129 (paired
+# with NVIDIA driver R570+, CUDA 12.9 runtime). uv picks them up via the
+# explicit index + source declarations below; without these, `uv sync
+# --extra models` silently lands every model on CPU.
+#
+# We're on cu129 (not the older cu128) because vLLM 0.21+ ships its
+# binary wheels with CUDA 12.9 runtime as the lowest supported floor
+# (the PyPI default is CUDA 13.0). cu129 is the highest CUDA toolkit
+# release that pairs with the broadest set of community AWQ
+# quantisation kernels we depend on.
 
 [[tool.uv.index]]
-name = "pytorch-cu128"
-url = "https://download.pytorch.org/whl/cu128"
+name = "pytorch-cu129"
+url = "https://download.pytorch.org/whl/cu129"
+explicit = true
+
+[[tool.uv.index]]
+name = "vllm-cu129"
+url = "https://wheels.vllm.ai/0.21.0/cu129"
 explicit = true
 
 [tool.uv.sources]
-torch = [{ index = "pytorch-cu128", marker = "sys_platform == 'linux'" }]
-# torchvision must come from the same cu128 index so its custom ops
+torch = [{ index = "pytorch-cu129", marker = "sys_platform == 'linux'" }]
+# torchvision must come from the same cu129 index so its custom ops
 # (NMS, RoI) register against the matching torch ABI. The default PyPI
 # torchvision on Linux is CPU-only and silently fails at
 # `from transformers import PreTrainedModel` because modeling_utils
 # transitively imports torchvision's loss code, which can't register
-# `torchvision::nms` against a cu128 torch.
-torchvision = [{ index = "pytorch-cu128", marker = "sys_platform == 'linux'" }]
+# `torchvision::nms` against a cu129 torch.
+torchvision = [{ index = "pytorch-cu129", marker = "sys_platform == 'linux'" }]
+# vLLM's PyPI wheel targets CUDA 13.0 runtime by default; we pin the
+# cu129 wheel from wheels.vllm.ai instead so the binary's `libcudart`
+# matches the rest of the stack.
+vllm = [{ index = "vllm-cu129", marker = "sys_platform == 'linux'" }]
 
 # flash-attn imports torch in its setup.py at build time. To install
 # it on top of a normal `uv sync`, drop it through uv's pip surface
