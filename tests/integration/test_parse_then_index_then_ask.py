@@ -197,13 +197,17 @@ def _make_pymupdf_conversion(
 
 @pytest.fixture
 def patch_pymupdf_born_digital(monkeypatch: pytest.MonkeyPatch) -> None:
-    """PyMuPDF fake that returns a born-digital PowerPoint deck."""
+    """PyMuPDF fake that returns a born-digital PowerPoint document
+    (portrait, text-dense — e.g., a whitepaper exported from
+    PowerPoint, NOT a slide deck). Slide-shaped PowerPoint content
+    is tested separately under the slide-deck routing fixtures.
+    """
 
     async def _fake(source: Path, *, timeout_s: int, **_kw: object) -> PyMuPDFConversion:
         return _make_pymupdf_conversion(
             producer="Microsoft PowerPoint 2023",
-            chars_per_page_avg=200.0,
-            aspect_ratio=1.78,
+            chars_per_page_avg=1200.0,  # text-dense, above slide-deck threshold
+            aspect_ratio=0.77,  # portrait letter, fails slide-deck aspect gate
             has_headings=True,
         )
 

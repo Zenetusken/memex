@@ -147,6 +147,28 @@ class ParseSettings(BaseModel):
     pymupdf_mixed_content_min_image_heavy_pages: float = Field(
         default=0.30, ge=0.0, le=1.0
     )
+    # Slide-deck override (Tier 1.5 in the classifier). When the
+    # document's average page aspect ratio is at or above this
+    # threshold AND chars-per-page is below the companion threshold,
+    # the classifier routes the document to Docling regardless of
+    # producer metadata. PyMuPDF text extraction loses chart structure
+    # on slide-deck-shaped content (interleaving chart imagery as
+    # `[chart-text]` blocks the agent can't ground on); Docling
+    # preserves layout as proper tables + figures. Verified on the
+    # GTC 2024 CUDA deck: legitimate answer rate 4/7 → 6/7 (+50%).
+    # Reference values: portrait letter ≈ 0.77; 4:3 slides ≈ 1.33;
+    # 16:9 slides ≈ 1.78. 1.3 is the floor catching both 4:3 and 16:9.
+    pymupdf_slide_deck_aspect_threshold: float = Field(
+        default=1.3, ge=1.0, le=3.0
+    )
+    # Companion to pymupdf_slide_deck_aspect_threshold. When the
+    # document's average chars-per-page is below this value AND the
+    # aspect threshold is met, the document is classified as a slide
+    # deck and routed to Docling. Reference values: typical slides
+    # have 200–700 chars per page; documents typically 2000+. 800 is
+    # the floor catching even text-heavy slides without trapping
+    # cover-page-light documents (which fail the aspect gate anyway).
+    pymupdf_slide_deck_max_chars_per_page: int = Field(default=800, ge=0)
     pymupdf_timeout_s: int = Field(default=120, ge=5)
     pymupdf_crash_threshold: int = Field(default=5, ge=1)
     # Network-egress sandbox for the PyMuPDF worker. Symmetric with

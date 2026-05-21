@@ -215,6 +215,25 @@ def _is_mixed_content(s: PdfSignals) -> bool:
     )
 
 
+def _is_slide_deck(s: PdfSignals) -> bool:
+    """True iff the document looks like a slide deck — landscape
+    aspect ratio AND moderate-to-low text-density per page (at least
+    50 chars/page so rasterised image-only PDFs fall to Tier 1.C
+    instead). PyMuPDF text extraction loses chart structure on
+    slide-deck content (interleaving chart imagery as `[chart-text]`
+    blocks the agent can't ground on); Docling preserves layout as
+    proper tables + figures. Verified on the GTC 2024 CUDA deck
+    (commit `2805ac4`): legitimate answer rate 4/7 → 6/7 (+50%) when
+    routed to Docling.
+    """
+    settings = get_settings().parse
+    return (
+        s.avg_aspect_ratio >= settings.pymupdf_slide_deck_aspect_threshold
+        and 50.0 <= s.chars_per_page_avg
+        < float(settings.pymupdf_slide_deck_max_chars_per_page)
+    )
+
+
 def _classify(signals: PdfSignals) -> _Classification:
     """Route a PDF to PyMuPDF / Docling / Docling-with-OCR.
 
@@ -240,6 +259,32 @@ def _classify(signals: PdfSignals) -> _Classification:
     # Docling-with-OCR so chart labels, screenshots, and diagram
     # annotations make it into the final markdown.
     mixed = _is_mixed_content(s)
+
+    # Tier 0.5 — slide-deck override. Preempts Tier 1.A because
+    # PowerPoint-produced decks otherwise win confidence 0.98 →
+    # PyMuPDF, which loses chart structure to [chart-text] noise.
+    # When both signals fire (landscape AND moderate-low chars-per-
+    # page), return a low-confidence slide-deck classification so the
+    # existing fallthrough routes to Docling.
+    #
+    # Skipped when scan_hits is set (Tier 1.B's scan-producer routing
+    # to Docling-with-OCR is the right destination regardless of
+    # shape). When the doc is *also* mixed-content (chart imagery
+    # heavy enough to want OCR for figure-embedded labels), we
+    # inherit `needs_ocr=True` so the mixed-content quality bar still
+    # holds.
+    if _is_slide_deck(s) and not scan_hits:
+        return _Classification(
+            doc_type="slide-deck-mixed" if mixed else "slide-deck",
+            confidence=0.10,  # below pymupdf_min_confidence default 0.5
+            attribution={
+                "tier": "0.5-slide-deck" + ("-mixed" if mixed else ""),
+                "avg_aspect_ratio": s.avg_aspect_ratio,
+                "chars_per_page_avg": s.chars_per_page_avg,
+                "producer_match": born_digital_hits,
+            },
+            needs_ocr=mixed,
+        )
 
     # Tier 1.A — known born-digital producer + text. Highest-signal case.
     if born_digital_hits and s.chars_per_page_avg >= 50.0:

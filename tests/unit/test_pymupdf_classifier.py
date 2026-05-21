@@ -163,10 +163,17 @@ def test_near_empty_doc_forces_ocr() -> None:
 
 
 def test_landscape_paper_fallback_uses_density() -> None:
-    """Generic landscape PDF in Tier 4 → density-based confidence."""
+    """Generic landscape PDF in Tier 4 → density-based confidence.
+
+    Uses chars-per-page above the slide-deck threshold (Tier 0.5)
+    so this test exercises the Tier 4 fallback specifically. Wide-
+    format landscape documents (folded brochures, two-column
+    landscape technical docs) are "slide-shaped" but text-dense
+    enough to not be slide decks.
+    """
     sig = _signals(
         avg_aspect_ratio=1.78,
-        chars_per_page_avg=300.0,
+        chars_per_page_avg=1000.0,  # above slide-deck threshold (800)
         has_headings=True,
     )
     result = _classify(sig)
@@ -187,12 +194,18 @@ def test_portrait_paper_fallback_uses_density() -> None:
 
 
 def test_structure_bonus_boosts_confidence() -> None:
-    """Two identical sparse docs — one with markdown structure clues,
-    one without — should diverge in confidence."""
-    base = _signals(avg_aspect_ratio=1.78, chars_per_page_avg=80.0)
+    """Two identical landscape docs in Tier 4 — one with markdown
+    structure clues, one without — should diverge in confidence.
+
+    Uses chars-per-page above the slide-deck threshold so both
+    signals fall through to Tier 4 (where the structure bonus
+    actually applies). Below the threshold both would hit Tier 0.5
+    and return identical confidence.
+    """
+    base = _signals(avg_aspect_ratio=1.78, chars_per_page_avg=900.0)
     enriched = _signals(
         avg_aspect_ratio=1.78,
-        chars_per_page_avg=80.0,
+        chars_per_page_avg=900.0,
         has_headings=True,
         has_tables=True,
         has_lists=True,
@@ -201,3 +214,50 @@ def test_structure_bonus_boosts_confidence() -> None:
     base_result = _classify(base)
     enriched_result = _classify(enriched)
     assert enriched_result.confidence > base_result.confidence
+
+
+def test_slide_deck_landscape_and_low_density_routes_to_docling() -> None:
+    """16:9 aspect + slide-typical text density → Tier 0.5 → Docling.
+
+    Preempts any Tier 1.A win that PowerPoint-produced decks would
+    otherwise score, because PyMuPDF text extraction loses chart
+    structure on slide-shaped content. Verified on the GTC 2024 CUDA
+    deck — see docs/ROADMAP.md parser-investigation section.
+    """
+    sig = _signals(
+        producer="Microsoft PowerPoint 2023",
+        avg_aspect_ratio=1.78,  # 16:9
+        chars_per_page_avg=400.0,
+    )
+    result = _classify(sig)
+    assert result.doc_type == "slide-deck"
+    assert result.confidence < 0.5  # below pymupdf_min_confidence default
+    assert result.attribution["tier"] == "0.5-slide-deck"
+
+
+def test_landscape_but_text_dense_stays_pymupdf() -> None:
+    """Landscape + dense text → not a slide deck (e.g., wide-format
+    legal doc, two-column landscape report). Aspect alone is not
+    enough; density gate prevents false-positive routing.
+    """
+    sig = _signals(
+        producer="LibreOffice",
+        avg_aspect_ratio=1.5,
+        chars_per_page_avg=1500.0,  # well above the 800 threshold
+    )
+    result = _classify(sig)
+    assert result.doc_type != "slide-deck"
+
+
+def test_portrait_low_density_stays_pymupdf() -> None:
+    """Portrait + low text → not a slide deck (e.g., sparse cover sheet,
+    image-heavy portrait report). Density alone is not enough; aspect
+    gate prevents false-positive routing.
+    """
+    sig = _signals(
+        producer="Microsoft Word",
+        avg_aspect_ratio=0.77,  # standard letter portrait
+        chars_per_page_avg=300.0,
+    )
+    result = _classify(sig)
+    assert result.doc_type != "slide-deck"

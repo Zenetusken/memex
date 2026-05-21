@@ -29,10 +29,11 @@ The blueprint in [`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) is the archi
 | **FU3.2.2** | **`memex upgrade` CLI** — one-shot pull + sync + restart-installed-units | ✅ **Shipped + live-verified** (2026-05-21) |
 | **FU3.2.3** | **`memex-vault-backup.timer`** — nightly encrypted restic snapshots | ✅ **Shipped + live-verified** (2026-05-21) |
 | **P0** | **Eval corpus** — JSON query sets + `memex eval` rigorous baseline | ⚠️ **Rigorous baseline shipped** (2026-05-21): 1 category (slide-decks), 1 doc, 15 queries (7 answerable + 3 empty-retrieval refusals + 5 near-miss refusals); `top_k ∈ {4,6,8}` sweep run; `mcp_answered_only ≈ 0.5–0.6`. Corpus extension is multi-session curator work. |
+| **Parse — slide-deck → Docling** | Tier 0.5 classifier override routing slide-shaped PDFs to Docling | ✅ **Shipped + live-verified** (2026-05-21) — `_is_slide_deck` heuristic (aspect ≥ 1.3 AND chars-per-page in [50, 800)); 147 tests green; CUDA deck now routes correctly. |
 
-**File count:** 83 Python files in `src/memex/` + `tests/` + `scripts/`, all parse-clean. 7 ADRs. 8 audit reports under `docs/audits/`. 54 commits on `main` (public at `github.com/Zenetusken/memex`); the canonical count is `git rev-list --count main`.
+**File count:** 83 Python files in `src/memex/` + `tests/` + `scripts/`, all parse-clean. 7 ADRs. 8 audit reports under `docs/audits/`. 59 commits on `main` (public at `github.com/Zenetusken/memex`); the canonical count is `git rev-list --count main`.
 
-**Test suite:** 144/144 green on the reference rig (141 pre-existing + 3 rerank-dispatch unit tests). Linux + pyseccomp; 5 tests skip on Windows.
+**Test suite:** 147/147 green on the reference rig. Linux + pyseccomp; 5 tests skip on Windows.
 
 ---
 
@@ -200,33 +201,33 @@ P0 is now scaffolded with a baseline that can be trusted as a P2.x reference, an
 
 **Q11/Q12 hallucinations are independent of parser** — both runs hallucinated identically. Agent-prompt issue, separately diagnosable.
 
-### Recommendation: angle 1 (parser swap, category-aware)
+### Recommendation: angle 1 (parser swap, category-aware) — ✅ Shipped 2026-05-21
 
-Route slide-deck-shaped documents to Docling instead of PyMuPDF in the tiered classifier (`src/memex/parse/pipeline.py`). Non-slide-deck born-digital PDFs (whitepapers, books, technical docs) keep PyMuPDF — their parse profile is fine and PyMuPDF is 2.8× faster.
+Routes slide-deck-shaped documents to Docling instead of PyMuPDF via a new Tier 0.5 in the classifier (`src/memex/parse/pipeline.py`). Non-slide-deck born-digital PDFs (whitepapers, books, technical docs) keep PyMuPDF — their parse profile is fine and PyMuPDF is 2.8× faster.
 
-Implementation outline (a separate session):
+**The heuristic**: `_is_slide_deck(s)` fires when `avg_aspect_ratio >= 1.3` (slides are 4:3 ≈ 1.33 or 16:9 ≈ 1.78; documents are 0.77 portrait) **AND** `50 ≤ chars_per_page_avg < 800` (slides typically 200–700 chars per page; documents 2000+; below 50 falls through to Tier 1.C as rasterised). Two new `ParseSettings` knobs: `pymupdf_slide_deck_aspect_threshold` (default 1.3) and `pymupdf_slide_deck_max_chars_per_page` (default 800).
 
-1. Add a slide-deck heuristic to the classifier — candidate signals: page aspect ratio (slide decks are typically 16:9 or 4:3 landscape; documents are 8.5×11 portrait), low word density per page, high figure-to-text ratio. The Docling manifest already reports figure/table counts; PyMuPDF's pre-parse metadata can probably read aspect ratio cheaply.
-2. When the heuristic fires, force Docling regardless of the existing Tier 1 (producer-metadata) early-exit.
-3. Verify on the existing CUDA deck — should re-route to Docling and produce the cleaner output.
+**Precedence**:
+- Skips when `scan_hits` is detected (Tier 1.B's scan-producer routing is the right destination regardless of shape).
+- When the doc is also mixed-content (chart imagery heavy enough to want OCR for figure-embedded labels), inherits `needs_ocr=True` and uses `doc_type="slide-deck-mixed"`.
+- Otherwise returns `doc_type="slide-deck"` at confidence 0.10 — below the `pymupdf_min_confidence` default of 0.5 — so the existing fallthrough path routes to Docling.
 
-Implementation cost: ~50 lines in `pipeline.py` + a test. Estimated half-session of work. **The +50% answer-rate gain on legitimate slide-deck queries justifies the 2.8× parse-time cost** (parse is one-time per doc; query path is unchanged).
+**Live-verified on the CUDA deck**: aspect 1.778, 432 chars/page → routes to slide-deck at Tier 0.5 (confirmed by direct PyMuPDF probe + `_classify()` call). Three new unit tests in `tests/unit/test_pymupdf_classifier.py` + two integration tests updated (the existing `patch_pymupdf_born_digital` fixture was changed to portrait + text-dense signals so it still exercises Tier 1.A; slide-shaped PowerPoint is covered by the new Tier 0.5 tests). 147/147 tests green.
 
-**Caveats for the follow-up implementer:**
-- The doc_id format changed (`2f96ae1c-source` vs `2f96ae1c-s62400-cuda-...`) in the experiment because the ingest path was different; not relevant when integrating via the classifier (the upstream ingest+doc_id stays untouched).
-- Docling-Docling deduplication: re-ingesting an existing PyMuPDF-indexed doc through Docling will produce different chunks (the chunker sees different markdown). A clean reindex of any pre-existing slide-deck content will be needed after the switch.
-- Chart-data extraction (Q4-style numerics from chart imagery) is still a ceiling. Mark as a separate P3.x: chart-OCR pass over Docling figures. Not a parser swap, an additional model.
+**Out of scope for this ship**: re-ingesting pre-existing slide-deck content. The classifier is forward-acting; the user's existing PyMuPDF-parsed CUDA deck stays as-is until manually re-ingested via `memex ingest`. A clean reindex of existing slide-deck content will be needed for the new routing to take effect on already-ingested docs.
 
 ### P2 — eval-gated stack swaps (after P0)
 
 2. ~~**Qwen3-Reranker-0.6B infrastructure**~~ — ✅ **Infra shipped 2026-05-21** (commits `714dd32`, `b485748`). Backend flag wired; live verification revised the published "0.6 GB" footprint up to **~2.1 GB live** (autoregressive activations cost more than parameter count suggests). The swap is a quality play, not a memory play. Quality verdict pending P0.
 3. **Granite 4.1-8B-Instruct** vs `Qwen/Qwen3-8B-AWQ`. Apache-2.0 license + native OpenAI-tool-calling in the chat template (vs Qwen's prompt-template tool path). Same vLLM serving infrastructure; the swap is a model-name change in `scripts/serve-vllm.sh`. Eval-gated.
 4. **Qwen3-VL-8B-Instruct** vs `Qwen2.5-VL-7B`. +6–14 OCR points published; native 256 K context. Same AWQ-Int4 footprint (~5 GB). Currently disabled by default on 12 GB; the swap doesn't unblock 12 GB users (`disable_vlm=True` is still the right default there) but improves quality for the larger-VRAM tier. Eval-gated.
+5. **P2.4 — Agent refusal calibration on near-miss queries.** Surfaced by the rigorous eval + chart-text ablation + parser investigation: queries 11 (FP128 energy cost) and 12 (FP4 tensor core cost) hallucinated **identically** across PyMuPDF, chart-text-stripped, and Docling vault runs at every top_k swept. The agent grounds correctly in the FP-precision table chunks but substitutes nearby table values by interpolation (e.g., "FP4 ≈ 0.03x" extrapolated from FP8's 0.06x). Independent of parser, independent of context budget; the failure mode is the agent's prompt + threshold calibration. Investigation tier: prompt-engineering (start with stronger "the question asks for X; if X is not literally present, refuse" guardrails in `prompts/answer@v1`) → if prompt alone is insufficient, model swap (P2.2/P2.3 may carry better refusal-on-near-miss behaviour as a side effect, measurable on the same query set).
 
 ### P3 — infrastructure (no eval needed)
 
 5. ~~**Daemon process model**~~ — ✅ **Shipped 2026-05-21** (commits below). Pure docs+templates: [`docs/deploy/systemd.md`](deploy/systemd.md) (Linux user units, the recommended path), [`docs/deploy/launchd.md`](deploy/launchd.md) (macOS dev), and **twelve** sibling artefacts — four `(unit, env)` pairs for systemd (`memex-vllm.service`, `memex-web.service`, `memex-mcp.service`, `memex-watch.service`) plus four launchd plists (`com.memex.{vllm,web,mcp,watch}.plist`). The web + MCP + watcher units carry soft `Wants=memex-vllm.service` so the full stack boots together; failures in any one service don't cascade. Live-verified on the reference rig: all units enabled + reachable, `kill -9` on the web's `uv` parent triggered a 5 s respawn, and a real edit to a vault markdown triggered the watcher's reaction (enrich+index) end-to-end — including the soft-dependency design proving itself when vLLM was offline (`enrich.chunk_failed` × 32 → graceful continuation → `index.done partial=true` succeeded). Logs flow into journald; rotation is the OS's job now.
 6. **Real-mode benchmark nightly CI** — `scripts/benchmark.py --real` measures cold start + first-token + embedding throughput. Needs a GPU runner: cloud (Lambda, RunPod, Modal) or a dedicated rig. Workflow template already in `.github/workflows/`. Decision blocker is **cost + ops**, not code.
+7. **P3.3 — Chart-data extraction (chart-OCR over Docling figures).** Surfaced by the parser investigation: query 04 ("transistor density 2004–2022 per TSMC chart") stayed refused under both PyMuPDF and Docling, because the year-by-year numerics live inside chart imagery that Docling represents as `<!-- image -->` placeholders. A DocVQA-style chart-OCR pass over those figures (input: Docling-tagged figure crops; output: a structured GFM table or key:value list appended to the parent chunk's markdown) would extract them. Candidate models: ChartQA-style finetunes, DePlot, Pix2Struct. New parse-stage post-processor (sandbox-able alongside the existing Docling worker); new VRAM footprint to budget. Out of scope for the parser swap that just shipped — this is an additional model + pipeline, not a routing tweak.
 
 ### P4 — design decisions still owed (low urgency)
 
