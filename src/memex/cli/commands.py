@@ -322,8 +322,18 @@ def serve_mcp(
 
     _boot()
     if transport == "stdio":
+        # Don't print to stdout on stdio transport — that channel IS the
+        # MCP protocol. stderr is fine.
+        err.print(
+            "[green]Memex MCP server ready[/green] [dim](stdio transport, "
+            "Ctrl-C to stop)[/dim]"
+        )
         asyncio.run(serve_stdio())
     elif transport == "http":
+        err.print(
+            f"[green]Memex MCP server ready →[/green] [bold]http://{host}:{port}[/bold]   "
+            f"[dim](Ctrl-C to stop)[/dim]"
+        )
         asyncio.run(serve_http(host=host, port=port))
     else:
         err.print(
@@ -344,6 +354,14 @@ def serve_web(
     from memex.webui.app import create_app
 
     _boot()
+    # `log_config=None` keeps uvicorn out of structlog's way, but it
+    # also silences uvicorn's own "Uvicorn running on ..." startup
+    # banner. Print a one-line ready signal to stderr so the operator
+    # can see the server is listening without having to curl /healthz.
+    err.print(
+        f"[green]Memex web UI ready →[/green] [bold]http://{host}:{port}[/bold]   "
+        f"[dim](Ctrl-C to stop)[/dim]"
+    )
     uvicorn.run(create_app(), host=host, port=port, log_config=None)
 
 
