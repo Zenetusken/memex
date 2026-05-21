@@ -28,7 +28,7 @@ The blueprint in [`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) is the archi
 | **FU3.2.1** | **`Type=notify` for vLLM** — readiness gate, not just process-forked ordering | ✅ **Shipped + live-verified** (2026-05-21) |
 | **FU3.2.2** | **`memex upgrade` CLI** — one-shot pull + sync + restart-installed-units | ✅ **Shipped + live-verified** (2026-05-21) |
 | **FU3.2.3** | **`memex-vault-backup.timer`** — nightly encrypted restic snapshots | ✅ **Shipped + live-verified** (2026-05-21) |
-| **P0** | **Eval corpus** — JSON query sets + `memex eval` baseline | ⚠️ **Bootstrap shipped** (2026-05-21): 1 category (slide-decks), 1 doc, 10 queries; first real baseline run captured. Corpus extension is multi-session curator work. |
+| **P0** | **Eval corpus** — JSON query sets + `memex eval` rigorous baseline | ⚠️ **Rigorous baseline shipped** (2026-05-21): 1 category (slide-decks), 1 doc, 15 queries (7 answerable + 3 empty-retrieval refusals + 5 near-miss refusals); `top_k ∈ {4,6,8}` sweep run; `mcp_answered_only ≈ 0.5–0.6`. Corpus extension is multi-session curator work. |
 
 **File count:** 83 Python files in `src/memex/` + `tests/` + `scripts/`, all parse-clean. 7 ADRs. 8 audit reports under `docs/audits/`. 54 commits on `main` (public at `github.com/Zenetusken/memex`); the canonical count is `git rev-list --count main`.
 
@@ -100,35 +100,40 @@ PDFs now run through a tiered classifier before Docling. Producer metadata is th
 
 The entire P1 code-work backlog plus the P3.2 always-on stack + every FU3.2.* follow-up is shipped. **P0 has its scaffolding now**: the first real query set + baseline run exists. The remaining work on P0 is corpus extension (more documents, more queries, more categories), which is a curator-time investment rather than a code task.
 
-### P0 — eval corpus: scaffolding shipped 2026-05-21
+### P0 — eval corpus: rigorous baseline shipped 2026-05-21
 
-The eval harness (`src/memex/eval/runner.py`) now has its first concrete query set: **`tests/eval-data/slide-decks/queries.json`** — 10 queries (7 answerable + 3 counterfactual) against the GTC 2024 CUDA deck. First baseline run (2026-05-21, `MEMEX_RERANK_TOP_K=4` to fit `max_model_len=4096`):
+The eval harness now has its first concrete query set at **`tests/eval-data/slide-decks/queries.json`** — 15 queries (7 answerable + 3 empty-retrieval counterfactuals + 5 near-miss counterfactuals) against the GTC 2024 CUDA deck. The bootstrap (10 queries; published 2026-05-21 in commit `720fdfa`) was superseded the same day after the calibration was audited and the methodology hardened: broader chunk-set labelling, near-miss counterfactuals added, and `mean_citation_precision_answered_only` added to `EvalReport` so refused queries don't inflate the headline.
 
-| Metric | Value | Reading |
-|---|---|---|
-| `query_count` | 10 | |
-| `answered_count` | 3 | 4 of 7 answerable queries got refused — significant over-refusal |
-| `refused_count` | 7 | (3 correct counterfactual refusals + 4 over-refusals) |
-| `mean_citation_precision` | 0.9 | Refused queries score 1.0 (no citations to be wrong about) — among the 3 *answered* queries, citation precision was 2/3 |
-| `refusal_rate_on_counterfactuals` | 1.0 | Counterfactual refusal logic is working correctly |
+**Rigorous baseline sweep — `MEMEX_RERANK_TOP_K ∈ {4, 6, 8}`:**
 
-**Baseline findings worth carrying into P2.x decisions:**
+| top_k | answered | refused | `mcp_all` | `mcp_ans` | `refusal_rate_cf` |
+|---|---|---|---|---|---|
+| 4 | 4 | 11 | 0.87 | **0.50** | 0.875 |
+| 6 | 6 | 9 | 0.80 | **0.50** | 0.75 |
+| 8 | 5 | 10 | 0.87 | **0.60** | 0.75 |
 
-1. **Over-refusal on grounded queries.** Four of seven answerable queries refused — even queries where the right chunk was the top retrieval result with rerank scores `0.95`–`0.97`. The agent reasoned that the chunks "lack direct discussion" of the asked topic despite the chunks containing the literal answer (e.g., "Power of floating point arithmetic generally scales as the square of the mantissa length"). The `[chart-text]` noise from PyMuPDF chart extraction interleaves with the answer text and confuses the model. Two angles for P2.x:
-   - **Chunker / parser**: should `[chart-text]` blocks be siphoned to a separate index (or dropped from chunks fed to the agent) so per-chunk signal-to-noise improves?
-   - **Answer prompt**: the refusal threshold + "literal phrasing" expectation needs calibration. A model that refuses on grounded content is worse than one that hallucinates here, because the chunk_id is still attached.
-2. **Context-length pressure.** Default `top_k=10` × 400-token chunks + system prompt + question overflows `max_model_len=4096` on long-chunk decks like this. The session had to run with `MEMEX_RERANK_TOP_K=4` to fit. Two angles:
-   - Per-category `top_k` defaults (slide decks need smaller; technical docs probably want larger)
-   - Bump `max_model_len` to 8192 (costs ~2 GB VRAM more for KV cache)
-3. **Citation labelling needs to allow chunk-set equivalence.** Query `slide-decks-01` answered correctly but cited a different chunk than the labelled one — the chunker has near-duplicate chunks from `[chart-text]` overlap, and labelling a single chunk in `relevant_chunk_ids` artificially penalises a correct answer that cited an equivalent chunk. Future queries should label the *set* of chunks that contain the answer.
+The bootstrap's headline `mean_citation_precision = 0.9` was the all-queries metric — refused queries score 1.0 (no false-positive citations) and inflated the number. The answered-only metric (now reported alongside) tells the honest story: **roughly half of citations on attempted answers are correct**. Refusal rate on counterfactuals dropped from a naïve `1.0` (3 empty-retrieval queries only) to `0.75–0.875` once near-miss queries entered the mix — the agent hallucinated on questions like "FP128 energy cost" and "FP4 tensor core cost," substituting nearby table values as if they answered the actual question.
 
-**Outstanding P0 work (multi-session):**
+**Findings carrying into P2.x:**
+
+1. **Over-refusal is invariant to top_k.** Queries 02 ("two categories of power"), 04 ("transistor density 2004-2022"), 05 ("data movement power") refused at every `top_k ∈ {4, 6, 8}`. Since the same chunks are retrieved across top_k, the cause isn't context-budget — it's per-chunk quality or agent-prompt calibration. The chart-text-noise hypothesis is now the leading theory (an ablation run with `[chart-text]` blocks stripped from the chunk text would confirm; deferred to a future session).
+2. **Near-miss hallucinations are real and unmeasured before.** Queries 11 (FP128) and 12 (FP4) got hallucinated answers at `top_k ∈ {6, 8}`; query 12 hallucinated at every top_k. The retrieval correctly routed to the precision-table chunks (high rerank), but the agent substituted nearby values from those chunks as if they answered the unrelated FP128/FP4 question. **The bootstrap's `refusal_rate_on_counterfactuals = 1.0` was a measurement artefact of only using easy empty-retrieval counterfactuals.**
+3. **`max_model_len=4096` context pressure is real but narrower than first thought.** The bootstrap overflowed at default `top_k=10`; the rigorous sweep at `top_k ∈ {4, 6, 8}` runs cleanly. The operational floor for slide-deck content is probably around `top_k=8`. Per-category defaults still warrant consideration; bumping `max_model_len` to 8192 would unlock `top_k=10` again at ~2 GB more KV-cache VRAM.
+
+**What's verified now that wasn't in the bootstrap:**
+
+- The `relevant_chunk_ids` labelling rule is documented in `tests/eval-data/README.md` (top-10 search, include every chunk that contains the literal answer).
+- `EvalReport.mean_citation_precision_answered_only` is the published honest metric.
+- Counterfactual coverage includes near-miss queries with the `_counterfactual_mode` tag distinguishing the two refusal modes.
+
+**Outstanding P0 work (multi-session, curator-time):**
 
 1. Extend `slide-decks` to 30–50 queries across 3–5 documents.
 2. Bootstrap the other 6 categories (modern-printed, scientific-papers, technical-docs, historical-scans, handwritten, forms).
-3. Wire CER/WER/structural-F1 (currently in `src/memex/eval/scoring.py` but not consumed by `runner.py`) → needs per-doc hand-curated reference markdown.
+3. Wire CER/WER/structural-F1 from `src/memex/eval/scoring.py` into `runner.py`; needs per-doc hand-curated reference markdown.
+4. Run the chart-text ablation (strip `[chart-text]` blocks from a copy of the canonical markdown, re-index, re-run the eval) to confirm or deny the over-refusal attribution.
 
-The P0 status is no longer a binary blocker; it's a graduated effort.
+P0 is now scaffolded with a baseline that can be trusted as a P2.x reference.
 
 ### P2 — eval-gated stack swaps (after P0)
 

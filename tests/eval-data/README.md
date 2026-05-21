@@ -43,6 +43,31 @@ Each `queries.json` is consumed by `src/memex/eval/runner.py::run_eval`. Shape:
 
 Fields with a leading underscore (`_description`, `_expected_answer`, `_note`, etc.) are tolerated as documentation and ignored by the loader. Use them to capture the human-readable answer + any caveats.
 
+## Labelling rules (the rigorous version)
+
+These rules were arrived at after the first rigorous sweep exposed weaknesses in the bootstrap:
+
+### `relevant_chunk_ids` for answerable queries
+
+> Run `memex search "<question>" --k 10`. **Every chunk in the top-10 whose text contains the literal answer (or a clear paraphrase) goes into `relevant_chunk_ids`.** Single-chunk labels appear when only one chunk has the answer; multi-chunk labels appear when the chunker's overlap creates near-duplicate chunks containing the same answer prose.
+
+The earlier mistake was labelling a single chunk per query "for cleanliness," which artificially penalised correct answers that cited an equivalent overlap-chunk. The rule above eliminates that bias.
+
+### Counterfactual mix
+
+A category's `should_refuse: true` queries should test **both refusal modes**:
+
+1. **Empty-retrieval counterfactuals** — questions whose chunks come back nothing relevant (e.g., "what year was Mellanox acquired" against a CUDA architecture deck). The easy refusal case.
+2. **Near-miss counterfactuals** — questions phrased so retrieval pulls *related but non-answering* chunks (e.g., "FP128 energy cost" pulls the FP precision table which lists FP64/32/16/8 but not FP128). The hard refusal case — exercises whether the agent recognises that *being grounded in the chunk-neighbourhood* doesn't mean *the specific value is present*.
+
+Without near-miss counterfactuals, a category's `refusal_rate_on_counterfactuals = 1.0` is misleadingly easy. The bootstrap had 3 empty-retrieval counterfactuals and scored 1.0; the rigorous version added 5 near-miss counterfactuals and the rate dropped to 0.75-0.875 — surfacing real hallucination behaviour.
+
+Tag each counterfactual with an underscore field: `"_counterfactual_mode": "empty-retrieval"` or `"near-miss"`.
+
+### Headline metric interpretation
+
+`mean_citation_precision` counts refused queries as 1.0 (no citations → no false positives), which inflates the number when most queries refuse. Use **`mean_citation_precision_answered_only`** (added 2026-05-21) as the honest signal of citation quality. The all-queries number stays as a tie-breaker / regression indicator but is not the primary metric.
+
 ## How to add a query
 
 ```sh

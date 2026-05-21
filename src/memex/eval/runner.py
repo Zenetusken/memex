@@ -55,6 +55,12 @@ class EvalReport(BaseModel):
     answered_count: int
     refused_count: int
     mean_citation_precision: float
+    # Refused queries score 1.0 on `mean_citation_precision` because
+    # they cite nothing (no false positives). That inflates the
+    # headline when most queries are refusals. The "answered-only"
+    # variant is the honest signal of citation quality on the queries
+    # the agent actually attempted. NaN when zero queries answered.
+    mean_citation_precision_answered_only: float
     refusal_rate_on_counterfactuals: float
     per_query: list[EvalQueryResult] = Field(default_factory=list)
 
@@ -116,17 +122,24 @@ async def run_eval(
         )
 
     finished = datetime.now(UTC)
+    answered_results = [r for r in results if r.answered]
     report = EvalReport(
         run_id=str(ulid.ULID()),
         started_at=started,
         finished_at=finished,
         query_count=len(results),
-        answered_count=sum(1 for r in results if r.answered),
+        answered_count=len(answered_results),
         refused_count=sum(1 for r in results if not r.answered),
         mean_citation_precision=(
             sum(r.citation_precision for r in results) / len(results)
             if results
             else 0.0
+        ),
+        mean_citation_precision_answered_only=(
+            sum(r.citation_precision for r in answered_results)
+            / len(answered_results)
+            if answered_results
+            else float("nan")
         ),
         refusal_rate_on_counterfactuals=(
             refusal_correct_count / counterfactual_count
@@ -139,5 +152,6 @@ async def run_eval(
         "eval.done",
         query_count=report.query_count,
         mean_citation_precision=report.mean_citation_precision,
+        mean_citation_precision_answered_only=report.mean_citation_precision_answered_only,
     )
     return report

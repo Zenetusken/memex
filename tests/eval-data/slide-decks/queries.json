@@ -1,19 +1,22 @@
 {
-  "_description": "P0 eval-corpus bootstrap, category: slide-decks. Source doc: Stephen Jones, 'CUDA: New Features and Beyond', GTC 2024. Authored 2026-05-21; first real query set against the Memex eval harness.",
+  "_description": "P0 eval-corpus, category: slide-decks. Source doc: Stephen Jones, 'CUDA: New Features and Beyond', GTC 2024. Rigorous baseline 2026-05-21 — replaces the initial bootstrap after methodology gaps surfaced (over-narrow labelling, easy-only counterfactuals, top_k confound).",
   "_doc_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640",
-  "_query_count": 10,
-  "_mix": "7 answerable + 3 counterfactual (refuse)",
-  "_chunk_id_provenance": "For each answerable query, `memex search --k 3 <question>` was run; chunks with rerank_score > 0.5 that contain the answer are listed in relevant_chunk_ids. Low-rerank cases (qids slide-decks-02 and slide-decks-05) are kept intentionally to expose retrieval-quality baselines.",
+  "_query_count": 15,
+  "_mix": "7 answerable + 3 empty-retrieval refusals + 5 near-miss refusals",
+  "_labelling_rule": "For each answerable query, run `memex search --k 10`; `relevant_chunk_ids` = every chunk in the top-10 whose text contains the literal answer (or equivalent paraphrase). Single-chunk labels appear when only one chunk has the answer text; multi-chunk labels appear when the chunker's overlap creates near-duplicate chunks.",
   "queries": [
     {
       "qid": "slide-decks-01",
       "question": "What is the energy cost of FP16 matrix multiplication relative to FP32, in FMA operations?",
       "relevant_chunk_ids": [
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3a6c6789e8"
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3a6c6789e8",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#68dbf5fd57",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3033839212"
       ],
       "should_refuse": false,
       "_expected_answer": "0.5x (from the Energy per FLOP table for matrix multiply)",
-      "_baseline_rerank_top1": 0.6484
+      "_baseline_rerank_top1": 0.7382,
+      "_note": "Re-labelled with broader chunk set after the initial bootstrap revealed chunk-set-equivalence under-labelling."
     },
     {
       "qid": "slide-decks-02",
@@ -23,8 +26,8 @@
       ],
       "should_refuse": false,
       "_expected_answer": "1. Data movement, 2. Computation",
-      "_baseline_rerank_top1": 0.0272,
-      "_note": "Low rerank score — agent may over-refuse. This is a known retrieval-quality finding to capture in the baseline."
+      "_baseline_rerank_top1": 0.0292,
+      "_note": "Genuinely single-chunk answer; the low rerank (0.029) is a retrieval-quality finding to surface, not a labelling issue."
     },
     {
       "qid": "slide-decks-03",
@@ -57,7 +60,7 @@
       "should_refuse": false,
       "_expected_answer": "Modern processors spend significant power on data movement (one of the two categories of power consumption); reducing it is one of the headline strategies in the deck.",
       "_baseline_rerank_top1": 0.5664,
-      "_note": "Borderline rerank score (0.57) — useful test of refusal threshold calibration."
+      "_note": "Single-chunk answer (top-10 search confirms no other chunk discusses data movement as a power factor). Borderline rerank score useful for threshold testing."
     },
     {
       "qid": "slide-decks-06",
@@ -86,6 +89,7 @@
       "question": "In what year did NVIDIA acquire Mellanox?",
       "relevant_chunk_ids": [],
       "should_refuse": true,
+      "_counterfactual_mode": "empty-retrieval",
       "_expected_answer": "(Refuse — the deck is about CUDA architecture, not corporate M&A history.)"
     },
     {
@@ -93,6 +97,7 @@
       "question": "What is the recommended chunk size for retrieval-augmented generation pipelines?",
       "relevant_chunk_ids": [],
       "should_refuse": true,
+      "_counterfactual_mode": "empty-retrieval",
       "_expected_answer": "(Refuse — RAG is unrelated to a CUDA architecture deck.)"
     },
     {
@@ -100,7 +105,53 @@
       "question": "What is the manufacturer's suggested retail price of the NVIDIA RTX 4090?",
       "relevant_chunk_ids": [],
       "should_refuse": true,
+      "_counterfactual_mode": "empty-retrieval",
       "_expected_answer": "(Refuse — pricing is not discussed in this technical deck.)"
+    },
+    {
+      "qid": "slide-decks-11",
+      "question": "What is the energy cost of FP128 matrix multiplication relative to FP32, in FMA operations?",
+      "relevant_chunk_ids": [],
+      "should_refuse": true,
+      "_counterfactual_mode": "near-miss",
+      "_expected_answer": "(Refuse — the Energy per FLOP table covers FP64/FP32/FP16/FP8/Int8 but not FP128.) This should pull the precision-table chunks at high rerank but the agent should recognise FP128 is absent.",
+      "_note": "Tests near-miss refusal: retrieval will route to the FP-precision chunk which is the right neighbourhood, but the specific value asked isn't there."
+    },
+    {
+      "qid": "slide-decks-12",
+      "question": "What is the FP4 tensor core energy cost per FLOP relative to an FP32 FMA?",
+      "relevant_chunk_ids": [],
+      "should_refuse": true,
+      "_counterfactual_mode": "near-miss",
+      "_expected_answer": "(Refuse — the table lists FP8 as the smallest tensor-core precision; FP4 is not in this deck.)",
+      "_note": "Same chunk-neighbourhood as the precision-table answerable queries; tests whether the agent grounds on the specific value or hallucinates by analogy."
+    },
+    {
+      "qid": "slide-decks-13",
+      "question": "What is the NVLink bandwidth between Hopper and Blackwell GPUs?",
+      "relevant_chunk_ids": [],
+      "should_refuse": true,
+      "_counterfactual_mode": "near-miss",
+      "_expected_answer": "(Refuse — Grace-Hopper bandwidth is discussed but Blackwell isn't covered in this 2024 deck.)",
+      "_note": "Pulls the NVLink-bandwidth chunks; the agent must distinguish Grace-Hopper from a non-existent Hopper-Blackwell pairing."
+    },
+    {
+      "qid": "slide-decks-14",
+      "question": "How many CUDA cores are in NVIDIA's latest data-center GPU according to this deck?",
+      "relevant_chunk_ids": [],
+      "should_refuse": true,
+      "_counterfactual_mode": "near-miss",
+      "_expected_answer": "(Refuse — the deck discusses transistor density and SM architecture but does not list CUDA core counts.)",
+      "_note": "Tests whether the agent over-claims about GPU specs based on architecture-discussion chunks."
+    },
+    {
+      "qid": "slide-decks-15",
+      "question": "What is the kernel-fusion speed-up factor for converting FP32 to INT8 according to the slides?",
+      "relevant_chunk_ids": [],
+      "should_refuse": true,
+      "_counterfactual_mode": "near-miss",
+      "_expected_answer": "(Refuse — kernel fusion is discussed but the example given is FP32→FP16, not FP32→INT8.)",
+      "_note": "Tests whether the agent substitutes the FP32→FP16 example as if it answered the FP32→INT8 question."
     }
   ]
 }
