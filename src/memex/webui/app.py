@@ -153,6 +153,8 @@ def create_app() -> FastAPI:
         request: Request,
         question: str = Form(..., max_length=_QUESTION_MAX_BYTES),
     ) -> HTMLResponse:
+        from memex.core.errors import MemexError
+
         question = question.strip()
         if not question:
             return templates.TemplateResponse(
@@ -161,7 +163,32 @@ def create_app() -> FastAPI:
                 {"response": None, "error": "Question is empty."},
                 status_code=400,
             )
-        response = await answer_query(question)
+        try:
+            response = await answer_query(question)
+        except MemexError as e:
+            # The agent surfaces typed MemexError subclasses (ModelCallError
+            # from a schema-violating LLM output, InsufficientVRAMError on
+            # OOM, CircuitBreakerOpen on a tripped breaker, etc). Render
+            # them as a refusal partial rather than a bare 500. The HTMX
+            # caller swaps the same target either way, so a clean error
+            # banner is friendlier than the browser's default error page.
+            logger.warning(
+                "ask.failed",
+                error_type=type(e).__name__,
+                error=str(e)[:200],
+            )
+            return templates.TemplateResponse(
+                request,
+                "_answer.html",
+                {
+                    "response": None,
+                    "error": (
+                        f"Couldn't answer: {type(e).__name__}. "
+                        f"{str(e)[:160]}"
+                    ),
+                },
+                status_code=503,
+            )
         return templates.TemplateResponse(
             request,
             "_answer.html",
