@@ -53,6 +53,17 @@ _MAX_NEW_TOKENS = 512
 # budget. Override via env var if quality calls for it.
 _DEFAULT_RENDER_SCALE = 2.5
 
+# Minimum figure area (in PDF user-space squared points) to bother
+# running chart-OCR on. Below this threshold, the figure is almost
+# certainly a page-number badge, watermark, or decorative element
+# rather than a real chart. ~140×140 points ≈ 2 inches square at
+# 72 DPI, which is the minimum chart size we've seen on the slide-
+# decks corpus. Filtering pre-inference saves ~80% of model calls on
+# the canonical CUDA deck (245 picture objects → ~40-50 actual
+# charts) without losing any chart-with-numerics that the model
+# could plausibly extract.
+_MIN_FIGURE_AREA_SQPT = 20000.0
+
 
 class ChartOCRUnavailable(MemexError):
     """The chart-OCR stack is not installed (transformers / torch / pypdfium2)."""
@@ -151,6 +162,13 @@ def _chart_ocr_transcribe_sync(
     modal batch, model.generate runs greedy decode, processor decodes
     the output ids. No chat-template wrapping (Pix2Struct doesn't
     have one — the prompt is just a text prefix).
+
+    Calls `torch.cuda.empty_cache()` after inference to keep the
+    caching allocator from accumulating fragmentation across many
+    sequential figures. The CUDA audit (2026-05-20) observed this on
+    the VLM path too — without explicit cache reclaim, ~200+
+    sequential generates can OOM even when per-call peak memory is
+    well within budget.
     """
     import torch
 
@@ -159,16 +177,35 @@ def _chart_ocr_transcribe_sync(
         text=prompt,
         return_tensors="pt",
     ).to(handle.model.device)
+    # Cast float tensors to the model's dtype (BF16 per ADR-0006).
+    # The Pix2Struct processor produces FP32 pixel_values; the
+    # BF16-loaded model expects BF16 inputs, so without this cast we
+    # get the canonical "mat1 and mat2 have different dtype" error.
+    # Integer tensors (input_ids, attention_mask) stay as-is.
+    model_dtype = next(handle.model.parameters()).dtype
+    inputs = {
+        k: v.to(model_dtype) if v.dtype.is_floating_point else v
+        for k, v in inputs.items()
+    }
 
-    with torch.inference_mode():
-        outputs = handle.model.generate(
-            **inputs,
-            max_new_tokens=max_new_tokens,
-            do_sample=False,
-        )
-
-    decoded = handle.processor.decode(outputs[0], skip_special_tokens=True)
-    return decoded.strip()
+    try:
+        with torch.inference_mode():
+            outputs = handle.model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+            )
+        decoded = handle.processor.decode(outputs[0], skip_special_tokens=True)
+        return decoded.strip()
+    finally:
+        # Reclaim caching-allocator blocks so the next figure starts
+        # from a clean slate. Cheap (microseconds); the alternative is
+        # slow accumulation that eventually trips the OOM killer.
+        del inputs
+        if "outputs" in dir():
+            del outputs  # noqa: F821
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
 
 async def _extract_with_handle(
@@ -209,6 +246,7 @@ async def chart_ocr_extract(
     source_pdf: Path,
     figures: list[FigureMetadata],
     max_new_tokens: int = _MAX_NEW_TOKENS,
+    min_area_sqpt: float = _MIN_FIGURE_AREA_SQPT,
 ) -> list[ChartOCROutput | Exception]:
     """Per-document batch extraction over a list of figures.
 
@@ -227,15 +265,55 @@ async def chart_ocr_extract(
     if not figures:
         return []
 
-    registry = get_registry()
+    # Filter tiny figures BEFORE acquiring the model. Page-number
+    # badges, watermarks, and decorative elements are sub-threshold
+    # and waste model inference time without producing useful chart
+    # data. On the canonical CUDA deck this prunes ~80% of the 245
+    # picture objects down to the ~40-50 real charts.
+    #
+    # IMPORTANT: we still return one result PER INPUT figure so the
+    # caller's stitch step (`_stitch_chart_extractions`) can zip
+    # results positionally against the markdown's `<!-- image -->`
+    # placeholders. Filtered figures get a synthetic empty
+    # ChartOCROutput so the count matches.
     results: list[ChartOCROutput | Exception] = []
+    figures_to_extract: list[tuple[int, FigureMetadata]] = []
+    for idx, figure in enumerate(figures):
+        x0, y0, x1, y1 = figure.bbox
+        area = max(0.0, x1 - x0) * max(0.0, y1 - y0)
+        if area < min_area_sqpt:
+            results.append(
+                ChartOCROutput(
+                    page_no=figure.page_no, bbox=figure.bbox, markdown=""
+                )
+            )
+        else:
+            results.append(
+                ChartOCROutput(
+                    page_no=figure.page_no, bbox=figure.bbox, markdown=""
+                )
+            )
+            figures_to_extract.append((idx, figure))
+
+    if not figures_to_extract:
+        return results
+
+    log = logger.bind(
+        total_figures=len(figures),
+        figures_to_extract=len(figures_to_extract),
+    )
+    log.info("chart_ocr.batch.start")
+
+    registry = get_registry()
     async with registry.use("chart_ocr") as handle:
-        for figure in figures:
+        for slot_idx, figure in figures_to_extract:
             try:
                 out = await _extract_with_handle(
                     handle, source_pdf, figure, max_new_tokens
                 )
-                results.append(out)
+                results[slot_idx] = out
             except (ChartOCRUnavailable, PDFFigureRenderError) as e:
-                results.append(e)
+                results[slot_idx] = e
+
+    log.info("chart_ocr.batch.done")
     return results

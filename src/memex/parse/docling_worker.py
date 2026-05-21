@@ -136,37 +136,69 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
     # chart-OCR pass skips the doc.
     figures: list[dict[str, Any]] = []
     for pic in getattr(doc, "pictures", None) or []:
-        bbox_obj = getattr(pic, "bbox", None) or getattr(pic, "prov", None)
-        # Docling's picture provenance may live on `.bbox` directly or
-        # via `.prov[0].bbox` depending on the version. Probe both.
-        if bbox_obj is None:
-            prov_list = getattr(pic, "prov", None) or []
-            if prov_list:
-                bbox_obj = getattr(prov_list[0], "bbox", None)
-        if bbox_obj is None:
+        # Docling's picture object exposes its position through
+        # `.prov[0].bbox` — a `BoundingBox` with `.l / .t / .r / .b`
+        # attributes in `CoordOrigin.BOTTOMLEFT` coords (verified on
+        # docling 2.x). The picture itself doesn't carry a direct
+        # `.bbox` or `.page_no`; both live on the provenance entry.
+        # We defensively probe but the common path is `.prov[0]`.
+        bbox_obj = None
+        page_no = None
+        if hasattr(pic, "bbox") and not isinstance(pic.bbox, (list, tuple)):
+            bbox_obj = pic.bbox
+        prov_list = getattr(pic, "prov", None) or []
+        if bbox_obj is None and prov_list:
+            bbox_obj = getattr(prov_list[0], "bbox", None)
+        if hasattr(pic, "page_no") and pic.page_no is not None:
+            page_no = pic.page_no
+        elif prov_list:
+            page_no = getattr(prov_list[0], "page_no", None)
+        if bbox_obj is None or page_no is None:
             continue
         try:
-            x0 = float(getattr(bbox_obj, "l", getattr(bbox_obj, "x0", 0.0)))
-            y0 = float(getattr(bbox_obj, "b", getattr(bbox_obj, "y0", 0.0)))
-            x1 = float(getattr(bbox_obj, "r", getattr(bbox_obj, "x1", 0.0)))
-            y1 = float(getattr(bbox_obj, "t", getattr(bbox_obj, "y1", 0.0)))
+            # Try the `.l/.t/.r/.b` schema first (docling's canonical
+            # BoundingBox); fall back to `.x0/.y0/.x1/.y1` for older
+            # versions or alternate types.
+            x0_attr = getattr(bbox_obj, "l", None)
+            x0 = float(
+                x0_attr
+                if x0_attr is not None
+                else getattr(bbox_obj, "x0", 0.0)
+            )
+            y_bot_attr = getattr(bbox_obj, "b", None)
+            y_bot = float(
+                y_bot_attr
+                if y_bot_attr is not None
+                else getattr(bbox_obj, "y0", 0.0)
+            )
+            x1_attr = getattr(bbox_obj, "r", None)
+            x1 = float(
+                x1_attr
+                if x1_attr is not None
+                else getattr(bbox_obj, "x1", 0.0)
+            )
+            y_top_attr = getattr(bbox_obj, "t", None)
+            y_top = float(
+                y_top_attr
+                if y_top_attr is not None
+                else getattr(bbox_obj, "y1", 0.0)
+            )
         except (TypeError, ValueError):
             continue
-        page_no = getattr(pic, "page_no", None)
-        if page_no is None:
-            prov_list = getattr(pic, "prov", None) or []
-            if prov_list:
-                page_no = getattr(prov_list[0], "page_no", None)
-        if page_no is None:
-            continue
-        caption_obj = getattr(pic, "caption_text", None) or getattr(
-            pic, "caption", None
-        )
+        # FigureMetadata.bbox is documented as (x0, y0_bottom, x1,
+        # y1_top) in bottom-left coords — matches what the chart-OCR
+        # backend's renderer expects.
+        caption_obj = getattr(pic, "caption_text", None)
+        if callable(caption_obj):
+            try:
+                caption_obj = caption_obj()
+            except Exception:
+                caption_obj = None
         caption = str(caption_obj) if caption_obj else None
         figures.append(
             {
                 "page_no": int(page_no),
-                "bbox": [x0, y0, x1, y1],
+                "bbox": [x0, y_bot, x1, y_top],
                 "caption": caption,
             }
         )

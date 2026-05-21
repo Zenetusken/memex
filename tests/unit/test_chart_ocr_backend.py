@@ -113,6 +113,7 @@ async def test_multiple_figures_extract_in_order(
     out = await chart_ocr_extract(
         source_pdf=Path("/fake.pdf"),
         figures=figures,
+        min_area_sqpt=0.0,  # bypass area filter so test bboxes go through
     )
 
     assert len(out) == 3
@@ -162,6 +163,7 @@ async def test_render_error_returned_per_figure(
     out = await chart_ocr_extract(
         source_pdf=Path("/fake.pdf"),
         figures=figures,
+        min_area_sqpt=0.0,  # bypass area filter so test bboxes go through
     )
 
     assert len(out) == 3
