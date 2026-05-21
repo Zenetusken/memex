@@ -23,10 +23,11 @@ The blueprint in [`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) is the archi
 | **P1.2** | **MCP HTTP bearer-token auth + safe-bind default** | ✅ **Shipped + live-verified** (2026-05-21) |
 | **P1.4** | **Annotation UI 409 conflict surface + vault CAS** | ✅ **Shipped + live-verified** (2026-05-21) |
 | **P1.5** | **Cross-process vault lock (fcntl.LOCK_EX)** | ✅ **Shipped + live-verified** (2026-05-21) |
+| **P2.1-infra** | **Qwen3-Reranker backend wired behind a feature flag** | ✅ **Infrastructure shipped** (2026-05-21); quality A/B and VRAM-fit on 12 GB rig still pending |
 
-**File count:** 82 Python files in `src/memex/` + `tests/` + `scripts/`, all parse-clean. 7 ADRs. 8 audit reports under `docs/audits/`. 38 commits on `main` (public at `github.com/Zenetusken/memex`).
+**File count:** 83 Python files in `src/memex/` + `tests/` + `scripts/`, all parse-clean. 7 ADRs. 8 audit reports under `docs/audits/`. 39 commits on `main` (public at `github.com/Zenetusken/memex`).
 
-**Test suite:** 141/141 green on the reference rig (137 pre-existing + 1 vault-lockfile unit + 3 vault-cross-process integration). Linux + pyseccomp; the 3 cross-process tests skip on Windows alongside the 2 seccomp-skip tests.
+**Test suite:** 144/144 green on the reference rig (141 pre-existing + 3 rerank-dispatch unit tests). Linux + pyseccomp; 5 tests skip on Windows.
 
 ---
 
@@ -106,7 +107,7 @@ PDFs now run through a tiered classifier before Docling. Producer metadata is th
 
 ### P2 — eval-gated stack swaps (after P0)
 
-6. **Qwen3-Reranker-0.6B** vs `BAAI/bge-reranker-v2-m3`. Memory: 0.6 GB vs 2 GB — frees ~1.5 GB on the 12 GB rig. Quality: +8 MMTEB-R on the published benchmark; autoregressive ⇒ higher per-pair latency. Gate on the `<15 s` answer-latency floor.
+6. **Qwen3-Reranker-0.6B** vs `BAAI/bge-reranker-v2-m3` — ◐ **Infrastructure shipped 2026-05-21** (commit `714dd32`). `MEMEX_MODELS__RERANKER_BACKEND=qwen3` flips the dispatcher in `retrieve/rerank.py`; new `Qwen3RerankerHandle` + `_load_reranker_qwen3` in the registry; budget table in `cli/bootstrap.py` updated. **Empirical correction**: P2.1 verification on the 12 GB rig showed Qwen3-Reranker-0.6B is **~2.1 GB live** (1.8 GB BF16 weights + ~0.3 GB forward-pass workspace), not the 0.6-0.7 GB the parameter count suggests — autoregressive activations cost more than published. The swap is therefore a *quality* play, not a memory play; on the reference 12 GB rig with vLLM-Qwen3-8B-AWQ already resident, the qwen3 backend OOMs the forward pass. Quality A/B still gated on the eval corpus (P0). Users with smaller orchestrators (Qwen3-4B-AWQ) or bigger GPUs can flip the toggle today.
 7. **Granite 4.1-8B-Instruct** vs `Qwen/Qwen3-8B-AWQ`. Apache-2.0 license + native OpenAI-tool-calling in the chat template (vs Qwen's prompt-template tool path). Run A/B against the eval corpus.
 8. **Qwen3-VL-8B-Instruct** vs `Qwen2.5-VL-7B`. +6-14 OCR points published; native 256 K context. Same AWQ-Int4 footprint (~5 GB). Currently disabled by default on 12 GB; the swap doesn't unblock 12-GB users but does improve quality for the larger-VRAM tier.
 
@@ -167,8 +168,9 @@ Detailed per-phase log lives in git history + `docs/audits/`. The compressed ver
 - **P1.2 — MCP HTTP bearer-token auth** (2026-05-21): new `McpSettings.auth_token` (`MEMEX_MCP__AUTH_TOKEN`, `SecretStr`), `mcp/auth.py` with `BearerAuthMiddleware` (constant-time, never logs the token) + `validate_bind` (refuses non-loopback bind without a token), `serve_http` branches on token presence, new `memex mcp generate-token` CLI helper, deploy doc at `docs/deploy/mcp-http.md`. 22 unit + 2 integration tests; stdio transport unaffected.
 - **P1.4 — Annotation UI 409 conflict surface** (2026-05-21): new `StaleDocumentError` + `expected_sha` parameter on `write_document` (constant-time CAS inside the per-doc lock). `/review` now catches stale-sha submits, rolls back the anticipated-manifest update, and renders `_review_conflict.html` with HTTP 409 — unified diff (stdlib `difflib`) + "discard mine & reload" + "overwrite anyway" buttons. HTMX `responseHandling` configured in `base.html` to swap 4xx into the target so the panel actually shows up. Diff CSS in `style.css` (emerald-300 / red-300 / sky-300 / zinc-400). 4 unit + 3 integration tests.
 - **P1.5 — Cross-process vault lock** (2026-05-21): new `vault/_file_lock.py` carries `doc_file_lock` (an async context manager that holds `fcntl.LOCK_EX` on `.memex/locks/{doc_id}.lock`) + `cleanup_lock_file` for delete-document. The flock syscall runs in the default executor with a 0.1 s polling loop so the event loop stays responsive while a structured `vault.lock.contended` / `vault.lock.acquired` audit trail is emitted on long waits. Linux + macOS get real locking; Windows falls back to no-op + one-time WARN (matches the pyseccomp Linux-only pattern). 1 unit + 3 cross-process integration tests.
+- **P2.1-infra — Qwen3-Reranker backend wired** (2026-05-21): new `ModelSettings.reranker_backend` literal (`cross_encoder` default, `qwen3` opt-in), new `Qwen3RerankerHandle` + `_load_reranker_qwen3` in the registry, new `_score_qwen3` in `retrieve/rerank.py` (chat-template prompt → forward pass → softmax over cached yes/no token logits at the last position), backend-aware VRAM budget keys in `cli/bootstrap.py`. Live verification corrected the published "0.6 GB" estimate to **~2.1 GB live**: the autoregressive forward pass holds significantly more activation memory than the parameter count suggests, so the swap remains memory-neutral with the 8B orchestrator on a 12 GB rig. Quality A/B still gated on P0 (eval corpus).
 
-For the full per-commit log: `git log --oneline` (38 commits as of 2026-05-21).
+For the full per-commit log: `git log --oneline` (39 commits as of 2026-05-21).
 
 ---
 

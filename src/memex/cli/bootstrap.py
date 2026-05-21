@@ -78,13 +78,16 @@ _VRAM_GB: dict[tuple[str, str | None], float] = {
     ("orchestrator", "AWQ"): 5.0,
     ("orchestrator", "GPTQ"): 5.0,
     ("embedder", None): 0.6,
-    # bge-reranker-v2-m3 in BF16 is ~2 GB resident (568 M params × 2 B
-    # plus the cross-encoder head). The 0.6 GB figure was a smaller
-    # reranker; the load test showed this is the number that hits the
-    # budget. Qwen3-Reranker-0.6B in BF16 is ~0.7 GB (300 M params × 2 B
-    # + embedding tables — P2.1 measurement).
+    # bge-reranker-v2-m3 in BF16: ~2 GB resident (568 M params × 2 B
+    # plus the cross-encoder head). Qwen3-Reranker-0.6B in BF16:
+    # ~1.8 GB weights + ~0.3 GB forward-pass workspace at batch=1
+    # ≈ 2.1 GB live. The P2.1 verification on RTX 4070 12 GB confirmed
+    # both backends sit at the ~2 GB tier — the swap is a quality
+    # play (eval-gated, P0), NOT a memory play. The headline 0.6 B vs
+    # 568 M parameter delta does not translate to a meaningful VRAM
+    # delta once autoregressive forward-pass activations are counted.
     ("reranker", "cross_encoder"): 2.0,
-    ("reranker", "qwen3"): 0.7,
+    ("reranker", "qwen3"): 2.1,
     ("vlm", "awq_int4"): 7.0,
     ("vlm", "bf16"): 16.0,
 }
