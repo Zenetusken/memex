@@ -32,16 +32,20 @@ async def cross_encoder_rerank(
     log = logger.bind(candidates=len(candidates), top_k=top_k)
     log.info("rerank.start")
 
-    # batch_size=64 tuned for bge-reranker-v2-m3 on Ada per the CUDA
-    # audit; sentence-transformers' default of 32 is too low for the
-    # typical top-50 candidate pool. On tight-VRAM rigs (12 GB) with
-    # large chunks (PyMuPDF-extracted), drop to 16-32 via
-    # MEMEX_RERANK_BATCH_SIZE to free ~300-500 MB during the forward
-    # pass — the cost is a slightly longer rerank wall-time.
+    # batch_size=8 is the safe default on a 12 GB rig running
+    # bge-reranker-v2-m3 alongside vLLM-Qwen3-8B-AWQ. Originally 64
+    # (CUDA audit, Docling-chunk baseline); lowered once
+    # PyMuPDF-extracted chunks (denser native text per pair) started
+    # OOMing the reranker's attention even at top_k=10. Even
+    # batch_size=16 OOMs on the reference RTX 4070 with the 8B
+    # orchestrator resident — see the empirical run after the chunker
+    # tuning commit. Bigger rigs, smaller orchestrators, or the
+    # planned Qwen3-Reranker-0.6B swap (P2.1) can push back up via
+    # MEMEX_RERANK_BATCH_SIZE for higher rerank throughput.
     try:
-        batch_size = int(os.environ.get("MEMEX_RERANK_BATCH_SIZE", "64"))
+        batch_size = int(os.environ.get("MEMEX_RERANK_BATCH_SIZE", "8"))
     except ValueError:
-        batch_size = 64
+        batch_size = 8
     batch_size = max(1, batch_size)
 
     registry = get_registry()

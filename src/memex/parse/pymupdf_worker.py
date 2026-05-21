@@ -116,23 +116,41 @@ def _normalise_breaks(text: str) -> str:
 
 
 def _strip_pymupdf_markers(text: str) -> str:
-    """Drop pymupdf4llm's structural metadata so it doesn't poison chunks.
+    """Tidy pymupdf4llm's structural metadata so chunks stay clean.
 
-    Two patterns get removed:
+    Two patterns:
       - `**==> picture [W x H] intentionally omitted <==**` lines —
-        pure metadata about regions PyMuPDF chose not to render.
+        pure extraction metadata describing a region PyMuPDF didn't
+        render. No retrieval signal; deleted outright.
       - `**----- Start/End of picture text -----**` boundary markers —
-        only the boundary lines; the content *between* them is real
-        text PyMuPDF extracted from inside images and stays untouched.
+        replaced with compact `[chart-text]` / `[/chart-text]` tags.
+        The verbose form bloats chunks (~5 KB on the canonical CUDA
+        deck), but the boundary signal itself is load-bearing: it
+        tells the agent that the bare data points between belong to
+        a chart, not body prose. Stripping the boundaries entirely
+        made the assessor reject chart-grounded chunks as
+        "fragmented" in the P1.6 verification run.
 
-    Then collapse runs of 3+ blank lines that the strips leave behind.
+    Then collapse runs of 3+ blank lines that the substitutions leave behind.
     """
     if "**==>" not in text and "Start of picture text" not in text:
         return text
     text = _PICTURE_OMITTED_RE.sub("", text)
-    text = _PICTURE_TEXT_BOUNDARY_RE.sub("", text)
+    text = _PICTURE_TEXT_BOUNDARY_RE.sub(_compact_picture_text_marker, text)
     text = _BLANK_LINE_RUN_RE.sub("\n\n", text)
     return text
+
+
+def _compact_picture_text_marker(match: re.Match[str]) -> str:
+    """Replace the verbose boundary marker with a compact tag.
+
+    The original full-width banner is ~38 chars; the compact tag is
+    14 chars (`[chart-text]` or `[/chart-text]`). Preserves the
+    semantic signal while shedding ~3 KB on a marker-heavy deck.
+    """
+    return (
+        "[chart-text]" if "Start" in match.group(0) else "[/chart-text]"
+    )
 
 
 def _clean_pymupdf_markdown(text: str) -> str:
