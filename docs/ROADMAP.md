@@ -126,14 +126,46 @@ The bootstrap's headline `mean_citation_precision = 0.9` was the all-queries met
 - `EvalReport.mean_citation_precision_answered_only` is the published honest metric.
 - Counterfactual coverage includes near-miss queries with the `_counterfactual_mode` tag distinguishing the two refusal modes.
 
+**Chart-text ablation — null result (2026-05-21):**
+
+Hypothesis tested: stripping the 67 `[chart-text]` blocks from the canonical CUDA-deck markdown (40% word reduction; from 7818 → 4668 words) would reduce over-refusal on the previously-refused answerable queries (Q2, Q4, Q5). Method: copied the vault to `/tmp/memex-ablation-vault`, sed-stripped chart-text, re-indexed, re-ran the eval at the same `top_k=6`. Result: **zero queries flipped REF→ANS.**
+
+Per-query comparison at `top_k=6`:
+
+| qid | rigorous | ablation | reading |
+|---|---|---|---|
+| Q1 (FP16 cost) | ANS | ANS | precision-table answer preserved in both |
+| Q2 (two power categories) | REF | REF | answer was *only* in chart-text → refusal is correct in ablation |
+| Q3 (mantissa scaling) | ANS | ANS | answer preserved (in table prose, not chart-text) |
+| Q4 (transistor density 2004–2022) | REF | REF | quantitative 2004→2022 data was in chart-text; only the qualitative claim survives |
+| Q5 (data movement power) | REF | REF | "data movement" mentioned only in chart-text — refusal correct in ablation |
+| Q6 (FP8 tensor core cost) | ANS | ANS | precision-table answer preserved |
+| Q7 (5-bit/10-bit half) | ANS | REF | precision-bit diagram was in chart-text → flipped correctly |
+| Q11 (FP128 near-miss) | ANS (hallucinated) | ANS (still hallucinated) | independent of chart-text |
+| Q12 (FP4 near-miss) | ANS (hallucinated) | ANS (still hallucinated) | independent of chart-text |
+
+The headline `refusal_rate_on_counterfactuals=0.75` was unchanged; `answered_count` dropped 6 → 5 because Q7 correctly flipped to refusal once its source diagram disappeared.
+
+**What this reframes:**
+
+1. **Over-refusal is NOT caused by `[chart-text]` noise.** Q2, Q4, Q5 stayed refused after the noise was removed. The hypothesis (chart-text interleaves with answer prose and confuses the agent) is falsified by this ablation.
+2. **The chart-text blocks were the *location* of real numerical answers** for Q2 (data movement/computation), Q5 (data-movement-as-power-cost), Q7 (precision-bit diagrams), Q4 (year-by-year transistor data). The "over-refusal" in the rigorous baseline turns out to have been the agent *correctly* judging that the answers were in too-noisy chart-text format to extract reliably — partly-correct behaviour misread as miscalibration.
+3. **The real failure mode is at the PARSER stage**, not the agent prompt: PyMuPDF chart extraction converts slide-chart imagery into chart-text blocks that contain the data values but in a format the agent considers unreliable. Three P2.x angles emerge:
+   - **Parser swap** for slide decks: route slide decks to Docling (or a chart-OCR specialist) instead of PyMuPDF, accepting the wall-time hit for better structural fidelity.
+   - **Post-parse cleanup**: a structure-aware chart-text→Markdown-table conversion step before chunking.
+   - **Dual-storage**: keep chart-text in the index for retrieval (so chunks DO surface for related queries) but feed the agent only the surrounding prose for grounding.
+4. **Hallucinations on Q11/Q12 (FP128, FP4) are independent of chart-text noise** — same answers in both runs. This is an agent-prompt issue: the precision-table grounding is solid, but the agent confabulates by interpolating absent rows.
+5. **Citation precision is not directly comparable across vaults** (`mcp_ans=0.0` in ablation because chunk_ids change when the chunker re-runs on different content). The eval needs a content-anchor identifier (or per-vault baselines) for cross-vault comparisons.
+
 **Outstanding P0 work (multi-session, curator-time):**
 
 1. Extend `slide-decks` to 30–50 queries across 3–5 documents.
 2. Bootstrap the other 6 categories (modern-printed, scientific-papers, technical-docs, historical-scans, handwritten, forms).
 3. Wire CER/WER/structural-F1 from `src/memex/eval/scoring.py` into `runner.py`; needs per-doc hand-curated reference markdown.
-4. Run the chart-text ablation (strip `[chart-text]` blocks from a copy of the canonical markdown, re-index, re-run the eval) to confirm or deny the over-refusal attribution.
+4. ~~Run the chart-text ablation~~ — ✅ Done 2026-05-21 (null result; see above).
+5. **NEW**: investigate slide-deck parser quality. The chart-text ablation reframes this as the most-likely root cause of slide-deck over-refusal. Candidates: Docling-for-decks routing override; structured chart-text→GFM-table conversion; dual-storage retrieval vs. grounding split.
 
-P0 is now scaffolded with a baseline that can be trusted as a P2.x reference.
+P0 is now scaffolded with a baseline that can be trusted as a P2.x reference, and the first ablation has reframed where the quality work needs to land.
 
 ### P2 — eval-gated stack swaps (after P0)
 
