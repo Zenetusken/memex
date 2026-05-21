@@ -23,7 +23,7 @@ The blueprint in [`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) is the archi
 | **P1.2** | **MCP HTTP bearer-token auth + safe-bind default** | ✅ **Shipped + live-verified** (2026-05-21) |
 | **P1.4** | **Annotation UI 409 conflict surface + vault CAS** | ✅ **Shipped + live-verified** (2026-05-21) |
 | **P1.5** | **Cross-process vault lock (fcntl.LOCK_EX)** | ✅ **Shipped + live-verified** (2026-05-21) |
-| **P2.1-infra** | **Qwen3-Reranker backend wired behind a feature flag** | ✅ **Infrastructure shipped** (2026-05-21); quality A/B and VRAM-fit on 12 GB rig still pending |
+| **P2.1-infra** | **Qwen3-Reranker backend wired behind a feature flag** | ✅ **Infrastructure shipped** (2026-05-21); quality A/B is **hardware-blocked on the 12 GB rig** under the new production context budget (max-model-len=6144). Qwen3-Reranker's ~2.1 GB live footprint + embedder + vLLM exceeds the 12 GB ceiling. Attempted at gpu_fraction=0.62 and 0.55; vLLM fails to start at 0.55 (insufficient KV-cache reservation). Verdict requires either (a) a 16+ GB GPU, or (b) the P4.2 smaller-orchestrator path. |
 | **P3.2** | **Daemon process model templates (systemd + launchd)** | ✅ **Shipped + live-verified** (2026-05-21) — vLLM + web + MCP + watcher; the complete stack |
 | **FU3.2.1** | **`Type=notify` for vLLM** — readiness gate, not just process-forked ordering | ✅ **Shipped + live-verified** (2026-05-21) |
 | **FU3.2.2** | **`memex upgrade` CLI** — one-shot pull + sync + restart-installed-units | ✅ **Shipped + live-verified** (2026-05-21) |
