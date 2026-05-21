@@ -9,6 +9,12 @@ Token counting uses word-count as a rough proxy (real tokens are ~1.3x
 words for English). When we adopt tiktoken or a model-specific
 tokenizer this becomes more precise; for Phase 0 the approximation is
 fine.
+
+Target window + overlap come from `IndexSettings`
+(`chunk_target_tokens`, `chunk_overlap_tokens`) so they can be tuned
+per-rig without code edits. The module-level `TARGET_TOKENS` /
+`OVERLAP_TOKENS` constants are kept as the default values for tests
+and legacy callers; the live chunker reads settings on each call.
 """
 
 from __future__ import annotations
@@ -16,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import re
 
+from memex.core.config import IndexSettings, get_settings
 from memex.core.types import Chunk
 from memex.vault.store import VaultDocument
 
@@ -26,8 +33,11 @@ _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
 _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9])")
 _PARAGRAPH_RE = re.compile(r"\n\s*\n")
 
-TARGET_TOKENS = 600
-OVERLAP_TOKENS = 100
+# Defaults — overridable per-call via IndexSettings. Kept as module
+# constants so test helpers can reference them without importing the
+# whole settings stack.
+TARGET_TOKENS = IndexSettings.model_fields["chunk_target_tokens"].default
+OVERLAP_TOKENS = IndexSettings.model_fields["chunk_overlap_tokens"].default
 
 
 def _word_count(s: str) -> int:
@@ -76,11 +86,16 @@ def _split_into_sections(body: str) -> list[tuple[int, str]]:
 def _split_section_into_chunks(
     section: str,
     section_offset: int,
+    *,
+    target_tokens: int = TARGET_TOKENS,
+    overlap_tokens: int = OVERLAP_TOKENS,
 ) -> list[tuple[int, int, str]]:
-    """Within a section, split into ~TARGET_TOKENS windows with overlap.
+    """Within a section, split into ~target_tokens windows with overlap.
 
     Returns a list of (char_start, char_end, text) relative to the
-    enclosing document.
+    enclosing document. `target_tokens` and `overlap_tokens` default
+    to the module-level constants (which mirror `IndexSettings`
+    defaults); callers via `chunk_document` thread the live settings.
     """
     paragraphs = [
         p.strip() for p in _PARAGRAPH_RE.split(section) if p.strip()
@@ -93,22 +108,22 @@ def _split_section_into_chunks(
     cur_tokens = 0
     for p in paragraphs:
         pt = _word_count(p)
-        if pt > TARGET_TOKENS:
+        if pt > target_tokens:
             # Sentence-split oversized paragraphs.
             sentences = _SENTENCE_RE.split(p)
             for s in sentences:
                 st = _word_count(s)
-                if cur and cur_tokens + st > TARGET_TOKENS:
+                if cur and cur_tokens + st > target_tokens:
                     windows.append(cur)
-                    overlap_words = " ".join(cur).split()[-OVERLAP_TOKENS:]
+                    overlap_words = " ".join(cur).split()[-overlap_tokens:]
                     cur = [" ".join(overlap_words)] if overlap_words else []
                     cur_tokens = _word_count(cur[0]) if cur else 0
                 cur.append(s)
                 cur_tokens += st
         else:
-            if cur and cur_tokens + pt > TARGET_TOKENS:
+            if cur and cur_tokens + pt > target_tokens:
                 windows.append(cur)
-                overlap_words = " ".join(cur).split()[-OVERLAP_TOKENS:]
+                overlap_words = " ".join(cur).split()[-overlap_tokens:]
                 cur = [" ".join(overlap_words)] if overlap_words else []
                 cur_tokens = _word_count(cur[0]) if cur else 0
             cur.append(p)
@@ -137,14 +152,33 @@ def _split_section_into_chunks(
 def chunk_document(doc: VaultDocument) -> list[Chunk]:
     """Produce the canonical chunk list for a vault document.
 
-    Pure function — no model calls, no I/O. The same input deterministically
-    produces the same chunks (and the same chunk_ids), so re-indexing the
-    same content is idempotent.
+    Reads target window + overlap from `IndexSettings` (live, not at
+    import time) so env overrides take effect. The function is still
+    deterministic given fixed settings + body: same input + same
+    settings ⇒ same chunks and chunk_ids, so re-indexing is idempotent.
+
+    Falls back to module-level defaults (`TARGET_TOKENS`,
+    `OVERLAP_TOKENS`) when settings haven't been initialised — keeps
+    pure-function tests that call the chunker directly working without
+    needing a `set_settings` fixture.
     """
+    try:
+        settings = get_settings()
+        target = settings.index.chunk_target_tokens
+        overlap = settings.index.chunk_overlap_tokens
+    except Exception:
+        target = TARGET_TOKENS
+        overlap = OVERLAP_TOKENS
+
     title = doc.frontmatter.title or doc.ref.doc_id
     out: list[Chunk] = []
     for section_offset, section_text in _split_into_sections(doc.body):
-        for cs, ce, text in _split_section_into_chunks(section_text, section_offset):
+        for cs, ce, text in _split_section_into_chunks(
+            section_text,
+            section_offset,
+            target_tokens=target,
+            overlap_tokens=overlap,
+        ):
             heading_path = _heading_path_at(doc.body, cs)
             out.append(
                 Chunk(

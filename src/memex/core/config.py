@@ -144,6 +144,31 @@ class ParseSettings(BaseModel):
     pymupdf_sandbox_network: bool = True
 
 
+class IndexSettings(BaseModel):
+    """Indexing knobs — chunker target sizes.
+
+    The chunker walks heading sections → paragraphs → sentences and
+    accumulates paragraphs until the cumulative word-count exceeds
+    `chunk_target_tokens`, then flushes a chunk and re-seeds with
+    `chunk_overlap_tokens` words of tail. The "tokens" here are
+    word-count (real transformer tokens are ~1.3× higher); a future
+    swap to tiktoken-counted tokens is on the roadmap.
+
+    Default 400 ≈ 520 transformer tokens; with the answer prompt's
+    per-chunk 700-char truncate, 10 such chunks comfortably fit
+    inside vLLM's 4096-token context. Drop to 300 for an 8 GB /
+    4K-context tier; raise to 600 (the pre-P1.6 default) on rigs
+    with `max-model-len >= 8192`.
+
+    Note: changing these values changes chunk boundaries → chunk_ids
+    (sha1 of chunk text) → forces a full re-embed on next index of
+    any doc whose chunks shift.
+    """
+
+    chunk_target_tokens: int = Field(default=400, ge=50)
+    chunk_overlap_tokens: int = Field(default=60, ge=0)
+
+
 class ObservabilitySettings(BaseModel):
     """Logging and tracing — see ADR-0004.
 
@@ -207,6 +232,7 @@ class MemexSettings(BaseSettings):
     )
     ingest: IngestSettings = Field(default_factory=IngestSettings)
     parse: ParseSettings = Field(default_factory=ParseSettings)
+    index: IndexSettings = Field(default_factory=IndexSettings)
 
     model_config = SettingsConfigDict(
         toml_file=str(Path.home() / ".config" / "memex" / "config.toml"),
