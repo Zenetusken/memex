@@ -37,7 +37,7 @@ class PageDecision(BaseModel):
     """Per-page parse engine routing record."""
 
     page: int
-    engine: Literal["docling", "vlm", "passthrough"]
+    engine: Literal["docling", "vlm", "passthrough", "pymupdf"]
     confidence: float
     rationale: str = ""
     duration_ms: int = 0
@@ -48,6 +48,7 @@ class ParseStage(BaseModel):
     parsed_at: datetime
     parser_version: str
     docling_version: str | None = None
+    pymupdf_version: str | None = None
     pages: list[PageDecision] = Field(default_factory=list)
     figure_count: int = 0
     table_count: int = 0

@@ -95,6 +95,54 @@ class ParseSettings(BaseModel):
     # `huggingface-cli download` instead.
     docling_sandbox_network: bool = True
 
+    # ----- PyMuPDF4LLM pre-filter -----
+    # When True, PDFs are first inspected by the PyMuPDF4LLM worker,
+    # which extracts the native text layer + a rich signal set
+    # (producer metadata, char distribution, image area, mojibake
+    # ratio, markdown structure). A tiered classifier then routes the
+    # document: high-confidence born-digital → use PyMuPDF (10-20×
+    # faster than Docling); mixed-content (text + substantial images)
+    # → Docling with OCR forced on for image-embedded text; everything
+    # else → Docling default. See pipeline._classify and
+    # docs/audits/07-ocr-ab.md.
+    pymupdf_enabled: bool = True
+    # Confidence threshold for trusting PyMuPDF's output. The classifier
+    # emits ~1.0 for born-digital docs with rich text, 0.0 for scans,
+    # and ~0.20 for mixed-content (which intentionally falls through to
+    # Docling-with-OCR). Default 0.5 rejects sparse and mixed content.
+    pymupdf_min_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    # Average fraction of page area covered by images that triggers
+    # the "mixed-content" classification. 0.35 = 35% of the page area
+    # on average is images → likely contains charts/screenshots/photos
+    # with embedded text that needs OCR for full retrieval. Combined
+    # with `pymupdf_mixed_content_min_image_heavy_pages` to avoid
+    # false-positives on decorative-heavy docs whose image-text is
+    # disconnected from retrieval-worthy context. The canonical
+    # NVIDIA GTC slide deck (109 pages, 13 images/page avg) measures
+    # 0.285 — *below* this threshold by design, because the audit at
+    # docs/audits/07-ocr-ab.md showed OCR didn't change a single
+    # query outcome for that deck. Users who want more aggressive
+    # OCR (academic docs with figure-embedded text, technical
+    # diagrams with critical labels) can lower to 0.20.
+    pymupdf_mixed_content_image_area_threshold: float = Field(
+        default=0.35, ge=0.0, le=1.0
+    )
+    # Minimum fraction of pages that must individually be image-heavy
+    # (>3 images per page) for the mixed-content classification to
+    # fire. 0.30 = 30% of pages must independently flag image-heavy
+    # before we force-OCR. Both gates must pass (AND) — protects
+    # against false-positives on text docs with a single front-cover
+    # image, and on decorative-heavy decks whose image-text is noise.
+    pymupdf_mixed_content_min_image_heavy_pages: float = Field(
+        default=0.30, ge=0.0, le=1.0
+    )
+    pymupdf_timeout_s: int = Field(default=120, ge=5)
+    pymupdf_crash_threshold: int = Field(default=5, ge=1)
+    # Network-egress sandbox for the PyMuPDF worker. Symmetric with
+    # docling_sandbox_network — PyMuPDF should never need the network
+    # but the principle of least authority applies all the same.
+    pymupdf_sandbox_network: bool = True
+
 
 class ObservabilitySettings(BaseModel):
     """Logging and tracing — see ADR-0004.

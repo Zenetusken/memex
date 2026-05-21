@@ -32,7 +32,18 @@ from memex.core.manifest import read_manifest
 from memex.ingest.pipeline import IngestRequest, ingest_file
 from memex.parse import pipeline as parse_pipeline
 from memex.parse.docling_backend import DoclingConversion, DoclingPageOutput
-from memex.parse.pipeline import parse_document, reset_docling_breaker
+from memex.parse.pipeline import (
+    parse_document,
+    reset_docling_breaker,
+    reset_pymupdf_breaker,
+)
+from memex.parse.pymupdf_backend import (
+    PdfSignals,
+    PyMuPDFConversion,
+    PyMuPDFCrashed,
+    PyMuPDFPageOutput,
+    PyMuPDFUnavailable,
+)
 
 # ----- Fixtures: tmp vault, settings, fake heavy I/O -----
 
@@ -59,9 +70,11 @@ def settings(
 def _fresh_graph() -> Iterator[None]:
     reset_compiled_graph()
     reset_docling_breaker()
+    reset_pymupdf_breaker()
     yield
     reset_compiled_graph()
     reset_docling_breaker()
+    reset_pymupdf_breaker()
 
 
 @pytest.fixture
@@ -75,10 +88,28 @@ def fake_pdf(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def patch_docling(monkeypatch: pytest.MonkeyPatch) -> None:
+def patch_docling(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[object]]:
+    """Fake Docling and also record every call so tests can assert it
+    was (or wasn't) invoked and inspect the `force_ocr` kwarg.
+    """
+    calls: list[object] = []
+
     async def _fake_convert(
-        source: Path, *, timeout_s: int, **_kw: object
+        source: Path,
+        *,
+        timeout_s: int,
+        sandbox_network: bool = True,
+        force_ocr: bool | None = None,
+        **_kw: object,
     ) -> DoclingConversion:
+        calls.append(
+            {
+                "source": source,
+                "timeout_s": timeout_s,
+                "sandbox_network": sandbox_network,
+                "force_ocr": force_ocr,
+            }
+        )
         return DoclingConversion(
             markdown=(
                 "# Smith 2024 on reflexivity\n\n"
@@ -97,9 +128,148 @@ def patch_docling(monkeypatch: pytest.MonkeyPatch) -> None:
             equation_count=0,
         )
 
-    monkeypatch.setattr(
-        "memex.parse.pipeline.docling_convert", _fake_convert
+    monkeypatch.setattr("memex.parse.pipeline.docling_convert", _fake_convert)
+    return {"calls": calls}
+
+
+def _make_pymupdf_conversion(
+    *,
+    creator: str | None = None,
+    producer: str | None = None,
+    chars_per_page_avg: float = 200.0,
+    aspect_ratio: float = 1.78,
+    is_tagged: bool = False,
+    embedded_font_count: int = 0,
+    image_area_fraction: float = 0.0,
+    image_heavy_page_fraction: float = 0.0,
+    image_count_total: int = 0,
+    replacement_char_fraction: float = 0.0,
+    empty_page_fraction: float = 0.0,
+    chars_per_page_p90: float = 250.0,
+    has_headings: bool = True,
+    has_tables: bool = False,
+    has_lists: bool = False,
+    has_code_blocks: bool = False,
+    page_count: int = 2,
+) -> PyMuPDFConversion:
+    """Build a PyMuPDFConversion with controllable signals for routing tests."""
+    pages = [
+        PyMuPDFPageOutput(
+            page=i + 1,
+            markdown=f"# page {i + 1}\n\n" + ("text " * int(chars_per_page_avg / 5)),
+            char_count=int(chars_per_page_avg),
+            image_count=3 if image_heavy_page_fraction > 0.5 else 0,
+            aspect_ratio=aspect_ratio,
+        )
+        for i in range(page_count)
+    ]
+    return PyMuPDFConversion(
+        markdown="\n\n".join(p.markdown for p in pages),
+        pages=pages,
+        pymupdf_version="fake-1.27",
+        signals=PdfSignals(
+            creator=creator,
+            producer=producer,
+            is_tagged=is_tagged,
+            page_count=page_count,
+            avg_aspect_ratio=aspect_ratio,
+            embedded_font_count=embedded_font_count,
+            image_count_total=image_count_total,
+            image_heavy_page_fraction=image_heavy_page_fraction,
+            image_area_fraction=image_area_fraction,
+            total_chars=int(chars_per_page_avg * page_count),
+            chars_per_page_avg=chars_per_page_avg,
+            chars_per_page_median=chars_per_page_avg,
+            chars_per_page_p10=chars_per_page_avg * 0.5,
+            chars_per_page_p90=chars_per_page_p90,
+            empty_page_fraction=empty_page_fraction,
+            replacement_char_fraction=replacement_char_fraction,
+            word_like_token_fraction=0.6,
+            unique_char_variety=70,
+            whitespace_fraction=0.15,
+            has_headings=has_headings,
+            has_tables=has_tables,
+            has_lists=has_lists,
+            has_code_blocks=has_code_blocks,
+        ),
     )
+
+
+@pytest.fixture
+def patch_pymupdf_born_digital(monkeypatch: pytest.MonkeyPatch) -> None:
+    """PyMuPDF fake that returns a born-digital PowerPoint deck."""
+
+    async def _fake(source: Path, *, timeout_s: int, **_kw: object) -> PyMuPDFConversion:
+        return _make_pymupdf_conversion(
+            producer="Microsoft PowerPoint 2023",
+            chars_per_page_avg=200.0,
+            aspect_ratio=1.78,
+            has_headings=True,
+        )
+
+    monkeypatch.setattr("memex.parse.pipeline.pymupdf_convert", _fake)
+
+
+@pytest.fixture
+def patch_pymupdf_scan_producer(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _fake(source: Path, *, timeout_s: int, **_kw: object) -> PyMuPDFConversion:
+        return _make_pymupdf_conversion(
+            producer="ABBYY FineReader OCR",
+            chars_per_page_avg=600.0,
+        )
+
+    monkeypatch.setattr("memex.parse.pipeline.pymupdf_convert", _fake)
+
+
+@pytest.fixture
+def patch_pymupdf_mixed_content(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mixed-content: native text + substantial images (charts/screenshots)."""
+
+    async def _fake(source: Path, *, timeout_s: int, **_kw: object) -> PyMuPDFConversion:
+        return _make_pymupdf_conversion(
+            producer="Microsoft PowerPoint 2023",
+            chars_per_page_avg=200.0,
+            aspect_ratio=1.78,
+            image_area_fraction=0.40,
+            image_heavy_page_fraction=0.60,
+            image_count_total=20,
+        )
+
+    monkeypatch.setattr("memex.parse.pipeline.pymupdf_convert", _fake)
+
+
+@pytest.fixture
+def patch_pymupdf_mojibake(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _fake(source: Path, *, timeout_s: int, **_kw: object) -> PyMuPDFConversion:
+        return _make_pymupdf_conversion(
+            producer="Generic PDF Writer",
+            chars_per_page_avg=400.0,
+            replacement_char_fraction=0.20,
+        )
+
+    monkeypatch.setattr("memex.parse.pipeline.pymupdf_convert", _fake)
+
+
+@pytest.fixture
+def patch_pymupdf_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _fake(source: Path, *, timeout_s: int, **_kw: object) -> PyMuPDFConversion:
+        raise PyMuPDFUnavailable(
+            "pymupdf not installed",
+            context={"source": str(source)},
+        )
+
+    monkeypatch.setattr("memex.parse.pipeline.pymupdf_convert", _fake)
+
+
+@pytest.fixture
+def patch_pymupdf_crashes(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _fake(source: Path, *, timeout_s: int, **_kw: object) -> PyMuPDFConversion:
+        raise PyMuPDFCrashed(
+            "subprocess exited 134",
+            context={"source": str(source), "exit_code": 134},
+        )
+
+    monkeypatch.setattr("memex.parse.pipeline.pymupdf_convert", _fake)
 
 
 @pytest.fixture
@@ -320,6 +490,135 @@ async def test_markdown_passthrough_skips_docling(
     canonical = settings.vault_path / "documents" / f"{ingest_result.doc_id}.md"
     assert canonical.exists()
     assert "Some content." in canonical.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_pymupdf_routes_powerpoint_to_pymupdf(
+    settings: MemexSettings,
+    fake_pdf: Path,
+    patch_docling: dict[str, list[object]],
+    patch_pymupdf_born_digital: None,
+) -> None:
+    """PowerPoint producer + 200 chars/page → Tier 1.A → use PyMuPDF.
+    Docling fake must not be called.
+    """
+    result = await ingest_file(IngestRequest(source_path=fake_pdf))
+    assert result.accepted and result.doc_id is not None
+
+    parse_result = await parse_document(result.doc_id)
+    assert parse_result.engine == "pymupdf"
+    assert all(p.engine == "pymupdf" for p in parse_result.pages)
+    assert patch_docling["calls"] == []
+
+    manifest = await read_manifest(settings.vault_path, result.doc_id)
+    assert manifest is not None and manifest.parse is not None
+    assert manifest.parse.pymupdf_version == "fake-1.27"
+
+
+@pytest.mark.asyncio
+async def test_pymupdf_scanner_producer_falls_through_with_force_ocr(
+    settings: MemexSettings,
+    fake_pdf: Path,
+    patch_docling: dict[str, list[object]],
+    patch_pymupdf_scan_producer: None,
+) -> None:
+    """ABBYY producer → Tier 1.B scan → fall through to Docling with
+    OCR forced on. Verifies the mixed-content/scan routing carries
+    `force_ocr=True` through to docling_convert.
+    """
+    result = await ingest_file(IngestRequest(source_path=fake_pdf))
+    assert result.accepted and result.doc_id is not None
+
+    parse_result = await parse_document(result.doc_id)
+    assert parse_result.engine == "docling"
+    assert len(patch_docling["calls"]) == 1
+    call = patch_docling["calls"][0]
+    assert call["force_ocr"] is True
+
+
+@pytest.mark.asyncio
+async def test_pymupdf_mixed_content_routes_to_docling_with_ocr(
+    settings: MemexSettings,
+    fake_pdf: Path,
+    patch_docling: dict[str, list[object]],
+    patch_pymupdf_mixed_content: None,
+) -> None:
+    """Born-digital PowerPoint with substantial image area (charts,
+    screenshots, diagrams) → mixed-content tier → fall through to
+    Docling with OCR forced on so image-embedded text is captured.
+
+    This is the case the user explicitly flagged: documents with both
+    native text AND images whose text needs OCR for full context.
+    """
+    result = await ingest_file(IngestRequest(source_path=fake_pdf))
+    assert result.accepted and result.doc_id is not None
+
+    parse_result = await parse_document(result.doc_id)
+    assert parse_result.engine == "docling"
+    assert len(patch_docling["calls"]) == 1
+    call = patch_docling["calls"][0]
+    assert call["force_ocr"] is True
+
+
+@pytest.mark.asyncio
+async def test_pymupdf_mojibake_falls_through_without_forced_ocr(
+    settings: MemexSettings,
+    fake_pdf: Path,
+    patch_docling: dict[str, list[object]],
+    patch_pymupdf_mojibake: None,
+) -> None:
+    """Broken encoding (20% U+FFFD) → Tier 3 mojibake → fall through.
+    OCR won't help with a font-mapping bug, so force_ocr stays None.
+    """
+    result = await ingest_file(IngestRequest(source_path=fake_pdf))
+    assert result.accepted and result.doc_id is not None
+
+    parse_result = await parse_document(result.doc_id)
+    assert parse_result.engine == "docling"
+    assert len(patch_docling["calls"]) == 1
+    assert patch_docling["calls"][0]["force_ocr"] is None
+
+
+@pytest.mark.asyncio
+async def test_pymupdf_unavailable_falls_through_silently(
+    settings: MemexSettings,
+    fake_pdf: Path,
+    patch_docling: dict[str, list[object]],
+    patch_pymupdf_unavailable: None,
+) -> None:
+    """PyMuPDF not installed → fall through to Docling, no crash record."""
+    result = await ingest_file(IngestRequest(source_path=fake_pdf))
+    assert result.accepted and result.doc_id is not None
+
+    parse_result = await parse_document(result.doc_id)
+    assert parse_result.engine == "docling"
+
+    manifest = await read_manifest(settings.vault_path, result.doc_id)
+    assert manifest is not None and manifest.parse is not None
+    assert manifest.parse.crashed is False
+    assert manifest.parse.pymupdf_version is None
+
+
+@pytest.mark.asyncio
+async def test_pymupdf_crash_falls_through_no_manifest_record(
+    settings: MemexSettings,
+    fake_pdf: Path,
+    patch_docling: dict[str, list[object]],
+    patch_pymupdf_crashes: None,
+) -> None:
+    """PyMuPDF subprocess crashes → fall through to Docling. Only
+    Docling's own outcome touches the manifest; PyMuPDF crashes are
+    logged but never recorded as parse-stage failures.
+    """
+    result = await ingest_file(IngestRequest(source_path=fake_pdf))
+    assert result.accepted and result.doc_id is not None
+
+    parse_result = await parse_document(result.doc_id)
+    assert parse_result.engine == "docling"
+
+    manifest = await read_manifest(settings.vault_path, result.doc_id)
+    assert manifest is not None and manifest.parse is not None
+    assert manifest.parse.crashed is False
 
 
 @pytest.mark.asyncio

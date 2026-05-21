@@ -85,6 +85,7 @@ models = [
 # See ADR-0006 for why FA3 is unavailable on sm_89.
 parse = [
     "docling>=2.0",
+    "pymupdf4llm>=1.27,<2",
     "pypdfium2>=4.30",
     "pyseccomp>=0.1 ; sys_platform == 'linux'",
 ]

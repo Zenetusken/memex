@@ -70,6 +70,7 @@ async def convert(
     *,
     timeout_s: int,
     sandbox_network: bool = True,
+    force_ocr: bool | None = None,
 ) -> DoclingConversion:
     """Convert `source` to markdown by spawning the Docling worker.
 
@@ -86,6 +87,13 @@ async def convert(
     pre-fetching models with `huggingface-cli download` as the
     sandbox-friendly path.
 
+    `force_ocr` overrides the `MEMEX_PARSE_DOCLING_OCR` env-var default
+    for this single call. The PyMuPDF pre-filter's mixed-content
+    routing path uses `force_ocr=True` so image-embedded text in
+    charts, screenshots, and diagrams is OCR'd alongside Docling's
+    native-text extraction. `None` (default) leaves the env-var
+    setting alone.
+
     Wraps the call in `asyncio.wait_for(timeout_s)` so a hung Docling
     can't wedge the agent; on timeout we terminate the child.
     """
@@ -93,11 +101,14 @@ async def convert(
         source=str(source),
         timeout_s=timeout_s,
         sandbox_network=sandbox_network,
+        force_ocr=force_ocr,
     )
     log.info("docling.start")
 
     env = os.environ.copy()
     env["MEMEX_PARSE_SANDBOX_NETWORK"] = "1" if sandbox_network else "0"
+    if force_ocr is not None:
+        env["MEMEX_PARSE_DOCLING_OCR"] = "1" if force_ocr else "0"
 
     proc = await asyncio.create_subprocess_exec(
         sys.executable,

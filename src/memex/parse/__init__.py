@@ -21,6 +21,15 @@ from memex.parse.pipeline import (
     ParseResult,
     parse_document,
     reset_docling_breaker,
+    reset_pymupdf_breaker,
+)
+from memex.parse.pymupdf_backend import (
+    PdfSignals,
+    PyMuPDFConversion,
+    PyMuPDFCrashed,
+    PyMuPDFPageOutput,
+    PyMuPDFTimeout,
+    PyMuPDFUnavailable,
 )
 from memex.parse.sandbox import (
     SandboxStatus,
@@ -35,10 +44,17 @@ __all__ = [
     "DoclingTimeout",
     "DoclingUnavailable",
     "ParseResult",
+    "PdfSignals",
+    "PyMuPDFConversion",
+    "PyMuPDFCrashed",
+    "PyMuPDFPageOutput",
+    "PyMuPDFTimeout",
+    "PyMuPDFUnavailable",
     "SandboxLoadFailed",
     "SandboxStatus",
     "VLMUnavailable",
     "enable_network_block",
     "parse_document",
     "reset_docling_breaker",
+    "reset_pymupdf_breaker",
 ]
