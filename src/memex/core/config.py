@@ -79,7 +79,12 @@ class ParseSettings(BaseModel):
     # confirmed your rig has the headroom; bootstrap's VRAM-fit check
     # will refuse to load it otherwise.
     disable_vlm: bool = True
-    docling_timeout_s: int = Field(default=300, ge=10)
+    # 1200s headroom (20 min). The original 300s default fit 30-page
+    # papers; 600s was still tight on 100-page slide decks because the
+    # layout model is CPU-bound. Most slide decks finish in 3-5 min
+    # with OCR disabled (the worker's default — set
+    # MEMEX_PARSE_DOCLING_OCR=1 to re-enable for scanned PDFs).
+    docling_timeout_s: int = Field(default=1200, ge=10)
     docling_crash_threshold: int = Field(default=5, ge=1)
     # Network-egress sandbox for the Docling worker. When True, the
     # worker installs a seccomp filter blocking all network syscalls

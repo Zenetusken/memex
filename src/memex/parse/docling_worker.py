@@ -27,6 +27,7 @@ Exit codes:
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import sys
@@ -34,12 +35,45 @@ import traceback
 from pathlib import Path
 from typing import Any
 
+# CRITICAL: the worker's stdout IS the protocol channel — the parent
+# parses it as JSON via `json.loads`. Anything written to stdout by
+# log handlers (structlog's default ConsoleRenderer; the seccomp
+# sandbox's `sandbox.applied` event; any chatty third-party lib)
+# corrupts the JSON. Redirect *all* stderr-bound logging into actual
+# stderr by configuring structlog + the stdlib logging root before
+# any module that uses them is imported.
+logging.basicConfig(stream=sys.stderr, level=logging.WARNING, force=True)
+try:
+    import structlog
+
+    structlog.configure(
+        processors=[
+            structlog.processors.add_log_level,
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.KeyValueRenderer(
+                key_order=["timestamp", "level", "event"]
+            ),
+        ],
+        logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),
+        cache_logger_on_first_use=True,
+    )
+except ImportError:
+    pass
+
 
 def _convert_to_payload(source: Path) -> dict[str, Any]:
     """Run Docling, return a JSON-serialisable dict matching the
-    `DoclingConversion` pydantic schema in `docling_backend.py`."""
+    `DoclingConversion` pydantic schema in `docling_backend.py`.
+
+    OCR is disabled by default: most PDFs have a native text layer
+    (slide decks, papers exported from LaTeX/Word, etc.), so running
+    RapidOCR per page just adds 3-5s/page of redundant work. Set
+    `MEMEX_PARSE_DOCLING_OCR=1` to flip it on for scanned-image PDFs.
+    """
     try:
-        from docling.document_converter import DocumentConverter
+        from docling.datamodel.base_models import InputFormat
+        from docling.datamodel.pipeline_options import PdfPipelineOptions
+        from docling.document_converter import DocumentConverter, PdfFormatOption
     except ImportError as e:
         raise SystemExit(
             json.dumps({"error": "docling_unavailable", "detail": str(e)})
@@ -52,7 +86,15 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
     except Exception:
         version = None
 
-    converter = DocumentConverter()
+    do_ocr = os.environ.get("MEMEX_PARSE_DOCLING_OCR", "0") == "1"
+    pipeline_opts = PdfPipelineOptions()
+    pipeline_opts.do_ocr = do_ocr
+    print(f"docling: do_ocr={do_ocr}", file=sys.stderr)
+    converter = DocumentConverter(
+        format_options={
+            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_opts)
+        }
+    )
     result = converter.convert(source)
     doc = result.document
     markdown = doc.export_to_markdown()
