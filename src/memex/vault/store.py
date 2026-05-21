@@ -22,7 +22,9 @@ from typing import Any
 import frontmatter
 from pydantic import BaseModel, Field
 
-from memex.core.errors import VaultIntegrityError
+import hmac
+
+from memex.core.errors import StaleDocumentError, VaultIntegrityError
 
 # Per-`doc_id` write serialisation. `_atomic_write` is atomic at the
 # tempfile-rename level, but two coroutines calling `write_document` on
@@ -162,7 +164,12 @@ def make_ref(
     return _ref_for(vault_path, doc_id, content_sha256, source_path)
 
 
-async def write_document(vault_path: Path, doc: VaultDocument) -> DocumentRef:
+async def write_document(
+    vault_path: Path,
+    doc: VaultDocument,
+    *,
+    expected_sha: str | None = None,
+) -> DocumentRef:
     """Atomically write `doc` to `vault/documents/{doc_id}.md`.
 
     Recomputes the content sha256 and updates the returned ref. Caller
@@ -171,8 +178,41 @@ async def write_document(vault_path: Path, doc: VaultDocument) -> DocumentRef:
     Serialised per-`doc_id` via `_lock_for(doc_id)` so two concurrent
     callers on the same doc don't both `os.replace` and silently drop
     one's data. Different doc_ids are unaffected.
+
+    Optimistic concurrency: when `expected_sha` is supplied, the
+    current on-disk sha is compared inside the lock before the
+    atomic rename. On mismatch the function raises
+    `StaleDocumentError` (with the current sha + body in `context`
+    so a UI can render a conflict diff without a second read), and
+    the on-disk file is left untouched. `expected_sha=None` (the
+    default) preserves the pre-P1.4 last-write-wins behaviour for
+    callers that don't care (ingest, parse, MCP write tools).
     """
     async with _lock_for(doc.ref.doc_id):
+        if expected_sha is not None:
+            current = _current_sha_and_body(vault_path, doc.ref.doc_id)
+            if current is None:
+                raise StaleDocumentError(
+                    "document was deleted concurrently",
+                    context={
+                        "doc_id": doc.ref.doc_id,
+                        "expected_sha": expected_sha,
+                        "current_sha": None,
+                        "current_body": "",
+                    },
+                )
+            current_sha, current_body = current
+            if not hmac.compare_digest(current_sha, expected_sha):
+                raise StaleDocumentError(
+                    "document changed since the caller loaded it",
+                    context={
+                        "doc_id": doc.ref.doc_id,
+                        "expected_sha": expected_sha,
+                        "current_sha": current_sha,
+                        "current_body": current_body,
+                    },
+                )
+
         fm_dict: dict[str, Any] = {
             **doc.frontmatter.model_dump(exclude={"custom"}, exclude_none=True),
             **doc.frontmatter.custom,
@@ -187,6 +227,21 @@ async def write_document(vault_path: Path, doc: VaultDocument) -> DocumentRef:
             new_sha,
             doc.ref.source_path,
         )
+
+
+def _current_sha_and_body(vault_path: Path, doc_id: str) -> tuple[str, str] | None:
+    """Read the current on-disk sha + body for `doc_id`, or None if missing.
+
+    Sha is computed the same way `read_document` / `write_document`
+    compute it (over the full serialized bytes), so the CAS check
+    compares apples to apples. Body is the full file text (frontmatter
+    included) so the UI can show exactly what's on disk.
+    """
+    path = _markdown_path(vault_path, doc_id)
+    if not path.exists():
+        return None
+    text = path.read_text(encoding="utf-8")
+    return hash_bytes(text.encode("utf-8")), text
 
 
 async def read_document(vault_path: Path, doc_id: str) -> VaultDocument:

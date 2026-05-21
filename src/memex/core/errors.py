@@ -58,6 +58,20 @@ class ConfigurationError(MemexError):
     """
 
 
+class StaleDocumentError(MemexError):
+    """Optimistic-concurrency check failed on a vault write.
+
+    Raised by `vault.store.write_document(..., expected_sha=...)` when
+    the on-disk content has changed since the caller loaded it. The
+    web UI's `/review` handler catches this and renders a conflict
+    panel with a diff and "discard / overwrite" buttons.
+
+    Context: `doc_id`, `expected_sha`, `current_sha`, `current_body`.
+    The full current on-disk body is included so the UI can render
+    the diff without a second vault read.
+    """
+
+
 class AnswerStateInvariantError(MemexError):
     """An agent node was reached with an `AnswerState` that violates its
     preconditions (e.g. `verify` called without a draft, `compose` called
