@@ -112,14 +112,31 @@ class VectorStore:
                 f"chunks ({len(chunks)}) and embeddings ({len(embeddings)}) "
                 "must be the same length"
             )
-        rows = [_row_from_chunk(c, e) for c, e in zip(chunks, embeddings, strict=True)]
+        # Dedupe by chunk_id — same rationale as FTSStore.upsert (see
+        # that docstring). Pair the *first* occurrence with its
+        # embedding so the post-rerank citation lookup still resolves.
+        seen: set[str] = set()
+        deduped_chunks: list[Chunk] = []
+        deduped_embeddings: list[list[float]] = []
+        for c, e in zip(chunks, embeddings, strict=True):
+            if c.chunk_id in seen:
+                continue
+            seen.add(c.chunk_id)
+            deduped_chunks.append(c)
+            deduped_embeddings.append(e)
+        duplicates = len(chunks) - len(deduped_chunks)
+
+        rows = [
+            _row_from_chunk(c, e)
+            for c, e in zip(deduped_chunks, deduped_embeddings, strict=True)
+        ]
         table = await self._db.open_table(_TABLE)
         # LanceDB upsert: delete by chunk_id then add. Deleting by primary key
         # is the supported idempotency pattern.
         ids = ",".join(_sql_quote(r.chunk_id) for r in rows)
         await table.delete(f"chunk_id IN ({ids})")
         await table.add(rows)
-        logger.info("vector.upsert", count=len(rows))
+        logger.info("vector.upsert", count=len(rows), deduped=duplicates)
 
     async def delete_document(self, doc_id: str) -> int:
         table = await self._db.open_table(_TABLE)

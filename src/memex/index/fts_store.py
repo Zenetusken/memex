@@ -64,8 +64,24 @@ class FTSStore:
         if not chunks:
             return
 
+        # Dedupe by chunk_id. The chunker emits chunk_ids as
+        # `sha1(text)[:10]`, which collides when two slides have
+        # identical content (e.g. a deck where many pages are just
+        # `<!-- image -->` placeholders). chunks_meta has chunk_id as
+        # PRIMARY KEY, so an executemany INSERT with duplicates raises
+        # `IntegrityError: UNIQUE constraint failed`. First occurrence
+        # wins — they're identical anyway.
+        seen: set[str] = set()
+        deduped: list[Chunk] = []
+        for c in chunks:
+            if c.chunk_id in seen:
+                continue
+            seen.add(c.chunk_id)
+            deduped.append(c)
+        duplicates = len(chunks) - len(deduped)
+
         def _write() -> None:
-            ids = [c.chunk_id for c in chunks]
+            ids = [c.chunk_id for c in deduped]
             placeholders = ",".join("?" for _ in ids)
             self._db.execute(
                 f"DELETE FROM chunks_fts WHERE chunk_id IN ({placeholders})",
@@ -80,7 +96,7 @@ class FTSStore:
                 "VALUES (?, ?, ?, ?)",
                 [
                     (c.chunk_id, c.document_id, c.document_title, c.text)
-                    for c in chunks
+                    for c in deduped
                 ],
             )
             self._db.executemany(
@@ -97,12 +113,14 @@ class FTSStore:
                         c.char_end,
                         " > ".join(c.heading_path),
                     )
-                    for c in chunks
+                    for c in deduped
                 ],
             )
 
         await asyncio.to_thread(_write)
-        logger.info("fts.upsert", count=len(chunks))
+        logger.info(
+            "fts.upsert", count=len(deduped), deduped=duplicates
+        )
 
     async def delete_document(self, doc_id: str) -> int:
         def _delete() -> int:

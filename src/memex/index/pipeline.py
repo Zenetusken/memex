@@ -22,6 +22,7 @@ automatically — small markdown edits trigger small index updates.
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from contextlib import AsyncExitStack
 from pathlib import Path
@@ -82,13 +83,17 @@ class ReindexReport(BaseModel):
 async def _embed_chunks(chunks: list[Chunk]) -> list[list[float]]:
     """Run the chunks through the embedder. Empty list short-circuits.
 
-    `batch_size=128` tuned for EmbeddingGemma-300M on Ada (sm_89) per
-    the CUDA audit — sentence-transformers' default of 32 leaves the
-    Ada cores idle on this small a model. `show_progress_bar=False`
-    keeps the structured-log stream clean.
+    `batch_size=32` is the safe default when vLLM is co-resident on
+    a 12 GB card (8B-AWQ leaves ~2.5 GB for the embedder + reranker
+    + activations, and batch=128 spikes the activations enough to
+    OOM during the encode call). The earlier 128 was tuned for a
+    standalone embedder run with the orchestrator off-process and
+    no other GPU consumers. Override via `MEMEX_INDEX_EMBED_BATCH`
+    if you want to push throughput on rigs with more headroom.
     """
     if not chunks:
         return []
+    batch_size = int(os.environ.get("MEMEX_INDEX_EMBED_BATCH", "32"))
     registry = get_registry()
     async with registry.use("embedder") as embedder:
         # SentenceTransformer.encode is sync + heavy; offload.
@@ -97,7 +102,7 @@ async def _embed_chunks(chunks: list[Chunk]) -> list[list[float]]:
                 [c.text for c in chunks],
                 normalize_embeddings=True,
                 convert_to_numpy=True,
-                batch_size=128,
+                batch_size=batch_size,
                 show_progress_bar=False,
             )
 
