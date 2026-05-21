@@ -21,10 +21,15 @@
 #   MEMEX_VLLM_MAX_MODEL_LEN  (default: 4096 — Memex's chunks are short
 #                              (~300 tokens) and so are queries; doubling
 #                              this just buys idle KV-cache reservation.)
-#   MEMEX_VLLM_GPU_FRACTION   (default: 0.65 — leaves ~4 GB on a 12 GB
-#                              card for Memex's embedder (~0.6 GB) +
-#                              reranker (~2 GB) + activations. At 0.80
-#                              the reranker OOMs.)
+#   MEMEX_VLLM_GPU_FRACTION   (default: 0.72 — measured from a vLLM
+#                              0.21 cold start on RTX 4070 12 GB with
+#                              Qwen3-8B-AWQ (5.7 GB weights) + the new
+#                              CUDA-graph memory profiler (≈ 0.45 GB);
+#                              0.72 leaves ~2.5 GB for KV cache and
+#                              ~3.4 GB headroom for the in-process
+#                              embedder + reranker. 0.65 left only
+#                              0.09 GB for KV cache and vLLM refused
+#                              to start; 0.80 OOMed the reranker.)
 
 set -euo pipefail
 
@@ -36,7 +41,7 @@ PORT="${MEMEX_VLLM_PORT:-8000}"
 # for unquantized models like Qwen3-0.6B.
 QUANTIZATION="${MEMEX_VLLM_QUANTIZATION-awq_marlin}"
 MAX_MODEL_LEN="${MEMEX_VLLM_MAX_MODEL_LEN:-4096}"
-GPU_FRACTION="${MEMEX_VLLM_GPU_FRACTION:-0.65}"
+GPU_FRACTION="${MEMEX_VLLM_GPU_FRACTION:-0.72}"
 
 # Explicit single-device — skips the multi-GPU discovery codepath at
 # startup (~1–2 s faster cold start on a single-card rig).
