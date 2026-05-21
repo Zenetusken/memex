@@ -1,6 +1,6 @@
 # Memex Roadmap
 
-**Last updated:** 2026-05-21 (P1.1 PyMuPDF4LLM pre-filter shipped + live-verified on RTX 4070)
+**Last updated:** 2026-05-21 (end-of-session — entire P1 backlog shipped + P2.1 reranker infrastructure landed)
 
 The blueprint in [`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) is the architectural design — module signatures, cross-cutting concerns, build order. This document is the **operational view**: what is shipped today, what is measured, and what comes next.
 
@@ -93,45 +93,45 @@ PDFs now run through a tiered classifier before Docling. Producer metadata is th
 
 ## What's next — prioritised
 
-### P0 — blocking quality measurement
+The entire P1 code-work backlog from the start-of-session prioritisation is now shipped (PyMuPDF pre-filter, chunker tuning, MCP HTTP auth, annotation UI 409, cross-process vault lock). The bottleneck is **P0 — eval corpus**. Every remaining P2 quality-A/B item depends on it, and the P1.6 chunker tradeoff + P2.1-infra Qwen3-Reranker quality claim both have measurements waiting on it.
 
-1. **Eval corpus assembly** — `docs/eval-corpus-plan.md` calls for 125 docs across 7 categories. Bootstrap with the first 10-15 to land a real baseline that the next stack swap can measure against. **Multi-week curator effort**; no other roadmap item should ship without it eventually.
+### P0 — blocking quality measurement (load-bearing)
 
-### P1 — high-leverage code work (next sessions)
-
-2. ~~**PyMuPDF4LLM pre-filter**~~ — ✅ **Shipped 2026-05-21** (commits `9e02042`, `3773801`). 2.9× wall-clock speedup on the canonical 109-page deck (33 s vs 96 s), 67% more markdown extracted (chart text captured via PDF text operators, no OCR needed), tiered classifier with rich-signal routing, mixed-content force-OCR path for scanned/image-text docs. Default-tuned to avoid false-positive OCR on born-digital decks. See "Parse routing" above + `src/memex/parse/pymupdf_backend.py` + `pymupdf_worker.py`.
-3. ~~**MCP HTTP auth model**~~ — ✅ **Shipped 2026-05-21** (commits `32b811d`, `bec5e57`, `78d9518`). `McpSettings.auth_token` (`MEMEX_MCP__AUTH_TOKEN`) gates every HTTP request via constant-time bearer-token comparison; non-loopback bind is refused at startup without a token; loopback bind without a token still runs with a clear WARN line (developer affordance). New `memex mcp generate-token` CLI prints a fresh `secrets.token_urlsafe(32)`. Full deployment story: [`docs/deploy/mcp-http.md`](deploy/mcp-http.md).
-4. ~~**Annotation UI 409 conflict surface**~~ — ✅ **Shipped 2026-05-21** (commits `180e9aa`, `d0d1df6`). `write_document(expected_sha=...)` is now the CAS primitive; on mismatch it raises a new `StaleDocumentError` whose `context` carries the current sha + on-disk body. The `/review` POST handler catches it and returns HTTP 409 with `_review_conflict.html` — a unified diff (via stdlib `difflib`) plus "discard mine & reload" and "overwrite anyway" buttons. The edit form carries `expected_sha` as a hidden input. HTMX 4xx swap-handling is configured in `base.html` so the panel actually renders. 4 unit + 3 integration tests; the conflict round-trip is curl-verified end-to-end.
-5. ~~**Vault concurrency hardening**~~ — ✅ **Shipped 2026-05-21** (commit `aa05365`). New `vault/_file_lock.py` exposes `doc_file_lock(vault_path, doc_id)` — an async context manager that holds `fcntl.LOCK_EX` on `.memex/locks/{doc_id}.lock`. Wired into `write_document` + `delete_document` as the inner critical section under the existing per-doc `asyncio.Lock`. Structured `vault.lock.contended` / `vault.lock.acquired` INFO logs make contention auditable (live-verified: a 6 s-held lock from a sibling process produced `waited_ms=101` contended log + `waited_ms=5338` acquired log + a 5.35 s blocked write). Windows: no-op + one-time WARN (matches the pyseccomp Linux-only pattern). 1 unit + 3 cross-process integration tests.
-6. ~~**Chunker tuning for dense PyMuPDF output**~~ — ✅ **Shipped 2026-05-21** (commits `bd948e4`, `e514d7c`, `fdf4d00`). `IndexSettings.chunk_target_tokens` defaults to 400 (was 600); `MEMEX_INDEX__CHUNK_TARGET_TOKENS` env-tunable. PyMuPDF marker stripping: `==> picture [...] intentionally omitted <==` lines deleted, `Start/End of picture text` boundaries compacted to `[chart-text]` / `[/chart-text]` tags — 21 % markdown shrinkage on the canonical deck. Default `MEMEX_RERANK_BATCH_SIZE` lowered 64 → 8 (12 GB rig empirical floor). **Infra fix complete** — default pipeline runs end-to-end at `top_k=10` with no env workarounds. **Quality tradeoff is now eval-corpus-gated**: smaller chunks improve retrieval precision but reduce per-chunk context, which surfaces refusal-rate changes on broad "what is this about" queries. P0 (eval corpus) is the right tool to settle the optimal `chunk_target_tokens` value across a real workload; until then, rigs with `max-model-len >= 8192` can bump back to 600 via env for the pre-P1.6 retrieval behaviour.
+1. **Eval corpus assembly** — `docs/eval-corpus-plan.md` calls for 125 docs across 7 categories. **No other P2 item can ship a real verdict without this.** Multi-week curator effort end-to-end; a single-session bootstrap is feasible: source 3–5 docs in one category, label their queries + golden answers + chunk citations in the JSON query-set format, run the eval harness with `memex eval` against the live indexed vault, capture the baseline. Three pending decisions blocked by the absence of this corpus:
+   - **P1.6**: is `chunk_target_tokens=400` the right default, or should it be 500–600 with a longer model context?
+   - **P2.1**: does Qwen3-Reranker actually beat bge on Memex's workload, justifying its ~equal memory cost?
+   - **P2.2 / P2.3**: do the orchestrator + VLM swaps clear their respective answer-quality floors?
 
 ### P2 — eval-gated stack swaps (after P0)
 
-6. **Qwen3-Reranker-0.6B** vs `BAAI/bge-reranker-v2-m3` — ◐ **Infrastructure shipped 2026-05-21** (commit `714dd32`). `MEMEX_MODELS__RERANKER_BACKEND=qwen3` flips the dispatcher in `retrieve/rerank.py`; new `Qwen3RerankerHandle` + `_load_reranker_qwen3` in the registry; budget table in `cli/bootstrap.py` updated. **Empirical correction**: P2.1 verification on the 12 GB rig showed Qwen3-Reranker-0.6B is **~2.1 GB live** (1.8 GB BF16 weights + ~0.3 GB forward-pass workspace), not the 0.6-0.7 GB the parameter count suggests — autoregressive activations cost more than published. The swap is therefore a *quality* play, not a memory play; on the reference 12 GB rig with vLLM-Qwen3-8B-AWQ already resident, the qwen3 backend OOMs the forward pass. Quality A/B still gated on the eval corpus (P0). Users with smaller orchestrators (Qwen3-4B-AWQ) or bigger GPUs can flip the toggle today.
-7. **Granite 4.1-8B-Instruct** vs `Qwen/Qwen3-8B-AWQ`. Apache-2.0 license + native OpenAI-tool-calling in the chat template (vs Qwen's prompt-template tool path). Run A/B against the eval corpus.
-8. **Qwen3-VL-8B-Instruct** vs `Qwen2.5-VL-7B`. +6-14 OCR points published; native 256 K context. Same AWQ-Int4 footprint (~5 GB). Currently disabled by default on 12 GB; the swap doesn't unblock 12-GB users but does improve quality for the larger-VRAM tier.
+2. ~~**Qwen3-Reranker-0.6B infrastructure**~~ — ✅ **Infra shipped 2026-05-21** (commits `714dd32`, `b485748`). Backend flag wired; live verification revised the published "0.6 GB" footprint up to **~2.1 GB live** (autoregressive activations cost more than parameter count suggests). The swap is a quality play, not a memory play. Quality verdict pending P0.
+3. **Granite 4.1-8B-Instruct** vs `Qwen/Qwen3-8B-AWQ`. Apache-2.0 license + native OpenAI-tool-calling in the chat template (vs Qwen's prompt-template tool path). Same vLLM serving infrastructure; the swap is a model-name change in `scripts/serve-vllm.sh`. Eval-gated.
+4. **Qwen3-VL-8B-Instruct** vs `Qwen2.5-VL-7B`. +6–14 OCR points published; native 256 K context. Same AWQ-Int4 footprint (~5 GB). Currently disabled by default on 12 GB; the swap doesn't unblock 12 GB users (`disable_vlm=True` is still the right default there) but improves quality for the larger-VRAM tier. Eval-gated.
 
-### P3 — infrastructure
+### P3 — infrastructure (no eval needed)
 
-9. **Real-mode benchmark nightly CI** — `scripts/benchmark.py --real` measures cold start + first-token + embedding throughput. Needs a GPU runner: cloud (Lambda, RunPod) or a dedicated home rig. Workflow template already in `.github/workflows/`.
-10. **Daemon process model** — `memex daemon start` currently runs a detached child + PID file. Production deployment would benefit from systemd unit (Linux) / launchd (macOS) templates so the OS handles restart-on-crash + log rotation.
+5. **Daemon process model** — `memex daemon start` currently runs a detached child + PID file. Ship a `docs/deploy/systemd.md` + a sample unit file (Linux) and a launchd plist (macOS) so the OS handles restart-on-crash and log rotation. Pure docs/template work; ~1-session task; no code change. **Recommended next pick after P0 bootstrap if a session can't tackle the corpus.**
+6. **Real-mode benchmark nightly CI** — `scripts/benchmark.py --real` measures cold start + first-token + embedding throughput. Needs a GPU runner: cloud (Lambda, RunPod, Modal) or a dedicated rig. Workflow template already in `.github/workflows/`. Decision blocker is **cost + ops**, not code.
 
-### P4 — design decisions still owed
+### P4 — design decisions still owed (low urgency)
 
-11. **Wikilink format** (per ADR-0003) — `[[doc_id]]` is committed but the section-anchor case (`[[doc_id#heading]]`) is unresolved. Punt until a real cross-doc citation that benefits from sub-document precision shows up.
-12. **8 GB GPU tier** — ADR-0001 commits to "no first-class CPU fallback." Should there be a documented 8 GB tier with smaller model defaults (Qwen3-4B-AWQ + reranker-base + no VLM)? Decision can wait until a user actually has that rig.
-13. **Trace retention** — `EventBus` has 30-day prune; Langfuse self-host hasn't been wired up. The plan is matching retention windows, but no concrete date.
+7. **Wikilink format** (per ADR-0003) — `[[doc_id]]` is committed; `[[doc_id#heading]]` for sub-document precision is unresolved. Punt until a real cross-doc citation needs it.
+8. **8 GB GPU tier** — ADR-0001 says "no first-class CPU fallback." Should there be a documented 8 GB profile (Qwen3-4B-AWQ + reranker-base + no VLM)? Decision can wait until a user actually has that rig. **Note**: a smaller orchestrator would also unblock Qwen3-Reranker's quality test (P2.1) on tighter rigs.
+9. **Trace retention** — `EventBus` has 30-day prune; Langfuse self-host wiring is open. Match retention windows when self-host lands.
 
-### Filler — minor hardening (when bored, see `docs/audits/00-synthesis.md` nits)
+### Filler — minor hardening (pickable in idle sessions)
 
-- N1: LanceDB concurrent-search smoke test
-- N2: `FTSStore` explicit `asyncio.Lock` for future `transaction()` use
-- N3: `configure_client` should close prior `_client` on re-call
-- N4: Verify `GraphStore.close()` is truly no-op-safe on the current ryugraph
-- N5: `_pid_alive` returning True on EPERM (treated as alive-but-unkillable)
-- N6: `_COMPILED_GRAPH` thread-safety on first compile
-- N7: pypdfium2 `to_pil` lifetime vs `doc.close()` ordering
-- N8: docling breaker `lambda` coroutine handling — verify
+When bored, working from `docs/audits/00-synthesis.md`:
+
+- **N1** — LanceDB concurrent-search smoke test
+- **N2** — `FTSStore` explicit `asyncio.Lock` for future `transaction()` use
+- **N3** — `configure_client` should close prior `_client` on re-call (httpx pool linger)
+- **N4** — Verify `GraphStore.close()` is no-op-safe on current ryugraph (Kuzu lineage needed it)
+- **N5** — `_pid_alive` returning True on EPERM (alive-but-unkillable — document or fix)
+- **N6** — `_COMPILED_GRAPH` thread-safety on first compile
+- **N7** — `pypdfium2.to_pil` lifetime vs `doc.close()` ordering
+- **N8** — Docling breaker `lambda` coroutine handling — verify the `await` path
+- **N9** — FastMCP startup logs `PydanticUserError: get_graph_neighborsOutput is not fully defined` (forward-ref to `GraphNeighbor` in `mcp/server.py`'s `get_graph_neighbors` return type). Cosmetic — the tool still works — but worth a `from memex.index.graph_store import GraphNeighbor` at module level to silence it.
 
 ---
 
@@ -202,3 +202,4 @@ Reference for the env-tunable settings landed alongside P1.1:
 | `MEMEX_RERANK_BATCH_SIZE` | `8` | bge-reranker pair-batch size. Empirical 12 GB-rig floor with 8B-AWQ resident; bump to 32 or 64 on bigger rigs / smaller orchestrators for ~2-8× rerank throughput. |
 | `MEMEX_RERANK_TOP_K` | `10` | Reranked chunks fed to the agent. Drop to 4-5 if your chunks are large enough that 10 chunks overflow `max-model-len`. |
 | `MEMEX_MCP__AUTH_TOKEN` | _(unset)_ | When set, the HTTP transport requires `Authorization: Bearer <token>` on every request (constant-time check). When unset, non-loopback binds are refused at startup. Generate via `memex mcp generate-token`. |
+| `MEMEX_MODELS__RERANKER_BACKEND` | `cross_encoder` | `qwen3` flips the reranker dispatch to load `Qwen/Qwen3-Reranker-0.6B` (or whatever `MEMEX_MODELS__RERANKER` points at) via `transformers.AutoModelForCausalLM` and score via softmax-over-yes/no logits. Empirically ~2.1 GB live on the 12 GB rig — comparable to bge, not the parameter-count-implied savings. Quality A/B pending P0. |
