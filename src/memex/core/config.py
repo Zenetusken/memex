@@ -131,10 +131,21 @@ class ObservabilitySettings(BaseModel):
         return self
 
 
+def _default_vault_path() -> Path:
+    """Default vault location. `XDG_DATA_HOME` (e.g. `~/.local/share`) if
+    set, otherwise `~/.memex/vault`. Either way the validator below
+    creates it on first run with mode 0700, so a fresh user can just
+    `memex serve web` and have everything land in a sane place."""
+    xdg = os.environ.get("XDG_DATA_HOME")
+    if xdg:
+        return Path(xdg) / "memex" / "vault"
+    return Path.home() / ".memex" / "vault"
+
+
 class MemexSettings(BaseSettings):
     """Top-level settings. Construct once at startup; treat as immutable."""
 
-    vault_path: Path
+    vault_path: Path = Field(default_factory=_default_vault_path)
     models: ModelSettings = Field(default_factory=ModelSettings)
     hardware: HardwareSettings = Field(default_factory=HardwareSettings)
     inference: InferenceSettings = Field(default_factory=InferenceSettings)
