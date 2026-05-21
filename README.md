@@ -4,6 +4,12 @@
 
 Memex reads your documents, builds you a Markdown library of what's inside them, and lets you ask questions that get grounded answers with citations. Everything runs on your laptop. 🏠
 
+```
+You: ── PDFs, notes, papers ──►  Memex  ──►  Markdown vault + indexes + answers
+                                  │
+                            stays on your disk
+```
+
 ---
 
 ## 🤔 What it's for
@@ -15,109 +21,350 @@ You have:
 
 Memex helps you:
 - 📖 **Read** your documents into clean Markdown (with figures, tables, equations preserved).
-- 🔍 **Search** across them with hybrid retrieval (keyword + meaning).
-- 💬 **Ask** real questions and get answers that cite the source paragraphs.
-- 🔗 **Cross-reference** — Memex builds an entity graph so it knows when two papers talk about the same thing.
+- 🔍 **Search** across them with hybrid retrieval (BM25 + dense + cross-encoder rerank).
+- 💬 **Ask** real questions and get answers that cite the source paragraphs — or *refuse* when there isn't enough grounding (refusal is a first-class outcome).
+- 🔗 **Cross-reference** through an entity graph that links docs sharing topics, citations, or named entities.
 - ✏️ **Edit** the Markdown yourself; Memex notices and re-indexes.
+- 🔌 **Plug in** to Claude Code, Cursor, or any MCP-aware client.
 
 ---
 
-## ⚡ Quick start
+## 🖥️ System requirements
 
-You'll need an **NVIDIA GPU** (RTX 4070 / 12 GB VRAM is the reference rig) and **Python 3.12+**. The heavy lifting — embedding, reranking, parsing low-confidence PDF pages — happens on the GPU. Everything else is local Python.
+| Component | Minimum | Reference rig |
+|---|---|---|
+| GPU | NVIDIA, 12 GB VRAM, Ada Lovelace (sm_89) or newer | RTX 4070 12 GB |
+| CUDA driver | R570+ (cu129 wheels) | — |
+| CPU | Any modern x86_64 (8+ cores comfortable) | — |
+| RAM | 16 GB | 32 GB |
+| Disk | 50 GB for models + your vault | — |
+| OS | **Linux** (Ubuntu 22.04+, Pop!_OS, Fedora 39+, Arch). macOS is dev-tier only — the CUDA-only stack doesn't apply. Windows is unsupported. | Pop!_OS 22.04 |
+| Python | 3.12+ | — |
+
+Per ADR-0001 the project doesn't ship a CPU fallback. If `torch.cuda.is_available()` is False, startup fails fast with a clear message.
+
+---
+
+## ⚡ Install
 
 ```sh
-# 1️⃣  Install
-uv sync --extra models --extra parse
+# 1. Clone + sync
+git clone https://github.com/Zenetusken/memex.git ~/project/Doc_Flo
+cd ~/project/Doc_Flo
+uv sync --extra models --extra parse --extra serve
 
-# 2️⃣  Tell Memex where to put your vault
-export MEMEX_VAULT_PATH=~/memex-vault
+# 2. (optional, recommended) Pre-fetch the HuggingFace models so first
+# boot doesn't hammer the network. ~13 GB on disk.
+uv run python scripts/download-models.py
 
-# 3️⃣  Vendor the frontend assets (one-time, downloads HTMX)
+# 3. Vendor the HTMX + Tailwind subset (one-time; SHA-384 verified).
 ./scripts/vendor-frontend.sh
 
-# 4️⃣  Start the local language model in another terminal
-./scripts/serve-vllm.sh
+# 4. Pick your vault directory (or accept the default ~/.memex/vault).
+export MEMEX_VAULT_PATH=~/memex-vault
+mkdir -p "$MEMEX_VAULT_PATH"
+```
 
-# 5️⃣  Talk to Memex
+That installs the four Memex extras:
+
+| Extra | What it brings | When you need it |
+|---|---|---|
+| `models` | torch + transformers + sentence-transformers + accelerate (all cu129) | Always |
+| `parse` | Docling + PyMuPDF4LLM + pyseccomp + pypdfium2 | Always (PDF / DOCX / PPTX ingest) |
+| `serve` | vLLM (cu129 wheels) | If you're running the inference daemon locally (almost always) |
+| `dev` | pytest + ruff + pyright + hypothesis + pre-commit | Contributing or running the test suite |
+| `eval` | ragas + jiwer | Running `memex eval` against a query set |
+| `docs` | mkdocs + mkdocs-material | Building the documentation site |
+
+---
+
+## 🚦 Pick your deployment pattern
+
+There are three supported ways to run Memex. Pick one — they don't conflict, but **the always-on systemd flow is the recommended production setup** and what the rest of this README assumes unless noted.
+
+### A) Always-on services (recommended on Linux)
+
+The whole stack — vLLM + web UI + MCP server + vault watcher — runs as user-level systemd services. Boots with your session, restart-on-crash, log rotation via journald, **no terminal babysitting**.
+
+```sh
+# One-time install
+mkdir -p ~/.config/systemd/user ~/.config/memex ~/.local/state/memex
+cp docs/deploy/memex-vllm.service docs/deploy/memex-web.service \
+   docs/deploy/memex-mcp.service  docs/deploy/memex-watch.service \
+   ~/.config/systemd/user/
+cp docs/deploy/memex-vllm.env docs/deploy/memex-web.env \
+   docs/deploy/memex-mcp.env  docs/deploy/memex-watch.env \
+   ~/.config/memex/
+
+# Generate an MCP bearer token (skip if you'll only use stdio MCP)
+echo "MEMEX_MCP__AUTH_TOKEN=$(uv run memex mcp generate-token)" \
+  >> ~/.config/memex/memex-mcp.env
+
+# Edit each .service file: change `WorkingDirectory=` and `ExecStart=`
+# to match where you cloned Memex. The default templates assume
+# %h/project/Doc_Flo — adjust if needed.
+
+systemctl --user daemon-reload
+systemctl --user enable --now memex-vllm.service memex-web.service \
+                              memex-mcp.service  memex-watch.service
+```
+
+Verify:
+
+```sh
+systemctl --user status memex-vllm memex-web memex-mcp memex-watch --no-pager
+journalctl --user -u memex-vllm -u memex-web -u memex-mcp -u memex-watch -f
+```
+
+After this, you never start anything by hand again. `memex ask`, `memex ingest`, the web UI at <http://127.0.0.1:7423>, and the MCP HTTP endpoint at <http://127.0.0.1:7424> are all permanently available.
+
+Full guide: [`docs/deploy/systemd.md`](docs/deploy/systemd.md).
+macOS equivalent (launchd plists): [`docs/deploy/launchd.md`](docs/deploy/launchd.md).
+
+### B) One-shot from two terminals (demo / dev)
+
+If you just want to try Memex without installing services:
+
+```sh
+# Terminal 1 — start the inference daemon
+./scripts/serve-vllm.sh
+# wait ~40s for "Application startup complete."
+
+# Terminal 2 — use Memex
 uv run memex ingest path/to/some-paper.pdf
 uv run memex ask "What does the paper say about reproducibility?"
 ```
 
-That's the whole thing. ✨
+This is what the original quickstart looked like; it works, but you lose vLLM the moment you close terminal 1.
+
+### C) Detached background (no systemd)
+
+Memex ships a small wrapper that detaches vLLM via `nohup`-style session leadership:
+
+```sh
+uv run memex daemon start
+# vLLM is now running in the background; check status:
+uv run memex daemon status
+# stop it:
+uv run memex daemon stop
+```
+
+This is intermediate between (A) and (B) — survives terminal close, doesn't survive logout/reboot, no restart-on-crash. Useful on a Mac dev box where launchd feels heavy. Don't mix this with (A); they'd race.
 
 ---
 
-## 🎯 Try the web UI
+## 💬 Common workflows
+
+After installing per **Pattern A** above, these are the everyday commands:
+
+### Ingest documents
 
 ```sh
-uv run memex serve web
-# then open http://127.0.0.1:7423
+uv run memex ingest some-paper.pdf                    # one file
+uv run memex ingest *.pdf                             # batch
+uv run memex ingest ~/Downloads/papers/               # whole folder
 ```
 
-You get:
-- 💭 An **ask box** with HTMX-driven streaming answers, every claim labelled with its source chunk.
-- 📑 A **documents page** with PDF side-by-side preview when you ingested from PDF.
-- 🕸️ A **graph view** showing which docs share entities or cite each other.
-- ✍️ **Inline correction** — edit a paragraph in the browser, hit save, Memex picks up the change.
+Each PDF goes through: validation → ingest copy → parse (PyMuPDF for born-digital, Docling for scans) → index (chunks → LanceDB + FTS5) → enrich (entity extraction + graph edges via vLLM). All inline, all logged.
 
-The whole UI is dark zinc on near-black with a single blue accent, dense and quiet — built to feel like a desk lamp, not an AI app. 🛋️
+For scanned content add `MEMEX_PARSE_DOCLING_OCR=1`; for born-digital PDFs (PowerPoint exports, LaTeX, Word) leave it off — the PyMuPDF pre-filter handles those at ~3× Docling's speed.
+
+### Ask grounded questions
+
+```sh
+uv run memex ask "What does the paper say about ablations?"
+uv run memex ask "Compare how Smith and Tan handle reflexivity"
+uv run memex ask "Has anyone discussed CUDA-graph capture overhead?"
+```
+
+Output is JSON on a pipe, rich tables in a terminal. Every `claim` carries a `source_chunk_id`; the agent **refuses** when chunks don't ground the answer (returns `answered: false` + `refusal_reason`).
+
+### Browse the vault
+
+```sh
+# CLI listing
+uv run memex list documents
+
+# Or the web UI
+open http://127.0.0.1:7423
+```
+
+The web UI gives you a documents list, PDF side-by-side preview, a Cytoscape graph view of entity neighbors, and an inline edit-then-save flow (with conflict detection if someone else changed the doc since you started editing — see [`docs/deploy/mcp-http.md`](docs/deploy/mcp-http.md) for the 409 conflict surface).
+
+### Edit a Markdown document
+
+In the web UI, click **edit**, change the text, hit **save**. If the file changed under you (because of a parallel ingest, watcher reaction, or another tab) you get a 409 panel with a unified diff and **"discard mine & reload"** + **"overwrite anyway"** buttons.
+
+Outside the web UI, just edit the file:
+
+```sh
+$EDITOR ~/.memex/vault/documents/2f96ae1c-some-paper.md
+```
+
+The watcher service notices the sha change, re-enriches, and re-indexes the doc within seconds. No manual `memex reindex` needed.
+
+### Plug Memex into Claude Code / Cursor / Claude Desktop
+
+Memex is an MCP server. From a desktop MCP client, point at the stdio transport:
+
+```json
+{
+  "mcpServers": {
+    "memex": {
+      "command": "uv",
+      "args": ["run", "memex", "serve", "mcp", "--transport", "stdio"],
+      "cwd": "/home/YOU/project/Doc_Flo"
+    }
+  }
+}
+```
+
+For remote / network access, point at the HTTP transport with the bearer token from your `memex-mcp.env`:
+
+```json
+{
+  "mcpServers": {
+    "memex": {
+      "url": "http://YOUR-HOST:7424/mcp/",
+      "headers": { "Authorization": "Bearer ze1Q9k…ZW" }
+    }
+  }
+}
+```
+
+Five tools are exposed:
+- 🔎 `search(query, k)` — hybrid retrieval over the vault
+- ❓ `ask(question)` — full grounded answering agent
+- 📄 `get_document(doc_id)` — canonical markdown + frontmatter
+- 📚 `list_documents()` — every doc in the vault
+- 🌐 `get_graph_neighbors(doc_id)` — one-hop entity neighbors
+
+### Inspect health + breakers
+
+```sh
+uv run memex doctor              # checks GPU, vLLM, vault, breaker state
+journalctl --user -u memex-vllm -u memex-web -u memex-mcp -u memex-watch -f
+```
 
 ---
 
-## 🔌 Plug it into your other tools
+## 🛠️ Configuration reference
 
-Memex ships a **Model Context Protocol** server, so you can use it from Claude Code, Cursor, or any MCP-aware client:
+Every knob is set via environment variable or `~/.config/memex/config.toml`. Env-var prefix is `MEMEX_`; nested keys use `__` as the separator (`MEMEX_INFERENCE__BASE_URL`).
 
-```sh
-uv run memex serve mcp --transport stdio
-```
+### Core paths + transport
 
-Tools the server exposes:
-- 🔎 `search(query, k)` — hybrid retrieval over your vault
-- ❓ `ask(question)` — full agent with grounded answers
-- 📄 `get_document(doc_id)` — fetch the canonical Markdown
-- 📚 `list_documents()` — what's in the vault
-- 🌐 `get_graph_neighbors(doc_id)` — related documents
+| Variable | Default | Purpose |
+|---|---|---|
+| `MEMEX_VAULT_PATH` | `~/.memex/vault` (or `$XDG_DATA_HOME/memex/vault`) | Where the canonical Markdown + indexes live. Mode 0700. |
+| `MEMEX_INFERENCE__BASE_URL` | `http://localhost:8000/v1` | OpenAI-compatible endpoint the agent calls. Override if vLLM is on a different host/port. |
 
-Network-facing setup (HTTP transport + bearer-token auth): see [`docs/deploy/mcp-http.md`](docs/deploy/mcp-http.md).
+### vLLM daemon (read by `scripts/serve-vllm.sh`)
 
-Long-running production deployment (vLLM under systemd / launchd, restart-on-crash, journald log integration): see [`docs/deploy/systemd.md`](docs/deploy/systemd.md) and [`docs/deploy/launchd.md`](docs/deploy/launchd.md).
+| Variable | Default | Purpose |
+|---|---|---|
+| `MEMEX_VLLM_MODEL` | `Qwen/Qwen3-8B-AWQ` | HuggingFace model ID for the orchestrator. |
+| `MEMEX_VLLM_HOST` | `127.0.0.1` | Bind host. |
+| `MEMEX_VLLM_PORT` | `8000` | Bind port. |
+| `MEMEX_VLLM_QUANTIZATION` | `awq_marlin` | Quantization kernel. Set `""` for unquantized models, `awq` for the legacy kernel. |
+| `MEMEX_VLLM_MAX_MODEL_LEN` | `4096` | Max sequence length. |
+| `MEMEX_VLLM_GPU_FRACTION` | `0.72` | Empirical 12 GB-rig floor with the 8B-AWQ orchestrator + in-process embedder + bge-reranker. Bump on bigger cards. |
+| `CUDA_VISIBLE_DEVICES` | `0` | GPU device index. |
+| `MEMEX_VLLM_EAGER` | _(unset)_ | Set to anything to disable CUDA-graph compilation (slower decode, faster startup). |
+
+### Parse stage
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `MEMEX_PARSE__PYMUPDF_ENABLED` | `true` | When `false`, all PDFs route through Docling (the pre-PyMuPDF behaviour). |
+| `MEMEX_PARSE__PYMUPDF_MIN_CONFIDENCE` | `0.5` | Confidence threshold for trusting the PyMuPDF extraction. Lower to be more eager; raise to be conservative. |
+| `MEMEX_PARSE__PYMUPDF_MIXED_CONTENT_IMAGE_AREA_THRESHOLD` | `0.35` | Image-area share that triggers the mixed-content (force-OCR) routing path. Lower → more aggressive OCR. |
+| `MEMEX_PARSE__PYMUPDF_MIXED_CONTENT_MIN_IMAGE_HEAVY_PAGES` | `0.30` | Companion gate; both image-area AND image-heavy-pages must trip for mixed-content to fire. |
+| `MEMEX_PARSE_DOCLING_OCR` | `0` | Set to `1` to force OCR on Docling. Default off (born-digital PDFs don't benefit; +10× wall time for no answer improvement on the canonical test deck). |
+
+### Index stage
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `MEMEX_INDEX__CHUNK_TARGET_TOKENS` | `400` | Word-count target for chunks. ≈ 520 transformer tokens. Bump to 600 on rigs with `max-model-len >= 8192`. |
+| `MEMEX_INDEX__CHUNK_OVERLAP_TOKENS` | `60` | Word-count overlap between chunks. Scales with target. |
+| `MEMEX_INDEX_EMBED_BATCH` | `32` | Embedder batch size. Push higher on bigger GPUs for throughput. |
+
+### Retrieve stage
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `MEMEX_RERANK_BATCH_SIZE` | `8` | bge-reranker pair-batch size. Empirical 12 GB-rig floor; bump to 32–64 on bigger rigs / smaller orchestrators. |
+| `MEMEX_RERANK_TOP_K` | `10` | Reranked chunks fed to the agent. Drop to 4–5 if chunks are large enough to overflow `max-model-len`. |
+| `MEMEX_MODELS__RERANKER_BACKEND` | `cross_encoder` | `qwen3` swaps in Qwen3-Reranker-0.6B (autoregressive yes/no scoring). Quality A/B pending the eval corpus; memory comparable, not better. |
+
+### Network / security
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `MEMEX_MCP__AUTH_TOKEN` | _(unset)_ | When set, the MCP HTTP transport requires `Authorization: Bearer <token>`. When unset, non-loopback binds are refused at startup. Generate via `uv run memex mcp generate-token`. |
+
+### Observability
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `MEMEX_OBSERVABILITY__LANGFUSE_ENABLED` | `false` | Off by default (local-first / no-telemetry). Set true + both keys below to enable tracing. |
+| `MEMEX_OBSERVABILITY__LANGFUSE_PUBLIC_KEY` | _(unset)_ | Self-hosted Langfuse public key. |
+| `MEMEX_OBSERVABILITY__LANGFUSE_SECRET_KEY` | _(unset)_ | Self-hosted Langfuse secret key. |
+
+Either set both Langfuse keys, or neither. Half-configured fails at startup.
 
 ---
 
 ## 🛡️ Privacy & offline guarantees
 
-- 🚫 **No remote endpoints.** The parser worker runs under a `seccomp` filter that blocks every network syscall — even a malicious PDF can't phone home.
-- 🪪 **No telemetry.** Memex doesn't ping anyone, ever. Logs stay on disk.
-- 🗝️ **Your vault is mode 0700.** Locked down to your user account.
-- 🪶 **Local LLM by default.** vLLM runs your chosen 7B/8B model on your GPU. No OpenAI API keys, no Anthropic keys, nothing.
-- 📡 **Air-gap test passes.** Pull the ethernet, do everything you'd normally do — Memex doesn't blink.
+- 🚫 **No remote endpoints.** The Docling + PyMuPDF parser workers run under a `seccomp` filter that blocks every network syscall — even a malicious PDF can't phone home.
+- 🪪 **No telemetry.** Memex doesn't ping anyone, ever. Logs stay on disk. Langfuse tracing is opt-in.
+- 🗝️ **Vault locked down.** `~/.memex/vault` is mode 0700.
+- 🔐 **MCP HTTP is auth-or-loopback.** The HTTP transport refuses to bind to anything except loopback unless a bearer token is set. No "oops, exposed the LLM to the LAN" footgun.
+- 🪶 **Local LLM by default.** vLLM runs your chosen 7B/8B model on your GPU. No OpenAI / Anthropic / Mistral API keys, no third-party inference.
+- 📡 **Air-gap test passes.** Pull the ethernet, do everything you'd normally do. Memex doesn't blink.
 
-The only thing that talks to the network is the *initial model download* (a one-time `huggingface-cli download`). After that, you can pull the cable. 🔌
+The only thing that talks to the network is the *initial model download* (one-time HuggingFace pulls, gated through `scripts/download-models.py`). After that, you can pull the cable. 🔌
 
 ---
 
 ## 📂 What's in the vault
 
 ```
-~/memex-vault/
+~/.memex/vault/
 ├── documents/
-│   ├── abc12345-paper-on-reflexivity.md      ← the canonical Markdown
-│   └── abc12345-paper-on-reflexivity/        ← the original PDF + figures
-│       └── source.pdf
+│   ├── 2f96ae1c-some-paper.md          ← canonical Markdown (the source of truth)
+│   └── 2f96ae1c-some-paper/
+│       └── source.pdf                  ← original ingested file
 └── .memex/
-    ├── embeddings.lance     ← vector index (LanceDB)
-    ├── search.sqlite        ← keyword index (SQLite FTS5)
-    ├── graph.ryu            ← entity + citation graph (RyuGraph)
-    └── manifests/*.json     ← audit trail per document
+    ├── embeddings.lance/               ← vector index (LanceDB)
+    ├── search.sqlite                   ← keyword index (SQLite FTS5)
+    ├── graph.ryu                       ← entity + citation graph (RyuGraph)
+    ├── events.sqlite                   ← in-process audit bus (30-day prune)
+    ├── manifests/{doc_id}.json         ← per-doc audit trail (sha, parse versions)
+    ├── locks/{doc_id}.lock             ← fcntl advisory lock files (P1.5)
+    └── daemon/vllm.{pid,log}           ← only used by `memex daemon start`;
+                                          unused under systemd
 ```
 
-**The Markdown files are the source of truth.** 📜 You can edit them, version them with git, sync them across machines — Memex will rebuild every index from them with `memex reindex`.
+**The Markdown files in `documents/` are the source of truth** 📜 (ADR-0003). Everything in `.memex/` is regenerable from them via `memex reindex`. You can git-version the canonical markdown, sync it across machines with Syncthing or rsync, edit by hand — the watcher catches the edit and rebuilds the indexes.
 
 ---
 
-## 🧭 The full picture
+## 🧪 Run the tests
+
+```sh
+uv run pytest                  # 144 tests, ~7 seconds, no GPU needed
+uv run pytest tests/unit       # just the pure-function tests
+uv run pytest tests/integration  # full ingest→parse→index→ask flow with faked I/O
+```
+
+Integration tests fake the heavy I/O (vLLM, Docling, PyMuPDF worker, LanceDB, sentence-transformers) so the full pipeline can run on a laptop without a GPU. Five tests skip on Windows (seccomp + cross-process fcntl).
+
+---
+
+## 🧭 Documentation
 
 | If you want to know… | Read… |
 |---|---|
@@ -126,6 +373,10 @@ The only thing that talks to the network is the *initial model download* (a one-
 | 🗺️ What's done & what's queued | [`docs/ROADMAP.md`](docs/ROADMAP.md) |
 | 🏗️ The architecture blueprint | [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) |
 | 📐 Why we picked what we picked | [`docs/adr/`](docs/adr/) (ADRs 0001–0006) |
+| 🚀 Network-facing MCP setup | [`docs/deploy/mcp-http.md`](docs/deploy/mcp-http.md) |
+| 🖥️ systemd deployment (Linux) | [`docs/deploy/systemd.md`](docs/deploy/systemd.md) |
+| 🍎 launchd deployment (macOS dev) | [`docs/deploy/launchd.md`](docs/deploy/launchd.md) |
+| 🔬 Audit reports (E2E + load + OCR A/B + bug-hunt) | [`docs/audits/`](docs/audits/) |
 
 Browse the same content as a navigable site:
 
@@ -134,17 +385,6 @@ uv sync --extra docs && uv run mkdocs serve
 ```
 
 Material for MkDocs, dark palette, no Google Fonts (because of course not). 🌒
-
----
-
-## 🧪 Run the tests
-
-```sh
-uv run pytest             # 86 tests, ~5 seconds, no GPU needed
-uv run pytest tests/unit  # just the pure-function tests
-```
-
-Integration tests fake the heavy I/O (vLLM, Docling, LanceDB) so the full pipeline can run without a GPU. The marquee sandbox test ("can a parsed PDF open a socket?") is skipped on platforms without privileged seccomp. ✅
 
 ---
 
