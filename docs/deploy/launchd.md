@@ -90,6 +90,15 @@ launchd has no native dependency ordering between agents — they all boot at lo
 
 Skip the watch agent if you only ingest documents in batches (`memex ingest`) and never edit markdown by hand — the parse stage triggers enrich + index inline and the watcher has no work to do.
 
+## Backups on macOS
+
+The Linux systemd ecosystem ships a `memex-vault-backup.timer` (see [`backup.md`](backup.md)); macOS doesn't have a direct equivalent, but the underlying script `scripts/memex-vault-backup.sh` is portable. Two options:
+
+1. **launchd job with a calendar interval** — wrap the script in a plist with `StartCalendarInterval` set to fire daily at your preferred hour. Same pattern as `com.memex.vllm.plist` but with `RunAtLoad=false` and the calendar dict instead.
+2. **cron** — `0 2 * * * /Users/YOUR_USER/project/Doc_Flo/scripts/memex-vault-backup.sh` in `crontab -e`.
+
+Both need restic installed (`brew install restic`) and the env vars set (either `EnvironmentVariables` in the plist or `export` lines in a wrapper). See [`backup.md`](backup.md) §"Quickstart" for the password-file setup.
+
 ## What's not covered here
 
 - **GPU monitoring** — macOS dev boxes are out of scope for the CUDA pipeline; if you're testing on an Apple Silicon Mac with the MPS backend, see PyTorch's own MPS docs for tuning.

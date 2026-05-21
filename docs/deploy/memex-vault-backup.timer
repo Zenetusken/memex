@@ -1,0 +1,25 @@
+# Memex vault backup — daily timer.
+#
+# Enables nightly snapshots via the companion service. The default
+# fires every day at 02:00 local time with a 10-minute random delay
+# (avoids thundering-herd if you have many machines snapshotting the
+# same cloud bucket). Persistent=true catches up after the laptop
+# sleeps past the scheduled wake.
+#
+# To enable: `systemctl --user enable --now memex-vault-backup.timer`
+# To change the schedule: edit `OnCalendar=` below and run
+# `systemctl --user daemon-reload`.
+# To inspect: `systemctl --user list-timers memex-vault-backup`.
+
+[Unit]
+Description=Daily Memex vault backup timer
+Documentation=https://github.com/Zenetusken/memex/blob/main/docs/deploy/backup.md
+
+[Timer]
+OnCalendar=*-*-* 02:00:00
+Persistent=true
+RandomizedDelaySec=10m
+Unit=memex-vault-backup.service
+
+[Install]
+WantedBy=timers.target

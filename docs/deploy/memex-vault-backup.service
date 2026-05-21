@@ -1,0 +1,56 @@
+# Memex vault backup — user systemd service (oneshot; fired by .timer).
+#
+# Install with the companion files:
+#
+#     mkdir -p ~/.config/systemd/user ~/.config/memex
+#     cp docs/deploy/memex-vault-backup.service \
+#        docs/deploy/memex-vault-backup.timer \
+#        ~/.config/systemd/user/
+#     cp docs/deploy/memex-vault-backup.env ~/.config/memex/
+#     # Generate the password file (see docs/deploy/backup.md):
+#     printf 'your-passphrase' > ~/.config/memex/restic-password
+#     chmod 600 ~/.config/memex/restic-password
+#     # Edit the paths below if your clone isn't at %h/project/Doc_Flo, then:
+#     systemctl --user daemon-reload
+#     systemctl --user enable --now memex-vault-backup.timer
+#
+# Logs land in journald — `journalctl --user -u memex-vault-backup -f`.
+# Fire a backup immediately (outside the schedule) with:
+#
+#     systemctl --user start memex-vault-backup.service
+#
+# Restore flow: see docs/deploy/backup.md §"Restoring a snapshot".
+
+[Unit]
+Description=Memex vault backup (restic)
+Documentation=https://github.com/Zenetusken/memex/blob/main/docs/deploy/backup.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+
+# ── EDIT THESE PATHS to match your clone ────────────────────────────
+WorkingDirectory=%h/project/Doc_Flo
+ExecStart=%h/project/Doc_Flo/scripts/memex-vault-backup.sh
+
+EnvironmentFile=%h/.config/memex/memex-vault-backup.env
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+# Backups are I/O bound, not user-blocking; let them run nice so they
+# don't compete with interactive work or with the vLLM daemon.
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=memex-vault-backup
+
+NoNewPrivileges=true
+PrivateTmp=true
+# Vault, repo, and password file all live under $HOME.
+ProtectHome=false
+
+# Intentionally no [Install] section: timer-fired services don't get
+# enabled directly; `memex-vault-backup.timer` is what's enabled.

@@ -334,6 +334,7 @@ Either set both Langfuse keys, or neither. Half-configured fails at startup.
 - 🔐 **MCP HTTP is auth-or-loopback.** The HTTP transport refuses to bind to anything except loopback unless a bearer token is set. No "oops, exposed the LLM to the LAN" footgun.
 - 🪶 **Local LLM by default.** vLLM runs your chosen 7B/8B model on your GPU. No OpenAI / Anthropic / Mistral API keys, no third-party inference.
 - 📡 **Air-gap test passes.** Pull the ethernet, do everything you'd normally do. Memex doesn't blink.
+- 🗄️ **Vault backup is a `systemctl --user enable --now memex-vault-backup.timer` away.** See [`docs/deploy/backup.md`](docs/deploy/backup.md) — encrypted incremental snapshots via restic, default local repo at `~/.local/state/memex/backups/`, S3 / Backblaze / SSH targets documented for off-site.
 
 The only thing that talks to the network is the *initial model download* (one-time HuggingFace pulls, gated through `scripts/download-models.py`). After that, you can pull the cable. 🔌
 

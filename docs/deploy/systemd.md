@@ -99,6 +99,7 @@ Beyond the vLLM daemon you can run three more services under the same supervisor
 | `memex-web.service` | [`memex-web.service`](memex-web.service) | [`memex-web.env`](memex-web.env) | `127.0.0.1:7423` | Browser UI (single-user / loopback only) |
 | `memex-mcp.service` | [`memex-mcp.service`](memex-mcp.service) | [`memex-mcp.env`](memex-mcp.env) | `127.0.0.1:7424` | MCP HTTP transport; requires a token to bind non-loopback |
 | `memex-watch.service` | [`memex-watch.service`](memex-watch.service) | [`memex-watch.env`](memex-watch.env) | (no socket) | Watches `vault/documents/*.md`; re-enriches + re-indexes on edit |
+| `memex-vault-backup.timer` + `.service` | [`memex-vault-backup.{timer,service}`](memex-vault-backup.timer) | [`memex-vault-backup.env`](memex-vault-backup.env) | (no socket) | Nightly restic snapshot of `~/.memex/vault`. Full setup in [`backup.md`](backup.md). |
 
 Install everything at once:
 
@@ -148,7 +149,6 @@ systemctl --user status memex-vllm memex-web memex-mcp memex-watch --no-pager
 ## What's not covered here
 
 - **GPU monitoring** — out of scope. `nvidia-smi` works fine; if you want metrics in journald, `nvidia-smi --query-gpu=… --loop=5` in a sidecar unit is one path.
-- **Backup of the vault** — the vault is regular files under `~/.memex/vault`; any incremental backup tool (`restic`, `borg`, `rsnapshot`) handles it. A `memex-vault-backup.timer` is a natural follow-up to these unit templates.
 
 ## Troubleshooting
 
