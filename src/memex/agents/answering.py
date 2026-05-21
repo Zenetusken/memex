@@ -465,6 +465,30 @@ async def verify(state: AnswerState) -> AnswerStateUpdate:
             context={"correlation_id": state.correlation_id, "node": "verify"},
         )
 
+    # Empty-draft short-circuit. When the answer node legitimately
+    # returns zero claims (the literal-presence rule in answer/v2
+    # fires for queries whose answer isn't in the chunks), there is
+    # nothing to verify. Calling the model with an empty `Draft
+    # (indexed):` section is also dangerous: the model has no signal
+    # to bound the `grounded`/`ungrounded` arrays (both are
+    # `list[int]` with no length constraint in `VerificationResult`),
+    # and xgrammar's strict JSON-schema mode then permits arbitrarily
+    # long emissions. Under certain prompt phrasings this degenerates
+    # into a runaway integer sequence (`grounded: [0, 1, 2, ...]+`
+    # hitting `max_tokens=1024` with `finish_reason: length`) →
+    # schema-validation failure → ModelCallError. Short-circuiting
+    # both fixes that pathology AND saves the round-trip — an empty
+    # draft IS the refusal signal from the answer stage; downstream
+    # `compose` will correctly route to refuse.
+    if not state.draft.claims:
+        log.info("empty_draft_shortcircuit")
+        return {
+            "verification": VerificationResult(
+                grounded=[], ungrounded=[], ungrounded_reasons=[]
+            ),
+            "nodes_traversed": state.nodes_traversed + 1,
+        }
+
     chunk_by_id = {c.chunk_id: c for c in state.reranked}
 
     prompt = render_prompt(

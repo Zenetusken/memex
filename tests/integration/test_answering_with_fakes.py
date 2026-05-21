@@ -195,6 +195,47 @@ async def test_insufficiency_refuses_without_drafting(
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("patch_retrieve", "patch_prompt")
+async def test_empty_draft_short_circuits_verify(
+    fake_llm: FakeLLM,
+) -> None:
+    """An answer-stage refusal — `DraftAnswer.claims == []` — must short-
+    circuit the verify node instead of calling the model with an empty
+    `Draft (indexed):` section.
+
+    Why: `VerificationResult.grounded`/`ungrounded` are unbounded
+    `list[int]`. With xgrammar's strict JSON-schema mode and a prompt
+    that has no claims to bound the indices, the model can degenerate
+    into a runaway integer emission (`grounded: [0, 1, 2, ...]+`) that
+    hits `max_tokens` with `finish_reason: length` → schema validation
+    fails → ModelCallError. The short-circuit fixes the pathology AND
+    saves a useless round-trip — an empty draft is the refusal signal
+    from the answer stage; downstream `compose` routes to refuse.
+    """
+    fake_llm.respond(
+        "assess_sufficiency",
+        SufficiencyAssessment,
+        SufficiencyAssessment(sufficient=True, reason="ok"),
+    )
+    # Answer node legitimately returns zero claims — the literal-
+    # presence rule in answer/v2 fires for queries whose answer
+    # isn't in the chunks.
+    fake_llm.respond(
+        "answer",
+        DraftAnswer,
+        DraftAnswer(summary="No literal answer in chunks.", claims=[]),
+    )
+
+    response = await answer_query("What is the FP128 energy cost?")
+
+    assert response.answered is False
+    assert response.claims == []
+    schemas_called = {schema for (_p, schema) in fake_llm.calls}
+    assert DraftAnswer in schemas_called  # answer node DID fire
+    assert VerificationResult not in schemas_called  # verify DIDN'T
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_retrieve", "patch_prompt")
 async def test_ungrounded_triggers_regeneration_then_succeeds(
     fake_llm: FakeLLM,
     monkeypatch: pytest.MonkeyPatch,
