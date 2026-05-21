@@ -88,24 +88,27 @@ If the box is shared and you want vLLM running under a dedicated `memex` system 
 
 The trade-offs: needs root for install, but boots before any user logs in. For most single-user laptops/desktops, the user unit is enough.
 
-## The full stack — web + MCP as sibling units
+## The full stack — web + MCP + watcher as sibling units
 
-Beyond the vLLM daemon you can run two more services under the same supervisor: the FastAPI/HTMX web UI (`memex serve web`) and the MCP server (`memex serve mcp --transport http`). Both have sibling templates in this directory:
+Beyond the vLLM daemon you can run three more services under the same supervisor: the FastAPI/HTMX web UI (`memex serve web`), the MCP server (`memex serve mcp --transport http`), and the vault watcher (`memex watch`). All have sibling templates in this directory:
 
-| Unit | Template | Env file | Default bind | Notes |
+| Unit | Template | Env file | Default bind / scope | Notes |
 |---|---|---|---|---|
 | `memex-vllm.service` | [`memex-vllm.service`](memex-vllm.service) | [`memex-vllm.env`](memex-vllm.env) | `127.0.0.1:8000` | The OpenAI-compatible inference endpoint |
 | `memex-web.service` | [`memex-web.service`](memex-web.service) | [`memex-web.env`](memex-web.env) | `127.0.0.1:7423` | Browser UI (single-user / loopback only) |
 | `memex-mcp.service` | [`memex-mcp.service`](memex-mcp.service) | [`memex-mcp.env`](memex-mcp.env) | `127.0.0.1:7424` | MCP HTTP transport; requires a token to bind non-loopback |
+| `memex-watch.service` | [`memex-watch.service`](memex-watch.service) | [`memex-watch.env`](memex-watch.env) | (no socket) | Watches `vault/documents/*.md`; re-enriches + re-indexes on edit |
 
-Install all three at once:
+Install everything at once:
 
 ```sh
 # From the repo root
 mkdir -p ~/.config/systemd/user ~/.config/memex ~/.local/state/memex
-cp docs/deploy/memex-vllm.service docs/deploy/memex-web.service docs/deploy/memex-mcp.service \
+cp docs/deploy/memex-vllm.service docs/deploy/memex-web.service \
+   docs/deploy/memex-mcp.service docs/deploy/memex-watch.service \
    ~/.config/systemd/user/
-cp docs/deploy/memex-vllm.env docs/deploy/memex-web.env docs/deploy/memex-mcp.env \
+cp docs/deploy/memex-vllm.env docs/deploy/memex-web.env \
+   docs/deploy/memex-mcp.env docs/deploy/memex-watch.env \
    ~/.config/memex/
 
 # If you want MCP HTTP, generate a token + drop it into the env file:
@@ -115,25 +118,30 @@ echo "MEMEX_MCP__AUTH_TOKEN=$(uv run memex mcp generate-token)" \
 # Edit each unit so WorkingDirectory + ExecStart point at your clone,
 # then:
 systemctl --user daemon-reload
-systemctl --user enable --now memex-vllm.service memex-web.service memex-mcp.service
+systemctl --user enable --now memex-vllm.service memex-web.service \
+                              memex-mcp.service  memex-watch.service
 ```
 
 ### Dependency ordering
 
-The web + MCP units both carry `After=memex-vllm.service` + `Wants=memex-vllm.service`. systemd boots vLLM first, then web + MCP in parallel; on `systemctl --user start memex-web`, vLLM is implicitly started too.
+Web, MCP, and watch all carry `After=memex-vllm.service` + `Wants=memex-vllm.service`. systemd boots vLLM first, then the three downstream units in parallel; on `systemctl --user start memex-web`, vLLM is implicitly started too.
 
-The dependency is intentionally *soft*. Web + MCP boot fine even if vLLM is down — the document browser, graph view, and search/get_document/list_documents tools all work without an LLM. Only `/ask` queries (web) and the `ask` tool (MCP) fail when vLLM is unreachable. That's the right trade-off: a single CUDA OOM on the inference side shouldn't take down the entire stack.
+The dependency is intentionally *soft*. Web + MCP boot fine even if vLLM is down — the document browser, graph view, and search/get_document/list_documents tools all work without an LLM. Only `/ask` queries (web), the `ask` tool (MCP), and the re-enrich phase of an edit reaction (watcher) fail when vLLM is unreachable. A single CUDA OOM on the inference side shouldn't take the rest of the stack offline.
 
 `Type=simple` means systemd considers vLLM "started" the instant the process forks, not when the endpoint is actually reachable. In practice the 20-second cold-boot window is short enough that downstream callers see a clean "Connection refused" → retry rather than a hung tool call. If you want hard ordering with reachability checks, a `Type=notify` integration is the proper fix (out of scope for these templates).
+
+### Why run the watcher?
+
+If you only ever ingest documents in batches via `memex ingest path/to/*.pdf`, the parse stage triggers enrich + index inline and the watcher has no work to do — skip the unit. The watcher earns its keep when you edit canonical markdown by hand (the web UI's `/review` flow, an editor, or a sync tool dropping new files into `vault/documents/`) and want those edits to flow into the entity graph + the chunk index without manually re-running anything.
 
 ### Watching the full stack
 
 ```sh
-# Tail all three at once
-journalctl --user -u memex-vllm -u memex-web -u memex-mcp -f
+# Tail all four at once
+journalctl --user -u memex-vllm -u memex-web -u memex-mcp -u memex-watch -f
 
 # Status overview
-systemctl --user status memex-vllm memex-web memex-mcp --no-pager
+systemctl --user status memex-vllm memex-web memex-mcp memex-watch --no-pager
 ```
 
 ## What's not covered here

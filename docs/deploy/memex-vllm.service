@@ -24,6 +24,10 @@ Description=Memex vLLM orchestrator (Qwen3-8B-AWQ via vllm serve)
 Documentation=https://github.com/Zenetusken/memex/blob/main/docs/deploy/systemd.md
 After=network-online.target
 Wants=network-online.target
+# Throttle restart-on-failure to 5 attempts per 60 s; beyond that the
+# unit lands in `failed` and stops trying. Inspect with `journalctl`.
+StartLimitIntervalSec=60
+StartLimitBurst=5
 # If your distro ships it, uncomment to ensure NVIDIA persistence is
 # settled before vLLM tries to touch the GPU.
 # After=nvidia-persistenced.service
@@ -51,8 +55,6 @@ TimeoutStartSec=300
 # stops). Throttle: at most 5 restarts in 60 s before giving up.
 Restart=on-failure
 RestartSec=5
-StartLimitIntervalSec=60
-StartLimitBurst=5
 
 # Send stdout + stderr to journald.
 StandardOutput=journal
@@ -73,7 +75,8 @@ TimeoutStopSec=30
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
-ProtectHome=false   # vault + repo live in $HOME, the daemon needs them
+# Vault + repo live in $HOME, so ProtectHome stays off.
+ProtectHome=false, the daemon needs them
 
 [Install]
 WantedBy=default.target

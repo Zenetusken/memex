@@ -33,6 +33,8 @@ Description=Memex MCP server (HTTP transport)
 Documentation=https://github.com/Zenetusken/memex/blob/main/docs/deploy/mcp-http.md
 After=network-online.target memex-vllm.service
 Wants=network-online.target memex-vllm.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -50,8 +52,6 @@ TimeoutStartSec=30
 
 Restart=on-failure
 RestartSec=2
-StartLimitIntervalSec=60
-StartLimitBurst=5
 
 StandardOutput=journal
 StandardError=journal
@@ -64,7 +64,8 @@ TimeoutStopSec=10
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
-ProtectHome=false   # vault + repo live in $HOME
+# Vault + repo live in $HOME, so ProtectHome stays off.
+ProtectHome=false
 
 [Install]
 WantedBy=default.target

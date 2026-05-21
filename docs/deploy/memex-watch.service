@@ -1,0 +1,71 @@
+# Memex vault watcher — user systemd unit template.
+#
+# Runs `memex watch`: a long-lived filesystem watcher over
+# `vault/documents/*.md` that re-enriches + re-indexes any edited
+# document so the live vault never drifts away from its indexes.
+# Triggers entity extraction (vLLM) + embedding (in-process), so it
+# soft-depends on memex-vllm.service.
+#
+# Install with:
+#
+#     mkdir -p ~/.config/systemd/user ~/.config/memex
+#     cp docs/deploy/memex-watch.service ~/.config/systemd/user/
+#     cp docs/deploy/memex-watch.env     ~/.config/memex/memex-watch.env
+#     # Edit the paths below to match your clone, then:
+#     systemctl --user daemon-reload
+#     systemctl --user enable --now memex-watch.service
+#
+# Tail with `journalctl --user -u memex-watch -f`. The watcher emits
+# one INFO log per re-enrich + re-index cycle (`watch.reaction.start`,
+# `enrich.done`, `index.done`).
+#
+# When NOT to run this: if you only ever ingest documents in batches
+# via `memex ingest path/to/*.pdf`, the parse stage triggers enrich +
+# index inline and the watcher has nothing to do. The watcher earns
+# its keep when you edit canonical markdown by hand (via the web UI's
+# /review flow, an editor, or another tool) and want those edits to
+# flow into the indexes without manually re-running anything.
+
+[Unit]
+Description=Memex vault watcher (re-enrich + re-index on markdown edits)
+Documentation=https://github.com/Zenetusken/memex/blob/main/docs/deploy/systemd.md
+After=network-online.target memex-vllm.service
+Wants=memex-vllm.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+
+# ── EDIT THESE PATHS to match your clone ────────────────────────────
+WorkingDirectory=%h/project/Doc_Flo
+ExecStart=%h/.local/bin/uv run memex watch
+
+EnvironmentFile=%h/.config/memex/memex-watch.env
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+# Watcher boot includes loading the embedder lazily on first edit,
+# but the initial `memex watch` call returns control quickly after
+# starting the watchdog observer. Short startup timeout is fine.
+TimeoutStartSec=30
+
+# Restart on crashes; clean SIGTERM should NOT restart.
+Restart=on-failure
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=memex-watch
+
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+# Vault + repo live in $HOME, so ProtectHome stays off.
+ProtectHome=false
+
+[Install]
+WantedBy=default.target

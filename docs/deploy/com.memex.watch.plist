@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Memex vault watcher — macOS launchd user-agent template.
+
+  Install with:
+      mkdir -p ~/Library/LaunchAgents ~/.local/state/memex
+      cp docs/deploy/com.memex.watch.plist ~/Library/LaunchAgents/
+      # EDIT the WorkingDirectory + ProgramArguments + EnvironmentVariables
+      # below to match your clone, then:
+      launchctl load -w ~/Library/LaunchAgents/com.memex.watch.plist
+
+  Tail with: tail -f ~/.local/state/memex/watch.{out,err}.log
+
+  The watcher triggers re-enrich (which calls vLLM for entity
+  extraction) + re-index (in-process embedder) on every markdown
+  edit. If you're not running com.memex.vllm.plist, the enrich step
+  will fail and the watcher will log retries — index + the rest of
+  Memex still works.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.memex.watch</string>
+
+  <!-- EDIT: path to your Memex clone. -->
+  <key>WorkingDirectory</key>
+  <string>/Users/YOUR_USER/project/Doc_Flo</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <!-- EDIT: absolute path to your uv binary. -->
+    <string>/Users/YOUR_USER/.local/bin/uv</string>
+    <string>run</string>
+    <string>memex</string>
+    <string>watch</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/Users/YOUR_USER/.local/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <!-- Optional overrides:
+    <key>MEMEX_VAULT_PATH</key>
+    <string>/Users/YOUR_USER/.memex/vault</string>
+    <key>MEMEX_INFERENCE__BASE_URL</key>
+    <string>http://127.0.0.1:8000/v1</string>
+    -->
+  </dict>
+
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/YOUR_USER/.local/state/memex/watch.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/YOUR_USER/.local/state/memex/watch.err.log</string>
+</dict>
+</plist>

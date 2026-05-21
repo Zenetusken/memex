@@ -57,17 +57,18 @@ If you actually need GPU inference on macOS, swap the model out of `MEMEX_VLLM_M
 
 The full template lives at [`com.memex.vllm.plist`](com.memex.vllm.plist).
 
-## The full stack — web + MCP as sibling agents
+## The full stack — web + MCP + watcher as sibling agents
 
-This directory also ships templates for the web UI and the MCP HTTP server:
+This directory also ships templates for the web UI, the MCP HTTP server, and the vault watcher:
 
-| Agent | Template | Default bind | Notes |
+| Agent | Template | Default bind / scope | Notes |
 |---|---|---|---|
-| `com.memex.vllm` | [`com.memex.vllm.plist`](com.memex.vllm.plist) | `127.0.0.1:8000` | The OpenAI-compatible inference endpoint |
-| `com.memex.web`  | [`com.memex.web.plist`](com.memex.web.plist)   | `127.0.0.1:7423` | Browser UI (single-user / loopback only) |
-| `com.memex.mcp`  | [`com.memex.mcp.plist`](com.memex.mcp.plist)   | `127.0.0.1:7424` | MCP HTTP transport; requires a bearer token in `EnvironmentVariables` |
+| `com.memex.vllm`  | [`com.memex.vllm.plist`](com.memex.vllm.plist)   | `127.0.0.1:8000` | The OpenAI-compatible inference endpoint |
+| `com.memex.web`   | [`com.memex.web.plist`](com.memex.web.plist)     | `127.0.0.1:7423` | Browser UI (single-user / loopback only) |
+| `com.memex.mcp`   | [`com.memex.mcp.plist`](com.memex.mcp.plist)     | `127.0.0.1:7424` | MCP HTTP transport; requires a bearer token in `EnvironmentVariables` |
+| `com.memex.watch` | [`com.memex.watch.plist`](com.memex.watch.plist) | (no socket)      | Watches `vault/documents/*.md`; re-enriches + re-indexes on edit |
 
-Install all three:
+Install all four:
 
 ```sh
 mkdir -p ~/Library/LaunchAgents ~/.local/state/memex
@@ -82,9 +83,12 @@ uv run memex mcp generate-token
 launchctl load -w ~/Library/LaunchAgents/com.memex.vllm.plist
 launchctl load -w ~/Library/LaunchAgents/com.memex.web.plist
 launchctl load -w ~/Library/LaunchAgents/com.memex.mcp.plist
+launchctl load -w ~/Library/LaunchAgents/com.memex.watch.plist
 ```
 
-launchd has no native dependency ordering between agents — they all boot at login simultaneously. The web + MCP services tolerate a not-yet-reachable vLLM (the agent's retry path catches it); a hard "wait until reachable" sequence would need a wrapper script or a launchd `RunAtLoad=false` + manual `launchctl start` cascade. For a dev box this is rarely worth the complexity.
+launchd has no native dependency ordering between agents — they all boot at login simultaneously. The web, MCP, and watch services tolerate a not-yet-reachable vLLM (the agent's retry path catches it); a hard "wait until reachable" sequence would need a wrapper script or a launchd `RunAtLoad=false` + manual `launchctl start` cascade. For a dev box this is rarely worth the complexity.
+
+Skip the watch agent if you only ingest documents in batches (`memex ingest`) and never edit markdown by hand — the parse stage triggers enrich + index inline and the watcher has no work to do.
 
 ## What's not covered here
 
