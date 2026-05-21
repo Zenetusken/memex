@@ -338,9 +338,19 @@ async def _expand_graph_impl(state: AnswerState) -> AnswerStateUpdate:
 
 async def rerank(state: AnswerState) -> AnswerStateUpdate:
     """Second-stage reranking with bge-reranker-v2-m3."""
+    import os
+
     log = logger.bind(node="rerank")
     log.info("start", candidate_count=len(state.candidates))
-    reranked = await cross_encoder_rerank(state.query, state.candidates, top_k=10)
+    # top_k=10 fits the 4096-token assembly budget for ~600-word chunks
+    # (typical Docling output). PyMuPDF chunks tend to be denser; on
+    # tight contexts, drop to 5 via MEMEX_RERANK_TOP_K.
+    try:
+        top_k = int(os.environ.get("MEMEX_RERANK_TOP_K", "10"))
+    except ValueError:
+        top_k = 10
+    top_k = max(1, top_k)
+    reranked = await cross_encoder_rerank(state.query, state.candidates, top_k=top_k)
     log.info("done", reranked_count=len(reranked))
     return {
         "reranked": reranked,

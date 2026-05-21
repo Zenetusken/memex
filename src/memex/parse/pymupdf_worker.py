@@ -72,6 +72,30 @@ _LIST_RE = re.compile(r"^(\s*[-*+]\s|\s*\d+\.\s)", re.MULTILINE)
 _TABLE_RE = re.compile(r"^\|.*\|\s*$", re.MULTILINE)
 _CODE_FENCE_RE = re.compile(r"^```", re.MULTILINE)
 _WORD_LIKE_RE = re.compile(r"\b[A-Za-z]{2,15}\b")
+# pymupdf4llm emits `<br>`-joined runs inside "picture text" blocks
+# (chart axis labels, screenshot annotations, etc). For the chunker
+# downstream, these need to be paragraph breaks — otherwise a single
+# chart's data ends up as one massive paragraph that bypasses the
+# 600-token target and produces chunks that exceed the reranker's
+# attention window.
+_BR_RUN_RE = re.compile(r"(?:\s*<br\s*/?>\s*){1,}")
+
+
+def _normalise_breaks(text: str) -> str:
+    """Convert `<br>` runs to paragraph breaks.
+
+    pymupdf4llm renders text extracted from inside images as a single
+    `<br>`-joined run (chart labels, screenshot text, diagram
+    annotations). The downstream chunker uses double-newline as the
+    paragraph boundary; a `<br>`-joined block of 50+ items becomes one
+    paragraph that bypasses the chunker's size cap and produces chunks
+    too large for the reranker's attention window. Turning each `<br>`
+    run into `\\n\\n` keeps the data points addressable while letting
+    the chunker bundle them into reasonable-sized windows.
+    """
+    if "<br" not in text:
+        return text
+    return _BR_RUN_RE.sub("\n\n", text)
 
 
 def _safe_meta(doc: Any, key: str) -> str | None:
@@ -319,10 +343,17 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
             # Older API path — single string, no per-page split. Wrap
             # into a single-chunk list so downstream is uniform.
             chunks: list[dict[str, Any]] = [
-                {"text": chunks_raw, "metadata": {"page": 0}}
+                {"text": _normalise_breaks(chunks_raw), "metadata": {"page": 0}}
             ]
         else:
-            chunks = [c for c in chunks_raw if isinstance(c, dict)]
+            chunks = []
+            for c in chunks_raw:
+                if not isinstance(c, dict):
+                    continue
+                text_val = c.get("text")
+                if isinstance(text_val, str):
+                    c = {**c, "text": _normalise_breaks(text_val)}
+                chunks.append(c)
 
         pages: list[dict[str, Any]] = []
         markdown_parts: list[str] = []

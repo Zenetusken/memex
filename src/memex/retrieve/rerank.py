@@ -9,6 +9,7 @@ hardware settings.
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Any
 
 import structlog
@@ -31,17 +32,26 @@ async def cross_encoder_rerank(
     log = logger.bind(candidates=len(candidates), top_k=top_k)
     log.info("rerank.start")
 
+    # batch_size=64 tuned for bge-reranker-v2-m3 on Ada per the CUDA
+    # audit; sentence-transformers' default of 32 is too low for the
+    # typical top-50 candidate pool. On tight-VRAM rigs (12 GB) with
+    # large chunks (PyMuPDF-extracted), drop to 16-32 via
+    # MEMEX_RERANK_BATCH_SIZE to free ~300-500 MB during the forward
+    # pass — the cost is a slightly longer rerank wall-time.
+    try:
+        batch_size = int(os.environ.get("MEMEX_RERANK_BATCH_SIZE", "64"))
+    except ValueError:
+        batch_size = 64
+    batch_size = max(1, batch_size)
+
     registry = get_registry()
     async with registry.use("reranker") as reranker:
         pairs = [(query, c.text) for c in candidates]
 
         def _predict() -> Any:
-            # batch_size=64 tuned for bge-reranker-v2-m3 on Ada per the
-            # CUDA audit; sentence-transformers' default of 32 is too low
-            # for the typical top-50 candidate pool.
             return reranker.predict(
                 pairs,
-                batch_size=64,
+                batch_size=batch_size,
                 show_progress_bar=False,
                 convert_to_numpy=True,
             )
