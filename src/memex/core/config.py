@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -144,6 +144,29 @@ class ParseSettings(BaseModel):
     pymupdf_sandbox_network: bool = True
 
 
+class McpSettings(BaseModel):
+    """MCP server knobs — see docs/deploy/mcp-http.md.
+
+    When `auth_token` is set, `memex serve mcp --transport http`
+    requires `Authorization: Bearer <token>` on every request,
+    verified via constant-time comparison. When unset, the HTTP
+    transport refuses to bind a non-loopback address at startup,
+    and warns-but-runs on loopback as a developer affordance.
+
+    Generate a token with `memex mcp generate-token` and put the
+    output in `MEMEX_MCP__AUTH_TOKEN` (env) or
+    `~/.config/memex/config.toml` (`[mcp] auth_token = "…"`). One
+    token = full access to all MCP tools; rotate by setting a new
+    value and restarting the server. Out of scope here: OAuth,
+    mTLS, token expiry, multi-token / scoped access. Put a reverse
+    proxy in front if you need those.
+
+    stdio transport is unaffected — auth only applies to HTTP.
+    """
+
+    auth_token: SecretStr | None = None
+
+
 class IndexSettings(BaseModel):
     """Indexing knobs — chunker target sizes.
 
@@ -233,6 +256,7 @@ class MemexSettings(BaseSettings):
     ingest: IngestSettings = Field(default_factory=IngestSettings)
     parse: ParseSettings = Field(default_factory=ParseSettings)
     index: IndexSettings = Field(default_factory=IndexSettings)
+    mcp: McpSettings = Field(default_factory=McpSettings)
 
     model_config = SettingsConfigDict(
         toml_file=str(Path.home() / ".config" / "memex" / "config.toml"),

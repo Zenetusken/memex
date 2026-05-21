@@ -13,6 +13,7 @@ server" and IMPLEMENTATION-PLAN.md §1.9.
 # integration tests. Callers that want the instance import it
 # explicitly: `from memex.mcp.server import server`.
 
+from memex.mcp.auth import BearerAuthMiddleware, is_loopback, validate_bind
 from memex.mcp.server import (
     ask,
     get_document,
@@ -23,10 +24,13 @@ from memex.mcp.server import (
 )
 
 __all__ = [
+    "BearerAuthMiddleware",
     "ask",
     "get_document",
+    "is_loopback",
     "list_documents_tool",
     "search",
     "serve_http",
     "serve_stdio",
+    "validate_bind",
 ]
