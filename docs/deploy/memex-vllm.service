@@ -34,7 +34,15 @@ StartLimitBurst=5
 # Wants=nvidia-persistenced.service
 
 [Service]
-Type=simple
+# Type=notify so downstream units (web, MCP, watcher) only see vLLM
+# as "active" once it's genuinely serving /v1/models, not just when
+# the process forked. The serve script (scripts/serve-vllm.sh)
+# spawns a backgrounded sidecar that polls the endpoint and calls
+# `systemd-notify --ready` on first 2xx.
+Type=notify
+# NotifyAccess=all because the sidecar isn't the main PID (vllm is).
+# Safe inside this user unit's cgroup.
+NotifyAccess=all
 
 # ── EDIT THESE PATHS to match your clone ────────────────────────────
 WorkingDirectory=%h/project/Doc_Flo

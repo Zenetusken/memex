@@ -68,7 +68,7 @@ The user-unit path is the recommended setup: no root required, runs under your a
 
 ## What the unit does
 
-- **`Type=simple`** — systemd considers the service running as soon as the ExecStart process forks; vLLM is healthy when the OpenAI-compatible endpoint becomes reachable (~40 s on the reference RTX 4070).
+- **`Type=notify`** — `scripts/serve-vllm.sh` spawns a backgrounded sidecar that polls `http://$HOST:$PORT/v1/models` and calls `systemd-notify --ready --status="vLLM serving at …"` on the first 2xx. systemd then marks the unit `active`; downstream units waiting on `After=memex-vllm.service` get a genuine readiness signal, not a process-forked-but-not-listening race. The sidecar no-ops if `$NOTIFY_SOCKET` is unset (i.e. when the script is invoked manually or via `memex daemon start`), so the dev / Pattern B flows are unaffected.
 - **`Restart=on-failure`** — only crashes trigger a restart. A clean `systemctl stop` doesn't loop.
 - **`StartLimitBurst=5` / `StartLimitIntervalSec=60`** — five restarts per minute is the ceiling; beyond that systemd gives up and the unit enters `failed`. Check `journalctl` to see why.
 - **`TimeoutStartSec=300`** — five-minute window for first-time weight downloads or slow disks. Subsequent boots are bound by `MEMEX_VLLM_GPU_FRACTION` + CUDA-graph capture, both <40 s.
@@ -128,7 +128,7 @@ Web, MCP, and watch all carry `After=memex-vllm.service` + `Wants=memex-vllm.ser
 
 The dependency is intentionally *soft*. Web + MCP boot fine even if vLLM is down — the document browser, graph view, and search/get_document/list_documents tools all work without an LLM. Only `/ask` queries (web), the `ask` tool (MCP), and the re-enrich phase of an edit reaction (watcher) fail when vLLM is unreachable. A single CUDA OOM on the inference side shouldn't take the rest of the stack offline.
 
-`Type=simple` means systemd considers vLLM "started" the instant the process forks, not when the endpoint is actually reachable. In practice the 20-second cold-boot window is short enough that downstream callers see a clean "Connection refused" → retry rather than a hung tool call. If you want hard ordering with reachability checks, a `Type=notify` integration is the proper fix (out of scope for these templates).
+**The vLLM unit is `Type=notify`** (since FU3.2.1) — `scripts/serve-vllm.sh` spawns a backgrounded sidecar that calls `systemd-notify --ready` once `/v1/models` responds, so `After=memex-vllm.service` on the downstream units is a real readiness gate, not just process-forked-then-keep-going ordering. The 20–30 s cold-boot window happens *before* systemd marks vLLM active; web + MCP + watcher only start after the orchestrator is genuinely serving, so the very first inference call doesn't race a not-yet-bound socket. Verify with `journalctl --user -u memex-vllm | grep ready` after a fresh start.
 
 ### Why run the watcher?
 

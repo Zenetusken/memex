@@ -56,6 +56,36 @@ unset VLLM_FLASH_ATTN_VERSION || true
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# ── systemd-notify readiness gate (FU3.2.1) ─────────────────────────
+# When this script runs under a Type=notify unit, $NOTIFY_SOCKET is
+# set. Spawn a backgrounded poller that calls `systemd-notify --ready`
+# once vLLM's OpenAI endpoint is genuinely reachable. systemd then
+# only marks the unit `active` after that, so `After=memex-vllm.service`
+# on downstream units (web, MCP, watcher) becomes a real readiness
+# gate — not just "the process forked" ordering. No-op when
+# $NOTIFY_SOCKET is unset, so the manual / `memex daemon start` /
+# Pattern B / Pattern C flows are unaffected.
+if [ -n "${NOTIFY_SOCKET:-}" ]; then
+    if command -v systemd-notify >/dev/null 2>&1; then
+        (
+            # Brief grace so we don't race the `exec` below.
+            sleep 1
+            # Poll until vLLM answers /v1/models. systemd's
+            # TimeoutStartSec=300 (set on the unit) caps the wait —
+            # no second timeout here so the budgets don't compete.
+            until curl -sf "http://${HOST}:${PORT}/v1/models" \
+                       >/dev/null 2>&1; do
+                sleep 1
+            done
+            systemd-notify --ready \
+                --status="vLLM serving at ${HOST}:${PORT}"
+        ) &
+    else
+        echo "serve-vllm.sh: NOTIFY_SOCKET set but systemd-notify" \
+             "binary not found; readiness gating disabled." >&2
+    fi
+fi
+
 # Run through `uv` so the project's venv (with the pinned cu129 torch
 # and vllm>=0.21,<0.22) is used regardless of the caller's shell state.
 # Falls back to a bare `vllm serve` if uv isn't on PATH so a manually
