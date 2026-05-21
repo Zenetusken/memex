@@ -215,3 +215,81 @@ def test_server_has_registered_the_five_tools() -> None:
         "list_documents",
         "get_graph_neighbors",
     } <= names
+
+
+# ----- HTTP transport: bind validation + auth wiring -----
+
+
+@pytest.mark.asyncio
+async def test_serve_http_refuses_non_loopback_without_token(
+    settings: MemexSettings,
+) -> None:
+    """Non-loopback bind + no auth_token → ConfigurationError before
+    any server starts. The default `settings` fixture leaves auth_token
+    unset, so `validate_bind` should trip immediately.
+    """
+    from memex.core.errors import ConfigurationError
+    from memex.mcp.server import serve_http
+
+    with pytest.raises(ConfigurationError) as exc:
+        await serve_http(host="0.0.0.0", port=7424)
+    assert exc.value.context["host"] == "0.0.0.0"
+    assert "MEMEX_MCP__AUTH_TOKEN" in exc.value.context["fix"]
+
+
+@pytest.mark.asyncio
+async def test_serve_http_wraps_app_with_bearer_middleware_when_token_set(
+    tmp_vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When `auth_token` is configured, `serve_http` must wrap the
+    FastMCP ASGI app with `BearerAuthMiddleware` before handing it to
+    uvicorn. We verify by intercepting the uvicorn.Server.serve call:
+    the captured app's middleware stack must contain BearerAuthMiddleware
+    and respond 401 on an unauthenticated request via TestClient.
+    """
+    monkeypatch.setenv("MEMEX_VAULT_PATH", str(tmp_vault))
+    monkeypatch.setenv("MEMEX_OBSERVABILITY__LANGFUSE_ENABLED", "false")
+    monkeypatch.setenv("MEMEX_MCP__AUTH_TOKEN", "verify-this-token")
+    s = MemexSettings()  # type: ignore[call-arg]
+    set_settings(s)
+    try:
+        # Capture the uvicorn.Server.serve invocation without binding a
+        # socket. The app is reachable via the captured Config.
+        captured: dict[str, Any] = {}
+
+        class _FakeServer:
+            def __init__(self, config: Any) -> None:
+                captured["config"] = config
+
+            async def serve(self) -> None:
+                # Don't actually run; serve_http awaits this — return
+                # immediately so the test completes.
+                return None
+
+        monkeypatch.setattr("uvicorn.Server", _FakeServer)
+
+        from memex.mcp.server import serve_http
+
+        await serve_http(host="127.0.0.1", port=18001)
+
+        config = captured["config"]
+        app = config.app
+        # The middleware should be in the stack. Starlette stores
+        # user-added middleware on `app.user_middleware`.
+        from memex.mcp.auth import BearerAuthMiddleware
+
+        middleware_classes = [m.cls for m in app.user_middleware]
+        assert BearerAuthMiddleware in middleware_classes
+
+        # Mount the (real) app in a TestClient and verify the auth gate
+        # actually fires. `streamable_http_app` exposes routes under
+        # `/mcp`; an unauthenticated GET on any path under there
+        # should return 401.
+        from starlette.testclient import TestClient
+
+        with TestClient(app) as client:
+            resp = client.get("/mcp/")
+            assert resp.status_code == 401
+            assert resp.headers["WWW-Authenticate"].startswith("Bearer")
+    finally:
+        set_settings(None)

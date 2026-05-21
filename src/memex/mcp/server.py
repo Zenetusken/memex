@@ -27,6 +27,7 @@ from mcp.server.fastmcp import FastMCP
 from memex.agents.answering import FinalResponse, answer_query
 from memex.core.config import get_settings
 from memex.core.types import Chunk
+from memex.mcp.auth import BearerAuthMiddleware, validate_bind
 from memex.retrieve import cross_encoder_rerank, hybrid_search
 from memex.vault.store import (
     DocumentRef,
@@ -175,13 +176,47 @@ async def serve_stdio() -> None:
 
 
 async def serve_http(host: str = "127.0.0.1", port: int = 7424) -> None:
-    """Run the MCP server over streamable HTTP. Bind to localhost only
-    unless you have a Phase 4 auth model in place — there is no
-    authentication on this transport today.
+    """Run the MCP server over streamable HTTP.
+
+    When `McpSettings.auth_token` is set (env: MEMEX_MCP__AUTH_TOKEN),
+    every request must carry `Authorization: Bearer <token>` and
+    `BearerAuthMiddleware` rejects everything else with 401. When the
+    token is unset, the bind is restricted: loopback hosts get a
+    startup WARN and run unauthenticated; non-loopback hosts are
+    refused at startup via `validate_bind`. See docs/deploy/mcp-http.md.
     """
-    # FastMCP exposes its uvicorn config via `.settings`; mutate before
-    # calling `run_streamable_http_async`.
+    settings = get_settings()
+    has_token = settings.mcp.auth_token is not None
+    validate_bind(host, has_token=has_token)
+
     server.settings.host = host
     server.settings.port = port
-    logger.info("mcp.serve.http.start", host=host, port=port)
-    await server.run_streamable_http_async()
+
+    if not has_token:
+        logger.warning(
+            "mcp.serve.http.unauthenticated",
+            host=host,
+            port=port,
+            hint=(
+                "set MEMEX_MCP__AUTH_TOKEN to require Bearer auth; "
+                "this loopback-only mode is a developer affordance"
+            ),
+        )
+        logger.info("mcp.serve.http.start", host=host, port=port, auth=False)
+        await server.run_streamable_http_async()
+        return
+
+    # Authenticated path: wrap the FastMCP ASGI app with bearer-auth
+    # middleware and serve via uvicorn directly. FastMCP's
+    # `run_streamable_http_async` builds the app + runs uvicorn in one
+    # call; we split that here so the middleware can layer on between.
+    import uvicorn
+
+    app = server.streamable_http_app()
+    app.add_middleware(
+        BearerAuthMiddleware,
+        expected_token=settings.mcp.auth_token.get_secret_value(),
+    )
+    logger.info("mcp.serve.http.start", host=host, port=port, auth=True)
+    config = uvicorn.Config(app, host=host, port=port, log_level="info")
+    await uvicorn.Server(config).serve()
