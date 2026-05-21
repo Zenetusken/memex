@@ -19,8 +19,9 @@ The blueprint in [`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) is the archi
 | Bug-hunt audit | Four-agent fan-out → ~70 findings → 30+ fixes | ✅ **Shipped + verified** (2026-05-20) |
 | End-to-end on real rig | Install + Qwen3-8B-AWQ + 109-page PDF + load test + OCR A/B | ✅ **Verified** (2026-05-20) |
 | **P1.1** | **PyMuPDF4LLM pre-filter with tiered routing classifier** | ✅ **Shipped + live-verified** (2026-05-21) |
+| **P1.6** | **Chunker tuning + rerank-batch default for dense PyMuPDF chunks** | ✅ **Shipped + live-verified** (2026-05-21) |
 
-**File count:** 77 Python files in `src/memex/` + `tests/` + `scripts/`, all parse-clean. 7 ADRs. 8 audit reports under `docs/audits/`. 27 commits on `main` (public at `github.com/Zenetusken/memex`).
+**File count:** 77 Python files in `src/memex/` + `tests/` + `scripts/`, all parse-clean. 7 ADRs. 8 audit reports under `docs/audits/`. 30 commits on `main` (public at `github.com/Zenetusken/memex`).
 
 **Test suite:** 106/106 green on the reference rig (88 pre-existing + 12 classifier-unit + 6 PyMuPDF-integration). Linux + pyseccomp; 104/106 + 2 seccomp-skipped on environments without privileged seccomp.
 
@@ -98,7 +99,7 @@ PDFs now run through a tiered classifier before Docling. Producer metadata is th
 3. **MCP HTTP auth model** — `memex serve mcp --transport http` binds to localhost with no auth. Required before exposing to anything beyond the loopback: bearer token? mTLS? OAuth flow? Pick one + document it; the `serve mcp` CLI already has the bind-host knob.
 4. **Annotation UI 409 conflict surface** — `/review` currently last-write-wins on stale-sha edits. Add a 409 + inline diff UI so concurrent edits don't silently clobber each other. (Audit fix landed the manifest-before-write race; this is the user-facing surfacing.)
 5. **Vault concurrency hardening** — per-doc `asyncio.Lock` shipped in `vault/store.py`, but cross-process `fcntl.LOCK_EX` for users running `memex` in two terminals simultaneously is still TBD.
-6. **Chunker tuning for dense PyMuPDF output** — PyMuPDF's per-chunk text is denser than Docling's (more structure preserved). With `TARGET_TOKENS=600`, the default `top_k=10` reranked-chunk assembly overflows vLLM's 4096-token context. Today the workaround is `MEMEX_RERANK_TOP_K=4` for tight rigs. Better fix: drop `TARGET_TOKENS` to ~400 specifically for PyMuPDF-engine docs, or bump vLLM's `max-model-len` to 8192 (costs KV cache, gated on memory budget).
+6. ~~**Chunker tuning for dense PyMuPDF output**~~ — ✅ **Shipped 2026-05-21** (commits `bd948e4`, `e514d7c`, `fdf4d00`). `IndexSettings.chunk_target_tokens` defaults to 400 (was 600); `MEMEX_INDEX__CHUNK_TARGET_TOKENS` env-tunable. PyMuPDF marker stripping: `==> picture [...] intentionally omitted <==` lines deleted, `Start/End of picture text` boundaries compacted to `[chart-text]` / `[/chart-text]` tags — 21 % markdown shrinkage on the canonical deck. Default `MEMEX_RERANK_BATCH_SIZE` lowered 64 → 8 (12 GB rig empirical floor). **Infra fix complete** — default pipeline runs end-to-end at `top_k=10` with no env workarounds. **Quality tradeoff is now eval-corpus-gated**: smaller chunks improve retrieval precision but reduce per-chunk context, which surfaces refusal-rate changes on broad "what is this about" queries. P0 (eval corpus) is the right tool to settle the optimal `chunk_target_tokens` value across a real workload; until then, rigs with `max-model-len >= 8192` can bump back to 600 via env for the pre-P1.6 retrieval behaviour.
 
 ### P2 — eval-gated stack swaps (after P0)
 
@@ -159,8 +160,9 @@ Detailed per-phase log lives in git history + `docs/audits/`. The compressed ver
 - **Multi-agent bug-hunt audit** (2026-05-20): 4 specialist agents in parallel → ~70 findings → ~30 fixes. Reports at `docs/audits/00-synthesis.md` through `04-wiring.md`.
 - **E2E + production tuning** (2026-05-20): cu128 → cu129 migration, Qwen3-8B-AWQ + awq_marlin tuning, OCR-off default, chunk-dedupe in upsert, `/ask` MemexError catch, langfuse-default off, vault-path default, ready banner. Reports at `docs/audits/05–07`.
 - **P1.1 — PyMuPDF4LLM pre-filter** (2026-05-21): subprocess-sandboxed pymupdf worker, rich-signal collection (producer metadata, char distribution, image area, mojibake ratio, markdown structure), tiered classifier (`_classify` in `parse/pipeline.py`) with mixed-content force-OCR routing. `<br>` normalisation in the worker so chart-extracted runs become paragraph breaks. `MEMEX_RERANK_TOP_K` + `MEMEX_RERANK_BATCH_SIZE` env knobs for tight-rig context fit. 18 new tests (12 classifier unit + 6 pipeline integration).
+- **P1.6 — Chunker tuning + rerank-batch default** (2026-05-21): added `IndexSettings` exposing `chunk_target_tokens` (default 400) and `chunk_overlap_tokens` (default 60), both env-tunable. Stripped PyMuPDF's structural metadata in the worker (image-omitted lines deleted; picture-text boundaries compacted to `[chart-text]` tags) — 21 % markdown shrinkage. Lowered default `MEMEX_RERANK_BATCH_SIZE` from 64 → 8 to fit 12 GB rigs running the 8B-AWQ orchestrator. Default pipeline now runs end-to-end at `top_k=10` without env workarounds; the quality side of the chunker tradeoff is eval-corpus-gated.
 
-For the full per-commit log: `git log --oneline` (27 commits as of 2026-05-21).
+For the full per-commit log: `git log --oneline` (30 commits as of 2026-05-21).
 
 ---
 
@@ -187,5 +189,7 @@ Reference for the env-tunable settings landed alongside P1.1:
 | `MEMEX_PARSE__PYMUPDF_MIN_CONFIDENCE` | `0.5` | Lower (0.3) for more aggressive PyMuPDF routing; higher (0.7) to prefer Docling on borderline cases. |
 | `MEMEX_PARSE__PYMUPDF_MIXED_CONTENT_IMAGE_AREA_THRESHOLD` | `0.35` | Lower (0.20) to force-OCR more docs with image-embedded text; higher to be more conservative. |
 | `MEMEX_PARSE__PYMUPDF_MIXED_CONTENT_MIN_IMAGE_HEAVY_PAGES` | `0.30` | Companion gate; both image-area AND image-heavy fractions must trip for mixed-content to fire. |
-| `MEMEX_RERANK_BATCH_SIZE` | `64` | Drop to 16-32 on tight-VRAM rigs (12 GB) with dense chunks — frees ~300-500 MB during the reranker's forward pass. |
-| `MEMEX_RERANK_TOP_K` | `10` | Drop to 4-5 when chunks are large enough that 10 chunks overflow vLLM's `max-model-len` budget. |
+| `MEMEX_INDEX__CHUNK_TARGET_TOKENS` | `400` | Word-count target for the chunker. Default 400 ≈ 520 transformer tokens; raises to 600 on rigs with `max-model-len >= 8192` for pre-P1.6 chunk granularity. |
+| `MEMEX_INDEX__CHUNK_OVERLAP_TOKENS` | `60` | Word-count overlap between chunks. Scales with `chunk_target_tokens`. |
+| `MEMEX_RERANK_BATCH_SIZE` | `8` | bge-reranker pair-batch size. Empirical 12 GB-rig floor with 8B-AWQ resident; bump to 32 or 64 on bigger rigs / smaller orchestrators for ~2-8× rerank throughput. |
+| `MEMEX_RERANK_TOP_K` | `10` | Reranked chunks fed to the agent. Drop to 4-5 if your chunks are large enough that 10 chunks overflow `max-model-len`. |
