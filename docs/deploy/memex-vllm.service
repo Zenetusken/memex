@@ -84,7 +84,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 # Vault + repo live in $HOME, so ProtectHome stays off.
-ProtectHome=false, the daemon needs them
+ProtectHome=false
 
 [Install]
 WantedBy=default.target

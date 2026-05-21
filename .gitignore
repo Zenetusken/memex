@@ -27,6 +27,15 @@ htmlcov/
 .idea/
 .DS_Store
 Thumbs.db
+*.swp
+*.swo
+*.bak
+*.tmp
+
+# Env files — may contain secrets; never commit (.env.example is safe)
+.env
+.env.*
+!.env.example
 
 # Memex-specific
 # User vault data — never commit. Anchored to project root so the
@@ -39,6 +48,15 @@ Thumbs.db
 # Local config (may contain machine-specific paths / keys)
 .memex/
 *.local.toml
+*.local.env
+
+# Restic password files. docs/deploy/backup.md keeps these under
+# ~/.config/memex/, but defensive against the `printf … > restic-password`
+# recipe being accidentally run from inside the repo.
+restic-password*
 
 # Eval run outputs
 tests/eval-results/
+
+# Defensive — not currently used but cheap to ignore
+node_modules/
