@@ -1,6 +1,6 @@
 # Memex Roadmap
 
-**Last updated:** 2026-05-21 (phase wrap — P1 backlog + P3.2 daemon stack + P2.1 infra + P0 rigorous baseline + slide-deck Docling routing + **P2.4 refusal calibration** + **xgrammar empty-draft short-circuit** + **P0 corpus extension to 30 queries** + **retrieval-truncate-budget retune** all shipped; **P2.1 Qwen3-Reranker quality A/B hardware-blocked on 12 GB rig** post-retune (the +1 GB max-model-len bump consumed the headroom that Qwen3-Reranker's 2.1 GB live footprint needed); P3.3 chart-OCR is now the highest-priority next pickup, P4.2 smaller-orchestrator is the direct unblocker for P2.1)
+**Last updated:** 2026-05-21 (phase wrap — P1 backlog + P3.2 daemon stack + P2.1 infra + P0 rigorous baseline + slide-deck Docling routing + **P2.4 refusal calibration** + **xgrammar empty-draft short-circuit** + **P0 corpus extension to 30 queries** + **retrieval-truncate-budget retune** + **P2.1 verdict (cross_encoder wins)** + **P4.2 smaller-orchestrator tier shipped** (Qwen3-4B-AWQ profile eval-verified, hardware-tiers doc shipped) all complete. Next foundational item: P3.3 chart-OCR over Docling figures.)
 
 The blueprint in [`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) is the architectural design — module signatures, cross-cutting concerns, build order. This document is the **operational view**: what is shipped today, what is measured, and what comes next.
 
@@ -145,7 +145,7 @@ These are ready to run once the corpus has the depth to discriminate between can
 ### Tier 5 — design decisions still owed (punt until a user needs it)
 
 - **P4.1 — Wikilink section anchors** (per ADR-0003). `[[doc_id]]` is committed; `[[doc_id#heading]]` is unresolved. Punt until a real cross-doc citation needs it.
-- **P4.2 — 8 GB GPU tier.** ADR-0001 says "no first-class CPU fallback." Should there be a documented 8 GB profile (Qwen3-4B-AWQ + reranker-base + no VLM)? Decision can wait. Note: a smaller orchestrator would also unblock P2.1's quality test on tighter rigs.
+- ~~**P4.2 — 8 GB GPU tier.**~~ ✅ **Shipped 2026-05-21**. Smaller-orchestrator tier (`Qwen/Qwen3-4B-AWQ` + `gpu_fraction=0.50`) eval-verified across 5 sessions (spec → baseline → Qwen3-4B benchmark → Granite 4.1-3B comparison → P2.1 A/B re-run). HARD GATES (refusal_cf=1.0, hallucinations=0) hold on both tiers. Side effect: also unblocked P2.1 (now resolved with cross_encoder winning). Full env-var matrix + per-tier eval numbers documented at [`docs/deploy/hardware-tiers.md`](deploy/hardware-tiers.md).
 - **P4.3 — Trace retention.** `EventBus` has 30-day prune; Langfuse self-host wiring is open. Match retention windows when self-host lands.
 
 ### Recently shipped this phase (foundation cleanup)
@@ -153,16 +153,17 @@ These are ready to run once the corpus has the depth to discriminate between can
 - ✅ **P0 corpus extension to 30 queries** — n=17 answerable queries gives Tier-3 A/Bs statistical signal.
 - ✅ **xgrammar empty-draft short-circuit** — diagnosed + fixed; verify node bypasses model call when draft is empty; insight saved for P3.3 (structured outputs with unbounded array fields need explicit empty-input handling).
 - ✅ **Retrieval truncate-budget retune** — root cause was content-visibility; bumped truncate 700→1800 in prompts, top_k 10→5, max_tokens 1024→640, vLLM max-model-len 4096→6144. Three legitimate REF→ANS flips (Q2, Q7-recovered, Q20); zero new hallucinations.
+- ✅ **P2.1 Qwen3-Reranker quality A/B** — resolved at the 4B stack: cross_encoder wins clearly; default stays unchanged.
+- ✅ **P4.2 smaller-orchestrator tier** — Qwen3-4B-AWQ at gpu_fraction=0.50 ships as the 8 GB tier; eval-verified HARD GATES; full env-var matrix at `docs/deploy/hardware-tiers.md`.
 
 ### Next pickup — ranked by impact × feasibility
 
-1. ~~**🪜 P2.1 Qwen3-Reranker quality A/B**~~ — ✅ **Resolved 2026-05-21**. Initially hardware-blocked on the 12 GB rig at production budget; unblocked by P4.2 Sessions 3-4 (Qwen3-4B-AWQ + gpu_fraction=0.50). **Verdict: cross_encoder (bge-reranker-v2-m3) wins clearly** — median ANS=4 vs qwen3's 0 across 3 head-to-head runs. Qwen3-Reranker promotes thematically-general chunks over the literal-answer chunk; for slide-decks-with-chart-text, cross_encoder's fact-extraction-relevance ranking is markedly better-suited. Default stays `cross_encoder`; qwen3 backend remains opt-in.
-2. **🏗️ P3.3 chart-OCR pass over Docling figures** (Tier 2, multi-session). **Now the highest-priority pickup.** Addresses the Q4/Q16/Q21 residuals (chart-numerics buried in image format). New parse-stage post-processor + DocVQA-class model (Pix2Struct, DePlot, ChartQA). The xgrammar empty-input short-circuit pattern transfers here for safe structured outputs.
-3. **🎯 P0 corpus extension — multi-doc / multi-category** (Tier 2, multi-session). Within-category variance (3-5 slide decks) AND breadth across the other 6 categories.
-4. **🧰 Filler N1/N5** — Tier 1 atomic nits, <1 hour each. Useful when the user wants something contained.
-5. **🪜 P2.2** (Granite vs Qwen3 orchestrator) and **P2.3** (Qwen3-VL vs Qwen2.5-VL) — Tier 3, single-session each. Same VRAM-ceiling concern as P2.1 — check footprints before queuing.
+1. **🏗️ P3.3 chart-OCR pass over Docling figures** (Tier 2, multi-session). **Now the highest-priority pickup.** Addresses the Q4/Q16/Q21 residuals (chart-numerics buried in image format). New parse-stage post-processor + DocVQA-class model (Pix2Struct, DePlot, ChartQA). The xgrammar empty-input short-circuit pattern + the bounded-VerificationResult schema both transfer to this work as mitigation templates.
+2. **🎯 P0 corpus extension — multi-doc / multi-category** (Tier 2, multi-session). Within-category variance (3-5 slide decks) AND breadth across the other 6 categories. The current P4.2 + P2.1 verdicts are sourced from one corpus and one document; multi-doc would test generalisability.
+3. **🧰 Filler N1/N5** — Tier 1 atomic nits, <1 hour each. Useful when a contained scope is wanted.
+4. **🪜 P2.2** (Granite vs Qwen3 at 8B orchestrator level) and **P2.3** (Qwen3-VL vs Qwen2.5-VL VLM swap). Single-session each; both should now respect the bounded-schema + KV-cache-dtype configurability that P4.2 shipped.
 
-Items below (P3.1 benchmark CI / P4.x design decisions, **including P4.2 which directly unblocks P2.1**) stay queued; pickup needs an external trigger or a deliberate scope shift (e.g., 8 GB / smaller-orchestrator tier).
+Items below (P3.1 benchmark CI / P4.1 wikilink anchors / P4.3 trace retention) stay queued; pickup needs an external trigger (GPU runner commit, real cross-doc citation, Langfuse self-host).
 
 ---
 

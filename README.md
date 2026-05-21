@@ -33,7 +33,7 @@ Memex helps you:
 
 | Component | Minimum | Reference rig |
 |---|---|---|
-| GPU | NVIDIA, 12 GB VRAM, Ada Lovelace (sm_89) or newer | RTX 4070 12 GB |
+| GPU | NVIDIA, **8 GB VRAM**, Ada Lovelace (sm_89) or newer | RTX 4070 12 GB |
 | CUDA driver | R570+ (cu129 wheels) | — |
 | CPU | Any modern x86_64 (8+ cores comfortable) | — |
 | RAM | 16 GB | 32 GB |
@@ -42,6 +42,8 @@ Memex helps you:
 | Python | 3.12+ | — |
 
 Per ADR-0001 the project doesn't ship a CPU fallback. If `torch.cuda.is_available()` is False, startup fails fast with a clear message.
+
+Memex ships **two hardware-tier profiles**. The 12 GB tier uses Qwen3-8B-AWQ and is the default; the 8 GB tier uses Qwen3-4B-AWQ at a tighter vLLM memory fraction. See [`docs/deploy/hardware-tiers.md`](docs/deploy/hardware-tiers.md) for the env-var matrix + the eval-verified quality numbers behind each profile.
 
 ---
 
@@ -273,12 +275,13 @@ Every knob is set via environment variable or `~/.config/memex/config.toml`. Env
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `MEMEX_VLLM_MODEL` | `Qwen/Qwen3-8B-AWQ` | HuggingFace model ID for the orchestrator. |
+| `MEMEX_VLLM_MODEL` | `Qwen/Qwen3-8B-AWQ` | HuggingFace model ID for the orchestrator. 8 GB tier: `Qwen/Qwen3-4B-AWQ`. |
 | `MEMEX_VLLM_HOST` | `127.0.0.1` | Bind host. |
 | `MEMEX_VLLM_PORT` | `8000` | Bind port. |
-| `MEMEX_VLLM_QUANTIZATION` | `awq_marlin` | Quantization kernel. Set `""` for unquantized models, `awq` for the legacy kernel. |
-| `MEMEX_VLLM_MAX_MODEL_LEN` | `4096` | Max sequence length. |
-| `MEMEX_VLLM_GPU_FRACTION` | `0.72` | Empirical 12 GB-rig floor with the 8B-AWQ orchestrator + in-process embedder + bge-reranker. Bump on bigger cards. |
+| `MEMEX_VLLM_QUANTIZATION` | `awq_marlin` | Quantization kernel. Set `""` for unquantized or FP8 models, `awq` for the legacy kernel. |
+| `MEMEX_VLLM_MAX_MODEL_LEN` | `6144` | Max sequence length. Sized to fit the production answer prompt at `top_k=5` with chunks truncated to 1800 chars; the +2048 over the earlier 4096 ceiling costs ~1 GB KV-cache reservation under fp8_e5m2. |
+| `MEMEX_VLLM_GPU_FRACTION` | `0.72` | 12 GB-rig floor with the 8B-AWQ orchestrator. **8 GB tier: drop to `0.50`** to leave room for embedder + reranker alongside the smaller orchestrator. |
+| `MEMEX_VLLM_KV_CACHE_DTYPE` | `fp8_e5m2` | Halves KV-cache memory for AWQ-int4 checkpoints. **Set to `auto` for FP8-checkpoint models** (vLLM blocks fp8 KV cache + FP8 weights at startup). |
 | `CUDA_VISIBLE_DEVICES` | `0` | GPU device index. |
 | `MEMEX_VLLM_EAGER` | _(unset)_ | Set to anything to disable CUDA-graph compilation (slower decode, faster startup). |
 
@@ -305,8 +308,8 @@ Every knob is set via environment variable or `~/.config/memex/config.toml`. Env
 | Variable | Default | Purpose |
 |---|---|---|
 | `MEMEX_RERANK_BATCH_SIZE` | `8` | bge-reranker pair-batch size. Empirical 12 GB-rig floor; bump to 32–64 on bigger rigs / smaller orchestrators. |
-| `MEMEX_RERANK_TOP_K` | `10` | Reranked chunks fed to the agent. Drop to 4–5 if chunks are large enough to overflow `max-model-len`. |
-| `MEMEX_MODELS__RERANKER_BACKEND` | `cross_encoder` | `qwen3` swaps in Qwen3-Reranker-0.6B (autoregressive yes/no scoring). Quality A/B pending the eval corpus; memory comparable, not better. |
+| `MEMEX_RERANK_TOP_K` | `5` | Reranked chunks fed to the agent. Sized to fit the answer prompt's chunk truncate (1800 chars) within `max-model-len=6144`. Drop to 4 if chunks are unusually dense; bump to 8+ with larger context windows. |
+| `MEMEX_MODELS__RERANKER_BACKEND` | `cross_encoder` | `qwen3` swaps in Qwen3-Reranker-0.6B. **Quality A/B verdict 2026-05-21**: `cross_encoder` (bge-reranker-v2-m3) wins clearly on the slide-decks benchmark (median ANS=4 vs qwen3's 0) — Qwen3-Reranker ranks thematically-general chunks above the literal-answer chunk. Stay on `cross_encoder` unless your corpus favours topical similarity over fact-extraction. |
 
 ### Network / security
 
