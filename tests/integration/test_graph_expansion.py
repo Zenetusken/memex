@@ -80,7 +80,7 @@ def _make_fake_llm(
                 ),
                 30,
             )
-        if schema is VerificationResult:
+        if schema is VerificationResult or schema.__name__ == VerificationResult.__name__:
             return VerificationResult(grounded=[0], ungrounded=[]), 10
         raise AssertionError(f"unexpected schema {schema}")
 

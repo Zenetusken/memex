@@ -38,13 +38,13 @@ Usage:
 
 from __future__ import annotations
 
-from typing import Literal, TypedDict
+from typing import Annotated, Literal, TypedDict
 
 import structlog
 import ulid
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 
 from memex.core.errors import AnswerStateInvariantError
 from memex.core.types import Chunk
@@ -504,10 +504,47 @@ async def verify(state: AnswerState) -> AnswerStateUpdate:
         draft=state.draft,
         chunk_by_id=chunk_by_id,
     )
-    verification, tokens = await complete_structured(
+
+    # Bounded-schema construction. The default `VerificationResult` has
+    # unbounded `list[int]` fields, which lets xgrammar emit arbitrarily
+    # many integers when the model gets stuck (the same pathology as the
+    # empty-draft case, but here it surfaces when the model loses track
+    # of how many claims exist — observed on Qwen3-4B-AWQ in P4.2
+    # Session 3a). Constraining the arrays to `max_length=n` where n is
+    # the actual claim count lets xgrammar reject runaway emission at
+    # the grammar level. Pydantic schemas are class-level, so we build
+    # a dynamic subclass per call.
+    n = len(state.draft.claims)
+    # The dynamically-constructed schema retains `__name__ ==
+    # "VerificationResult"` so test fakes that key canned responses by
+    # schema name continue to match — see FakeLLM.__call__ in
+    # tests/integration/test_answering_with_fakes.py.
+    BoundedVerificationResult = create_model(
+        "VerificationResult",
+        grounded=(
+            Annotated[list[int], Field(max_length=n)],
+            Field(description=f"0-indexed positions in draft.claims (0..{n - 1}) whose cited chunk supports the claim."),
+        ),
+        ungrounded=(
+            Annotated[list[int], Field(max_length=n)],
+            Field(description=f"0-indexed positions in draft.claims (0..{n - 1}) whose cited chunk does NOT support the claim."),
+        ),
+        ungrounded_reasons=(
+            Annotated[list[str], Field(max_length=n)],
+            Field(default_factory=list, description="Optional, parallel to `ungrounded`: one short reason per ungrounded claim."),
+        ),
+    )
+
+    bounded, tokens = await complete_structured(
         prompt=prompt,
-        schema=VerificationResult,
-        prompt_tag="verify_grounding@v1",
+        schema=BoundedVerificationResult,
+        prompt_tag="verify_grounding@v2",
+    )
+
+    verification = VerificationResult(
+        grounded=list(bounded.grounded),
+        ungrounded=list(bounded.ungrounded),
+        ungrounded_reasons=list(bounded.ungrounded_reasons),
     )
 
     return {

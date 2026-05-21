@@ -107,7 +107,13 @@ class FakeLLM:
         # `temperature`) without changing the fake's behaviour.
         self.calls.append((prompt, schema))
         for (frag, sch), value in self._responses.items():
-            if sch is schema and frag in prompt:
+            # Match by class identity OR by class name. The latter lets a
+            # dynamically-constructed subclass (e.g. the bounded
+            # `VerificationResult` built at runtime in the verify node
+            # with `max_length=len(claims)` to constrain xgrammar) match
+            # against a canned response keyed on the logical type. The
+            # bounded variant retains `__name__ == "VerificationResult"`.
+            if (sch is schema or sch.__name__ == schema.__name__) and frag in prompt:
                 return value, 10
         raise AssertionError(
             f"no canned response for ({prompt!r}, {schema.__name__})"
@@ -295,7 +301,7 @@ async def test_ungrounded_triggers_regeneration_then_succeeds(
             return fake_llm._responses[("assess_sufficiency", schema)], 8
         if schema is DraftAnswer:
             return next(drafts), 30
-        if schema is VerificationResult:
+        if schema is VerificationResult or schema.__name__ == VerificationResult.__name__:
             return next(verdicts), 15
         raise AssertionError(f"unexpected schema {schema}")
 

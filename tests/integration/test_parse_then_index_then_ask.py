@@ -374,7 +374,7 @@ def patch_agent(monkeypatch: pytest.MonkeyPatch) -> None:
                     ),
                 ],
             ), 25
-        if schema is VerificationResult:
+        if schema is VerificationResult or schema.__name__ == VerificationResult.__name__:
             return VerificationResult(grounded=[0], ungrounded=[]), 10
         raise AssertionError(f"unexpected schema {schema}")
 
