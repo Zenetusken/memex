@@ -13,10 +13,13 @@ timeouts, not validation rejections (those happen at ingest).
 
 from __future__ import annotations
 
+import asyncio
+import re
 import time
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import AsyncIterator, Final
 
 import structlog
 import ulid
@@ -57,6 +60,11 @@ from memex.parse.vlm_backend import (
 )
 from memex.parse.vlm_backend import (
     convert_pages as vlm_convert_pages,
+)
+from memex.parse.chart_ocr_backend import (
+    ChartOCROutput,
+    ChartOCRUnavailable,
+    chart_ocr_extract,
 )
 from memex.vault.store import (
     DocumentRef,
@@ -621,6 +629,241 @@ def _bootstrap_ref(vault_path: Path, doc_id: str, body: str) -> DocumentRef:
     )
 
 
+_IMAGE_PLACEHOLDER_RE: Final[re.Pattern[str]] = re.compile(
+    r"<!--\s*image\s*-->", re.IGNORECASE
+)
+
+
+async def _vllm_reachable(base_url: str, timeout_s: float = 2.0) -> bool:
+    """True iff vLLM's `/v1/models` returns a 200 within `timeout_s`.
+
+    Uses `httpx` if available (the agent layer already depends on it);
+    falls back to a stdlib `urllib` call on import error so the parse
+    stage stays importable in test environments without httpx.
+    """
+    url = f"{base_url.rstrip('/')}/models"
+    try:
+        import httpx  # type: ignore[import-not-found]
+    except ImportError:
+        # Stdlib fallback.
+        from urllib.error import URLError
+        from urllib.request import Request, urlopen
+
+        def _check() -> bool:
+            try:
+                with urlopen(Request(url), timeout=timeout_s) as resp:
+                    return 200 <= resp.status < 300
+            except (URLError, TimeoutError):
+                return False
+
+        return await asyncio.to_thread(_check)
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            response = await client.get(url)
+            return 200 <= response.status_code < 300
+    except Exception:
+        return False
+
+
+async def _vllm_pkill() -> None:
+    """Send SIGTERM to any running `vllm serve` process.
+
+    Works whether vLLM was started via systemd or via the bare
+    `serve-vllm.sh` script (pkill matches the process name regardless).
+    A clean SIGTERM gives vLLM time to release CUDA contexts so the
+    subsequent chart-OCR load doesn't compete for half-released memory.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        "pkill",
+        "-TERM",
+        "-f",
+        "vllm serve",
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    await proc.wait()  # pkill exits non-zero if no match; we don't care
+
+
+async def _vllm_restart(scripts_dir: Path) -> None:
+    """Bring vLLM back up after the chart-OCR pass.
+
+    Tries `systemctl --user start memex-vllm` first (the canonical
+    daemon-stack path). If systemctl isn't available OR the unit isn't
+    installed, falls back to spawning `scripts/serve-vllm.sh` as a
+    detached background process with `nohup`-style redirection.
+
+    Either way, this returns once the START command is issued — caller
+    is responsible for waiting on `/v1/models` to come back.
+    """
+    log = logger.bind(component="chart_ocr.vllm_restart")
+    import shutil
+
+    if shutil.which("systemctl") is not None:
+        proc = await asyncio.create_subprocess_exec(
+            "systemctl",
+            "--user",
+            "start",
+            "memex-vllm",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _stdout, stderr = await proc.communicate()
+        if proc.returncode == 0:
+            log.info("vllm.restart.via_systemctl")
+            return
+        # systemctl exists but the unit isn't installed → fall through.
+        log.info(
+            "vllm.restart.systemctl_failed_fallback_to_script",
+            stderr=(stderr or b"").decode("utf-8", errors="replace")[:200],
+        )
+
+    script = scripts_dir / "serve-vllm.sh"
+    if not script.exists():
+        raise RuntimeError(
+            f"vLLM restart fallback failed: {script} not found. "
+            "Set MEMEX_SCRIPTS_DIR or restart manually."
+        )
+    proc = await asyncio.create_subprocess_exec(
+        "nohup",
+        str(script),
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+        stdin=asyncio.subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    log.info("vllm.restart.via_script", pid=proc.pid)
+
+
+@asynccontextmanager
+async def _pause_vllm_for_chart_ocr() -> AsyncIterator[None]:
+    """Pause-and-restart vLLM around the chart-OCR pass (P3.3).
+
+    On the 12 GB reference rig, vLLM's ~8.5 GB resident footprint
+    plus the embedder + reranker + chart-OCR's ~2.3 GB doesn't fit.
+    Stopping vLLM during parse frees the budget; restarting after
+    keeps the user-facing inference daemon alive in the long run.
+
+    The restart is in `finally` so a parse crash doesn't strand the
+    user without inference. The restart failure (rare) logs at ERROR
+    but doesn't propagate — the parse itself succeeded; vLLM
+    unavailability is a follow-on issue the user can address.
+
+    No-op when vLLM is not reachable at the start of the context
+    (e.g., the user is running parse with vLLM intentionally off).
+    """
+    log = logger.bind(component="chart_ocr.pause_vllm")
+    settings = get_settings()
+    base_url = settings.inference.base_url
+
+    was_running = await _vllm_reachable(base_url)
+    if not was_running:
+        log.info("vllm.not_running.skip_pause")
+        yield
+        return
+
+    log.info("vllm.pause.start")
+    await _vllm_pkill()
+    # Wait for the port to actually be free. ~15s is a generous budget;
+    # vLLM typically exits in 2-5s on SIGTERM.
+    for _ in range(15):
+        if not await _vllm_reachable(base_url, timeout_s=1.0):
+            break
+        await asyncio.sleep(1.0)
+    log.info("vllm.paused")
+
+    try:
+        yield
+    finally:
+        log.info("vllm.restart.start")
+        scripts_dir = _detect_scripts_dir()
+        try:
+            await _vllm_restart(scripts_dir)
+            # Wait for vLLM to come back. 120s budget = first-load
+            # latency on cold start (model materialisation + CUDA-graph
+            # compile). Subsequent restarts in the same process should
+            # be faster (~40s) but the budget covers worst case.
+            for _ in range(120):
+                if await _vllm_reachable(base_url, timeout_s=1.0):
+                    log.info("vllm.restarted")
+                    return
+                await asyncio.sleep(1.0)
+            log.error("vllm.restart.timeout")
+        except Exception as e:
+            log.error("vllm.restart.failed", error=str(e))
+
+
+def _detect_scripts_dir() -> Path:
+    """Best-effort: find the repo's `scripts/` directory for the vLLM
+    restart fallback path. Honours `MEMEX_SCRIPTS_DIR` env var first.
+    """
+    import os
+
+    env = os.environ.get("MEMEX_SCRIPTS_DIR")
+    if env:
+        return Path(env)
+    # Walk up from this file looking for a `.git` sibling (the project
+    # root).
+    here = Path(__file__).resolve()
+    for parent in (here.parent, *here.parents):
+        scripts = parent / "scripts"
+        if scripts.is_dir() and (parent / ".git").exists():
+            return scripts
+    # Fallback — cwd/scripts. May not exist; caller raises if so.
+    return Path.cwd() / "scripts"
+
+
+def _stitch_chart_extractions(
+    conversion: DoclingConversion,
+    extractions: list[ChartOCROutput | Exception],
+) -> DoclingConversion:
+    """Replace each `<!-- image -->` placeholder with the placeholder
+    plus a `[chart-extracted]...[/chart-extracted]` block carrying the
+    DePlot output for that figure.
+
+    Iterates placeholders from last to first so insertions don't shift
+    the offsets of unprocessed positions. Skips extractions that are
+    exceptions or empty strings — the placeholder stays unchanged
+    (the agent still sees `<!-- image -->` but no extracted data).
+
+    On a count mismatch between placeholders and extractions, logs a
+    warning and returns the conversion unchanged. The mismatch could
+    happen if Docling emitted placeholders for non-figure sources
+    (rare; some equation renderers), in which case alignment isn't
+    reliable and we prefer no-stitch over wrong-stitch.
+    """
+    log = logger.bind(component="chart_ocr.stitch")
+    placeholders = list(_IMAGE_PLACEHOLDER_RE.finditer(conversion.markdown))
+    if len(placeholders) != len(extractions):
+        log.warning(
+            "stitch_count_mismatch",
+            placeholders=len(placeholders),
+            extractions=len(extractions),
+        )
+        return conversion
+
+    new_markdown = conversion.markdown
+    for placeholder, extraction in reversed(
+        list(zip(placeholders, extractions, strict=True))
+    ):
+        if isinstance(extraction, Exception):
+            continue
+        text = extraction.markdown.strip()
+        if not text:
+            continue
+        start, end = placeholder.span()
+        new_markdown = (
+            new_markdown[:start]
+            + placeholder.group(0)
+            + "\n\n[chart-extracted]\n"
+            + text
+            + "\n[/chart-extracted]"
+            + new_markdown[end:]
+        )
+
+    return conversion.model_copy(update={"markdown": new_markdown})
+
+
 async def _parse_with_docling(
     vault_path: Path,
     doc_id: str,
@@ -668,6 +911,41 @@ async def _parse_with_docling(
         disable_vlm=settings.parse.disable_vlm,
         log=log,
     )
+
+    # P3.3 chart-OCR pass over Docling figures (opt-in via
+    # `MEMEX_PARSE__DISABLE_CHART_OCR=false`). vLLM is paused for the
+    # duration so DePlot's ~2.3 GB live fits alongside embedder +
+    # reranker on the 12 GB reference rig; restarted via the `finally`
+    # block of the pause context manager. Skips entirely when the
+    # feature is disabled OR Docling reported no figures.
+    chart_ocr_count = 0
+    if not settings.parse.disable_chart_ocr and conversion.figures:
+        log.info(
+            "chart_ocr.start",
+            figure_count=len(conversion.figures),
+        )
+        try:
+            async with _pause_vllm_for_chart_ocr():
+                extractions = await chart_ocr_extract(
+                    source_pdf=source,
+                    figures=conversion.figures,
+                )
+            conversion = _stitch_chart_extractions(conversion, extractions)
+            chart_ocr_count = sum(
+                1
+                for e in extractions
+                if isinstance(e, ChartOCROutput) and e.markdown.strip()
+            )
+            log.info(
+                "chart_ocr.done",
+                processed=len(extractions),
+                stitched=chart_ocr_count,
+            )
+        except ChartOCRUnavailable as e:
+            # Missing transformers / pypdfium2 / torch — log and skip.
+            # The parse still ships; just without chart-OCR enrichment.
+            log.warning("chart_ocr.unavailable", error=str(e))
+
     duration_ms = int((time.monotonic() - start) * 1000)
 
     confident = [p for p in pages if p.confidence >= settings.parse.vlm_confidence_threshold]
