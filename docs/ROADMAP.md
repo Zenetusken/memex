@@ -1,6 +1,6 @@
 # Memex Roadmap
 
-**Last updated:** 2026-05-20 (end of session — live-verified on RTX 4070)
+**Last updated:** 2026-05-21 (P1.1 PyMuPDF4LLM pre-filter shipped + live-verified on RTX 4070)
 
 The blueprint in [`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) is the architectural design — module signatures, cross-cutting concerns, build order. This document is the **operational view**: what is shipped today, what is measured, and what comes next.
 
@@ -18,10 +18,11 @@ The blueprint in [`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) is the archi
 | v1.x | Citation reasoning, daemon supervisor, sandboxed Docling, partial re-indexing | ✅ **All shipped** (2026-05-20) |
 | Bug-hunt audit | Four-agent fan-out → ~70 findings → 30+ fixes | ✅ **Shipped + verified** (2026-05-20) |
 | End-to-end on real rig | Install + Qwen3-8B-AWQ + 109-page PDF + load test + OCR A/B | ✅ **Verified** (2026-05-20) |
+| **P1.1** | **PyMuPDF4LLM pre-filter with tiered routing classifier** | ✅ **Shipped + live-verified** (2026-05-21) |
 
-**File count:** 74 Python files in `src/memex/` + `tests/` + `scripts/`, all parse-clean. 7 ADRs. 8 audit reports under `docs/audits/`. 24 commits on `main` (public at `github.com/Zenetusken/memex`).
+**File count:** 77 Python files in `src/memex/` + `tests/` + `scripts/`, all parse-clean. 7 ADRs. 8 audit reports under `docs/audits/`. 27 commits on `main` (public at `github.com/Zenetusken/memex`).
 
-**Test suite:** 88/88 green on the reference rig (Linux + pyseccomp). 86/88 + 2 seccomp-skipped on environments without privileged seccomp.
+**Test suite:** 106/106 green on the reference rig (88 pre-existing + 12 classifier-unit + 6 PyMuPDF-integration). Linux + pyseccomp; 104/106 + 2 seccomp-skipped on environments without privileged seccomp.
 
 ---
 
@@ -67,15 +68,21 @@ Measured live, not estimated. Numbers are from the 2026-05-20 E2E + load + OCR a
 | Workload | Cost | Notes |
 |---|---|---|
 | Cold vLLM boot to reachable | **40 s** | Qwen3-8B-AWQ + awq_marlin |
-| Single `memex ask` (cold path) | **~21 s** | retrieve → expand_graph → rerank → assess → answer → verify → compose, 6699 tokens |
+| Single `memex ask` (cold path, Docling baseline) | **~21 s** | retrieve → expand_graph → rerank → assess → answer → verify → compose, 6699 tokens |
+| Single `memex ask` (cold path, PyMuPDF chunks) | **~14 s** | top_k=4, batch_size=1; 1250 + 1791 + 1741 tokens |
 | 5 concurrent `/ask` (web server) | **24.5 s wall** | 4/5 answered + 1/5 refused; 100% GPU utilisation; peak VRAM 11.7 GB |
-| Ingest 109-page slide deck | **~96 s** parse + ~6 s index | OCR off; 163 chunks, 245 figures, 13 tables |
+| Ingest 109-page slide deck (Docling, OCR off) | **~96 s** parse + ~6 s index | 163 chunks, 245 figures, 13 tables |
+| Ingest 109-page slide deck (PyMuPDF pre-filter) | **~33 s** parse + ~5 s index | 31 chunks (denser), 67 KB markdown (+67%), chart text captured natively |
 | Re-index unchanged doc | **89 ms** | Diff-based partial re-index (audit fix) |
 | Enrich 5 small docs parallel | **3.7 s** | 49 entities, 60 MENTIONS, 1 CITES |
 
 ### OCR off vs on (settled — see `docs/audits/07-ocr-ab.md`)
 
 For born-digital PDFs: **OCR off**. 10.8× faster, zero query-outcome changes on the test deck. OCR on is the right choice only for scanned content (`MEMEX_PARSE_DOCLING_OCR=1`).
+
+### Parse routing (settled in P1.1 — see `src/memex/parse/pipeline.py:_classify`)
+
+PDFs now run through a tiered classifier before Docling. Producer metadata is the gold signal: a PowerPoint export goes to PyMuPDF4LLM (10-20× faster); an ABBYY-OCR'd PDF goes straight to Docling with OCR forced on; broken-encoding extractions fall through to Docling for re-extraction. The classifier logs the full attribution dict on every routing decision (`parse.pymupdf.classified`) so future eval-data collection is free. Defaults tuned to the canonical CUDA deck so it correctly stays on PyMuPDF (the deck's image-text is already in the PDF text layer, captured natively without OCR).
 
 ---
 
@@ -87,10 +94,11 @@ For born-digital PDFs: **OCR off**. 10.8× faster, zero query-outcome changes on
 
 ### P1 — high-leverage code work (next sessions)
 
-2. **PyMuPDF4LLM pre-filter** — Docling's layout model takes ~1 s/page even with OCR off. PyMuPDF4LLM extracts native-text PDFs at ~20× speed; Docling can then be reserved for the hard cases (scans, complex tables). Cuts the easy ~60% of ingest time at zero licensing cost. Listed on the eval-gated watchlist but doesn't need eval gating — it's a parse-time speedup, the markdown is byte-identical for the clean-text path.
+2. ~~**PyMuPDF4LLM pre-filter**~~ — ✅ **Shipped 2026-05-21** (commits `9e02042`, `3773801`). 2.9× wall-clock speedup on the canonical 109-page deck (33 s vs 96 s), 67% more markdown extracted (chart text captured via PDF text operators, no OCR needed), tiered classifier with rich-signal routing, mixed-content force-OCR path for scanned/image-text docs. Default-tuned to avoid false-positive OCR on born-digital decks. See "Parse routing" above + `src/memex/parse/pymupdf_backend.py` + `pymupdf_worker.py`.
 3. **MCP HTTP auth model** — `memex serve mcp --transport http` binds to localhost with no auth. Required before exposing to anything beyond the loopback: bearer token? mTLS? OAuth flow? Pick one + document it; the `serve mcp` CLI already has the bind-host knob.
 4. **Annotation UI 409 conflict surface** — `/review` currently last-write-wins on stale-sha edits. Add a 409 + inline diff UI so concurrent edits don't silently clobber each other. (Audit fix landed the manifest-before-write race; this is the user-facing surfacing.)
 5. **Vault concurrency hardening** — per-doc `asyncio.Lock` shipped in `vault/store.py`, but cross-process `fcntl.LOCK_EX` for users running `memex` in two terminals simultaneously is still TBD.
+6. **Chunker tuning for dense PyMuPDF output** — PyMuPDF's per-chunk text is denser than Docling's (more structure preserved). With `TARGET_TOKENS=600`, the default `top_k=10` reranked-chunk assembly overflows vLLM's 4096-token context. Today the workaround is `MEMEX_RERANK_TOP_K=4` for tight rigs. Better fix: drop `TARGET_TOKENS` to ~400 specifically for PyMuPDF-engine docs, or bump vLLM's `max-model-len` to 8192 (costs KV cache, gated on memory budget).
 
 ### P2 — eval-gated stack swaps (after P0)
 
@@ -150,8 +158,9 @@ Detailed per-phase log lives in git history + `docs/audits/`. The compressed ver
 - **v1.x backlog** (2026-05-20): citation resolution + wikilinks, daemon supervisor real, watcher → bus, subprocess-sandboxed Docling, citation-graph reasoning, incremental partial re-indexing, network-egress sandbox.
 - **Multi-agent bug-hunt audit** (2026-05-20): 4 specialist agents in parallel → ~70 findings → ~30 fixes. Reports at `docs/audits/00-synthesis.md` through `04-wiring.md`.
 - **E2E + production tuning** (2026-05-20): cu128 → cu129 migration, Qwen3-8B-AWQ + awq_marlin tuning, OCR-off default, chunk-dedupe in upsert, `/ask` MemexError catch, langfuse-default off, vault-path default, ready banner. Reports at `docs/audits/05–07`.
+- **P1.1 — PyMuPDF4LLM pre-filter** (2026-05-21): subprocess-sandboxed pymupdf worker, rich-signal collection (producer metadata, char distribution, image area, mojibake ratio, markdown structure), tiered classifier (`_classify` in `parse/pipeline.py`) with mixed-content force-OCR routing. `<br>` normalisation in the worker so chart-extracted runs become paragraph breaks. `MEMEX_RERANK_TOP_K` + `MEMEX_RERANK_BATCH_SIZE` env knobs for tight-rig context fit. 18 new tests (12 classifier unit + 6 pipeline integration).
 
-For the full per-commit log: `git log --oneline` (24 commits as of 2026-05-20).
+For the full per-commit log: `git log --oneline` (27 commits as of 2026-05-21).
 
 ---
 
@@ -167,3 +176,16 @@ For the full per-commit log: `git log --oneline` (24 commits as of 2026-05-20).
 | `05-e2e-loadtest.md` | Live verification of every audit fix on RTX 4070 |
 | `06-8b-loadtest.md` | Post-tuning verification of the 8B-AWQ production target |
 | `07-ocr-ab.md` | Empirical OCR off vs on settling the parse-default question |
+
+## New env knobs (2026-05-21)
+
+Reference for the env-tunable settings landed alongside P1.1:
+
+| Variable | Default | When to set |
+|---|---|---|
+| `MEMEX_PARSE__PYMUPDF_ENABLED` | `true` | `false` disables the pre-filter entirely (all PDFs go to Docling). |
+| `MEMEX_PARSE__PYMUPDF_MIN_CONFIDENCE` | `0.5` | Lower (0.3) for more aggressive PyMuPDF routing; higher (0.7) to prefer Docling on borderline cases. |
+| `MEMEX_PARSE__PYMUPDF_MIXED_CONTENT_IMAGE_AREA_THRESHOLD` | `0.35` | Lower (0.20) to force-OCR more docs with image-embedded text; higher to be more conservative. |
+| `MEMEX_PARSE__PYMUPDF_MIXED_CONTENT_MIN_IMAGE_HEAVY_PAGES` | `0.30` | Companion gate; both image-area AND image-heavy fractions must trip for mixed-content to fire. |
+| `MEMEX_RERANK_BATCH_SIZE` | `64` | Drop to 16-32 on tight-VRAM rigs (12 GB) with dense chunks — frees ~300-500 MB during the reranker's forward pass. |
+| `MEMEX_RERANK_TOP_K` | `10` | Drop to 4-5 when chunks are large enough that 10 chunks overflow vLLM's `max-model-len` budget. |
