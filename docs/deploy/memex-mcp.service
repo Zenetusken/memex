@@ -1,0 +1,70 @@
+# Memex MCP server (HTTP transport) — user systemd unit template.
+#
+# Runs `memex serve mcp --transport http` so non-localhost clients
+# (LAN agents, cloud-deployed MCP consumers) can hit the four tools
+# (`search`, `ask`, `get_document`, `list_documents`,
+# `get_graph_neighbors`).
+#
+# Soft-depends on memex-vllm.service: the MCP server itself starts
+# without vLLM (search + get_document + list_documents don't need it)
+# but the `ask` tool fails until vLLM is reachable.
+#
+# Install with:
+#
+#     # ── one-time, from the repo root ────────────────────────────
+#     mkdir -p ~/.config/systemd/user ~/.config/memex
+#     cp docs/deploy/memex-mcp.service ~/.config/systemd/user/
+#     cp docs/deploy/memex-mcp.env     ~/.config/memex/memex-mcp.env
+#     # Generate a bearer token + put it in memex-mcp.env:
+#     echo "MEMEX_MCP__AUTH_TOKEN=$(uv run memex mcp generate-token)" \
+#       >> ~/.config/memex/memex-mcp.env
+#     # Edit the paths below to match your clone, then:
+#     systemctl --user daemon-reload
+#     systemctl --user enable --now memex-mcp.service
+#
+# Tail with `journalctl --user -u memex-mcp -f`. Bind defaults to
+# 127.0.0.1:7424; flip to 0.0.0.0 only AFTER setting a token in the
+# env file. Without a token, the service refuses to bind to anything
+# other than loopback. See docs/deploy/mcp-http.md for the full
+# auth story.
+
+[Unit]
+Description=Memex MCP server (HTTP transport)
+Documentation=https://github.com/Zenetusken/memex/blob/main/docs/deploy/mcp-http.md
+After=network-online.target memex-vllm.service
+Wants=network-online.target memex-vllm.service
+
+[Service]
+Type=simple
+
+# ── EDIT THESE PATHS to match your clone + chosen host/port ─────────
+WorkingDirectory=%h/project/Doc_Flo
+ExecStart=%h/.local/bin/uv run memex serve mcp --transport http --host 127.0.0.1 --port 7424
+
+EnvironmentFile=%h/.config/memex/memex-mcp.env
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+# MCP server boots in <2 s; allow a little slack for FastMCP's
+# tool-schema introspection.
+TimeoutStartSec=30
+
+Restart=on-failure
+RestartSec=2
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=memex-mcp
+
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=false   # vault + repo live in $HOME
+
+[Install]
+WantedBy=default.target

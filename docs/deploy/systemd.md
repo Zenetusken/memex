@@ -88,11 +88,59 @@ If the box is shared and you want vLLM running under a dedicated `memex` system 
 
 The trade-offs: needs root for install, but boots before any user logs in. For most single-user laptops/desktops, the user unit is enough.
 
+## The full stack — web + MCP as sibling units
+
+Beyond the vLLM daemon you can run two more services under the same supervisor: the FastAPI/HTMX web UI (`memex serve web`) and the MCP server (`memex serve mcp --transport http`). Both have sibling templates in this directory:
+
+| Unit | Template | Env file | Default bind | Notes |
+|---|---|---|---|---|
+| `memex-vllm.service` | [`memex-vllm.service`](memex-vllm.service) | [`memex-vllm.env`](memex-vllm.env) | `127.0.0.1:8000` | The OpenAI-compatible inference endpoint |
+| `memex-web.service` | [`memex-web.service`](memex-web.service) | [`memex-web.env`](memex-web.env) | `127.0.0.1:7423` | Browser UI (single-user / loopback only) |
+| `memex-mcp.service` | [`memex-mcp.service`](memex-mcp.service) | [`memex-mcp.env`](memex-mcp.env) | `127.0.0.1:7424` | MCP HTTP transport; requires a token to bind non-loopback |
+
+Install all three at once:
+
+```sh
+# From the repo root
+mkdir -p ~/.config/systemd/user ~/.config/memex ~/.local/state/memex
+cp docs/deploy/memex-vllm.service docs/deploy/memex-web.service docs/deploy/memex-mcp.service \
+   ~/.config/systemd/user/
+cp docs/deploy/memex-vllm.env docs/deploy/memex-web.env docs/deploy/memex-mcp.env \
+   ~/.config/memex/
+
+# If you want MCP HTTP, generate a token + drop it into the env file:
+echo "MEMEX_MCP__AUTH_TOKEN=$(uv run memex mcp generate-token)" \
+  >> ~/.config/memex/memex-mcp.env
+
+# Edit each unit so WorkingDirectory + ExecStart point at your clone,
+# then:
+systemctl --user daemon-reload
+systemctl --user enable --now memex-vllm.service memex-web.service memex-mcp.service
+```
+
+### Dependency ordering
+
+The web + MCP units both carry `After=memex-vllm.service` + `Wants=memex-vllm.service`. systemd boots vLLM first, then web + MCP in parallel; on `systemctl --user start memex-web`, vLLM is implicitly started too.
+
+The dependency is intentionally *soft*. Web + MCP boot fine even if vLLM is down — the document browser, graph view, and search/get_document/list_documents tools all work without an LLM. Only `/ask` queries (web) and the `ask` tool (MCP) fail when vLLM is unreachable. That's the right trade-off: a single CUDA OOM on the inference side shouldn't take down the entire stack.
+
+`Type=simple` means systemd considers vLLM "started" the instant the process forks, not when the endpoint is actually reachable. In practice the 20-second cold-boot window is short enough that downstream callers see a clean "Connection refused" → retry rather than a hung tool call. If you want hard ordering with reachability checks, a `Type=notify` integration is the proper fix (out of scope for these templates).
+
+### Watching the full stack
+
+```sh
+# Tail all three at once
+journalctl --user -u memex-vllm -u memex-web -u memex-mcp -f
+
+# Status overview
+systemctl --user status memex-vllm memex-web memex-mcp --no-pager
+```
+
 ## What's not covered here
 
-- **The web UI (`memex serve web`) and the MCP server (`memex serve mcp --transport http`)** — these are separate processes from vLLM. They can run as their own user units following the same pattern; copy `memex-vllm.service`, change the `ExecStart` to `memex serve web --host 127.0.0.1 --port 8080` (or `memex serve mcp --transport http --host 0.0.0.0 --port 7424`), add the relevant env file (for MCP, that's `MEMEX_MCP__AUTH_TOKEN` — see [`mcp-http.md`](mcp-http.md)), and you're done.
 - **GPU monitoring** — out of scope. `nvidia-smi` works fine; if you want metrics in journald, `nvidia-smi --query-gpu=… --loop=5` in a sidecar unit is one path.
-- **Backup of the vault** — the vault is regular files under `~/.memex/vault`; any incremental backup tool (`restic`, `borg`, `rsnapshot`) handles it.
+- **Backup of the vault** — the vault is regular files under `~/.memex/vault`; any incremental backup tool (`restic`, `borg`, `rsnapshot`) handles it. A `memex-vault-backup.timer` is a natural follow-up to these unit templates.
+- **A `memex upgrade` wrapper** — `git pull && uv sync && systemctl --user restart memex-vllm memex-web memex-mcp` is the manual recipe; bundling it into one CLI command is a follow-up.
 
 ## Troubleshooting
 

@@ -1,0 +1,61 @@
+# Memex web UI — user systemd unit template.
+#
+# Runs `memex serve web` under your user account. Soft-depends on
+# `memex-vllm.service` (the web UI is reachable without vLLM — it
+# serves the document browser + graph view either way — but `/ask`
+# queries need vLLM up).
+#
+# Install with:
+#
+#     # ── one-time, from the repo root ────────────────────────────
+#     mkdir -p ~/.config/systemd/user ~/.config/memex
+#     cp docs/deploy/memex-web.service ~/.config/systemd/user/
+#     cp docs/deploy/memex-web.env     ~/.config/memex/memex-web.env
+#     # Edit the paths below to match your clone, then:
+#     systemctl --user daemon-reload
+#     systemctl --user enable --now memex-web.service
+#
+# Tail with `journalctl --user -u memex-web -f`. Default bind is
+# 127.0.0.1:7423; the UI is single-user / localhost-only by design
+# (see src/memex/webui/CLAUDE.md). If you genuinely need LAN exposure,
+# put a reverse proxy in front and keep the unit on loopback.
+
+[Unit]
+Description=Memex web UI (FastAPI + HTMX)
+Documentation=https://github.com/Zenetusken/memex/blob/main/docs/deploy/systemd.md
+After=network-online.target memex-vllm.service
+Wants=network-online.target memex-vllm.service
+
+[Service]
+Type=simple
+
+# ── EDIT THESE PATHS to match your clone ────────────────────────────
+WorkingDirectory=%h/project/Doc_Flo
+ExecStart=%h/.local/bin/uv run memex serve web --host 127.0.0.1 --port 7423
+
+EnvironmentFile=%h/.config/memex/memex-web.env
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+# Web boots in <2 s — short timeout is fine.
+TimeoutStartSec=30
+
+Restart=on-failure
+RestartSec=2
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=memex-web
+
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=false   # vault + repo live in $HOME
+
+[Install]
+WantedBy=default.target

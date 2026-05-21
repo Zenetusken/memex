@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Memex web UI — macOS launchd user-agent template.
+
+  Install with:
+      mkdir -p ~/Library/LaunchAgents ~/.local/state/memex
+      cp docs/deploy/com.memex.web.plist ~/Library/LaunchAgents/
+      # EDIT the WorkingDirectory + ProgramArguments + EnvironmentVariables
+      # paths below to match your clone, then:
+      launchctl load -w ~/Library/LaunchAgents/com.memex.web.plist
+
+  Tail with: tail -f ~/.local/state/memex/web.{out,err}.log
+  Unload:    launchctl unload ~/Library/LaunchAgents/com.memex.web.plist
+
+  Bind defaults to 127.0.0.1:7423; the web UI is single-user /
+  loopback-only by design (see src/memex/webui/CLAUDE.md).
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.memex.web</string>
+
+  <!-- EDIT: path to your Memex clone. -->
+  <key>WorkingDirectory</key>
+  <string>/Users/YOUR_USER/project/Doc_Flo</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <!-- EDIT: absolute path to your uv binary. `which uv` to check. -->
+    <string>/Users/YOUR_USER/.local/bin/uv</string>
+    <string>run</string>
+    <string>memex</string>
+    <string>serve</string>
+    <string>web</string>
+    <string>--host</string>
+    <string>127.0.0.1</string>
+    <string>--port</string>
+    <string>7423</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/Users/YOUR_USER/.local/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <!-- Add MEMEX_* env vars here if you need to override defaults. -->
+    <!-- <key>MEMEX_VAULT_PATH</key> -->
+    <!-- <string>/Users/YOUR_USER/.memex/vault</string> -->
+  </dict>
+
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>2</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/YOUR_USER/.local/state/memex/web.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/YOUR_USER/.local/state/memex/web.err.log</string>
+</dict>
+</plist>

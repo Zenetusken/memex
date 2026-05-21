@@ -57,10 +57,38 @@ If you actually need GPU inference on macOS, swap the model out of `MEMEX_VLLM_M
 
 The full template lives at [`com.memex.vllm.plist`](com.memex.vllm.plist).
 
+## The full stack — web + MCP as sibling agents
+
+This directory also ships templates for the web UI and the MCP HTTP server:
+
+| Agent | Template | Default bind | Notes |
+|---|---|---|---|
+| `com.memex.vllm` | [`com.memex.vllm.plist`](com.memex.vllm.plist) | `127.0.0.1:8000` | The OpenAI-compatible inference endpoint |
+| `com.memex.web`  | [`com.memex.web.plist`](com.memex.web.plist)   | `127.0.0.1:7423` | Browser UI (single-user / loopback only) |
+| `com.memex.mcp`  | [`com.memex.mcp.plist`](com.memex.mcp.plist)   | `127.0.0.1:7424` | MCP HTTP transport; requires a bearer token in `EnvironmentVariables` |
+
+Install all three:
+
+```sh
+mkdir -p ~/Library/LaunchAgents ~/.local/state/memex
+cp docs/deploy/com.memex.*.plist ~/Library/LaunchAgents/
+
+# Generate a token + paste into ~/Library/LaunchAgents/com.memex.mcp.plist
+# (the file has a REPLACE_WITH_GENERATED_TOKEN placeholder)
+uv run memex mcp generate-token
+
+# Edit each plist's WorkingDirectory / ProgramArguments / EnvironmentVariables
+# to match your clone, then:
+launchctl load -w ~/Library/LaunchAgents/com.memex.vllm.plist
+launchctl load -w ~/Library/LaunchAgents/com.memex.web.plist
+launchctl load -w ~/Library/LaunchAgents/com.memex.mcp.plist
+```
+
+launchd has no native dependency ordering between agents — they all boot at login simultaneously. The web + MCP services tolerate a not-yet-reachable vLLM (the agent's retry path catches it); a hard "wait until reachable" sequence would need a wrapper script or a launchd `RunAtLoad=false` + manual `launchctl start` cascade. For a dev box this is rarely worth the complexity.
+
 ## What's not covered here
 
 - **GPU monitoring** — macOS dev boxes are out of scope for the CUDA pipeline; if you're testing on an Apple Silicon Mac with the MPS backend, see PyTorch's own MPS docs for tuning.
-- **The web UI / MCP server** — copy the plist, change the `Label`, the script path, and the env vars, and you've got separate user agents for `memex serve web` / `memex serve mcp`.
 - **System-wide daemons** (`/Library/LaunchDaemons/`) — single-user / single-Mac is the assumed setup; LaunchDaemon needs root, persists across logout, and isn't worth the operational weight for a dev box.
 
 ## Troubleshooting
