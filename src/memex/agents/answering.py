@@ -345,13 +345,21 @@ async def rerank(state: AnswerState) -> AnswerStateUpdate:
 
     log = logger.bind(node="rerank")
     log.info("start", candidate_count=len(state.candidates))
-    # top_k=10 fits the 4096-token assembly budget for ~600-word chunks
-    # (typical Docling output). PyMuPDF chunks tend to be denser; on
-    # tight contexts, drop to 5 via MEMEX_RERANK_TOP_K.
+    # Default top_k=5 fits a 4096-token assembly budget when each chunk
+    # is truncated at 1800 chars (~450 tokens) in the answer prompt:
+    # 5 × 1800 × ~0.25 tok/char ≈ 2250 tokens for chunks + ~500 for
+    # scaffolding + 1024 for output = ~3774 tokens, comfortably under
+    # max-model-len=4096. The earlier `top_k=10` default paired with
+    # an aggressive `truncate(700)` in the answer prompt clipped most
+    # chunks to ~32% of their content (median chunk is 2172 chars);
+    # bumping truncate to 1800 and dropping top_k to 5 trades retrieval
+    # breadth for grounding fidelity, which the eval showed was the
+    # winning trade. Users with longer-context model variants can raise
+    # MEMEX_RERANK_TOP_K to recover breadth.
     try:
-        top_k = int(os.environ.get("MEMEX_RERANK_TOP_K", "10"))
+        top_k = int(os.environ.get("MEMEX_RERANK_TOP_K", "5"))
     except ValueError:
-        top_k = 10
+        top_k = 5
     top_k = max(1, top_k)
     reranked = await cross_encoder_rerank(state.query, state.candidates, top_k=top_k)
     log.info("done", reranked_count=len(reranked))

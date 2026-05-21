@@ -18,9 +18,17 @@
 #                              quality, just a better kernel. Set to
 #                              empty for unquantized models, or to `awq`
 #                              for the legacy kernel.)
-#   MEMEX_VLLM_MAX_MODEL_LEN  (default: 4096 — Memex's chunks are short
-#                              (~300 tokens) and so are queries; doubling
-#                              this just buys idle KV-cache reservation.)
+#   MEMEX_VLLM_MAX_MODEL_LEN  (default: 6144 — sized to fit the agent's
+#                              answer prompt at top_k=5 with chunks
+#                              truncated to 1800 chars. The earlier
+#                              4096 ceiling clipped at ~3070 input
+#                              tokens with the v2 prompts, leaving
+#                              insufficient room for the 1024-token
+#                              output. The +2048 token bump costs
+#                              ~1 GB of KV-cache reservation with
+#                              fp8_e5m2 KV; the 12 GB reference rig
+#                              fits comfortably at gpu_memory_
+#                              utilization=0.72.)
 #   MEMEX_VLLM_GPU_FRACTION   (default: 0.72 — measured from a vLLM
 #                              0.21 cold start on RTX 4070 12 GB with
 #                              Qwen3-8B-AWQ (5.7 GB weights) + the new
@@ -40,7 +48,7 @@ PORT="${MEMEX_VLLM_PORT:-8000}"
 # (e.g. MEMEX_VLLM_QUANTIZATION='') means "no --quantization flag"
 # for unquantized models like Qwen3-0.6B.
 QUANTIZATION="${MEMEX_VLLM_QUANTIZATION-awq_marlin}"
-MAX_MODEL_LEN="${MEMEX_VLLM_MAX_MODEL_LEN:-4096}"
+MAX_MODEL_LEN="${MEMEX_VLLM_MAX_MODEL_LEN:-6144}"
 GPU_FRACTION="${MEMEX_VLLM_GPU_FRACTION:-0.72}"
 
 # Explicit single-device — skips the multi-GPU discovery codepath at

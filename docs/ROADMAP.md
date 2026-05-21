@@ -179,7 +179,29 @@ Items below tier 3 (P3.1 benchmark CI / P4.x design decisions) stay queued; pick
 
 **The 15 new queries** (qids 16–30): 10 answerable covering NVRTC compilation, kernel fusion, NVLink C2C, CUTLASS, mixed-precision LU, unified memory, FP16 tensor core MMA, performance-per-watt thesis + 3 near-miss refusals (FP4 mantissa, CUDA 11.0 compile time, NVLink latency) + 2 empty-retrieval refusals (H100 TDP, kernel-language survey).
 
-**New finding to capture**: queries 16/20/21 (all NVRTC-related) refuse with reasons like "the chunks discuss CUDA features but do not provide specific data on NVRTC compile time" — but the NVRTC chunk (`#ba5b556a6b`) is at rerank 0.98 in raw `memex search`. There is a **retrieval-vs-agent-search gap**: the agent's internal flow doesn't always include the high-rerank chunk in its working set. Worth a follow-up investigation (separate from P0).
+**~~New finding to capture~~** — ✅ **Diagnosed + fixed 2026-05-21.** The "retrieval-vs-agent gap" hypothesis was wrong; the chunk WAS reaching the agent at rerank 0.98 top-1. Root cause: the answer/verify prompts use `{{ c.text | truncate(700) }}` in Jinja, and the median chunk is **2172 chars** — the agent has been operating on **the first ~32% of most chunks**. Query 16's NVRTC content sits at chars 1524-1700, well past the cliff.
+
+**Fix**: a coordinated retune of the prompt/budget pair —
+- Bump chunk truncate in all prompts: `answer/v{1,2}.md` and `verify_grounding/v{1,2}.md` go from `truncate(700)` → `truncate(1800)`; `assess_sufficiency/v1.md` from `truncate(500)` → `truncate(1200)`.
+- Lower default agent `MEMEX_RERANK_TOP_K` from 10 → 5 to keep context-budget healthy when chunks are bigger.
+- Lower default `complete_structured(max_tokens=...)` from 1024 → 640 (most outputs are <500 tokens; reserved budget was wasteful).
+- Bump vLLM `--max-model-len` from 4096 → 6144 in `scripts/serve-vllm.sh` (costs ~1 GB KV-cache reservation under fp8_e5m2; comfortable on the 12 GB rig at gpu_memory_utilization=0.72). The 4096 ceiling was insufficient with the new prompt budgets at the lowest-feasible top_k.
+
+**Result on the 30-query slide-decks corpus**:
+
+| Metric | Before truncate fix | After fix | Δ |
+|---|---|---|---|
+| `answered_count` | 9 | **12** | +3 legitimate answers |
+| `mcp_answered_only` | 0.89 | 0.75 | -14 pp (more queries answered with imperfect citations; not a precision drop on the same set) |
+| `refusal_rate_cf` | 1.00 | 1.00 | unchanged (zero new hallucinations) |
+| Hallucinations | 0 | 0 | unchanged |
+
+**Three legitimate REF→ANS flips**:
+- **Q2** (two power categories) — answer was past char 700 in chunk #3a6c6789e8.
+- **Q7** (5-bit/10-bit half precision-bit diagram) — **the P2.4 Q7 regression is recovered as a bonus**; the precision-bit diagram is now visible to the agent.
+- **Q20** (NVRTC '-minimal' flag) — the flag definition at char 1112+ is now visible.
+
+**Residual refusals** (Q16, Q21 NVRTC chart numerics + Q4 transistor density + Q5 data-movement synthesis + Q25 performance-per-watt thesis) are now genuine answer-prompt / chart-OCR limits, not retrieval limits. P3.3 (chart-OCR over Docling figures) addresses Q4/Q16/Q21; Q5/Q25 are synthesis-required.
 
 ### Eval baseline + parser-investigation history (preserved for reference)
 
