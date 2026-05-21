@@ -1,0 +1,92 @@
+# Memex eval query sets
+
+This directory holds the **versioned query sets** that `memex eval` consumes to score the retrieval/answering pipeline. One subdirectory per category from [`docs/eval-corpus-plan.md`](../../docs/eval-corpus-plan.md); each subdirectory holds a `queries.json` plus optional supporting notes.
+
+```
+tests/eval-data/
+├── README.md                       ← this file
+└── slide-decks/
+    └── queries.json                ← the bootstrapped CUDA-deck queries
+```
+
+Run outputs land under `tests/eval-results/` (gitignored — these are timestamped + regenerable and shouldn't be versioned).
+
+## Schema
+
+Each `queries.json` is consumed by `src/memex/eval/runner.py::run_eval`. Shape:
+
+```json
+{
+  "queries": [
+    {
+      "qid": "slide-decks-01",
+      "question": "What is the energy cost of FP16 matrix multiplication relative to FP32?",
+      "relevant_chunk_ids": ["2f96ae1c-...#3a6c6789e8"],
+      "should_refuse": false
+    },
+    {
+      "qid": "slide-decks-08",
+      "question": "In what year did NVIDIA acquire Mellanox?",
+      "relevant_chunk_ids": [],
+      "should_refuse": true
+    }
+  ]
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `qid` | string | Unique identifier; prefix with the category (e.g. `slide-decks-01`) so qids stay globally unique when categories combine. |
+| `question` | string | The natural-language question. The agent only sees this. |
+| `relevant_chunk_ids` | string[] | Chunk IDs (`{doc_id}#{hash}`) that contain the answer. Used for the citation-precision metric. Empty list for `should_refuse: true` queries. |
+| `should_refuse` | bool | `true` when no chunk in the vault answers the question — exercises the refusal path. |
+
+Fields with a leading underscore (`_description`, `_expected_answer`, `_note`, etc.) are tolerated as documentation and ignored by the loader. Use them to capture the human-readable answer + any caveats.
+
+## How to add a query
+
+```sh
+# 1. Make sure the doc is ingested.
+uv run memex ingest path/to/source.pdf
+uv run memex list documents    # confirm the new doc_id
+
+# 2. Author the question. Aim for factual, single-paragraph-scoped questions
+#    for answerable ones; for refusals, pick plausible-sounding things the
+#    doc explicitly doesn't cover.
+
+# 3. Find the chunk_id(s) that hold the answer.
+uv run memex search "your question here" --k 5 | grep '^{"chunk_id"' \
+  | head -3 | jq -r '.chunk_id + "  rerank=" + (.rerank_score | tostring | .[0:6])'
+
+# 4. Append the entry to the right category's queries.json with the
+#    chunk_id(s) you found. For should_refuse=true, use an empty array.
+```
+
+## How to run an eval
+
+```sh
+# Quick run (random ~20% sample)
+uv run memex eval tests/eval-data/slide-decks/queries.json --quick > /tmp/eval.json
+
+# Full run
+uv run memex eval tests/eval-data/slide-decks/queries.json > /tmp/eval.json
+
+# Headline metrics
+jq '{
+  query_count,
+  answered_count,
+  refused_count,
+  mean_citation_precision,
+  refusal_rate_on_counterfactuals
+}' /tmp/eval.json
+```
+
+The `EvalReport` schema lives at `src/memex/eval/runner.py::EvalReport`. `mean_citation_precision` is `len(cited ∩ relevant) / len(cited)` averaged over answered queries; `refusal_rate_on_counterfactuals` is the fraction of `should_refuse: true` queries the agent correctly refused.
+
+## What's NOT here yet
+
+- **Parsing evals** (CER / WER / structural F1) — the metrics are implemented in `src/memex/eval/scoring.py` but not wired into `runner.py`. The spec calls these out as Phase 2; they need hand-curated ground-truth markdown per document, which is a deeper labour expense.
+- **The other 6 categories** — `modern-printed`, `scientific-papers`, `technical-docs`, `historical-scans`, `handwritten`, `forms`. Each one needs documents in the vault + a `queries.json` here. The slide-decks bootstrap establishes the pattern.
+- **Counterfactual diversity** — three refusal queries against a single-document corpus is the minimum. A larger corpus would let counterfactuals exercise *retrieval-distractor* refusals (questions that pull near-miss chunks the agent has to recognise as off-topic), not just *empty-retrieval* refusals.
+
+See `docs/eval-corpus-plan.md` for the full multi-category vision and CER/F1 thresholds.

@@ -1,0 +1,106 @@
+{
+  "_description": "P0 eval-corpus bootstrap, category: slide-decks. Source doc: Stephen Jones, 'CUDA: New Features and Beyond', GTC 2024. Authored 2026-05-21; first real query set against the Memex eval harness.",
+  "_doc_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640",
+  "_query_count": 10,
+  "_mix": "7 answerable + 3 counterfactual (refuse)",
+  "_chunk_id_provenance": "For each answerable query, `memex search --k 3 <question>` was run; chunks with rerank_score > 0.5 that contain the answer are listed in relevant_chunk_ids. Low-rerank cases (qids slide-decks-02 and slide-decks-05) are kept intentionally to expose retrieval-quality baselines.",
+  "queries": [
+    {
+      "qid": "slide-decks-01",
+      "question": "What is the energy cost of FP16 matrix multiplication relative to FP32, in FMA operations?",
+      "relevant_chunk_ids": [
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3a6c6789e8"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "0.5x (from the Energy per FLOP table for matrix multiply)",
+      "_baseline_rerank_top1": 0.6484
+    },
+    {
+      "qid": "slide-decks-02",
+      "question": "What are the two main categories where modern processors spend power, according to the slides?",
+      "relevant_chunk_ids": [
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3a6c6789e8"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "1. Data movement, 2. Computation",
+      "_baseline_rerank_top1": 0.0272,
+      "_note": "Low rerank score — agent may over-refuse. This is a known retrieval-quality finding to capture in the baseline."
+    },
+    {
+      "qid": "slide-decks-03",
+      "question": "How does the power cost of floating point arithmetic scale with the mantissa length?",
+      "relevant_chunk_ids": [
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3a6c6789e8",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3033839212"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "Power of floating point arithmetic generally scales as the square of the mantissa length.",
+      "_baseline_rerank_top1": 0.9531
+    },
+    {
+      "qid": "slide-decks-04",
+      "question": "What changed about transistor density and power efficiency between 2004 and 2022, per the TSMC chart?",
+      "relevant_chunk_ids": [
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3a6c6789e8",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#f41f19dbc0"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "Transistor density grew massively (120x), but transistors got less power-efficient over the same window; the deck calls out this divergence as the energy-efficiency motivation.",
+      "_baseline_rerank_top1": 0.9726
+    },
+    {
+      "qid": "slide-decks-05",
+      "question": "Why is data movement a key concern for power efficiency in modern processors?",
+      "relevant_chunk_ids": [
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3a6c6789e8"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "Modern processors spend significant power on data movement (one of the two categories of power consumption); reducing it is one of the headline strategies in the deck.",
+      "_baseline_rerank_top1": 0.5664,
+      "_note": "Borderline rerank score (0.57) — useful test of refusal threshold calibration."
+    },
+    {
+      "qid": "slide-decks-06",
+      "question": "What is the energy cost of FP8 tensor core matrix multiplication relative to an FP32 FMA?",
+      "relevant_chunk_ids": [
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3a6c6789e8",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3033839212"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "0.06x (from the Energy per FLOP table; Tensor Core MMA in FP8).",
+      "_baseline_rerank_top1": 0.9101
+    },
+    {
+      "qid": "slide-decks-07",
+      "question": "Which floating-point format has a 5-bit exponent and 10-bit mantissa?",
+      "relevant_chunk_ids": [
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3a6c6789e8",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3033839212"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "half (FP16) — listed in the precision sign/exponent/mantissa diagram.",
+      "_baseline_rerank_top1": 0.9179
+    },
+    {
+      "qid": "slide-decks-08",
+      "question": "In what year did NVIDIA acquire Mellanox?",
+      "relevant_chunk_ids": [],
+      "should_refuse": true,
+      "_expected_answer": "(Refuse — the deck is about CUDA architecture, not corporate M&A history.)"
+    },
+    {
+      "qid": "slide-decks-09",
+      "question": "What is the recommended chunk size for retrieval-augmented generation pipelines?",
+      "relevant_chunk_ids": [],
+      "should_refuse": true,
+      "_expected_answer": "(Refuse — RAG is unrelated to a CUDA architecture deck.)"
+    },
+    {
+      "qid": "slide-decks-10",
+      "question": "What is the manufacturer's suggested retail price of the NVIDIA RTX 4090?",
+      "relevant_chunk_ids": [],
+      "should_refuse": true,
+      "_expected_answer": "(Refuse — pricing is not discussed in this technical deck.)"
+    }
+  ]
+}
