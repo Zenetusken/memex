@@ -81,8 +81,10 @@ _VRAM_GB: dict[tuple[str, str | None], float] = {
     # bge-reranker-v2-m3 in BF16 is ~2 GB resident (568 M params × 2 B
     # plus the cross-encoder head). The 0.6 GB figure was a smaller
     # reranker; the load test showed this is the number that hits the
-    # budget.
-    ("reranker", None): 2.0,
+    # budget. Qwen3-Reranker-0.6B in BF16 is ~0.7 GB (300 M params × 2 B
+    # + embedding tables — P2.1 measurement).
+    ("reranker", "cross_encoder"): 2.0,
+    ("reranker", "qwen3"): 0.7,
     ("vlm", "awq_int4"): 7.0,
     ("vlm", "bf16"): 16.0,
 }
@@ -114,7 +116,7 @@ def _verify_vram_fit(settings: MemexSettings) -> None:
     estimated = (
         _VRAM_GB[("orchestrator", settings.models.orchestrator_quantization)]
         + _VRAM_GB[("embedder", None)]
-        + _VRAM_GB[("reranker", None)]
+        + _VRAM_GB[("reranker", settings.models.reranker_backend)]
         + _OVERHEAD_GB
     )
     # Only count the VLM if it's actually going to be loaded.

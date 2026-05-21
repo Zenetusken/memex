@@ -26,7 +26,11 @@ from memex.core.errors import InsufficientVRAMError, MemexError
 
 if TYPE_CHECKING:
     from sentence_transformers import CrossEncoder, SentenceTransformer
-    from transformers import PreTrainedModel, ProcessorMixin
+    from transformers import (
+        PreTrainedModel,
+        PreTrainedTokenizerBase,
+        ProcessorMixin,
+    )
 
 
 class VLMHandle:
@@ -35,6 +39,27 @@ class VLMHandle:
     def __init__(self, model: PreTrainedModel, processor: ProcessorMixin):
         self.model = model
         self.processor = processor
+
+
+class Qwen3RerankerHandle:
+    """Bundled tokenizer + decoder + cached yes/no token ids for the
+    Qwen3-Reranker autoregressive scoring backend (P2.1).
+
+    `_score_qwen3` in `retrieve/rerank.py` is the only consumer; the
+    handle's shape is private to the registry ↔ rerank contract.
+    """
+
+    def __init__(
+        self,
+        tokenizer: PreTrainedTokenizerBase,
+        model: PreTrainedModel,
+        yes_id: int,
+        no_id: int,
+    ) -> None:
+        self.tokenizer = tokenizer
+        self.model = model
+        self.yes_id = yes_id
+        self.no_id = no_id
 
 logger = structlog.get_logger(__name__)
 
@@ -111,9 +136,14 @@ class ModelRegistry:
                     self._load_embedder, self._settings.embedder
                 )
             elif name == "reranker":
-                self._models[name] = await asyncio.to_thread(
-                    self._load_reranker, self._settings.reranker
-                )
+                if self._settings.reranker_backend == "qwen3":
+                    self._models[name] = await asyncio.to_thread(
+                        self._load_reranker_qwen3, self._settings.reranker
+                    )
+                else:
+                    self._models[name] = await asyncio.to_thread(
+                        self._load_reranker, self._settings.reranker
+                    )
             elif name == "vlm":
                 self._models[name] = await asyncio.to_thread(
                     self._load_vlm, self._settings.vlm
@@ -200,7 +230,7 @@ class ModelRegistry:
 
     @staticmethod
     def _load_reranker(model_id: str) -> CrossEncoder:
-        """Load the cross-encoder reranker.
+        """Load the cross-encoder reranker (default backend).
 
         ADR-0006: BF16 + explicit `device="cuda"`.
         """
@@ -211,6 +241,44 @@ class ModelRegistry:
             model_id,
             device="cuda",
             automodel_args={"torch_dtype": torch.bfloat16},
+        )
+
+    @staticmethod
+    def _load_reranker_qwen3(model_id: str) -> Qwen3RerankerHandle:
+        """Load the Qwen3-Reranker autoregressive backend (P2.1).
+
+        Decoder-only LLM fine-tuned to answer "yes"/"no" given a (query,
+        document) pair. Scoring lives in `retrieve.rerank._score_qwen3`:
+        format → forward pass → last-token logits → softmax over the
+        cached yes/no ids.
+
+        ADR-0006 conventions: explicit `torch_dtype=torch.bfloat16` and
+        `device_map={"": "cuda:0"}` (no `"auto"`; we'd rather OOM cleanly
+        than silently CPU-offload).
+        """
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        tokenizer = AutoTokenizer.from_pretrained(model_id, padding_side="left")
+        if tokenizer.pad_token_id is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            torch_dtype=torch.bfloat16,
+            device_map={"": "cuda:0"},
+            low_cpu_mem_usage=True,
+        )
+        model.eval()
+        # The Qwen3-Reranker model card uses "yes" / "no" as the answer
+        # tokens. Cache the ids once at load — repeated tokenisation
+        # per pair would waste a chunk of the per-rerank latency budget.
+        yes_id = int(tokenizer("yes", add_special_tokens=False).input_ids[0])
+        no_id = int(tokenizer("no", add_special_tokens=False).input_ids[0])
+        return Qwen3RerankerHandle(
+            tokenizer=tokenizer,
+            model=model,
+            yes_id=yes_id,
+            no_id=no_id,
         )
 
     @staticmethod

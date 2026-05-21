@@ -1,6 +1,8 @@
-"""Hybrid retrieval — BM25 (SQLite FTS5) + dense (LanceDB) + RRF fusion, plus
-a cross-encoder reranker (bge-reranker-v2-m3). See GUIDELINES.md Part IV
-"Hybrid retrieval".
+"""Hybrid retrieval — BM25 (SQLite FTS5) + dense (LanceDB) + RRF fusion,
+plus a backend-dispatched reranker (`rerank`, defaulting to bge cross-
+encoder; Qwen3-Reranker via the `qwen3` backend flag). See
+GUIDELINES.md Part IV "Hybrid retrieval" and `retrieve/rerank.py` for
+the backend dispatch.
 """
 
 from memex.retrieve.fusion import reciprocal_rank_fusion

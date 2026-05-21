@@ -1,9 +1,18 @@
-"""Cross-encoder reranker — bge-reranker-v2-m3 by default.
+"""Reranker dispatcher — bge cross-encoder by default; Qwen3-Reranker behind a flag.
 
-Loaded on first call via `ModelRegistry.use("reranker")`. The reranker
-runs CPU-or-GPU depending on what `sentence-transformers` chooses; we
-don't pin a device here — the registry can configure it later via the
-hardware settings.
+Two backends share the same public API (`rerank`) and the same model-
+registry slot. Selection is by `settings.models.reranker_backend`:
+
+  - `cross_encoder` (default) → `sentence_transformers.CrossEncoder`,
+    typically `BAAI/bge-reranker-v2-m3`. One forward pass per pair via
+    `predict()`.
+  - `qwen3` (P2.1) → `transformers.AutoModelForCausalLM`, typically
+    `Qwen/Qwen3-Reranker-0.6B`. Autoregressive yes/no judgement; we
+    take softmax over the cached yes/no token logits at the last
+    non-pad position.
+
+The legacy public name `cross_encoder_rerank` stays exported as an
+alias so existing callers + test monkeypatches don't need to change.
 """
 
 from __future__ import annotations
@@ -14,10 +23,33 @@ from typing import Any
 
 import structlog
 
+from memex.core.config import get_settings
 from memex.core.types import Chunk
-from memex.models.registry import get_registry
+from memex.models.registry import Qwen3RerankerHandle, get_registry
 
 logger = structlog.get_logger(__name__)
+
+
+_QWEN3_SYSTEM_PROMPT = (
+    "Judge whether the Document meets the requirements based on the "
+    "Query and the Instruct provided. Note that the answer can only "
+    'be "yes" or "no".'
+)
+_QWEN3_TASK = (
+    "Given a web search query, retrieve relevant passages that answer the query"
+)
+
+
+def _read_batch_size() -> int:
+    # batch_size=8 is the safe default on a 12 GB rig running the bge
+    # cross-encoder alongside vLLM-Qwen3-8B-AWQ. Qwen3-Reranker-0.6B
+    # fits a larger batch (smaller model, smaller hidden dim per token),
+    # but we keep the same default and let users bump it via env.
+    try:
+        bs = int(os.environ.get("MEMEX_RERANK_BATCH_SIZE", "8"))
+    except ValueError:
+        bs = 8
+    return max(1, bs)
 
 
 async def cross_encoder_rerank(
@@ -25,42 +57,41 @@ async def cross_encoder_rerank(
     candidates: list[Chunk],
     top_k: int = 10,
 ) -> list[Chunk]:
-    """Rescore `candidates` against `query`, return top `top_k` by rerank score."""
+    """Rescore `candidates` against `query` and return the top `top_k`.
+
+    Misnomer: the function dispatches to either the CrossEncoder backend
+    OR the Qwen3-Reranker backend based on
+    `settings.models.reranker_backend`. The historical name is kept
+    because (1) it's the import path used by `agents/answering.py` and
+    test monkeypatches, and (2) renaming would collide with the module
+    name `memex.retrieve.rerank` and break attribute resolution on the
+    package init.
+
+    Returns each surviving chunk with its `rerank_score` field populated.
+    """
     if not candidates:
         return []
 
-    log = logger.bind(candidates=len(candidates), top_k=top_k)
+    settings = get_settings()
+    backend = settings.models.reranker_backend
+    log = logger.bind(
+        candidates=len(candidates), top_k=top_k, backend=backend
+    )
     log.info("rerank.start")
 
-    # batch_size=8 is the safe default on a 12 GB rig running
-    # bge-reranker-v2-m3 alongside vLLM-Qwen3-8B-AWQ. Originally 64
-    # (CUDA audit, Docling-chunk baseline); lowered once
-    # PyMuPDF-extracted chunks (denser native text per pair) started
-    # OOMing the reranker's attention even at top_k=10. Even
-    # batch_size=16 OOMs on the reference RTX 4070 with the 8B
-    # orchestrator resident — see the empirical run after the chunker
-    # tuning commit. Bigger rigs, smaller orchestrators, or the
-    # planned Qwen3-Reranker-0.6B swap (P2.1) can push back up via
-    # MEMEX_RERANK_BATCH_SIZE for higher rerank throughput.
-    try:
-        batch_size = int(os.environ.get("MEMEX_RERANK_BATCH_SIZE", "8"))
-    except ValueError:
-        batch_size = 8
-    batch_size = max(1, batch_size)
+    batch_size = _read_batch_size()
 
     registry = get_registry()
     async with registry.use("reranker") as reranker:
         pairs = [(query, c.text) for c in candidates]
-
-        def _predict() -> Any:
-            return reranker.predict(
-                pairs,
-                batch_size=batch_size,
-                show_progress_bar=False,
-                convert_to_numpy=True,
+        if isinstance(reranker, Qwen3RerankerHandle):
+            scores = await asyncio.to_thread(
+                _score_qwen3, reranker, pairs, batch_size
             )
-
-        scores = await asyncio.to_thread(_predict)
+        else:
+            scores = await asyncio.to_thread(
+                _score_cross_encoder, reranker, pairs, batch_size
+            )
 
     ranked = sorted(
         zip(candidates, (float(s) for s in scores), strict=True),
@@ -73,3 +104,88 @@ async def cross_encoder_rerank(
     ]
     log.info("rerank.done", returned=len(out))
     return out
+
+
+def _score_cross_encoder(
+    reranker: Any, pairs: list[tuple[str, str]], batch_size: int
+) -> Any:
+    """The CrossEncoder backend — one forward pass per pair via
+    `sentence_transformers.CrossEncoder.predict`. Returns a numpy
+    array of float logits, one per pair.
+    """
+    return reranker.predict(
+        pairs,
+        batch_size=batch_size,
+        show_progress_bar=False,
+        convert_to_numpy=True,
+    )
+
+
+def _qwen3_format(query: str, doc: str) -> str:
+    """Build the chat-template-formatted prompt for one (query, doc) pair.
+
+    Mirrors the Qwen3-Reranker model card's reference format. The
+    `<think></think>` block is left empty: we're scoring, not
+    reasoning, and the next-token logits at the assistant header are
+    what we read.
+    """
+    return (
+        "<|im_start|>system\n"
+        f"{_QWEN3_SYSTEM_PROMPT}<|im_end|>\n"
+        "<|im_start|>user\n"
+        f"<Instruct>: {_QWEN3_TASK}\n"
+        f"<Query>: {query}\n"
+        f"<Document>: {doc}<|im_end|>\n"
+        "<|im_start|>assistant\n"
+        "<think>\n\n</think>\n\n"
+    )
+
+
+def _score_qwen3(
+    handle: Qwen3RerankerHandle,
+    pairs: list[tuple[str, str]],
+    batch_size: int,
+) -> list[float]:
+    """The Qwen3-Reranker backend.
+
+    For each batch of pairs:
+      1. Format via `_qwen3_format` → chat-template strings.
+      2. Tokenise with left-padding (so the "last token" of every
+         sequence is the assistant-prefix marker after `<think></think>`).
+      3. Forward pass; extract logits at the final position.
+      4. Score = softmax([no_logit, yes_logit])[1] — the probability
+         the model assigns to "yes".
+
+    Returns a flat `list[float]` aligned with `pairs`.
+    """
+    import torch
+
+    scores: list[float] = []
+    device = next(handle.model.parameters()).device
+
+    for start in range(0, len(pairs), batch_size):
+        chunk = pairs[start : start + batch_size]
+        prompts = [_qwen3_format(q, d) for q, d in chunk]
+        inputs = handle.tokenizer(
+            prompts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=8192,
+        ).to(device)
+
+        with torch.no_grad():
+            logits = handle.model(**inputs).logits  # (B, T, V)
+
+        # With left-padding the assistant-prefix is the last token of
+        # every sequence, so `[:, -1, :]` gives us the right slice.
+        last_logits = logits[:, -1, :]
+        yes_logits = last_logits[:, handle.yes_id]
+        no_logits = last_logits[:, handle.no_id]
+        # softmax over the two-element [no, yes] vector → P(yes)
+        pair_logits = torch.stack([no_logits, yes_logits], dim=-1)
+        probs = torch.softmax(pair_logits.float(), dim=-1)
+        yes_probs = probs[:, 1].tolist()
+        scores.extend(float(p) for p in yes_probs)
+
+    return scores

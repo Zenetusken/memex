@@ -337,7 +337,10 @@ async def _expand_graph_impl(state: AnswerState) -> AnswerStateUpdate:
 
 
 async def rerank(state: AnswerState) -> AnswerStateUpdate:
-    """Second-stage reranking with bge-reranker-v2-m3."""
+    """Second-stage reranking. Backend selected by settings
+    (`reranker_backend`): bge cross-encoder by default, Qwen3-Reranker
+    when flagged. See `retrieve/rerank.py`.
+    """
     import os
 
     log = logger.bind(node="rerank")

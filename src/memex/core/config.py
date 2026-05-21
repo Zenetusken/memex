@@ -38,6 +38,17 @@ class ModelSettings(BaseModel):
     vlm_quantization: Literal["awq_int4", "bf16"] = "awq_int4"
     embedder: str = "google/embeddinggemma-300m"
     reranker: str = "BAAI/bge-reranker-v2-m3"
+    # Reranker backend selector. `cross_encoder` (default) loads the
+    # `sentence_transformers.CrossEncoder` model named in `reranker`
+    # (today: bge-reranker-v2-m3). `qwen3` loads a Qwen3-Reranker
+    # decoder via `transformers.AutoModelForCausalLM` and scores via
+    # softmax over the yes/no token logits — see P2.1 in
+    # docs/ROADMAP.md + retrieve/rerank.py. Set `reranker` to the
+    # matching checkpoint id (e.g. `Qwen/Qwen3-Reranker-0.6B`) when
+    # flipping the backend. Quality A/B between the two awaits the
+    # eval corpus (P0); memory wins of ~1.4 GB on a 12 GB rig are
+    # available today.
+    reranker_backend: Literal["cross_encoder", "qwen3"] = "cross_encoder"
 
 
 class HardwareSettings(BaseModel):
