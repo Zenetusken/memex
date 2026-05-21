@@ -65,6 +65,7 @@ The user-unit path is the recommended setup: no root required, runs under your a
 | Disable boot start | `systemctl --user disable memex-vllm` |
 | Reload env file changes | `systemctl --user daemon-reload && systemctl --user restart memex-vllm` |
 | Pin journal retention | `journalctl --vacuum-time=30d` (or set `SystemMaxUse=` in `journald.conf`) |
+| Apply upstream updates | `uv run memex upgrade` — bundles `git pull --ff-only`, `uv sync`, and `systemctl --user restart` of every installed `memex-*` unit. `--dry-run` previews, `--no-restart` for non-systemd boxes. |
 
 ## What the unit does
 
@@ -148,7 +149,6 @@ systemctl --user status memex-vllm memex-web memex-mcp memex-watch --no-pager
 
 - **GPU monitoring** — out of scope. `nvidia-smi` works fine; if you want metrics in journald, `nvidia-smi --query-gpu=… --loop=5` in a sidecar unit is one path.
 - **Backup of the vault** — the vault is regular files under `~/.memex/vault`; any incremental backup tool (`restic`, `borg`, `rsnapshot`) handles it. A `memex-vault-backup.timer` is a natural follow-up to these unit templates.
-- **A `memex upgrade` wrapper** — `git pull && uv sync && systemctl --user restart memex-vllm memex-web memex-mcp` is the manual recipe; bundling it into one CLI command is a follow-up.
 
 ## Troubleshooting
 

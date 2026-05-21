@@ -203,6 +203,16 @@ $EDITOR ~/.memex/vault/documents/2f96ae1c-some-paper.md
 
 The watcher service notices the sha change, re-enriches, and re-indexes the doc within seconds. No manual `memex reindex` needed.
 
+### Update to a newer Memex
+
+```sh
+uv run memex upgrade
+```
+
+Three steps in order: `git pull --ff-only` → `uv sync --extra models --extra parse --extra serve` → `systemctl --user restart` of every installed `memex-*.service`. Refuses if your tree has uncommitted changes (run `git stash` yourself if you want to keep them). vLLM's restart blocks ~30 s for the `Type=notify` readiness gate; the CLI prints a note so you don't mistake it for a hang.
+
+Flags: `--dry-run` previews, `--no-restart` for Pattern B / Pattern C boxes (no systemd), `--skip-sync` for git-pull-and-restart only.
+
 ### Plug Memex into Claude Code / Cursor / Claude Desktop
 
 Memex is an MCP server. From a desktop MCP client, point at the stdio transport:
