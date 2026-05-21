@@ -39,6 +39,7 @@ err = Console(stderr=True)
 
 daemon_app = typer.Typer(help="Manage the local vLLM inference daemon.")
 serve_app = typer.Typer(help="Serve Memex as an MCP server or local web UI.")
+mcp_app = typer.Typer(help="MCP server utilities (token generation, ...).")
 
 
 def _print(payload: object) -> None:
@@ -303,6 +304,33 @@ def register(app: typer.Typer) -> None:
 
     app.add_typer(daemon_app, name="daemon")
     app.add_typer(serve_app, name="serve")
+    app.add_typer(mcp_app, name="mcp")
+
+
+@mcp_app.command("generate-token")
+def mcp_generate_token(
+    length: int = typer.Option(
+        32,
+        "--length",
+        min=16,
+        max=128,
+        help="Token length in bytes (urlsafe-encoded; the printed string "
+        "is ~33% longer).",
+    ),
+) -> None:
+    """Print a fresh urlsafe bearer token to stdout.
+
+    Save the output into `MEMEX_MCP__AUTH_TOKEN` (env or
+    `~/.config/memex/config.toml`) and restart `memex serve mcp` to
+    require it on incoming requests. See docs/deploy/mcp-http.md.
+
+    The token is printed *without* a trailing newline-noise prompt so
+    it can be piped into a secrets manager: `memex mcp generate-token
+    | pbcopy` / `... | wl-copy`.
+    """
+    import secrets
+
+    typer.echo(secrets.token_urlsafe(length))
 
 
 @serve_app.command("mcp")
