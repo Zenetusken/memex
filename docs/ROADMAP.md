@@ -156,13 +156,13 @@ These are ready to run once the corpus has the depth to discriminate between can
 
 ### Next pickup — ranked by impact × feasibility
 
-1. **🪜 P2.1 Qwen3-Reranker quality A/B** (Tier 3, single-session). Now genuinely ready: 30-query corpus, full-content chunks post truncate-budget retune, refusal logic calibrated. Infra already shipped; the swap is `MEMEX_MODELS__RERANKER_BACKEND=qwen3` flag. **The first foundation-clean A/B verdict.**
-2. **🏗️ P3.3 chart-OCR pass over Docling figures** (Tier 2, multi-session). Addresses the Q4/Q16/Q21 residuals (chart-numerics buried in image format). New parse-stage post-processor + DocVQA-class model (Pix2Struct, DePlot, ChartQA). The xgrammar empty-input short-circuit pattern transfers here for safe structured outputs.
-3. **🎯 P0 corpus extension — multi-doc / multi-category** (Tier 2, multi-session). Within-category variance (3-5 slide decks) AND breadth across the other 6 categories (modern-printed, scientific-papers, technical-docs, historical-scans, handwritten, forms).
-4. **🪜 P2.2** (Granite vs Qwen3 orchestrator) and **P2.3** (Qwen3-VL vs Qwen2.5-VL) — Tier 3, single-session each, pickable after P2.1.
-5. **🧰 Filler N1/N5** — Tier 1 atomic nits, <1 hour each. Useful when the user wants something contained.
+1. ❌ ~~**🪜 P2.1 Qwen3-Reranker quality A/B**~~ — **Hardware-blocked 2026-05-21** on the 12 GB rig under the production budget (max-model-len=6144). Qwen3-Reranker (~2.1 GB live) + vLLM (~8.5 GB at gpu_fraction=0.72) + embedder + reranker overhead exceeds the 12 GB ceiling. At gpu_fraction=0.62 vLLM starts but cross_encoder baseline drops from 12 → 9 answered (KV-cache pressure affects vLLM determinism even at temp=0); at 0.55 vLLM refuses to start. Resolution paths: 16+ GB GPU OR P4.2 smaller-orchestrator option (Qwen3-4B-AWQ frees ~3 GB).
+2. **🏗️ P3.3 chart-OCR pass over Docling figures** (Tier 2, multi-session). **Now the highest-priority pickup.** Addresses the Q4/Q16/Q21 residuals (chart-numerics buried in image format). New parse-stage post-processor + DocVQA-class model (Pix2Struct, DePlot, ChartQA). The xgrammar empty-input short-circuit pattern transfers here for safe structured outputs.
+3. **🎯 P0 corpus extension — multi-doc / multi-category** (Tier 2, multi-session). Within-category variance (3-5 slide decks) AND breadth across the other 6 categories.
+4. **🧰 Filler N1/N5** — Tier 1 atomic nits, <1 hour each. Useful when the user wants something contained.
+5. **🪜 P2.2** (Granite vs Qwen3 orchestrator) and **P2.3** (Qwen3-VL vs Qwen2.5-VL) — Tier 3, single-session each. Same VRAM-ceiling concern as P2.1 — check footprints before queuing.
 
-Items below (P3.1 benchmark CI / P4.x design decisions) stay queued; pickup needs an external trigger (GPU runner cost commit, real cross-doc citation, Langfuse self-host).
+Items below (P3.1 benchmark CI / P4.x design decisions, **including P4.2 which directly unblocks P2.1**) stay queued; pickup needs an external trigger or a deliberate scope shift (e.g., 8 GB / smaller-orchestrator tier).
 
 ---
 
