@@ -28,7 +28,7 @@ The blueprint in [`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) is the archi
 | **FU3.2.1** | **`Type=notify` for vLLM** — readiness gate, not just process-forked ordering | ✅ **Shipped + live-verified** (2026-05-21) |
 | **FU3.2.2** | **`memex upgrade` CLI** — one-shot pull + sync + restart-installed-units | ✅ **Shipped + live-verified** (2026-05-21) |
 | **FU3.2.3** | **`memex-vault-backup.timer`** — nightly encrypted restic snapshots | ✅ **Shipped + live-verified** (2026-05-21) |
-| **P0** | **Eval corpus** — JSON query sets + `memex eval` rigorous baseline | ⚠️ **Rigorous baseline shipped** (2026-05-21): 1 category (slide-decks), 1 doc, 15 queries (7 answerable + 3 empty-retrieval refusals + 5 near-miss refusals); `top_k ∈ {4,6,8}` sweep run; `mcp_answered_only ≈ 0.5–0.6`. Corpus extension is multi-session curator work. |
+| **P0** | **Eval corpus** — JSON query sets + `memex eval` rigorous baseline | ⚠️ **Extended baseline shipped** (2026-05-21): 1 category (slide-decks), 1 doc, **30 queries** (17 answerable + 5 empty-retrieval + 8 near-miss refusals). `mcp_answered_only = 0.89`, `refusal_rate_cf = 1.00`, 9 legitimate answers, zero hallucinations. n=17 is now statistically meaningful for P2.x A/B's. Multi-document + multi-category extension is the next P0 sub-goal. |
 | **Parse — slide-deck → Docling** | Tier 0.5 classifier override routing slide-shaped PDFs to Docling | ✅ **Shipped + live-verified** (2026-05-21) — `_is_slide_deck` heuristic (aspect ≥ 1.3 AND chars-per-page in [50, 800)); 147 tests green; CUDA deck now routes correctly. |
 | **P2.4 — Agent refusal calibration** | `prompts/answer/v2.md` with literal-presence rule | ✅ **Shipped + live-verified** (2026-05-21) — Q11 (FP128) + Q12 (FP4) hallucinations both eliminated; `refusal_rate_cf` 0.75 → 1.0; `mcp_ans` 0.33 → 0.67. One regression: Q7 (5-bit/10-bit half) ANS→REF; tradeoff is favourable. |
 
@@ -151,7 +151,7 @@ These are ready to run once the corpus has the depth to discriminate between can
 
 The pending work, ranked by **impact × feasibility**:
 
-1. **🎯 P0 corpus extension** (Tier 2, multi-session but high impact). The single biggest unlock. Even bumping `slide-decks` from 15 → 30+ queries in one session would give P2.1's reranker A/B statistical signal. The harness is wired and the labelling pattern is documented at `tests/eval-data/README.md`. **Recommended if the user has a multi-session commitment.**
+1. ~~**🎯 P0 corpus extension to 30 queries**~~ — ✅ **Shipped 2026-05-21.** `tests/eval-data/slide-decks/queries.json` now carries 30 queries (was 15). Headline at `top_k=6 batch=4`: `mcp_answered_only=0.89` (up from 0.67), `refusal_rate_cf=1.00` (perfect; zero hallucinations across 13 refusal queries). n=17 answerable queries gives P2.1's reranker A/B statistical signal. New tracked findings surfaced: NVRTC-related queries (16/20/21) refuse despite the answer being in a high-rerank chunk — retrieval-vs-agent gap worth investigating. Outstanding P0 work: extend slide-decks to 3-5 docs (within-category variance), bootstrap other 6 categories.
 
 2. ~~**🔬 xgrammar-interaction investigation**~~ — ✅ Shipped 2026-05-21. Root cause was the verify node calling the model with an empty `Draft (indexed):` section when `answer/v2` legitimately returns zero claims; unbounded `list[int]` schema + xgrammar strict mode + greedy decoding = runaway. Fix is a 5-line empty-draft short-circuit in `agents/answering.py::verify`. `verify_grounding/v2` ships alongside. **Insight saved for P3.3**: any structured output with unbounded array fields (chart-OCR rows, table cells) needs an explicit empty-input short-circuit OR a `max_length` constraint — xgrammar will happily emit forever otherwise.
 
@@ -165,7 +165,21 @@ Items below tier 3 (P3.1 benchmark CI / P4.x design decisions) stay queued; pick
 
 ---
 
-## P0 — eval corpus: rigorous baseline shipped 2026-05-21
+## P0 — eval corpus: extended baseline shipped 2026-05-21
+
+**30-query extended baseline** (top_k=6, batch=4, against the live PyMuPDF vault):
+
+| Metric | 15-query baseline | 30-query extended | Δ |
+|---|---|---|---|
+| `answered_count` | 3 | 9 | +6 (more answerable queries fired) |
+| `refused_count` | 12 | 21 | +9 |
+| `mcp_answered_only` | 0.67 | **0.89** | **+22 pp** |
+| `refusal_rate_on_counterfactuals` | 1.00 | **1.00** | unchanged (perfect) |
+| Hallucinations | 0 | 0 | unchanged |
+
+**The 15 new queries** (qids 16–30): 10 answerable covering NVRTC compilation, kernel fusion, NVLink C2C, CUTLASS, mixed-precision LU, unified memory, FP16 tensor core MMA, performance-per-watt thesis + 3 near-miss refusals (FP4 mantissa, CUDA 11.0 compile time, NVLink latency) + 2 empty-retrieval refusals (H100 TDP, kernel-language survey).
+
+**New finding to capture**: queries 16/20/21 (all NVRTC-related) refuse with reasons like "the chunks discuss CUDA features but do not provide specific data on NVRTC compile time" — but the NVRTC chunk (`#ba5b556a6b`) is at rerank 0.98 in raw `memex search`. There is a **retrieval-vs-agent-search gap**: the agent's internal flow doesn't always include the high-rerank chunk in its working set. Worth a follow-up investigation (separate from P0).
 
 ### Eval baseline + parser-investigation history (preserved for reference)
 

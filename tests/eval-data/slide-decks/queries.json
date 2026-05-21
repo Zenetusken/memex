@@ -1,8 +1,8 @@
 {
-  "_description": "P0 eval-corpus, category: slide-decks. Source doc: Stephen Jones, 'CUDA: New Features and Beyond', GTC 2024. Rigorous baseline 2026-05-21 — replaces the initial bootstrap after methodology gaps surfaced (over-narrow labelling, easy-only counterfactuals, top_k confound).",
+  "_description": "P0 eval-corpus, category: slide-decks. Source doc: Stephen Jones, 'CUDA: New Features and Beyond', GTC 2024. Extended 2026-05-21 from the rigorous baseline (15→30 queries) to give P2.x A/Bs statistical signal. New queries cover NVRTC compilation, kernel fusion, NVLink C2C, CUTLASS abstractions, LU factorization, performance-per-watt thesis, and unified memory.",
   "_doc_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640",
-  "_query_count": 15,
-  "_mix": "7 answerable + 3 empty-retrieval refusals + 5 near-miss refusals",
+  "_query_count": 30,
+  "_mix": "17 answerable + 5 empty-retrieval refusals + 8 near-miss refusals",
   "_labelling_rule": "For each answerable query, run `memex search --k 10`; `relevant_chunk_ids` = every chunk in the top-10 whose text contains the literal answer (or equivalent paraphrase). Single-chunk labels appear when only one chunk has the answer text; multi-chunk labels appear when the chunker's overlap creates near-duplicate chunks.",
   "queries": [
     {
@@ -152,6 +152,156 @@
       "_counterfactual_mode": "near-miss",
       "_expected_answer": "(Refuse — kernel fusion is discussed but the example given is FP32→FP16, not FP32→INT8.)",
       "_note": "Tests whether the agent substitutes the FP32→FP16 example as if it answered the FP32→INT8 question."
+    },
+    {
+      "qid": "slide-decks-16",
+      "question": "By how much has NVRTC compilation time improved since CUDA 11.8 for a hello-world kernel?",
+      "relevant_chunk_ids": [
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#ba5b556a6b"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "6x speedup since CUDA 11.8 (from the NVRTC compile-time chart).",
+      "_baseline_rerank_top1": 0.9843
+    },
+    {
+      "qid": "slide-decks-17",
+      "question": "In the deck's basic kernel-fusion example, how many kernel launches does the unfused FP32→FP16 multiplication require versus the single fused version?",
+      "relevant_chunk_ids": [
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#ba5b556a6b"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "3 kernel launches unfused vs 1 launch fused.",
+      "_baseline_rerank_top1": 0.9570
+    },
+    {
+      "qid": "slide-decks-18",
+      "question": "What is the NVLink C2C bandwidth between the Grace CPU and Hopper GPU?",
+      "relevant_chunk_ids": [
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#1cb48b9127",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#166905082f"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "900 GB/s NVLink C2C.",
+      "_baseline_rerank_top1": 0.9843
+    },
+    {
+      "qid": "slide-decks-19",
+      "question": "Which two programming-language abstractions does CUTLASS provide for tensor cores?",
+      "relevant_chunk_ids": [
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#f651c446b9",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#4f6743cd3d"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "C++ and Python abstractions.",
+      "_baseline_rerank_top1": 0.9765
+    },
+    {
+      "qid": "slide-decks-20",
+      "question": "What new NVRTC flag reduces front-end compilation time by excluding rarely-used compile-time-expensive features?",
+      "relevant_chunk_ids": [
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#ba5b556a6b"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "The '-minimal' flag.",
+      "_baseline_rerank_top1": 0.9687
+    },
+    {
+      "qid": "slide-decks-21",
+      "question": "How much lower are the overheads of the NVRTC '-minimal' flag compared to the default '-O3'?",
+      "relevant_chunk_ids": [
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#ba5b556a6b"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "1.6x lower overheads than default '-O3'.",
+      "_baseline_rerank_top1": 0.9101
+    },
+    {
+      "qid": "slide-decks-22",
+      "question": "What method does the deck describe for getting IEEE-754 FP64-accurate results from FP16 tensor cores?",
+      "relevant_chunk_ids": [
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#68dbf5fd57",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#6f445df66b"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "Mixed-precision LU factorization with GMRES iterative refinement: do the LU factorisation in FP16 on tensor cores, then refine in FP64 until accurate enough.",
+      "_baseline_rerank_top1": 0.9882
+    },
+    {
+      "qid": "slide-decks-23",
+      "question": "What does the Grace-Hopper unified memory address space refer to in the deck?",
+      "relevant_chunk_ids": [
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#166905082f",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#1cb48b9127"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "Two memory systems (Grace LPDDR5X + Hopper HBM) presented as one address space accessible by both CPU and GPU.",
+      "_baseline_rerank_top1": 0.9765
+    },
+    {
+      "qid": "slide-decks-24",
+      "question": "What is the energy cost of an FP16 Tensor Core MMA matrix multiply relative to an FP32 FMA?",
+      "relevant_chunk_ids": [
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3a6c6789e8",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#68dbf5fd57",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3033839212"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "0.12x (from the Energy per FLOP table; Tensor Core MMA in FP16).",
+      "_baseline_rerank_top1": 0.9726
+    },
+    {
+      "qid": "slide-decks-25",
+      "question": "What is the deck's central thesis about the right performance metric to optimise in modern accelerators?",
+      "relevant_chunk_ids": [
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#f41f19dbc0"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "It's about performance per watt (the section is titled '_It's about Performance per Watt_').",
+      "_baseline_rerank_top1": 0.2636,
+      "_note": "Borderline rerank score (0.26) — the answer is the deck's THESIS, captured in section heading. Useful test of whether the agent grounds on heading-level structural signal."
+    },
+    {
+      "qid": "slide-decks-26",
+      "question": "What is the mantissa length of an FP4 number in this deck?",
+      "relevant_chunk_ids": [],
+      "should_refuse": true,
+      "_counterfactual_mode": "near-miss",
+      "_expected_answer": "(Refuse — the precision-bit table covers FP64/32/16/8/Int8 mantissa lengths but FP4 is not in the table.)",
+      "_note": "Sister near-miss to slide-decks-12 (FP4 tensor core cost). Tests whether the agent extrapolates a mantissa value by analogy with FP8 (3-bit) when FP4 is absent."
+    },
+    {
+      "qid": "slide-decks-27",
+      "question": "What is the NVRTC compile time for hello-world in CUDA 11.0?",
+      "relevant_chunk_ids": [],
+      "should_refuse": true,
+      "_counterfactual_mode": "near-miss",
+      "_expected_answer": "(Refuse — the NVRTC chart shows speedups SINCE CUDA 11.8; CUDA 11.0 is not present.)",
+      "_note": "Tests whether the agent extrapolates a value from the chart's domain. Should refuse because 11.0 is outside the chart's range."
+    },
+    {
+      "qid": "slide-decks-28",
+      "question": "What is the maximum latency of NVLink C2C between the Grace CPU and Hopper GPU?",
+      "relevant_chunk_ids": [],
+      "should_refuse": true,
+      "_counterfactual_mode": "near-miss",
+      "_expected_answer": "(Refuse — bandwidth is given (900 GB/s), but latency is not.)",
+      "_note": "Tests whether the agent substitutes bandwidth for latency. The bandwidth/latency confusion is a common LLM near-miss failure."
+    },
+    {
+      "qid": "slide-decks-29",
+      "question": "What is the thermal design power of the NVIDIA H100 reference design?",
+      "relevant_chunk_ids": [],
+      "should_refuse": true,
+      "_counterfactual_mode": "empty-retrieval",
+      "_expected_answer": "(Refuse — TDP / cooling specs are not in this architectural deck.)"
+    },
+    {
+      "qid": "slide-decks-30",
+      "question": "What programming language must I use to write CUDA kernels — only C++, or are other options supported?",
+      "relevant_chunk_ids": [],
+      "should_refuse": true,
+      "_counterfactual_mode": "empty-retrieval",
+      "_expected_answer": "(Refuse — although Python interfaces are mentioned for some libraries, the deck does not give a comprehensive answer to 'which languages can write CUDA kernels'.)"
     }
   ]
 }
