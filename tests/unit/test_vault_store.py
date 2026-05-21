@@ -1,14 +1,18 @@
-"""Unit tests for the vault store — focused on the optimistic-concurrency
-`expected_sha` parameter that P1.4 added to `write_document`.
+"""Unit tests for the vault store — focused on the concurrency layers
+P1.4 (optimistic `expected_sha` CAS) and P1.5 (cross-process flock)
+added to `write_document` / `delete_document`.
 
 The store has plenty of behaviour exercised end-to-end by integration
-tests (ingest/parse/index). These tests target the CAS path
-specifically so a regression in the conflict-detection logic shows up
-under `pytest tests/unit -q`.
+tests (ingest/parse/index). These tests target the concurrency paths
+specifically so a regression shows up under `pytest tests/unit -q`.
+The cross-process scenario lives in `tests/integration/` because it
+requires spawning a real subprocess.
 """
 
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -111,3 +115,33 @@ async def test_write_document_stale_error_when_doc_deleted_concurrently(
         )
     assert exc.value.context["current_sha"] is None
     assert exc.value.context["current_body"] == ""
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="fcntl not available")
+@pytest.mark.asyncio
+async def test_write_document_creates_and_releases_lock_file(
+    vault: Path,
+) -> None:
+    """After a successful write, the lock file exists at the canonical
+    path and is in the released state — a fresh non-blocking
+    flock-exclusive acquisition should succeed instantly.
+    """
+    import fcntl
+
+    from memex.vault._file_lock import _lock_path
+
+    doc_id = "00000005-lockfile"
+    await write_document(vault, _build_doc(vault, doc_id, "v1"))
+    lock = _lock_path(vault, doc_id)
+    assert lock.exists()
+    assert lock.stat().st_mode & 0o777 == 0o600
+
+    # The lock must be released. A non-blocking exclusive acquisition
+    # from another fd should succeed — if it raises BlockingIOError,
+    # the previous writer leaked the flock.
+    fd = os.open(str(lock), os.O_WRONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)

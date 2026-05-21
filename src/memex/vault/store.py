@@ -25,15 +25,18 @@ from pydantic import BaseModel, Field
 import hmac
 
 from memex.core.errors import StaleDocumentError, VaultIntegrityError
+from memex.vault._file_lock import cleanup_lock_file, doc_file_lock
 
 # Per-`doc_id` write serialisation. `_atomic_write` is atomic at the
 # tempfile-rename level, but two coroutines calling `write_document` on
 # the same `doc_id` concurrently would each prepare their own tempfile
 # and the loser's data would be silently discarded by the last
-# `os.replace`. The lock makes write+delete on a given doc id
-# sequential within the process. Cross-process safety would need
-# `fcntl.LOCK_EX`; today single-process is the only supported topology
-# (CLI, daemon, watcher all run in the same Python process).
+# `os.replace`. The asyncio lock below makes write+delete sequential
+# within the process. Cross-process safety lives in
+# `vault._file_lock.doc_file_lock` (P1.5), which `write_document` and
+# `delete_document` enter inside the asyncio critical section so two
+# `memex` processes on the same `doc_id` block on fcntl rather than
+# racing past each other's asyncio locks.
 _DOC_LOCKS: dict[str, asyncio.Lock] = {}
 
 
@@ -188,7 +191,9 @@ async def write_document(
     default) preserves the pre-P1.4 last-write-wins behaviour for
     callers that don't care (ingest, parse, MCP write tools).
     """
-    async with _lock_for(doc.ref.doc_id):
+    async with _lock_for(doc.ref.doc_id), doc_file_lock(
+        vault_path, doc.ref.doc_id
+    ):
         if expected_sha is not None:
             current = _current_sha_and_body(vault_path, doc.ref.doc_id)
             if current is None:
@@ -309,7 +314,7 @@ async def delete_document(vault_path: Path, doc_id: str) -> None:
     per-doc lock — a delete racing a write would otherwise leave a
     partially-removed asset directory.
     """
-    async with _lock_for(doc_id):
+    async with _lock_for(doc_id), doc_file_lock(vault_path, doc_id):
         md = _markdown_path(vault_path, doc_id)
         md.unlink(missing_ok=True)
         asset = _asset_dir(vault_path, doc_id)
@@ -321,4 +326,8 @@ async def delete_document(vault_path: Path, doc_id: str) -> None:
                 if child.is_dir():
                     child.rmdir()
             asset.rmdir()
+        # Unlink the lock file last, while we still hold the flock via
+        # the open fd. A future write_document on this doc_id will
+        # recreate the file at the same path.
+        cleanup_lock_file(vault_path, doc_id)
     _DOC_LOCKS.pop(doc_id, None)
