@@ -127,6 +127,50 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
     if not pages:
         pages.append({"page": 1, "markdown": markdown, "confidence": 1.0})
 
+    # P3.3 Session 2: serialise per-figure metadata for the chart-OCR
+    # backend. The image BYTES are NOT included — the chart-OCR pass
+    # re-renders from the source PDF via pypdfium2 (see
+    # `parse/chart_ocr_backend.py` once shipped). We tolerate any
+    # Docling internal-API shift by `getattr`-defaulting each field;
+    # missing metadata just yields an empty `figures` list and the
+    # chart-OCR pass skips the doc.
+    figures: list[dict[str, Any]] = []
+    for pic in getattr(doc, "pictures", None) or []:
+        bbox_obj = getattr(pic, "bbox", None) or getattr(pic, "prov", None)
+        # Docling's picture provenance may live on `.bbox` directly or
+        # via `.prov[0].bbox` depending on the version. Probe both.
+        if bbox_obj is None:
+            prov_list = getattr(pic, "prov", None) or []
+            if prov_list:
+                bbox_obj = getattr(prov_list[0], "bbox", None)
+        if bbox_obj is None:
+            continue
+        try:
+            x0 = float(getattr(bbox_obj, "l", getattr(bbox_obj, "x0", 0.0)))
+            y0 = float(getattr(bbox_obj, "b", getattr(bbox_obj, "y0", 0.0)))
+            x1 = float(getattr(bbox_obj, "r", getattr(bbox_obj, "x1", 0.0)))
+            y1 = float(getattr(bbox_obj, "t", getattr(bbox_obj, "y1", 0.0)))
+        except (TypeError, ValueError):
+            continue
+        page_no = getattr(pic, "page_no", None)
+        if page_no is None:
+            prov_list = getattr(pic, "prov", None) or []
+            if prov_list:
+                page_no = getattr(prov_list[0], "page_no", None)
+        if page_no is None:
+            continue
+        caption_obj = getattr(pic, "caption_text", None) or getattr(
+            pic, "caption", None
+        )
+        caption = str(caption_obj) if caption_obj else None
+        figures.append(
+            {
+                "page_no": int(page_no),
+                "bbox": [x0, y0, x1, y1],
+                "caption": caption,
+            }
+        )
+
     return {
         "markdown": markdown,
         "pages": pages,
@@ -134,6 +178,7 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
         "figure_count": len(getattr(doc, "pictures", []) or []),
         "table_count": len(getattr(doc, "tables", []) or []),
         "equation_count": len(getattr(doc, "equations", []) or []),
+        "figures": figures,
     }
 
 

@@ -217,21 +217,35 @@ def _is_mixed_content(s: PdfSignals) -> bool:
 
 def _is_slide_deck(s: PdfSignals) -> bool:
     """True iff the document looks like a slide deck — landscape
-    aspect ratio AND moderate-to-low text-density per page (at least
-    50 chars/page so rasterised image-only PDFs fall to Tier 1.C
-    instead). PyMuPDF text extraction loses chart structure on
-    slide-deck content (interleaving chart imagery as `[chart-text]`
-    blocks the agent can't ground on); Docling preserves layout as
-    proper tables + figures. Verified on the GTC 2024 CUDA deck
-    (commit `2805ac4`): legitimate answer rate 4/7 → 6/7 (+50%) when
-    routed to Docling.
+    aspect ratio plus either moderate-to-low text-density per page
+    OR substantial image area (chart-heavy escape valve).
+
+    The chars-per-page gate catches typical text-thin slide decks.
+    The image-area gate (P3.3 Session 2) catches chart-heavy slide
+    decks where per-page char count is inflated past 800 by PyMuPDF's
+    `[chart-text]` extraction of axis labels — the CUDA deck pattern
+    that P3.3 chart-OCR targets. Without the second gate those decks
+    stay on PyMuPDF and the agent grounds on noisy unstructured
+    chart-text; with the gate they route to Docling where the
+    chart-OCR backend can extract structured tables.
+
+    The lower 50 chars/page floor stays in place so rasterised
+    image-only PDFs fall to Tier 1.C instead.
     """
     settings = get_settings().parse
-    return (
+    aspect_ok = (
         s.avg_aspect_ratio >= settings.pymupdf_slide_deck_aspect_threshold
-        and 50.0 <= s.chars_per_page_avg
-        < float(settings.pymupdf_slide_deck_max_chars_per_page)
     )
+    if not aspect_ok or s.chars_per_page_avg < 50.0:
+        return False
+    text_thin = s.chars_per_page_avg < float(
+        settings.pymupdf_slide_deck_max_chars_per_page
+    )
+    chart_heavy = (
+        s.image_area_fraction
+        >= settings.pymupdf_slide_deck_chart_heavy_image_area_threshold
+    )
+    return text_thin or chart_heavy
 
 
 def _classify(signals: PdfSignals) -> _Classification:

@@ -236,17 +236,38 @@ def test_slide_deck_landscape_and_low_density_routes_to_docling() -> None:
 
 
 def test_landscape_but_text_dense_stays_pymupdf() -> None:
-    """Landscape + dense text → not a slide deck (e.g., wide-format
-    legal doc, two-column landscape report). Aspect alone is not
-    enough; density gate prevents false-positive routing.
+    """Landscape + dense text + low image area → not a slide deck (e.g.,
+    wide-format legal doc, two-column landscape report). Aspect alone
+    is not enough; density gate prevents false-positive routing.
     """
     sig = _signals(
         producer="LibreOffice",
         avg_aspect_ratio=1.5,
         chars_per_page_avg=1500.0,  # well above the 800 threshold
+        image_area_fraction=0.05,  # well below the chart-heavy 0.20 gate
     )
     result = _classify(sig)
     assert result.doc_type != "slide-deck"
+
+
+def test_chart_heavy_slide_deck_routes_to_docling() -> None:
+    """P3.3 Session 2 chart-heavy escape valve: when the aspect-ratio
+    gate is met AND image_area_fraction crosses the threshold, the
+    slide-deck classification fires even if chars_per_page is above
+    the 800 default. Targets the GTC 2024 CUDA deck pattern, where
+    chart-text extraction inflates chars_per_page past 800 but the
+    content is figure-dominated.
+    """
+    sig = _signals(
+        producer="Microsoft PowerPoint 2023",
+        avg_aspect_ratio=1.78,  # 16:9
+        chars_per_page_avg=1500.0,  # over the 800 chars/page floor
+        image_area_fraction=0.30,  # over the 0.20 chart-heavy gate
+    )
+    result = _classify(sig)
+    assert result.doc_type == "slide-deck"
+    assert result.confidence < 0.5
+    assert result.attribution["tier"] == "0.5-slide-deck"
 
 
 def test_portrait_low_density_stays_pymupdf() -> None:

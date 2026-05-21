@@ -169,6 +169,18 @@ class ParseSettings(BaseModel):
     # the floor catching even text-heavy slides without trapping
     # cover-page-light documents (which fail the aspect gate anyway).
     pymupdf_slide_deck_max_chars_per_page: int = Field(default=800, ge=0)
+    # P3.3 Session 2: chart-heavy slide-deck escape valve. When the
+    # aspect-ratio gate is met AND image_area_fraction crosses this
+    # threshold, the slide-deck classification fires regardless of
+    # chars_per_page. This catches chart-heavy decks (e.g., GPU /
+    # architecture slide decks where chart-text inflates the per-page
+    # char count past 800 but the content is dominated by figures).
+    # Without this gate, PyMuPDF emits `[chart-text]` blocks of axis
+    # labels interleaved with body prose; chart-OCR over Docling
+    # figures handles the same content as structured tables.
+    pymupdf_slide_deck_chart_heavy_image_area_threshold: float = Field(
+        default=0.20, ge=0.0, le=1.0
+    )
     pymupdf_timeout_s: int = Field(default=120, ge=5)
     pymupdf_crash_threshold: int = Field(default=5, ge=1)
     # Network-egress sandbox for the PyMuPDF worker. Symmetric with

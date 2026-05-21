@@ -308,3 +308,63 @@ async def test_docling_worker_subprocess_success_round_trips(
     assert len(conversion.pages) == 1
     assert conversion.pages[0].confidence == 0.92
     assert conversion.docling_version == "fake-1.0"
+    # Backward-compatibility: a payload without the P3.3 `figures`
+    # field deserialises with an empty default. Older workers + newer
+    # parents stay compatible.
+    assert conversion.figures == []
+
+
+@pytest.mark.asyncio
+async def test_docling_worker_figures_metadata_roundtrips(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P3.3 Session 2: a worker that emits `figures: list[...]` in its
+    payload must deserialise into `DoclingConversion.figures` as a
+    list of `FigureMetadata` objects. The bbox carries through as a
+    4-tuple; caption is optional.
+    """
+    from memex.parse.docling_backend import convert
+
+    ok_script = tmp_path / "ok_with_figures.py"
+    ok_script.write_text(
+        'import json, sys\n'
+        'payload = {\n'
+        '    "markdown": "# Doc\\n\\n<!-- image -->\\n",\n'
+        '    "pages": [{"page": 1, "markdown": "# Doc", "confidence": 0.9}],\n'
+        '    "docling_version": "fake-2.0",\n'
+        '    "figure_count": 2,\n'
+        '    "table_count": 0,\n'
+        '    "equation_count": 0,\n'
+        '    "figures": [\n'
+        '        {"page_no": 1, "bbox": [10.0, 20.0, 100.0, 80.0],\n'
+        '         "caption": "Figure 1: Chart"},\n'
+        '        {"page_no": 3, "bbox": [50.5, 60.0, 200.0, 150.0],\n'
+        '         "caption": None},\n'
+        '    ],\n'
+        '}\n'
+        'json.dump(payload, sys.stdout)\n',
+        encoding="utf-8",
+    )
+
+    import memex.parse.docling_backend as backend
+
+    real_spawn = asyncio.create_subprocess_exec
+
+    async def _spawn(*args: Any, **kwargs: Any):
+        new_args = (sys.executable, str(ok_script), args[-1])
+        return await real_spawn(*new_args, **kwargs)
+
+    monkeypatch.setattr(
+        backend.asyncio, "create_subprocess_exec", _spawn
+    )
+
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"%PDF-1.7\n%%EOF\n")
+
+    conversion = await convert(source, timeout_s=30)
+    assert len(conversion.figures) == 2
+    assert conversion.figures[0].page_no == 1
+    assert conversion.figures[0].bbox == (10.0, 20.0, 100.0, 80.0)
+    assert conversion.figures[0].caption == "Figure 1: Chart"
+    assert conversion.figures[1].page_no == 3
+    assert conversion.figures[1].caption is None

@@ -36,6 +36,25 @@ class DoclingPageOutput(BaseModel):
     confidence: float
 
 
+class FigureMetadata(BaseModel):
+    """Per-figure metadata serialized from the Docling worker's
+    `doc.pictures` array.
+
+    The image bytes themselves are NOT serialized across IPC — the
+    chart-OCR backend re-renders each figure from the source PDF via
+    `pypdfium2`, mirroring how `vlm_backend.py` renders pages. The
+    bbox is in PDF user-space coordinates (origin bottom-left); the
+    caller is responsible for any DPI / coord-space conversion.
+
+    `caption` is whatever Docling associates with the figure (often
+    empty or a one-line caption from the source).
+    """
+
+    page_no: int
+    bbox: tuple[float, float, float, float]
+    caption: str | None = None
+
+
 class DoclingConversion(BaseModel):
     markdown: str
     pages: list[DoclingPageOutput]
@@ -43,6 +62,10 @@ class DoclingConversion(BaseModel):
     figure_count: int = 0
     table_count: int = 0
     equation_count: int = 0
+    # P3.3 Session 2: figure metadata for the chart-OCR pass. Default
+    # empty so older callers / workers without the field stay
+    # forward-compatible.
+    figures: list[FigureMetadata] = []
 
 
 class DoclingUnavailable(MemexError):
