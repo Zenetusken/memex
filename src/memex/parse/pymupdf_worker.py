@@ -76,9 +76,26 @@ _WORD_LIKE_RE = re.compile(r"\b[A-Za-z]{2,15}\b")
 # (chart axis labels, screenshot annotations, etc). For the chunker
 # downstream, these need to be paragraph breaks — otherwise a single
 # chart's data ends up as one massive paragraph that bypasses the
-# 600-token target and produces chunks that exceed the reranker's
+# token target and produces chunks that exceed the reranker's
 # attention window.
 _BR_RUN_RE = re.compile(r"(?:\s*<br\s*/?>\s*){1,}")
+# pymupdf4llm's "picture omitted" / "picture text boundary" markers
+# are extraction-engine metadata, not document content. They bloat
+# chunks with content that never aids retrieval (~23% of the markdown
+# bytes on the canonical CUDA deck). Strip them in the worker; the
+# content *between* the picture-text boundary markers is real text
+# that PyMuPDF lifted from inside images via the PDF's text operators
+# — that stays.
+_PICTURE_OMITTED_RE = re.compile(
+    r"^\s*\*\*==>\s*picture\s*\[[^\]]*\]\s*intentionally omitted\s*<==\*\*\s*$",
+    re.MULTILINE,
+)
+_PICTURE_TEXT_BOUNDARY_RE = re.compile(
+    r"^\s*\*\*-{3,}\s*(?:Start|End)\s+of\s+picture\s+text\s*-{3,}\*\*\s*$",
+    re.MULTILINE,
+)
+# Strip runs of 3+ consecutive blank lines that the marker-strips leave behind.
+_BLANK_LINE_RUN_RE = re.compile(r"\n{3,}")
 
 
 def _normalise_breaks(text: str) -> str:
@@ -96,6 +113,31 @@ def _normalise_breaks(text: str) -> str:
     if "<br" not in text:
         return text
     return _BR_RUN_RE.sub("\n\n", text)
+
+
+def _strip_pymupdf_markers(text: str) -> str:
+    """Drop pymupdf4llm's structural metadata so it doesn't poison chunks.
+
+    Two patterns get removed:
+      - `**==> picture [W x H] intentionally omitted <==**` lines —
+        pure metadata about regions PyMuPDF chose not to render.
+      - `**----- Start/End of picture text -----**` boundary markers —
+        only the boundary lines; the content *between* them is real
+        text PyMuPDF extracted from inside images and stays untouched.
+
+    Then collapse runs of 3+ blank lines that the strips leave behind.
+    """
+    if "**==>" not in text and "Start of picture text" not in text:
+        return text
+    text = _PICTURE_OMITTED_RE.sub("", text)
+    text = _PICTURE_TEXT_BOUNDARY_RE.sub("", text)
+    text = _BLANK_LINE_RUN_RE.sub("\n\n", text)
+    return text
+
+
+def _clean_pymupdf_markdown(text: str) -> str:
+    """Both passes in order: `<br>` normalisation, then marker stripping."""
+    return _strip_pymupdf_markers(_normalise_breaks(text))
 
 
 def _safe_meta(doc: Any, key: str) -> str | None:
@@ -343,7 +385,7 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
             # Older API path — single string, no per-page split. Wrap
             # into a single-chunk list so downstream is uniform.
             chunks: list[dict[str, Any]] = [
-                {"text": _normalise_breaks(chunks_raw), "metadata": {"page": 0}}
+                {"text": _clean_pymupdf_markdown(chunks_raw), "metadata": {"page": 0}}
             ]
         else:
             chunks = []
@@ -352,7 +394,7 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
                     continue
                 text_val = c.get("text")
                 if isinstance(text_val, str):
-                    c = {**c, "text": _normalise_breaks(text_val)}
+                    c = {**c, "text": _clean_pymupdf_markdown(text_val)}
                 chunks.append(c)
 
         pages: list[dict[str, Any]] = []
