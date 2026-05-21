@@ -30,8 +30,9 @@ The blueprint in [`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) is the archi
 | **FU3.2.3** | **`memex-vault-backup.timer`** — nightly encrypted restic snapshots | ✅ **Shipped + live-verified** (2026-05-21) |
 | **P0** | **Eval corpus** — JSON query sets + `memex eval` rigorous baseline | ⚠️ **Rigorous baseline shipped** (2026-05-21): 1 category (slide-decks), 1 doc, 15 queries (7 answerable + 3 empty-retrieval refusals + 5 near-miss refusals); `top_k ∈ {4,6,8}` sweep run; `mcp_answered_only ≈ 0.5–0.6`. Corpus extension is multi-session curator work. |
 | **Parse — slide-deck → Docling** | Tier 0.5 classifier override routing slide-shaped PDFs to Docling | ✅ **Shipped + live-verified** (2026-05-21) — `_is_slide_deck` heuristic (aspect ≥ 1.3 AND chars-per-page in [50, 800)); 147 tests green; CUDA deck now routes correctly. |
+| **P2.4 — Agent refusal calibration** | `prompts/answer/v2.md` with literal-presence rule | ✅ **Shipped + live-verified** (2026-05-21) — Q11 (FP128) + Q12 (FP4) hallucinations both eliminated; `refusal_rate_cf` 0.75 → 1.0; `mcp_ans` 0.33 → 0.67. One regression: Q7 (5-bit/10-bit half) ANS→REF; tradeoff is favourable. |
 
-**File count:** 83 Python files in `src/memex/` + `tests/` + `scripts/`, all parse-clean. 7 ADRs. 8 audit reports under `docs/audits/`. 60 commits on `main` (public at `github.com/Zenetusken/memex`); the canonical count is `git rev-list --count main`.
+**File count:** 83 Python files in `src/memex/` + `tests/` + `scripts/`, all parse-clean. 7 ADRs. 8 audit reports under `docs/audits/`. 62 commits on `main` (public at `github.com/Zenetusken/memex`); the canonical count is `git rev-list --count main`.
 
 **Test suite:** 147/147 green on the reference rig. Linux + pyseccomp; 5 tests skip on Windows.
 
@@ -113,7 +114,7 @@ PDFs now run through a tiered classifier before Docling. Producer metadata is th
 
 These items have everything they need to be picked up immediately and shipped in one session.
 
-- **P2.4 — Agent refusal calibration on near-miss queries.** Surfaced by the rigorous eval + chart-text ablation + parser investigation: queries 11 (FP128 energy cost) and 12 (FP4 tensor core cost) hallucinated **identically** across PyMuPDF, chart-text-stripped, and Docling vault runs at every top_k swept. The agent grounds correctly in the FP-precision table chunks but substitutes nearby table values by interpolation (e.g., "FP4 ≈ 0.03x" extrapolated from FP8's 0.06x). Independent of parser, independent of context budget — the failure mode is the agent's prompt + threshold calibration. Investigation tier: prompt-engineering first (start with stronger "the question asks for X; if X is not literally present, refuse" guardrails in `prompts/answer@v1`); if prompt alone is insufficient, fall through to a model swap (P2.2/P2.3 may carry better refusal-on-near-miss behaviour as a side effect, measurable on the same 15-query set). **Validation surface already exists** at `tests/eval-data/slide-decks/queries.json`; no corpus extension needed to start iterating.
+- ~~**P2.4 — Agent refusal calibration on near-miss queries**~~ — ✅ **Shipped 2026-05-21** as `prompts/answer/v2.md`. New "literal-presence rule" with one worked example (FP128) tells the model: if the query asks for a specific value (number, year, name) absent from the chunks, return empty `claims` — do NOT interpolate or substitute neighbouring values. Auto-loaded as the new default (loader picks highest v<N>); v1 retained for rollback via `MEMEX_PROMPTS__PIN__ANSWER=v1`. Headline impact: **`refusal_rate_on_counterfactuals` 0.75 → 1.0** (perfect — both Q11 FP128 and Q12 FP4 now refuse correctly); **`mcp_answered_only` 0.33 → 0.67** (doubled). Cost: Q7 (5-bit/10-bit half) regressed ANS→REF because the precision-bit diagram in the PyMuPDF chart-text is hard to ground confidently; tradeoff is favourable since the alternative was emitting wrong numerics. A `verify_grounding/v2.md` was also drafted but rolled back — its bullet-example body caused the verify model to emit overly-long ungrounded_reasons lists that exceeded the 1024-token cap, crashing the eval. That tier of verify-prompt tightening is a follow-up.
 - **Filler N1–N8.** Audit-surfaced minor hardening — see the §Filler list at the end of this section. Each is small, atomic, and pickable in <1 hour. Useful when the user wants something contained while waiting on a bigger pickup.
 
 ### Tier 2 — multi-session foundational (unblocks downstream verdicts)
@@ -147,7 +148,7 @@ These are ready to run once the corpus has the depth to discriminate between can
 
 ### Recommended next pickup
 
-**P2.4 (near-miss hallucination calibration)** — it's the single tier-1 item with the highest impact. The Q11/Q12 failures are reproducible RIGHT NOW against the existing 15-query baseline; prompt iteration can validate immediately without any corpus work. If prompt-engineering carries the fix, this closes a substantial chunk of the eval-surfaced agent quality concern without the curator overhead of P0 extension.
+~~**P2.4 (near-miss hallucination calibration)**~~ — ✅ Shipped 2026-05-21 (see above; Q11/Q12 hallucinations eliminated, refusal_cf 0.75 → 1.0, one Q7 regression). The next Tier-1 pickup is **Filler N1** (LanceDB concurrent-search smoke test) or **N5** (`_pid_alive` EPERM behaviour) — both atomic. Bigger lift remains **P0 corpus extension**.
 
 If the user wants something even tighter, **N9** is shipped but **N1** (LanceDB concurrent-search smoke test) and **N5** (`_pid_alive` EPERM behaviour) are the most tractable nits left.
 
