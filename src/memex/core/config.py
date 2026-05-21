@@ -92,10 +92,16 @@ class ParseSettings(BaseModel):
 
 
 class ObservabilitySettings(BaseModel):
-    """Logging and tracing — see ADR-0004."""
+    """Logging and tracing — see ADR-0004.
+
+    Defaults align with the local-first / no-telemetry vision in
+    README + VISION.md: structured stdout logs are always on,
+    Langfuse tracing is **opt-in**. Set both keys to enable it; if
+    only one is set, startup fails loudly so we never half-configure.
+    """
 
     log_json: bool = True
-    langfuse_enabled: bool = True
+    langfuse_enabled: bool = False
     langfuse_host: str = "http://localhost:3000"
     langfuse_public_key: str | None = None
     langfuse_secret_key: str | None = None
@@ -111,8 +117,16 @@ class ObservabilitySettings(BaseModel):
             not self.langfuse_public_key or not self.langfuse_secret_key
         ):
             raise ValueError(
-                "langfuse_enabled=true requires langfuse_public_key and "
-                "langfuse_secret_key. Set them, or set langfuse_enabled=false."
+                "langfuse_enabled=true but the keys are missing. Either\n"
+                "  set MEMEX_OBSERVABILITY__LANGFUSE_PUBLIC_KEY and\n"
+                "      MEMEX_OBSERVABILITY__LANGFUSE_SECRET_KEY in the env,\n"
+                "  or write them to ~/.config/memex/config.toml under\n"
+                "    [observability]\n"
+                "    langfuse_enabled = true\n"
+                "    langfuse_public_key = \"pk-…\"\n"
+                "    langfuse_secret_key = \"sk-…\"\n"
+                "  or just omit `langfuse_enabled` — it now defaults to\n"
+                "  false (local-first; tracing is opt-in)."
             )
         return self
 
