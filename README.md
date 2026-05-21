@@ -82,6 +82,8 @@ Tools the server exposes:
 
 Network-facing setup (HTTP transport + bearer-token auth): see [`docs/deploy/mcp-http.md`](docs/deploy/mcp-http.md).
 
+Long-running production deployment (vLLM under systemd / launchd, restart-on-crash, journald log integration): see [`docs/deploy/systemd.md`](docs/deploy/systemd.md) and [`docs/deploy/launchd.md`](docs/deploy/launchd.md).
+
 ---
 
 ## 🛡️ Privacy & offline guarantees

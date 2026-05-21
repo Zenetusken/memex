@@ -1,0 +1,79 @@
+# Memex vLLM orchestrator — user systemd unit template.
+#
+# This template runs the vLLM daemon under your user account
+# (`systemctl --user`), reading model + binding knobs from a sibling
+# environment file. Install with:
+#
+#     # ── one-time, from the repo root ────────────────────────────
+#     mkdir -p ~/.config/systemd/user ~/.config/memex
+#     cp docs/deploy/memex-vllm.service ~/.config/systemd/user/
+#     cp docs/deploy/memex-vllm.env     ~/.config/memex/memex-vllm.env
+#     # Edit the file paths below to match your clone, then:
+#     systemctl --user daemon-reload
+#     systemctl --user enable --now memex-vllm.service
+#
+# Logs land in journald — `journalctl --user -u memex-vllm -f`.
+# Restart-on-crash and log rotation are systemd's job; the existing
+# `memex daemon start` wrapper is bypassed (systemd is the supervisor
+# now). `memex daemon status` will still see the running process via
+# its PID-on-port reachability check; `memex daemon stop` would race
+# with systemd's restart loop, so use `systemctl --user stop` instead.
+
+[Unit]
+Description=Memex vLLM orchestrator (Qwen3-8B-AWQ via vllm serve)
+Documentation=https://github.com/Zenetusken/memex/blob/main/docs/deploy/systemd.md
+After=network-online.target
+Wants=network-online.target
+# If your distro ships it, uncomment to ensure NVIDIA persistence is
+# settled before vLLM tries to touch the GPU.
+# After=nvidia-persistenced.service
+# Wants=nvidia-persistenced.service
+
+[Service]
+Type=simple
+
+# ── EDIT THESE PATHS to match your clone ────────────────────────────
+WorkingDirectory=%h/project/Doc_Flo
+ExecStart=%h/project/Doc_Flo/scripts/serve-vllm.sh
+
+# Read the model + binding knobs from a separate env file so the
+# unit itself stays generic.
+EnvironmentFile=%h/.config/memex/memex-vllm.env
+
+# Make sure `uv` is reachable. Adjust if your `uv` lives elsewhere.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+# vLLM cold boot on the reference RTX 4070 is ~40 s; allow 5 minutes
+# for first-time weight downloads or slow disks.
+TimeoutStartSec=300
+
+# Restart on crashes, not on clean SIGTERM (so `systemctl stop` actually
+# stops). Throttle: at most 5 restarts in 60 s before giving up.
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Send stdout + stderr to journald.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=memex-vllm
+
+# Cleanly bring down the whole process group on stop. vLLM has its own
+# graceful-shutdown handling on SIGTERM; KillMode=mixed ensures the
+# main process gets SIGTERM but any orphan workers get SIGKILL after
+# the timeout below.
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# Resource hardening — the daemon talks to the GPU, doesn't need much
+# else. Override if you find a feature breaking; these are
+# conservative defaults.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=false   # vault + repo live in $HOME, the daemon needs them
+
+[Install]
+WantedBy=default.target

@@ -24,8 +24,9 @@ The blueprint in [`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) is the archi
 | **P1.4** | **Annotation UI 409 conflict surface + vault CAS** | ✅ **Shipped + live-verified** (2026-05-21) |
 | **P1.5** | **Cross-process vault lock (fcntl.LOCK_EX)** | ✅ **Shipped + live-verified** (2026-05-21) |
 | **P2.1-infra** | **Qwen3-Reranker backend wired behind a feature flag** | ✅ **Infrastructure shipped** (2026-05-21); quality A/B and VRAM-fit on 12 GB rig still pending |
+| **P3.2** | **Daemon process model templates (systemd + launchd)** | ✅ **Shipped + live-verified** (2026-05-21) |
 
-**File count:** 83 Python files in `src/memex/` + `tests/` + `scripts/`, all parse-clean. 7 ADRs. 8 audit reports under `docs/audits/`. 39 commits on `main` (public at `github.com/Zenetusken/memex`).
+**File count:** 83 Python files in `src/memex/` + `tests/` + `scripts/`, all parse-clean. 7 ADRs. 8 audit reports under `docs/audits/`. 41 commits on `main` (public at `github.com/Zenetusken/memex`).
 
 **Test suite:** 144/144 green on the reference rig (141 pre-existing + 3 rerank-dispatch unit tests). Linux + pyseccomp; 5 tests skip on Windows.
 
@@ -110,7 +111,7 @@ The entire P1 code-work backlog from the start-of-session prioritisation is now 
 
 ### P3 — infrastructure (no eval needed)
 
-5. **Daemon process model** — `memex daemon start` currently runs a detached child + PID file. Ship a `docs/deploy/systemd.md` + a sample unit file (Linux) and a launchd plist (macOS) so the OS handles restart-on-crash and log rotation. Pure docs/template work; ~1-session task; no code change. **Recommended next pick after P0 bootstrap if a session can't tackle the corpus.**
+5. ~~**Daemon process model**~~ — ✅ **Shipped 2026-05-21** (commits below). Pure docs+templates: [`docs/deploy/systemd.md`](deploy/systemd.md) (Linux user unit, the recommended path), [`docs/deploy/launchd.md`](deploy/launchd.md) (macOS dev), and the three sibling artefacts: `memex-vllm.service`, `memex-vllm.env`, `com.memex.vllm.plist`. Live-verified on the reference rig — vLLM reachable in 21 s after `systemctl --user enable --now`, restart-on-failure proved via `kill -9` on the child (`Failed with result 'signal'` → automatic respawn in 5 s). Logs flow into journald via `journalctl --user -u memex-vllm`; rotation is now systemd's job.
 6. **Real-mode benchmark nightly CI** — `scripts/benchmark.py --real` measures cold start + first-token + embedding throughput. Needs a GPU runner: cloud (Lambda, RunPod, Modal) or a dedicated rig. Workflow template already in `.github/workflows/`. Decision blocker is **cost + ops**, not code.
 
 ### P4 — design decisions still owed (low urgency)
@@ -169,8 +170,9 @@ Detailed per-phase log lives in git history + `docs/audits/`. The compressed ver
 - **P1.4 — Annotation UI 409 conflict surface** (2026-05-21): new `StaleDocumentError` + `expected_sha` parameter on `write_document` (constant-time CAS inside the per-doc lock). `/review` now catches stale-sha submits, rolls back the anticipated-manifest update, and renders `_review_conflict.html` with HTTP 409 — unified diff (stdlib `difflib`) + "discard mine & reload" + "overwrite anyway" buttons. HTMX `responseHandling` configured in `base.html` to swap 4xx into the target so the panel actually shows up. Diff CSS in `style.css` (emerald-300 / red-300 / sky-300 / zinc-400). 4 unit + 3 integration tests.
 - **P1.5 — Cross-process vault lock** (2026-05-21): new `vault/_file_lock.py` carries `doc_file_lock` (an async context manager that holds `fcntl.LOCK_EX` on `.memex/locks/{doc_id}.lock`) + `cleanup_lock_file` for delete-document. The flock syscall runs in the default executor with a 0.1 s polling loop so the event loop stays responsive while a structured `vault.lock.contended` / `vault.lock.acquired` audit trail is emitted on long waits. Linux + macOS get real locking; Windows falls back to no-op + one-time WARN (matches the pyseccomp Linux-only pattern). 1 unit + 3 cross-process integration tests.
 - **P2.1-infra — Qwen3-Reranker backend wired** (2026-05-21): new `ModelSettings.reranker_backend` literal (`cross_encoder` default, `qwen3` opt-in), new `Qwen3RerankerHandle` + `_load_reranker_qwen3` in the registry, new `_score_qwen3` in `retrieve/rerank.py` (chat-template prompt → forward pass → softmax over cached yes/no token logits at the last position), backend-aware VRAM budget keys in `cli/bootstrap.py`. Live verification corrected the published "0.6 GB" estimate to **~2.1 GB live**: the autoregressive forward pass holds significantly more activation memory than the parameter count suggests, so the swap remains memory-neutral with the 8B orchestrator on a 12 GB rig. Quality A/B still gated on P0 (eval corpus).
+- **P3.2 — Daemon templates** (2026-05-21): new `docs/deploy/systemd.md` + `docs/deploy/launchd.md` deployment guides; sibling `memex-vllm.service` (user systemd unit), `memex-vllm.env` (env-file template), and `com.memex.vllm.plist` (macOS launchd user agent) templates. Linux unit live-verified end-to-end on the reference rig — `systemctl --user enable --now memex-vllm` brought vLLM up in 21 s, `kill -9` on the child triggered `Failed with result 'signal'` followed by an automatic respawn 5 s later (counter at 1, within the 5-per-minute throttle). README pointer added under the existing MCP-HTTP section. No code change.
 
-For the full per-commit log: `git log --oneline` (39 commits as of 2026-05-21).
+For the full per-commit log: `git log --oneline` (41 commits as of 2026-05-21).
 
 ---
 

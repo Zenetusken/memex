@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Memex vLLM orchestrator — macOS launchd user-agent template.
+
+  Install with:
+      # ── one-time, from the repo root ────────────────────────────
+      mkdir -p ~/Library/LaunchAgents
+      cp docs/deploy/com.memex.vllm.plist ~/Library/LaunchAgents/
+      # EDIT the WorkingDirectory + ExecPath + EnvironmentVariables
+      # below to match your clone.
+      launchctl load -w ~/Library/LaunchAgents/com.memex.vllm.plist
+
+  Tail the logs with:
+      tail -f ~/.local/state/memex/vllm.{out,err}.log
+
+  Stop / unload:
+      launchctl unload ~/Library/LaunchAgents/com.memex.vllm.plist
+
+  NOTE: macOS is a development target only — Memex's production stack
+  (cu129 wheels, AWQ-Marlin kernels) is CUDA-only per ADR-0001. This
+  plist exists for users running a CPU-or-MPS dev build; expect to
+  swap MEMEX_VLLM_MODEL for something Metal-friendly (e.g. a smaller
+  Qwen2.5 build) and to drop MEMEX_VLLM_QUANTIZATION entirely.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.memex.vllm</string>
+
+  <!-- EDIT: path to your Memex clone. -->
+  <key>WorkingDirectory</key>
+  <string>/Users/YOUR_USER/project/Doc_Flo</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <!-- EDIT: absolute path to the serve script. -->
+    <string>/Users/YOUR_USER/project/Doc_Flo/scripts/serve-vllm.sh</string>
+  </array>
+
+  <!-- Environment variables that scripts/serve-vllm.sh reads.
+       All defaults shown; comment out a key to fall back to the
+       script's built-in default. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- EDIT: make sure `uv` is reachable. -->
+    <key>PATH</key>
+    <string>/Users/YOUR_USER/.local/bin:/usr/local/bin:/usr/bin:/bin</string>
+
+    <key>MEMEX_VLLM_MODEL</key>
+    <string>Qwen/Qwen3-8B-AWQ</string>
+    <key>MEMEX_VLLM_HOST</key>
+    <string>127.0.0.1</string>
+    <key>MEMEX_VLLM_PORT</key>
+    <string>8000</string>
+    <key>MEMEX_VLLM_QUANTIZATION</key>
+    <string>awq_marlin</string>
+    <key>MEMEX_VLLM_MAX_MODEL_LEN</key>
+    <string>4096</string>
+    <key>MEMEX_VLLM_GPU_FRACTION</key>
+    <string>0.72</string>
+    <key>CUDA_VISIBLE_DEVICES</key>
+    <string>0</string>
+  </dict>
+
+  <!-- Restart-on-crash: respawn unless the process exits cleanly
+       (i.e. via launchctl unload or SIGTERM). 5s minimum between
+       respawns to avoid thrash on a chronic failure. -->
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- Logs. EDIT the paths if you want them elsewhere. -->
+  <key>StandardOutPath</key>
+  <string>/Users/YOUR_USER/.local/state/memex/vllm.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/YOUR_USER/.local/state/memex/vllm.err.log</string>
+
+  <!-- Process priority: leave default unless you have a reason to
+       deprioritise vLLM relative to interactive workloads. -->
+  <!-- <key>Nice</key> <integer>0</integer> -->
+</dict>
+</plist>
