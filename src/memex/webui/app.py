@@ -39,7 +39,7 @@ from fastapi.templating import Jinja2Templates
 
 from memex.agents.answering import answer_query
 from memex.core.config import get_settings
-from memex.core.errors import VaultIntegrityError
+from memex.core.errors import StaleDocumentError, VaultIntegrityError
 from memex.core.manifest import update_manifest
 from memex.index.graph_store import GraphStore
 from memex.vault.store import (
@@ -283,20 +283,25 @@ def create_app() -> FastAPI:
         request: Request,
         doc_id: str,
         body: str = Form(..., max_length=_BODY_MAX_BYTES),
+        expected_sha: str = Form(..., min_length=64, max_length=64),
     ) -> HTMLResponse:
-        """Apply an edit. Updates the manifest's `content_sha256` with
-        the post-write hash BEFORE writing the markdown, so a kill
-        between the two operations leaves a manifest that anticipates
-        the new file — when the doc is re-read, sha matches and the
-        watcher's `_confirm_user_edit` doesn't treat the self-write as
-        a fresh user edit.
+        """Apply an edit. Two layered concurrency stories:
 
-        If the kill happens between manifest-update and file-write, the
-        sha goes stale in the *opposite* direction: the on-disk content
-        is the OLD file but the manifest claims the NEW sha. On next
-        restart, `_confirm_user_edit` sees a mismatch and re-triggers —
-        which re-enrich/re-index is the correct recovery: the edit is
-        lost, but the index reflects what's actually on disk.
+        1. **Optimistic compare-and-swap (P1.4).** The form submits
+           `expected_sha`, the sha the user's draft was based on.
+           `write_document(expected_sha=...)` reads the current
+           on-disk sha inside the per-doc lock and raises
+           `StaleDocumentError` on mismatch. On stale, we render a
+           409 conflict panel with a unified diff and "discard /
+           overwrite" buttons (`_review_conflict.html`).
+
+        2. **Manifest-before-write race (audit fix).** We pre-update
+           the manifest's `content_sha256` with the anticipated
+           post-write hash BEFORE the atomic file rename. A kill
+           between manifest-update and file-write leaves the manifest
+           claiming the NEW sha while the file is still OLD — on
+           restart, `_confirm_user_edit` sees the mismatch and
+           re-triggers enrich/index, which is the correct recovery.
         """
         doc_id = _validate_doc_id(doc_id)
         settings = get_settings()
@@ -305,11 +310,6 @@ def create_app() -> FastAPI:
         except VaultIntegrityError as e:
             raise HTTPException(status_code=404, detail=str(e)) from e
 
-        # Compute the post-write sha by serialising the new document
-        # the same way `write_document` does (frontmatter is round-
-        # tripped). We pre-update the manifest's content_sha256 with
-        # this anticipated value, then perform the atomic file write.
-        # See the docstring for the kill-window analysis.
         new_doc = VaultDocument(
             ref=make_ref(
                 settings.vault_path,
@@ -327,7 +327,39 @@ def create_app() -> FastAPI:
             doc_id,
             content_sha256=anticipated,
         )
-        new_ref = await write_document(settings.vault_path, new_doc)
+        try:
+            new_ref = await write_document(
+                settings.vault_path, new_doc, expected_sha=expected_sha
+            )
+        except StaleDocumentError as e:
+            # Roll back the optimistic manifest update — the file
+            # didn't change, so the manifest must match the current
+            # on-disk sha (not the anticipated one).
+            current_sha = e.context["current_sha"]
+            current_body = e.context["current_body"]
+            if isinstance(current_sha, str):
+                await update_manifest(
+                    settings.vault_path,
+                    doc_id,
+                    content_sha256=current_sha,
+                )
+            logger.info(
+                "webui.document_review.conflict",
+                doc_id=doc_id,
+                expected_sha=expected_sha[:16],
+                current_sha=current_sha[:16] if isinstance(current_sha, str) else None,
+                draft_size=len(body),
+            )
+            return _render_conflict(
+                request,
+                templates=templates,
+                doc_id=doc_id,
+                user_draft=body,
+                current_body=current_body if isinstance(current_body, str) else "",
+                expected_sha=expected_sha,
+                current_sha=current_sha if isinstance(current_sha, str) else None,
+            )
+
         if new_ref.content_sha256 != anticipated:
             # Frontmatter round-trip changed the serialized bytes
             # (e.g. yaml reorder, quoting). Reconcile so the manifest
@@ -454,6 +486,65 @@ def create_app() -> FastAPI:
         }
 
     return app
+
+
+def _render_conflict(
+    request: Request,
+    *,
+    templates: Jinja2Templates,
+    doc_id: str,
+    user_draft: str,
+    current_body: str,
+    expected_sha: str,
+    current_sha: str | None,
+) -> HTMLResponse:
+    """Render the 409 conflict panel for `/review` stale-sha submissions.
+
+    Computes a unified diff between the user's draft and the current
+    vault body, splits it into per-line records with CSS classes
+    (`diff-add`, `diff-del`, `diff-hunk`, `diff-context`) for the
+    template to render with the right colour. Returns the rendered
+    `_review_conflict.html` partial with status 409.
+    """
+    import difflib
+
+    diff_records: list[dict[str, str]] = []
+    for line in difflib.unified_diff(
+        current_body.splitlines(keepends=False),
+        user_draft.splitlines(keepends=False),
+        fromfile="current",
+        tofile="your draft",
+        lineterm="",
+        n=3,
+    ):
+        if line.startswith("@@"):
+            css = "diff-hunk"
+        elif line.startswith("+++") or line.startswith("---"):
+            # File-header lines. Render as context so they don't drown
+            # out the actual additions/removals.
+            css = "diff-context"
+        elif line.startswith("+"):
+            css = "diff-add"
+        elif line.startswith("-"):
+            css = "diff-del"
+        else:
+            css = "diff-context"
+        diff_records.append({"text": line, "css_class": css})
+
+    return templates.TemplateResponse(
+        request,
+        "_review_conflict.html",
+        {
+            "doc_id": doc_id,
+            "user_draft": user_draft,
+            "current_body": current_body,
+            "expected_sha": expected_sha,
+            "current_sha": current_sha,
+            "diff_lines": diff_records,
+            "diff_line_count": len(diff_records),
+        },
+        status_code=409,
+    )
 
 
 def _anticipated_sha(doc: VaultDocument) -> str:

@@ -175,3 +175,9 @@ summary:focus-visible {
   border-color: rgb(63 63 70);
 }
 .btn-quiet[disabled] { opacity: 0.5; pointer-events: none; }
+
+/* Inline diff lines for the /review 409 conflict panel. */
+.diff-add     { color: rgb(110 231 183); }   /* emerald-300 — additions */
+.diff-del     { color: rgb(252 165 165); }   /* red-300 — removals */
+.diff-context { color: rgb(161 161 170); }   /* zinc-400 — unchanged context */
+.diff-hunk    { color: rgb(125 211 252); font-style: italic; } /* sky-300 — @@ markers */

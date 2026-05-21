@@ -1,0 +1,50 @@
+{# Stale-sha conflict surface for /documents/{doc_id}/review.
+   Returned with HTTP 409. HTMX swaps it into #md-pane via the
+   `htmx.config.responseHandling` rule in base.html that includes
+   4xx in the swap whitelist. #}
+<div class="space-y-3 p-4 bg-red-950/30 border border-red-800 rounded-md text-sm">
+  <h3 class="font-semibold text-red-200">
+    Conflict — the document changed since you started editing
+  </h3>
+  <p class="text-red-300">
+    Someone (or some process) wrote to this document while you were editing.
+    Pick one: discard your draft and reload the current vault content, or
+    overwrite it with your draft.
+  </p>
+
+  <p class="text-xs text-zinc-500 font-mono">
+    your basis sha
+    <span class="text-zinc-300">{{ expected_sha[:12] }}</span>
+    &nbsp;→&nbsp;
+    current vault sha
+    <span class="text-zinc-300">{{ current_sha[:12] if current_sha else '(deleted)' }}</span>
+  </p>
+
+  <details {% if diff_line_count > 0 and diff_line_count <= 30 %}open{% endif %}>
+    <summary class="cursor-pointer text-xs text-zinc-400 font-mono hover:text-zinc-200">
+      diff vs current vault ({{ diff_line_count }} line{{ '' if diff_line_count == 1 else 's' }})
+    </summary>
+    <pre class="mt-2 text-xs font-mono leading-snug overflow-x-auto whitespace-pre-wrap break-all bg-zinc-950 border border-zinc-800 rounded p-2">{%- for line in diff_lines -%}
+<span class="{{ line.css_class }}">{{ line.text }}</span>
+{% endfor -%}</pre>
+  </details>
+
+  <div class="flex gap-2 pt-1">
+    <button hx-get="/documents/{{ doc_id }}/edit"
+            hx-target="#md-pane"
+            hx-swap="innerHTML"
+            class="px-3 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-100 text-xs">
+      discard mine & reload
+    </button>
+    <form hx-post="/documents/{{ doc_id }}/review"
+          hx-target="#md-pane"
+          hx-swap="innerHTML"
+          class="inline">
+      <input type="hidden" name="expected_sha" value="{{ current_sha or '' }}">
+      <textarea name="body" hidden>{{ user_draft }}</textarea>
+      <button class="px-3 py-1.5 rounded bg-red-900/60 hover:bg-red-800 text-red-50 border border-red-700 text-xs">
+        overwrite anyway
+      </button>
+    </form>
+  </div>
+</div>

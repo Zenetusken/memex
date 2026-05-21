@@ -1,12 +1,15 @@
 {# Edit mode of the markdown body. HTMX target = #md-pane.
-   Save POSTs to /documents/{doc_id}/review with form field `body`;
-   cancel re-fetches the view-mode partial via /documents/{doc_id}/body. #}
+   Save POSTs to /documents/{doc_id}/review with form fields `body` +
+   `expected_sha` (optimistic concurrency). On stale-sha conflict the
+   server returns 409 and a `_review_conflict.html` panel.
+   Cancel re-fetches the view-mode partial via /documents/{doc_id}/body. #}
 <form
   hx-post="/documents/{{ document.ref.doc_id }}/review"
   hx-target="#md-pane"
   hx-swap="innerHTML"
   hx-disabled-elt="button[name='save']"
   class="space-y-3">
+  <input type="hidden" name="expected_sha" value="{{ document.ref.content_sha256 }}">
   <textarea
     name="body"
     spellcheck="false"

@@ -288,7 +288,8 @@ async def test_document_review_writes_and_returns_saved_partial(
 
     new_body = "# Updated\n\nSecond draft, hand-corrected.\n"
     r = client.post(
-        f"/documents/{ref.doc_id}/review", data={"body": new_body}
+        f"/documents/{ref.doc_id}/review",
+        data={"body": new_body, "expected_sha": ref.content_sha256},
     )
     assert r.status_code == 200
     assert "saved-flash" in r.text
@@ -317,7 +318,8 @@ async def test_document_review_updates_manifest_to_avoid_watcher_race(
     new_body = "# Watch race\n\nA.\n\nAppended by the UI.\n"
 
     r = client.post(
-        f"/documents/{ref.doc_id}/review", data={"body": new_body}
+        f"/documents/{ref.doc_id}/review",
+        data={"body": new_body, "expected_sha": ref.content_sha256},
     )
     assert r.status_code == 200
 
@@ -325,6 +327,97 @@ async def test_document_review_updates_manifest_to_avoid_watcher_race(
     assert manifest is not None
     on_disk = await read_document(settings.vault_path, ref.doc_id)
     assert manifest.content_sha256 == on_disk.ref.content_sha256
+
+
+@pytest.mark.asyncio
+async def test_document_review_returns_409_conflict_on_stale_sha(
+    settings: MemexSettings, client: TestClient
+) -> None:
+    """The user submits an edit based on an out-of-date sha. The server
+    returns 409 with the conflict panel (diff + overwrite/discard buttons)
+    and the on-disk file is unchanged.
+    """
+    from memex.vault.store import read_document
+
+    ref = await ingest_markdown_passthrough(
+        "# Conflict\n\nOriginal body.\n", source_stem="conflict"
+    )
+    # Out-of-band: the vault changes after the form loaded.
+    out_of_band_body = "# Conflict\n\nSomeone else edited this.\n"
+    r1 = client.post(
+        f"/documents/{ref.doc_id}/review",
+        data={"body": out_of_band_body, "expected_sha": ref.content_sha256},
+    )
+    assert r1.status_code == 200
+    after_first = await read_document(settings.vault_path, ref.doc_id)
+
+    # User submits based on the original (now-stale) sha.
+    user_draft = "# Conflict\n\nMy local edit.\n"
+    r2 = client.post(
+        f"/documents/{ref.doc_id}/review",
+        data={"body": user_draft, "expected_sha": ref.content_sha256},
+    )
+    assert r2.status_code == 409
+    assert "Conflict" in r2.text
+    assert "overwrite anyway" in r2.text.lower()
+    assert "discard mine" in r2.text.lower()
+    # The diff section should mention "your draft" vs "current".
+    assert "your draft" in r2.text.lower()
+    # On-disk content unchanged from the out-of-band write.
+    after_conflict = await read_document(settings.vault_path, ref.doc_id)
+    assert after_conflict.ref.content_sha256 == after_first.ref.content_sha256
+    assert "Someone else edited this" in after_conflict.body
+    assert "My local edit" not in after_conflict.body
+
+
+@pytest.mark.asyncio
+async def test_document_review_overwrite_anyway_succeeds(
+    settings: MemexSettings, client: TestClient
+) -> None:
+    """After a 409, re-submitting with the CURRENT sha (which the conflict
+    panel's "overwrite anyway" form does) succeeds and the user's draft
+    lands.
+    """
+    from memex.vault.store import read_document
+
+    ref = await ingest_markdown_passthrough(
+        "# Overwrite\n\nStart.\n", source_stem="overwrite_anyway"
+    )
+    out_of_band_body = "# Overwrite\n\nIntervening write.\n"
+    client.post(
+        f"/documents/{ref.doc_id}/review",
+        data={"body": out_of_band_body, "expected_sha": ref.content_sha256},
+    )
+    after_first = await read_document(settings.vault_path, ref.doc_id)
+    current_sha = after_first.ref.content_sha256
+
+    user_draft = "# Overwrite\n\nMy draft wins.\n"
+    # "Overwrite anyway": resubmit with the *current* sha as expected.
+    r = client.post(
+        f"/documents/{ref.doc_id}/review",
+        data={"body": user_draft, "expected_sha": current_sha},
+    )
+    assert r.status_code == 200
+    assert "saved-flash" in r.text
+    after = await read_document(settings.vault_path, ref.doc_id)
+    assert "My draft wins" in after.body
+    assert "Intervening write" not in after.body
+
+
+@pytest.mark.asyncio
+async def test_document_edit_form_includes_hidden_expected_sha(
+    settings: MemexSettings, client: TestClient
+) -> None:
+    """The GET /documents/{id}/edit partial must include the hidden
+    `expected_sha` input so the form submission can carry it back.
+    """
+    ref = await ingest_markdown_passthrough(
+        "# Hidden\n\nbody.\n", source_stem="hidden_sha_input"
+    )
+    r = client.get(f"/documents/{ref.doc_id}/edit")
+    assert r.status_code == 200
+    assert 'name="expected_sha"' in r.text
+    assert ref.content_sha256 in r.text
 
 
 @pytest.mark.asyncio

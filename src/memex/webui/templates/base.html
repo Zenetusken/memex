@@ -9,6 +9,20 @@
   <link rel="stylesheet" href="/static/tailwind.css">
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/htmx.min.js" defer></script>
+  {# HTMX 2 ignores 4xx responses by default. /review returns 409
+     Conflict with a diff panel on stale-sha edits — opt-in to
+     swapping 4xx so the panel renders instead of being dropped. #}
+  <script>
+    document.addEventListener("htmx:configRequest", function () {
+      if (window.htmx && window.htmx.config) {
+        window.htmx.config.responseHandling = [
+          {code: "204", swap: false},
+          {code: "[23]..", swap: true},
+          {code: "[45]..", swap: true, error: true},
+        ];
+      }
+    });
+  </script>
 </head>
 <body class="bg-zinc-950 text-zinc-100 min-h-screen font-sans">
   <header class="border-b border-zinc-800 bg-zinc-900/50">
