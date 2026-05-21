@@ -163,9 +163,59 @@ The headline `refusal_rate_on_counterfactuals=0.75` was unchanged; `answered_cou
 2. Bootstrap the other 6 categories (modern-printed, scientific-papers, technical-docs, historical-scans, handwritten, forms).
 3. Wire CER/WER/structural-F1 from `src/memex/eval/scoring.py` into `runner.py`; needs per-doc hand-curated reference markdown.
 4. ~~Run the chart-text ablation~~ — ✅ Done 2026-05-21 (null result; see above).
-5. **NEW**: investigate slide-deck parser quality. The chart-text ablation reframes this as the most-likely root cause of slide-deck over-refusal. Candidates: Docling-for-decks routing override; structured chart-text→GFM-table conversion; dual-storage retrieval vs. grounding split.
+5. ~~investigate slide-deck parser quality~~ — ✅ **Done 2026-05-21** (see below).
 
-P0 is now scaffolded with a baseline that can be trusted as a P2.x reference, and the first ablation has reframed where the quality work needs to land.
+P0 is now scaffolded with a baseline that can be trusted as a P2.x reference, and the parser investigation that the chart-text ablation surfaced has shipped its verdict.
+
+### Parser investigation (2026-05-21): Docling beats PyMuPDF on slide decks
+
+**Method.** Re-ingested the CUDA deck into a fresh vault (`/tmp/memex-docling-vault`) with `MEMEX_PARSE__PYMUPDF_ENABLED=false` forcing Docling. Ran the same 15-query eval at `top_k=6`. Three-way comparison vs the rigorous PyMuPDF baseline and the chart-text-stripped ablation.
+
+**Structural differences in the markdown output:**
+
+| Property | PyMuPDF | Docling |
+|---|---|---|
+| Word count | 7818 | 5797 (-26%) |
+| `[chart-text]` blocks | 67 | 0 |
+| GFM table rows | 68 | 98 (+44%) |
+| Tables detected (manifest) | 0 | 13 |
+| Figures detected | 0 | 245 |
+| Q2 answer rendering | `1. Data movement 80x` in `[chart-text]` block | `## We spend power on two things\n1. Data movement\n2. Computation` (clean heading + list) |
+| Q7 precision-bit diagram | chart-text dump | GFM table with sign / exponent / mantissa columns |
+| Parse duration | 33 s | 93 s (~2.8× slower) |
+
+**Eval result at top_k=6** (15 queries; 7 answerable + 8 counterfactual):
+
+| Vault | answered | of which **legitimate** | of which **hallucinated** | refusal_rate_cf |
+|---|---|---|---|---|
+| PyMuPDF (rigorous) | 6 | 4 (Q1, Q3, Q6, Q7) | 2 (Q11, Q12) | 0.75 |
+| PyMuPDF stripped (ablation) | 5 | 3 (Q1, Q3, Q6) | 2 (Q11, Q12) | 0.75 |
+| **Docling** | **8** | **6 (Q1, Q2, Q3, Q5, Q6, Q7)** | 2 (Q11, Q12) | 0.75 |
+
+**Two answerable queries flipped REF→ANS under Docling:**
+- **Q2** ("two main categories where modern processors spend power"): Docling renders "1. Data movement / 2. Computation" as a clean numbered list under a proper H2 heading; the agent grounds on it. PyMuPDF buried it in a chart-text block with chart axis values (`80x`, `60x`).
+- **Q5** ("data movement key concern for power efficiency"): same source content, same fix.
+
+**Q4 stayed refused even under Docling** — the year-by-year transistor-density numbers were embedded in chart imagery and Docling represents charts as figures (`<!-- image -->` markers in the markdown). A chart-OCR pass (e.g., DocVQA-style model) would be needed to extract those values; out of scope for either parser. This is a chart-data-extraction ceiling that's independent of the PyMuPDF/Docling choice.
+
+**Q11/Q12 hallucinations are independent of parser** — both runs hallucinated identically. Agent-prompt issue, separately diagnosable.
+
+### Recommendation: angle 1 (parser swap, category-aware)
+
+Route slide-deck-shaped documents to Docling instead of PyMuPDF in the tiered classifier (`src/memex/parse/pipeline.py`). Non-slide-deck born-digital PDFs (whitepapers, books, technical docs) keep PyMuPDF — their parse profile is fine and PyMuPDF is 2.8× faster.
+
+Implementation outline (a separate session):
+
+1. Add a slide-deck heuristic to the classifier — candidate signals: page aspect ratio (slide decks are typically 16:9 or 4:3 landscape; documents are 8.5×11 portrait), low word density per page, high figure-to-text ratio. The Docling manifest already reports figure/table counts; PyMuPDF's pre-parse metadata can probably read aspect ratio cheaply.
+2. When the heuristic fires, force Docling regardless of the existing Tier 1 (producer-metadata) early-exit.
+3. Verify on the existing CUDA deck — should re-route to Docling and produce the cleaner output.
+
+Implementation cost: ~50 lines in `pipeline.py` + a test. Estimated half-session of work. **The +50% answer-rate gain on legitimate slide-deck queries justifies the 2.8× parse-time cost** (parse is one-time per doc; query path is unchanged).
+
+**Caveats for the follow-up implementer:**
+- The doc_id format changed (`2f96ae1c-source` vs `2f96ae1c-s62400-cuda-...`) in the experiment because the ingest path was different; not relevant when integrating via the classifier (the upstream ingest+doc_id stays untouched).
+- Docling-Docling deduplication: re-ingesting an existing PyMuPDF-indexed doc through Docling will produce different chunks (the chunker sees different markdown). A clean reindex of any pre-existing slide-deck content will be needed after the switch.
+- Chart-data extraction (Q4-style numerics from chart imagery) is still a ceiling. Mark as a separate P3.x: chart-OCR pass over Docling figures. Not a parser swap, an additional model.
 
 ### P2 — eval-gated stack swaps (after P0)
 
