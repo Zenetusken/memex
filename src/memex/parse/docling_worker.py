@@ -87,9 +87,24 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
         version = None
 
     do_ocr = os.environ.get("MEMEX_PARSE_DOCLING_OCR", "0") == "1"
+    # P3.3 v2: enable Docling's built-in picture classifier so we can
+    # pre-filter chart-OCR candidates by `class_name` (bar_chart,
+    # line_chart, pie_chart, scatter_plot, box_plot) and skip the rest
+    # (logo, flow_chart, photograph, icon, etc.). On the canonical
+    # CUDA deck this drops 245 picture objects → ~26 actual chart
+    # candidates, an 89% reduction that prevents DePlot's
+    # OOD-hallucination cascade on non-chart content. Opt-out via env
+    # var if a future Docling-version bug requires it.
+    do_classify = os.environ.get(
+        "MEMEX_PARSE_DOCLING_PICTURE_CLASSIFICATION", "1"
+    ) == "1"
     pipeline_opts = PdfPipelineOptions()
     pipeline_opts.do_ocr = do_ocr
-    print(f"docling: do_ocr={do_ocr}", file=sys.stderr)
+    pipeline_opts.do_picture_classification = do_classify
+    print(
+        f"docling: do_ocr={do_ocr}, do_picture_classification={do_classify}",
+        file=sys.stderr,
+    )
     converter = DocumentConverter(
         format_options={
             InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_opts)
@@ -195,11 +210,38 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
             except Exception:
                 caption_obj = None
         caption = str(caption_obj) if caption_obj else None
+
+        # P3.3 v2: Docling's PictureClassifier emits a ranked list of
+        # `PictureClassificationPrediction(class_name, confidence)`
+        # under `pic.meta.classification.predictions`. Capture the top
+        # prediction; the chart-OCR backend uses this to skip non-chart
+        # pictures (logos, diagrams, photos) before invoking the model.
+        classification = None
+        classification_confidence = 0.0
+        meta = getattr(pic, "meta", None)
+        if meta is not None:
+            cls_field = getattr(meta, "classification", None)
+            if cls_field is not None:
+                preds = getattr(cls_field, "predictions", None) or []
+                if preds:
+                    top = preds[0]
+                    classification = str(
+                        getattr(top, "class_name", "") or ""
+                    ) or None
+                    try:
+                        classification_confidence = float(
+                            getattr(top, "confidence", 0.0)
+                        )
+                    except (TypeError, ValueError):
+                        classification_confidence = 0.0
+
         figures.append(
             {
                 "page_no": int(page_no),
                 "bbox": [x0, y_bot, x1, y_top],
                 "caption": caption,
+                "classification": classification,
+                "classification_confidence": classification_confidence,
             }
         )
 

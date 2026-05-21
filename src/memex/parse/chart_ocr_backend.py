@@ -58,11 +58,37 @@ _DEFAULT_RENDER_SCALE = 2.5
 # certainly a page-number badge, watermark, or decorative element
 # rather than a real chart. ~140×140 points ≈ 2 inches square at
 # 72 DPI, which is the minimum chart size we've seen on the slide-
-# decks corpus. Filtering pre-inference saves ~80% of model calls on
-# the canonical CUDA deck (245 picture objects → ~40-50 actual
-# charts) without losing any chart-with-numerics that the model
-# could plausibly extract.
+# decks corpus.
 _MIN_FIGURE_AREA_SQPT = 20000.0
+
+# P3.3 v2: Docling's `DocumentPictureClassifier` (v2.5) class names we
+# accept as "actual chart with extractable data." Anything else
+# (logo, flow_chart, photograph, engineering_drawing, screenshot,
+# icon, table, etc.) is dropped from the chart-OCR pass. This is the
+# pre-filter that prevents DePlot's OOD-hallucination cascade on
+# non-chart content. On the canonical CUDA deck this drops
+# 245 picture objects → ~26 actual chart candidates (89% reduction).
+# `flow_chart` is intentionally EXCLUDED — those are architecture /
+# block diagrams without extractable rows+columns, and DePlot
+# fabricates plausible-looking sports-statistics tables on them.
+_CHART_CLASS_NAMES: frozenset[str] = frozenset(
+    {
+        "bar_chart",
+        "line_chart",
+        "pie_chart",
+        "scatter_plot",
+        "box_plot",
+        "tabular_chart",  # if Docling emits this distinct type
+    }
+)
+
+# Minimum classifier confidence to trust the classification. Below
+# this we treat the classification as "unknown" and fall back to the
+# legacy "include everything that passes area filter" behavior — so a
+# misclassification of a real chart as e.g. 'icon' at 0.3 confidence
+# doesn't silently drop it. Tuned conservative; Docling's v2.5
+# classifier is typically >0.85 confident when it has a clear answer.
+_MIN_CLASSIFICATION_CONFIDENCE = 0.50
 
 
 class ChartOCRUnavailable(MemexError):
@@ -247,6 +273,8 @@ async def chart_ocr_extract(
     figures: list[FigureMetadata],
     max_new_tokens: int = _MAX_NEW_TOKENS,
     min_area_sqpt: float = _MIN_FIGURE_AREA_SQPT,
+    chart_class_names: frozenset[str] = _CHART_CLASS_NAMES,
+    min_classification_confidence: float = _MIN_CLASSIFICATION_CONFIDENCE,
 ) -> list[ChartOCROutput | Exception]:
     """Per-document batch extraction over a list of figures.
 
@@ -279,21 +307,40 @@ async def chart_ocr_extract(
     results: list[ChartOCROutput | Exception] = []
     figures_to_extract: list[tuple[int, FigureMetadata]] = []
     for idx, figure in enumerate(figures):
+        # ALWAYS append a placeholder so positional alignment with
+        # the caller's `<!-- image -->` placeholders is preserved.
+        # Filtered figures get an empty ChartOCROutput; the stitch
+        # step skips empty results so the placeholder stays unchanged.
+        results.append(
+            ChartOCROutput(
+                page_no=figure.page_no, bbox=figure.bbox, markdown=""
+            )
+        )
+
+        # Filter 1: area. Skip page-number badges, watermarks,
+        # decorative elements below ~140×140 pt.
         x0, y0, x1, y1 = figure.bbox
         area = max(0.0, x1 - x0) * max(0.0, y1 - y0)
         if area < min_area_sqpt:
-            results.append(
-                ChartOCROutput(
-                    page_no=figure.page_no, bbox=figure.bbox, markdown=""
-                )
-            )
-        else:
-            results.append(
-                ChartOCROutput(
-                    page_no=figure.page_no, bbox=figure.bbox, markdown=""
-                )
-            )
-            figures_to_extract.append((idx, figure))
+            continue
+
+        # Filter 2: classification. When Docling's classifier emits a
+        # confident prediction, accept ONLY the chart-like classes and
+        # drop everything else (logos, flow charts, photographs,
+        # engineering drawings, tables-as-images, icons). When the
+        # confidence is below the floor, fall back to "extract" to
+        # avoid dropping ambiguous-but-real charts. When the
+        # classification is None (v1 worker / disabled feature), also
+        # fall back to extract.
+        if (
+            figure.classification is not None
+            and figure.classification_confidence
+            >= min_classification_confidence
+            and figure.classification not in chart_class_names
+        ):
+            continue
+
+        figures_to_extract.append((idx, figure))
 
     if not figures_to_extract:
         return results

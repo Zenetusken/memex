@@ -48,11 +48,20 @@ class FigureMetadata(BaseModel):
 
     `caption` is whatever Docling associates with the figure (often
     empty or a one-line caption from the source).
+
+    `classification` is Docling's `PictureClassifier` top-1 prediction
+    (e.g. `bar_chart`, `line_chart`, `logo`, `flow_chart`,
+    `photograph`, `engineering_drawing`, etc.) — used by the chart-OCR
+    backend to skip non-chart figures before invoking the model. None
+    when the worker had picture classification disabled (the v1
+    payload format) or when no prediction was emitted.
     """
 
     page_no: int
     bbox: tuple[float, float, float, float]
     caption: str | None = None
+    classification: str | None = None
+    classification_confidence: float = 0.0
 
 
 class DoclingConversion(BaseModel):
