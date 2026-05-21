@@ -78,7 +78,11 @@ _VRAM_GB: dict[tuple[str, str | None], float] = {
     ("orchestrator", "AWQ"): 5.0,
     ("orchestrator", "GPTQ"): 5.0,
     ("embedder", None): 0.6,
-    ("reranker", None): 0.6,
+    # bge-reranker-v2-m3 in BF16 is ~2 GB resident (568 M params × 2 B
+    # plus the cross-encoder head). The 0.6 GB figure was a smaller
+    # reranker; the load test showed this is the number that hits the
+    # budget.
+    ("reranker", None): 2.0,
     ("vlm", "awq_int4"): 7.0,
     ("vlm", "bf16"): 16.0,
 }
@@ -92,6 +96,12 @@ def _verify_vram_fit(settings: MemexSettings) -> None:
     warn if the budget is tight. ADR-0001 promised this; ADR-0006 wires
     it. Does not raise — the OOM circuit breaker is the last line of
     defence, and this is a heads-up at startup.
+
+    `disable_vlm=True` skips the VLM in the estimate so the warning
+    reflects what will actually be loaded. The reranker estimate
+    uses the BF16 footprint of bge-reranker-v2-m3 (≈ 2 GB), not the
+    0.6 GB sentence-transformer default — the audit's load test
+    showed the BF16 number is what hits the budget.
     """
     import torch
 
@@ -105,9 +115,11 @@ def _verify_vram_fit(settings: MemexSettings) -> None:
         _VRAM_GB[("orchestrator", settings.models.orchestrator_quantization)]
         + _VRAM_GB[("embedder", None)]
         + _VRAM_GB[("reranker", None)]
-        + _VRAM_GB[("vlm", settings.models.vlm_quantization)]
         + _OVERHEAD_GB
     )
+    # Only count the VLM if it's actually going to be loaded.
+    if not settings.parse.disable_vlm:
+        estimated += _VRAM_GB[("vlm", settings.models.vlm_quantization)]
 
     if estimated > budget_gb:
         log.warning(
@@ -116,6 +128,7 @@ def _verify_vram_fit(settings: MemexSettings) -> None:
             budget_gb=round(budget_gb, 1),
             total_gb=round(total_gb, 1),
             gpu=torch.cuda.get_device_name(0),
+            vlm_counted=not settings.parse.disable_vlm,
             fix=(
                 "lower hardware.gpu_memory_fraction, switch to a smaller "
                 "VLM variant (vlm_quantization=awq_int4), or reduce the "
@@ -129,6 +142,7 @@ def _verify_vram_fit(settings: MemexSettings) -> None:
             budget_gb=round(budget_gb, 1),
             total_gb=round(total_gb, 1),
             gpu=torch.cuda.get_device_name(0),
+            vlm_counted=not settings.parse.disable_vlm,
         )
 
 

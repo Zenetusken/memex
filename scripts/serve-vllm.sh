@@ -8,14 +8,23 @@
 #
 # Override the model + endpoint via environment:
 #   MEMEX_VLLM_MODEL          (default: Qwen/Qwen3-8B-AWQ — Qwen3 dropped
-#                              the "Instruct" suffix; the base model IS
-#                              the instruct model.)
+#                              the "Instruct" suffix; the base IS the
+#                              instruct model.)
 #   MEMEX_VLLM_HOST           (default: 127.0.0.1)
 #   MEMEX_VLLM_PORT           (default: 8000)
-#   MEMEX_VLLM_QUANTIZATION   (default: awq)
-#   MEMEX_VLLM_MAX_MODEL_LEN  (default: 8192)
-#   MEMEX_VLLM_GPU_FRACTION   (default: 0.80 — leaves headroom for Memex's
-#                              embedder + reranker + VLM in the same process)
+#   MEMEX_VLLM_QUANTIZATION   (default: awq_marlin — vLLM logs that AWQ
+#                              models can run with the Marlin kernel for
+#                              ~1.5-2× faster decode. Same weights, same
+#                              quality, just a better kernel. Set to
+#                              empty for unquantized models, or to `awq`
+#                              for the legacy kernel.)
+#   MEMEX_VLLM_MAX_MODEL_LEN  (default: 4096 — Memex's chunks are short
+#                              (~300 tokens) and so are queries; doubling
+#                              this just buys idle KV-cache reservation.)
+#   MEMEX_VLLM_GPU_FRACTION   (default: 0.65 — leaves ~4 GB on a 12 GB
+#                              card for Memex's embedder (~0.6 GB) +
+#                              reranker (~2 GB) + activations. At 0.80
+#                              the reranker OOMs.)
 
 set -euo pipefail
 
@@ -25,9 +34,9 @@ PORT="${MEMEX_VLLM_PORT:-8000}"
 # Use single-dash `${VAR-default}` so an explicitly-empty override
 # (e.g. MEMEX_VLLM_QUANTIZATION='') means "no --quantization flag"
 # for unquantized models like Qwen3-0.6B.
-QUANTIZATION="${MEMEX_VLLM_QUANTIZATION-awq}"
-MAX_MODEL_LEN="${MEMEX_VLLM_MAX_MODEL_LEN:-8192}"
-GPU_FRACTION="${MEMEX_VLLM_GPU_FRACTION:-0.80}"
+QUANTIZATION="${MEMEX_VLLM_QUANTIZATION-awq_marlin}"
+MAX_MODEL_LEN="${MEMEX_VLLM_MAX_MODEL_LEN:-4096}"
+GPU_FRACTION="${MEMEX_VLLM_GPU_FRACTION:-0.65}"
 
 # Explicit single-device — skips the multi-GPU discovery codepath at
 # startup (~1–2 s faster cold start on a single-card rig).
