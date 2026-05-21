@@ -53,9 +53,17 @@ if [ ! -d "$VAULT" ]; then
     exit 3
 fi
 
-# Initialize the repo on first run. `restic snapshots` returns non-zero
-# when the repo isn't initialized; --no-lock keeps the check cheap.
-if ! restic snapshots --no-lock >/dev/null 2>&1; then
+# Initialize the repo on first run. We disambiguate "repo doesn't
+# exist yet" (we should init) from "repo exists but we can't read
+# it" (perms, corruption, wrong password) by inspecting restic's
+# stderr — fresh-repo errors mention "does not exist" / "config
+# file" / "unable to open config" / "Is there a repository". Other
+# errors (permission denied, wrong password, network failure) keep
+# the existing repo intact and surface the real error.
+SNAPSHOT_ERR="$(restic snapshots --no-lock 2>&1 >/dev/null || true)"
+if [ -z "$SNAPSHOT_ERR" ]; then
+    : # repo readable; proceed to backup
+elif echo "$SNAPSHOT_ERR" | grep -qE 'does not exist|unable to open config|config file|Is there a repository'; then
     if [ "${RESTIC_INIT_IF_MISSING:-true}" = "true" ]; then
         echo "→ initializing restic repo at $REPO"
         restic init
@@ -64,6 +72,12 @@ if ! restic snapshots --no-lock >/dev/null 2>&1; then
         echo "  run: restic -r $REPO init" >&2
         exit 4
     fi
+else
+    # Repo exists but we can't read it — never auto-init over it.
+    echo "memex-vault-backup.sh: restic could not read the repo:" >&2
+    echo "$SNAPSHOT_ERR" >&2
+    echo "  (refusing to auto-init; resolve the error above first)" >&2
+    exit 5
 fi
 
 echo "→ backup $VAULT → $REPO"
