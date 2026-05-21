@@ -1,6 +1,6 @@
 # Memex Roadmap
 
-**Last updated:** 2026-05-21 (end-of-session — entire P1 backlog shipped + P2.1 reranker infrastructure landed)
+**Last updated:** 2026-05-21 (phase wrap — P1 backlog + P3.2 daemon stack + P2.1 infra + P0 rigorous baseline + slide-deck Docling routing all shipped; chart-OCR and near-miss-hallucination items captured as new tracked entries)
 
 The blueprint in [`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) is the architectural design — module signatures, cross-cutting concerns, build order. This document is the **operational view**: what is shipped today, what is measured, and what comes next.
 
@@ -31,7 +31,7 @@ The blueprint in [`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) is the archi
 | **P0** | **Eval corpus** — JSON query sets + `memex eval` rigorous baseline | ⚠️ **Rigorous baseline shipped** (2026-05-21): 1 category (slide-decks), 1 doc, 15 queries (7 answerable + 3 empty-retrieval refusals + 5 near-miss refusals); `top_k ∈ {4,6,8}` sweep run; `mcp_answered_only ≈ 0.5–0.6`. Corpus extension is multi-session curator work. |
 | **Parse — slide-deck → Docling** | Tier 0.5 classifier override routing slide-shaped PDFs to Docling | ✅ **Shipped + live-verified** (2026-05-21) — `_is_slide_deck` heuristic (aspect ≥ 1.3 AND chars-per-page in [50, 800)); 147 tests green; CUDA deck now routes correctly. |
 
-**File count:** 83 Python files in `src/memex/` + `tests/` + `scripts/`, all parse-clean. 7 ADRs. 8 audit reports under `docs/audits/`. 59 commits on `main` (public at `github.com/Zenetusken/memex`); the canonical count is `git rev-list --count main`.
+**File count:** 83 Python files in `src/memex/` + `tests/` + `scripts/`, all parse-clean. 7 ADRs. 8 audit reports under `docs/audits/`. 60 commits on `main` (public at `github.com/Zenetusken/memex`); the canonical count is `git rev-list --count main`.
 
 **Test suite:** 147/147 green on the reference rig. Linux + pyseccomp; 5 tests skip on Windows.
 
@@ -99,9 +99,65 @@ PDFs now run through a tiered classifier before Docling. Producer metadata is th
 
 ## What's next — prioritised
 
-The entire P1 code-work backlog plus the P3.2 always-on stack + every FU3.2.* follow-up is shipped. **P0 has its scaffolding now**: the first real query set + baseline run exists. The remaining work on P0 is corpus extension (more documents, more queries, more categories), which is a curator-time investment rather than a code task.
+**Phase wrap, 2026-05-21.** This session closes a long stretch of deployment + evaluation + parser-quality work:
 
-### P0 — eval corpus: rigorous baseline shipped 2026-05-21
+- **P1 backlog** shipped (PyMuPDF pre-filter, chunker tuning, MCP HTTP auth, annotation UI 409, cross-process vault lock).
+- **P2.1 infra** shipped (Qwen3-Reranker backend behind a feature flag; honest verdict on the memory footprint).
+- **P3.2 daemon stack** shipped end-to-end (vLLM + web + MCP + watcher + vault-backup timer) with all four FU3.2.* follow-ups (Type=notify gating, `memex upgrade` CLI, vault-backup timer, FastMCP startup warning fix).
+- **P0 eval corpus** shipped its first rigorous baseline (15 queries against the GTC 2024 CUDA deck; `top_k ∈ {4,6,8}` sweep; `mcp_answered_only ≈ 0.5–0.6`; `refusal_rate_cf ≈ 0.75`).
+- **Parser quality investigation** delivered an evidence-backed verdict — Docling beats PyMuPDF on slide decks (+50% legitimate answer rate) — and **shipped the routing override** as Tier 0.5 of the classifier.
+
+**Beyond this phase.** The Memex pipeline is now end-to-end shippable, observable, and eval-instrumented. Remaining work falls into five tiers, ranked by pickability and impact. Tier 1 items are runnable in a single session without further setup; tiers 2–4 carry session-spanning dependencies; tier 5 is "punt until a user needs it."
+
+### Tier 1 — pickable now (no corpus / infra dependency)
+
+These items have everything they need to be picked up immediately and shipped in one session.
+
+- **P2.4 — Agent refusal calibration on near-miss queries.** Surfaced by the rigorous eval + chart-text ablation + parser investigation: queries 11 (FP128 energy cost) and 12 (FP4 tensor core cost) hallucinated **identically** across PyMuPDF, chart-text-stripped, and Docling vault runs at every top_k swept. The agent grounds correctly in the FP-precision table chunks but substitutes nearby table values by interpolation (e.g., "FP4 ≈ 0.03x" extrapolated from FP8's 0.06x). Independent of parser, independent of context budget — the failure mode is the agent's prompt + threshold calibration. Investigation tier: prompt-engineering first (start with stronger "the question asks for X; if X is not literally present, refuse" guardrails in `prompts/answer@v1`); if prompt alone is insufficient, fall through to a model swap (P2.2/P2.3 may carry better refusal-on-near-miss behaviour as a side effect, measurable on the same 15-query set). **Validation surface already exists** at `tests/eval-data/slide-decks/queries.json`; no corpus extension needed to start iterating.
+- **Filler N1–N8.** Audit-surfaced minor hardening — see the §Filler list at the end of this section. Each is small, atomic, and pickable in <1 hour. Useful when the user wants something contained while waiting on a bigger pickup.
+
+### Tier 2 — multi-session foundational (unblocks downstream verdicts)
+
+These need session-spanning investment but their completion unlocks several downstream items in tier 3.
+
+- **P0 corpus extension** (curator-time, multi-session). The single most-impactful pending work item; gates P2.1, P2.2, P2.3, and the P1.6 chunker tuning verdict.
+  1. Extend `slide-decks` to 30–50 queries across 3–5 documents.
+  2. Bootstrap each of the other 6 categories from `docs/eval-corpus-plan.md`: modern-printed, scientific-papers, technical-docs, historical-scans, handwritten, forms.
+  3. Wire CER/WER/structural-F1 from `src/memex/eval/scoring.py` into `runner.py`; needs per-doc hand-curated reference markdown (Phase 2 of the spec).
+- **P3.3 — Chart-data extraction (chart-OCR over Docling figures).** Surfaced by the parser investigation: query 04 ("transistor density 2004–2022 per TSMC chart") stayed refused under both PyMuPDF and Docling, because the year-by-year numerics live inside chart imagery that Docling represents as `<!-- image -->` placeholders. A DocVQA-style chart-OCR pass over those figures (input: Docling-tagged figure crops; output: a structured GFM table or key:value list appended to the parent chunk's markdown) would extract them. Candidate models: ChartQA-style finetunes, DePlot, Pix2Struct. New parse-stage post-processor (sandbox-able alongside the existing Docling worker); new VRAM footprint to budget. Multi-session: model selection + load + integration + eval pass.
+
+### Tier 3 — eval-gated stack swaps (unlocked by Tier 2 P0 extension)
+
+These are ready to run once the corpus has the depth to discriminate between candidates.
+
+- **P2.1 — Qwen3-Reranker-0.6B quality A/B.** ◐ Infra shipped (commits `714dd32`, `b485748`); the swap is a quality play, not a memory play (~2.1 GB live, ~equal to bge). Run the same 15-query (eventually larger) set with `MEMEX_MODELS__RERANKER_BACKEND=qwen3` vs the default `cross_encoder`; pick the winner per category.
+- **P2.2 — Granite 4.1-8B-Instruct vs `Qwen/Qwen3-8B-AWQ`.** Apache-2.0 license + native OpenAI-tool-calling. Model-name change in `scripts/serve-vllm.sh`. Eval-gated.
+- **P2.3 — Qwen3-VL-8B-Instruct vs `Qwen2.5-VL-7B`.** +6–14 OCR points published; native 256 K context. Same AWQ-Int4 footprint. Currently disabled by default on 12 GB; the swap helps the larger-VRAM tier. Eval-gated.
+- **P1.6 chunker-size verdict.** Is `chunk_target_tokens=400` the right default, or should it be 500–600 with a longer model context? Needs corpus depth to be answerable.
+
+### Tier 4 — cost / ops decision (no code blocker; resource blocker)
+
+- **P3.1 — Real-mode benchmark nightly CI.** `scripts/benchmark.py --real` measures cold-start + first-token + embedding throughput. Needs a GPU runner: cloud (Lambda, RunPod, Modal) or a dedicated home rig. Workflow template already in `.github/workflows/`. Don't pick up without confirming the user has the resources allocated.
+
+### Tier 5 — design decisions still owed (punt until a user needs it)
+
+- **P4.1 — Wikilink section anchors** (per ADR-0003). `[[doc_id]]` is committed; `[[doc_id#heading]]` is unresolved. Punt until a real cross-doc citation needs it.
+- **P4.2 — 8 GB GPU tier.** ADR-0001 says "no first-class CPU fallback." Should there be a documented 8 GB profile (Qwen3-4B-AWQ + reranker-base + no VLM)? Decision can wait. Note: a smaller orchestrator would also unblock P2.1's quality test on tighter rigs.
+- **P4.3 — Trace retention.** `EventBus` has 30-day prune; Langfuse self-host wiring is open. Match retention windows when self-host lands.
+
+### Recommended next pickup
+
+**P2.4 (near-miss hallucination calibration)** — it's the single tier-1 item with the highest impact. The Q11/Q12 failures are reproducible RIGHT NOW against the existing 15-query baseline; prompt iteration can validate immediately without any corpus work. If prompt-engineering carries the fix, this closes a substantial chunk of the eval-surfaced agent quality concern without the curator overhead of P0 extension.
+
+If the user wants something even tighter, **N9** is shipped but **N1** (LanceDB concurrent-search smoke test) and **N5** (`_pid_alive` EPERM behaviour) are the most tractable nits left.
+
+If the user wants the bigger lift, **P0 corpus extension** — even one category bumped to 30+ queries would let P2.1's reranker A/B run with statistical signal.
+
+---
+
+## P0 — eval corpus: rigorous baseline shipped 2026-05-21
+
+### Eval baseline + parser-investigation history (preserved for reference)
 
 The eval harness now has its first concrete query set at **`tests/eval-data/slide-decks/queries.json`** — 15 queries (7 answerable + 3 empty-retrieval counterfactuals + 5 near-miss counterfactuals) against the GTC 2024 CUDA deck. The bootstrap (10 queries; published 2026-05-21 in commit `720fdfa`) was superseded the same day after the calibration was audited and the methodology hardened: broader chunk-set labelling, near-miss counterfactuals added, and `mean_citation_precision_answered_only` added to `EvalReport` so refused queries don't inflate the headline.
 
@@ -216,25 +272,6 @@ Routes slide-deck-shaped documents to Docling instead of PyMuPDF via a new Tier 
 
 **Out of scope for this ship**: re-ingesting pre-existing slide-deck content. The classifier is forward-acting; the user's existing PyMuPDF-parsed CUDA deck stays as-is until manually re-ingested via `memex ingest`. A clean reindex of existing slide-deck content will be needed for the new routing to take effect on already-ingested docs.
 
-### P2 — eval-gated stack swaps (after P0)
-
-2. ~~**Qwen3-Reranker-0.6B infrastructure**~~ — ✅ **Infra shipped 2026-05-21** (commits `714dd32`, `b485748`). Backend flag wired; live verification revised the published "0.6 GB" footprint up to **~2.1 GB live** (autoregressive activations cost more than parameter count suggests). The swap is a quality play, not a memory play. Quality verdict pending P0.
-3. **Granite 4.1-8B-Instruct** vs `Qwen/Qwen3-8B-AWQ`. Apache-2.0 license + native OpenAI-tool-calling in the chat template (vs Qwen's prompt-template tool path). Same vLLM serving infrastructure; the swap is a model-name change in `scripts/serve-vllm.sh`. Eval-gated.
-4. **Qwen3-VL-8B-Instruct** vs `Qwen2.5-VL-7B`. +6–14 OCR points published; native 256 K context. Same AWQ-Int4 footprint (~5 GB). Currently disabled by default on 12 GB; the swap doesn't unblock 12 GB users (`disable_vlm=True` is still the right default there) but improves quality for the larger-VRAM tier. Eval-gated.
-5. **P2.4 — Agent refusal calibration on near-miss queries.** Surfaced by the rigorous eval + chart-text ablation + parser investigation: queries 11 (FP128 energy cost) and 12 (FP4 tensor core cost) hallucinated **identically** across PyMuPDF, chart-text-stripped, and Docling vault runs at every top_k swept. The agent grounds correctly in the FP-precision table chunks but substitutes nearby table values by interpolation (e.g., "FP4 ≈ 0.03x" extrapolated from FP8's 0.06x). Independent of parser, independent of context budget; the failure mode is the agent's prompt + threshold calibration. Investigation tier: prompt-engineering (start with stronger "the question asks for X; if X is not literally present, refuse" guardrails in `prompts/answer@v1`) → if prompt alone is insufficient, model swap (P2.2/P2.3 may carry better refusal-on-near-miss behaviour as a side effect, measurable on the same query set).
-
-### P3 — infrastructure (no eval needed)
-
-5. ~~**Daemon process model**~~ — ✅ **Shipped 2026-05-21** (commits below). Pure docs+templates: [`docs/deploy/systemd.md`](deploy/systemd.md) (Linux user units, the recommended path), [`docs/deploy/launchd.md`](deploy/launchd.md) (macOS dev), and **twelve** sibling artefacts — four `(unit, env)` pairs for systemd (`memex-vllm.service`, `memex-web.service`, `memex-mcp.service`, `memex-watch.service`) plus four launchd plists (`com.memex.{vllm,web,mcp,watch}.plist`). The web + MCP + watcher units carry soft `Wants=memex-vllm.service` so the full stack boots together; failures in any one service don't cascade. Live-verified on the reference rig: all units enabled + reachable, `kill -9` on the web's `uv` parent triggered a 5 s respawn, and a real edit to a vault markdown triggered the watcher's reaction (enrich+index) end-to-end — including the soft-dependency design proving itself when vLLM was offline (`enrich.chunk_failed` × 32 → graceful continuation → `index.done partial=true` succeeded). Logs flow into journald; rotation is the OS's job now.
-6. **Real-mode benchmark nightly CI** — `scripts/benchmark.py --real` measures cold start + first-token + embedding throughput. Needs a GPU runner: cloud (Lambda, RunPod, Modal) or a dedicated rig. Workflow template already in `.github/workflows/`. Decision blocker is **cost + ops**, not code.
-7. **P3.3 — Chart-data extraction (chart-OCR over Docling figures).** Surfaced by the parser investigation: query 04 ("transistor density 2004–2022 per TSMC chart") stayed refused under both PyMuPDF and Docling, because the year-by-year numerics live inside chart imagery that Docling represents as `<!-- image -->` placeholders. A DocVQA-style chart-OCR pass over those figures (input: Docling-tagged figure crops; output: a structured GFM table or key:value list appended to the parent chunk's markdown) would extract them. Candidate models: ChartQA-style finetunes, DePlot, Pix2Struct. New parse-stage post-processor (sandbox-able alongside the existing Docling worker); new VRAM footprint to budget. Out of scope for the parser swap that just shipped — this is an additional model + pipeline, not a routing tweak.
-
-### P4 — design decisions still owed (low urgency)
-
-7. **Wikilink format** (per ADR-0003) — `[[doc_id]]` is committed; `[[doc_id#heading]]` for sub-document precision is unresolved. Punt until a real cross-doc citation needs it.
-8. **8 GB GPU tier** — ADR-0001 says "no first-class CPU fallback." Should there be a documented 8 GB profile (Qwen3-4B-AWQ + reranker-base + no VLM)? Decision can wait until a user actually has that rig. **Note**: a smaller orchestrator would also unblock Qwen3-Reranker's quality test (P2.1) on tighter rigs.
-9. **Trace retention** — `EventBus` has 30-day prune; Langfuse self-host wiring is open. Match retention windows when self-host lands.
-
 ### Filler — minor hardening (pickable in idle sessions)
 
 When bored, working from `docs/audits/00-synthesis.md`:
@@ -290,7 +327,7 @@ Detailed per-phase log lives in git history + `docs/audits/`. The compressed ver
 - **FU3.2.1 — `Type=notify` readiness gate for vLLM** (2026-05-21): `scripts/serve-vllm.sh` gained a backgrounded sidecar that polls `/v1/models` and calls `systemd-notify --ready --status="…"` on the first 2xx; `memex-vllm.service` switched from `Type=simple` to `Type=notify` + `NotifyAccess=all`. `systemctl --user start memex-vllm` now blocks until vLLM is genuinely serving (~31 s measured), so `After=memex-vllm.service` on downstream units (web, MCP, watcher) is a real readiness gate. Live-verified: full-stack cold boot returned after 32 s with **zero Connection-refused logs** in any downstream unit's journal — and a watcher reaction triggered immediately afterward fired clean `extract_entities@v1` + `extract_citations@v1` model calls against vLLM. The sidecar no-ops when `$NOTIFY_SOCKET` is unset, so Pattern B (manual) and Pattern C (`memex daemon start`) are unaffected.
 - **P3.2 — Daemon templates** (2026-05-21): three waves. (1) vLLM unit + plist + deploy guides. (2) `memex-web.service` + `memex-mcp.service` (+ matching plists/env) so the full stack boots together. (3) `memex-watch.service` (+ plist + env) for the vault file-watcher that re-enriches + re-indexes on canonical-markdown edits. Web + MCP + watcher all carry soft `Wants=memex-vllm.service` — they cluster but degrade gracefully if vLLM is down (search/get_document/list_documents work LLM-less; only `/ask` and enrich need vLLM). The wave-3 live verification was the most thorough: appended a line to the canonical CUDA-deck markdown → watcher logged `watcher.edit_confirmed` → 32 chunks went to enrich → vLLM was offline (cleanup state) so 32× `enrich.chunk_failed` → `enrich.done chunk_failures: 32` → watcher kept running → `index.done added: 1 deleted: 1 unchanged: 30 partial: true` (partial re-index isolated the changed chunk). Restoring the file fired another correct reaction. Two unit-template bugs caught during verification (StartLimitIntervalSec in `[Service]` instead of `[Unit]`, inline `#` comments on `ProtectHome=` line) — both fixed across all four units. No code change.
 
-For the full per-commit log: `git log --oneline` (54 commits at session close, 2026-05-21; the up-to-date number is `git rev-list --count main`).
+For the full per-commit log: `git log --oneline` (60 commits at session close, 2026-05-21; the up-to-date number is `git rev-list --count main`).
 
 ---
 
