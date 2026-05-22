@@ -46,6 +46,19 @@ class FTSStore:
 
     def __init__(self, db: sqlite3.Connection):
         self._db = db
+        # N2 (audit 2026-05-20): gate multi-statement writes so a
+        # future `transaction()` method gets atomic BEGIN/COMMIT
+        # semantics. The connection runs in autocommit mode
+        # (`isolation_level=None`), so SQLite's kernel mutex
+        # serializes individual statements — but `upsert()` issues
+        # four consecutive statements (2 DELETE + 2 INSERT) and
+        # `delete_document/_chunks` each issue two. Without a lock,
+        # two concurrent coroutines could interleave their statements
+        # and leave the FTS table and chunks_meta table out of sync.
+        # Reads stay unlocked: SQLite handles concurrent SELECT
+        # natively and serializing them would block the daemon's
+        # parallel `/ask` workload.
+        self._lock = asyncio.Lock()
 
     @classmethod
     async def open(cls, vault_path: Path) -> FTSStore:
@@ -117,7 +130,8 @@ class FTSStore:
                 ],
             )
 
-        await asyncio.to_thread(_write)
+        async with self._lock:
+            await asyncio.to_thread(_write)
         logger.info(
             "fts.upsert", count=len(deduped), deduped=duplicates
         )
@@ -137,7 +151,8 @@ class FTSStore:
             )
             return count
 
-        deleted = await asyncio.to_thread(_delete)
+        async with self._lock:
+            deleted = await asyncio.to_thread(_delete)
         logger.info("fts.delete_document", doc_id=doc_id, deleted=deleted)
         return deleted
 
@@ -161,7 +176,8 @@ class FTSStore:
             )
             return cur.rowcount
 
-        deleted = await asyncio.to_thread(_delete)
+        async with self._lock:
+            deleted = await asyncio.to_thread(_delete)
         logger.info("fts.delete_chunks", count=len(chunk_ids), deleted=deleted)
         return deleted
 
