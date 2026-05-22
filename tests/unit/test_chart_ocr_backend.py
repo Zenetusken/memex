@@ -28,9 +28,21 @@ from memex.parse.chart_ocr_backend import (
 from memex.parse.docling_backend import FigureMetadata
 
 
+class _FakeModel:
+    """Stand-in model class so `_is_vlm_handle(handle)` can call
+    `type(handle.model).__name__` without crashing. Name doesn't match
+    any VLM patterns ('VL', 'Vision', 'Llava', 'Internvl') so the
+    Pix2Struct prompt branch is selected — which is fine because the
+    test monkeypatches the transcribe call anyway."""
+
+
 class _FakeChartOCRHandle:
     """Stand-in for ChartOCRHandle; never touched directly because the
     backend's `_chart_ocr_transcribe_sync` is monkeypatched."""
+
+    def __init__(self) -> None:
+        self.model = _FakeModel()
+        self.processor = None
 
 
 @asynccontextmanager

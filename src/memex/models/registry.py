@@ -145,6 +145,30 @@ class ModelRegistry:
     async def status(self) -> list[ModelHandle]:
         return list(self._handles.values())
 
+    async def unload(self, name: ModelName) -> None:
+        """Release a loaded model's weights from VRAM.
+
+        Used by the chart-OCR pass (P3.3 v2 Session 2) to free the
+        VLM-class chart-OCR model BEFORE vLLM restarts at the end of
+        the pause window — otherwise vLLM (~7 GB) + chart-OCR-VLM
+        (~5 GB) + embedder + reranker would exceed the 12 GB rig's
+        budget. The model reloads lazily on the next `use()` call.
+
+        Acquires the same per-name lock as `use()` so concurrent
+        load/unload races are serialized. Idempotent — safe to call
+        when nothing is loaded.
+        """
+        async with self._locks[name]:
+            self._models.pop(name, None)
+            self._handles.pop(name, None)
+            try:
+                import torch  # type: ignore[import-not-found]
+
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except ImportError:
+                pass
+
     async def _load(self, name: ModelName) -> None:
         log = logger.bind(name=name)
         log.info("model.load.start")
@@ -348,44 +372,85 @@ class ModelRegistry:
 
     @staticmethod
     def _load_chart_ocr(model_id: str) -> ChartOCRHandle:
-        """Load the chart-OCR model + its processor (P3.3 Session 3).
+        """Load the chart-OCR model + its processor.
 
-        Default `google/deplot` per P3.3 Session 1: 1.13 GB safetensors
-        on disk (~2.3 GB live in BF16); fine-tuned for plot→linearised-
-        table extraction; Apache 2.0; vLLM-not-required (runs via plain
-        transformers).
+        Two backends supported, dispatched by model_id substring:
 
-        Decisions mirror `_load_vlm`:
-        - `Pix2StructForConditionalGeneration` is the model class (NOT
-          `AutoModelForImageTextToText` — DePlot is a Pix2Struct
-          derivative and the auto-class can miss its image-encoder).
-        - `Pix2StructProcessor` handles image preprocessing + tokeniser
-          bundling; the model card's example pairs them explicitly.
-        - `torch_dtype=torch.bfloat16` — ADR-0006 stack-wide BF16 on Ada.
-        - `device_map={"": "cuda:0"}` — deterministic single-GPU
-          placement.
-        - No `attn_implementation="flash_attention_2"` — Pix2Struct
-          uses T5-style attention; FA2 isn't applicable. SDPA is the
-          default.
-        - `model.eval()` — no training-mode dropout.
+        - **DePlot-style** (default, `google/deplot`): Pix2Struct
+          derivative fine-tuned for plot→linearised-table. 0.3B / 1.13
+          GB on disk / ~2.3 GB live in BF16. Loaded via
+          `Pix2StructForConditionalGeneration` + `Pix2StructProcessor`.
+          SDPA attention (T5-style, FA2 not applicable).
 
-        The Docling worker itself remains CPU-only; this handle lives
-        in the orchestrator process and is invoked only when vLLM is
-        paused for parse (P3.3 Session 4).
+        - **VLM-style** (`Qwen*/*-VL-*`, etc.): a vision-language model
+          used as a chart extractor with an explicit UNREADABLE-escape-
+          hatch prompt (P3.3 v2 Session 2; the
+          ChartHal-recommended hallucination-resistant approach).
+          Loaded via `AutoModelForImageTextToText` + `AutoProcessor`
+          with FA2 + BF16, mirroring `_load_vlm`. ~5-6 GB live for the
+          Qwen2.5-VL-7B AWQ variant.
+
+        The VLM-style handle is transient: chart_ocr_backend explicitly
+        calls `registry.unload("chart_ocr")` after the extraction pass
+        so the model doesn't compete with vLLM's KV cache during query
+        time. The DePlot-style handle is small enough to stay resident
+        without strain.
         """
+        # Heuristic: model IDs that contain "VL" / "vision" / "VLM"
+        # use the VLM loading pattern. Anything else assumes a
+        # Pix2Struct-style chart specialist.
+        lid = model_id.lower()
+        is_vlm = (
+            "-vl-" in lid
+            or lid.endswith("-vl")
+            or "vision" in lid
+            or "vlm" in lid
+        )
         import torch
-        from transformers import (
-            Pix2StructForConditionalGeneration,
-            Pix2StructProcessor,
-        )
 
-        processor = Pix2StructProcessor.from_pretrained(model_id)
-        model = Pix2StructForConditionalGeneration.from_pretrained(
-            model_id,
-            torch_dtype=torch.bfloat16,
-            device_map={"": "cuda:0"},
-            low_cpu_mem_usage=True,
-        )
+        if is_vlm:
+            from transformers import AutoModelForImageTextToText, AutoProcessor
+
+            # Match `_load_vlm`'s processor config so chart crops get
+            # the same visual-token budget tuning.
+            min_pixels = 256 * 28 * 28
+            max_pixels = 1280 * 28 * 28
+            processor = AutoProcessor.from_pretrained(
+                model_id,
+                min_pixels=min_pixels,
+                max_pixels=max_pixels,
+            )
+            # Try FA2 first (matches `_load_vlm`); fall back to SDPA
+            # if flash_attn isn't installed. The chart-OCR backend
+            # processes individual figure crops (small) rather than
+            # full pages, so SDPA's slightly lower throughput is
+            # acceptable for the chart-OCR use case.
+            try:
+                import flash_attn  # noqa: F401  # type: ignore
+
+                attn_impl = "flash_attention_2"
+            except ImportError:
+                attn_impl = "sdpa"
+            model = AutoModelForImageTextToText.from_pretrained(
+                model_id,
+                torch_dtype=torch.bfloat16,
+                device_map={"": "cuda:0"},
+                attn_implementation=attn_impl,
+                low_cpu_mem_usage=True,
+            )
+        else:
+            from transformers import (
+                Pix2StructForConditionalGeneration,
+                Pix2StructProcessor,
+            )
+
+            processor = Pix2StructProcessor.from_pretrained(model_id)
+            model = Pix2StructForConditionalGeneration.from_pretrained(
+                model_id,
+                torch_dtype=torch.bfloat16,
+                device_map={"": "cuda:0"},
+                low_cpu_mem_usage=True,
+            )
         model.eval()
         return ChartOCRHandle(model=model, processor=processor)
 

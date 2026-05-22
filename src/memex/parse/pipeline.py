@@ -930,6 +930,20 @@ async def _parse_with_docling(
                     source_pdf=source,
                     figures=conversion.figures,
                 )
+                # P3.3 v2 Session 2: unload the chart-OCR model BEFORE
+                # vLLM restarts (the pause context's `finally` block).
+                # The VLM-backed chart-OCR is ~5-6 GB live; vLLM is
+                # ~7 GB; embedder + reranker ~2.5 GB. All four
+                # resident exceeds the 12 GB rig's budget. The unload
+                # call is idempotent — safe for the DePlot path too,
+                # where it just frees the modest ~2.3 GB earlier than
+                # GC would.
+                from memex.models.registry import get_registry
+
+                try:
+                    await get_registry().unload("chart_ocr")
+                except Exception as ex:  # noqa: BLE001
+                    log.warning("chart_ocr.unload_failed", error=str(ex))
             conversion = _stitch_chart_extractions(conversion, extractions)
             chart_ocr_count = sum(
                 1

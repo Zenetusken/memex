@@ -21,6 +21,7 @@ functions so the rest of the package stays importable without the
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -39,7 +40,55 @@ logger = structlog.get_logger(__name__)
 # DePlot's published example uses this exact prompt; deviating produces
 # worse extraction quality (the model is trained to expect this prompt
 # token sequence).
-_PROMPT = "Generate underlying data table of the figure below:"
+_PROMPT_DEPLOT = "Generate underlying data table of the figure below:"
+
+# VLM-style chart-extraction prompt with the UNREADABLE-escape-hatch
+# pattern from the ChartHal (Sep 2025) hallucination benchmark and the
+# Losing-the-Plot (Sep 2025) study on chart degradation. The
+# `UNREADABLE` token + explicit "do NOT infer" clause is the most
+# effective single technique reported for reducing fabrication on OOD
+# chart imagery. Used when the chart-OCR backend is loaded as a VLM
+# (e.g., Qwen2.5-VL-7B) rather than a Pix2Struct-derivative.
+_PROMPT_VLM = (
+    "Extract every data series from this chart as a markdown table. "
+    "Columns: [x_label, series_name, value, unit]. "
+    "Rules:\n"
+    "1. Only output values you can READ DIRECTLY off the chart's axis "
+    "labels, value labels, or legend. Do NOT infer values from the "
+    "chart's visual shape or by interpolation.\n"
+    "2. If the chart legend, axis labels, or values are ambiguous, "
+    "illegible, missing, or this image is not a real data chart (e.g., "
+    "a diagram, screenshot, photo, logo), output ONLY the literal "
+    "token UNREADABLE on a single line.\n"
+    "3. Never fabricate plausible-looking column headers (e.g., sports "
+    "statistics, financial metrics) for charts whose subject you "
+    "cannot identify.\n"
+    "4. Return ONLY the markdown table or UNREADABLE — no commentary, "
+    "no surrounding prose, no explanations.\n"
+)
+
+# When the VLM returns this literal token (case-insensitive, ignoring
+# whitespace), the backend treats the extraction as a refusal — the
+# stitch step will leave the `<!-- image -->` placeholder unchanged.
+_UNREADABLE_TOKEN = "UNREADABLE"
+
+# DePlot-output post-processing patterns. The model's raw output uses
+# `<0x0A>` (Pix2Struct's newline byte sequence) instead of actual `\n`
+# characters; we normalise so the resulting markdown is readable by
+# both humans and the downstream agent's literal-presence rule.
+_PIX2STRUCT_NEWLINE_RE = re.compile(r"\s*<0x0A>\s*")
+
+# Patterns indicating that DePlot collapsed a multi-series chart to a
+# single column — the resulting table is too ambiguous to ground on
+# (you can't tell which series each value belongs to). Reject these
+# at the stitch step. Example: TSMC Lithography chart on the CUDA
+# deck has "Power" and "Density" as Series1/Series2; DePlot extracts
+# headers like `"TITLE | Series1 | Series2"` or just `"Series1"`,
+# making "is 0.8 the power or density value?" unanswerable.
+_AMBIGUOUS_HEADER_RE = re.compile(
+    r"\bSeries\s*\d+\b",
+    re.IGNORECASE,
+)
 
 # DePlot's table outputs typically run 50-300 tokens. 512 leaves
 # headroom for dense charts; defends against runaway generation on
@@ -179,35 +228,68 @@ def _render_figure_to_image(
         doc.close()
 
 
+def _is_vlm_handle(handle) -> bool:
+    """True when the chart-OCR handle wraps a VLM-style model (Qwen-VL,
+    LLaVA, etc.) rather than a Pix2Struct-style chart specialist. The
+    inference path differs: VLMs use chat templates + messages;
+    Pix2Struct uses a direct text+image processor call.
+    """
+    cls = type(handle.model).__name__
+    return any(token in cls for token in ("VL", "Vision", "Llava", "Internvl"))
+
+
 def _chart_ocr_transcribe_sync(
     handle, image, prompt: str, max_new_tokens: int
 ) -> str:
     """Synchronous transcription; called via asyncio.to_thread.
 
-    Mirrors DePlot's published example: processor builds the multi-
-    modal batch, model.generate runs greedy decode, processor decodes
-    the output ids. No chat-template wrapping (Pix2Struct doesn't
-    have one — the prompt is just a text prefix).
+    Two inference paths, dispatched by handle type:
+    - VLM-style (Qwen-VL etc.): uses chat-template + processor +
+      generate, then slices off the prompt prefix from the output.
+    - Pix2Struct-style (DePlot etc.): direct text+image processor
+      call, decoded as-is.
 
     Calls `torch.cuda.empty_cache()` after inference to keep the
-    caching allocator from accumulating fragmentation across many
-    sequential figures. The CUDA audit (2026-05-20) observed this on
-    the VLM path too — without explicit cache reclaim, ~200+
-    sequential generates can OOM even when per-call peak memory is
-    well within budget.
+    caching allocator from fragmenting across many sequential figures.
     """
     import torch
 
-    inputs = handle.processor(
-        images=image,
-        text=prompt,
-        return_tensors="pt",
-    ).to(handle.model.device)
+    is_vlm = _is_vlm_handle(handle)
+
+    if is_vlm:
+        # VLM path: build a chat message with image + text prompt.
+        # Mirrors `vlm_backend.py::_vlm_transcribe_sync` but with the
+        # chart-extraction prompt (UNREADABLE escape hatch) instead of
+        # the page-transcription prompt.
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "image": image},
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ]
+        text = handle.processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        inputs = handle.processor(
+            text=[text],
+            images=[image],
+            return_tensors="pt",
+            padding=True,
+        ).to(handle.model.device)
+    else:
+        # Pix2Struct path: direct text+image processor call.
+        inputs = handle.processor(
+            images=image,
+            text=prompt,
+            return_tensors="pt",
+        ).to(handle.model.device)
+
     # Cast float tensors to the model's dtype (BF16 per ADR-0006).
-    # The Pix2Struct processor produces FP32 pixel_values; the
-    # BF16-loaded model expects BF16 inputs, so without this cast we
-    # get the canonical "mat1 and mat2 have different dtype" error.
-    # Integer tensors (input_ids, attention_mask) stay as-is.
+    # Pix2Struct processor produces FP32 pixel_values; BF16-loaded
+    # model expects BF16. Integer tensors stay as-is.
     model_dtype = next(handle.model.parameters()).dtype
     inputs = {
         k: v.to(model_dtype) if v.dtype.is_floating_point else v
@@ -221,12 +303,18 @@ def _chart_ocr_transcribe_sync(
                 max_new_tokens=max_new_tokens,
                 do_sample=False,
             )
+        if is_vlm:
+            # VLMs return prompt-prefix + completion; slice off the
+            # prompt portion before decoding so we get just the model's
+            # output, mirroring vlm_backend's pattern.
+            generated = outputs[:, inputs["input_ids"].shape[1] :]
+            decoded_list = handle.processor.batch_decode(
+                generated, skip_special_tokens=True
+            )
+            return (decoded_list[0] if decoded_list else "").strip()
         decoded = handle.processor.decode(outputs[0], skip_special_tokens=True)
         return decoded.strip()
     finally:
-        # Reclaim caching-allocator blocks so the next figure starts
-        # from a clean slate. Cheap (microseconds); the alternative is
-        # slow accumulation that eventually trips the OOM killer.
         del inputs
         if "outputs" in dir():
             del outputs  # noqa: F821
@@ -241,7 +329,9 @@ async def _extract_with_handle(
     max_new_tokens: int,
 ) -> ChartOCROutput:
     """Internal: render + transcribe one figure given an already-
-    acquired chart-OCR handle."""
+    acquired chart-OCR handle. Selects the prompt based on handle type
+    (VLM-style gets the UNREADABLE-escape-hatch prompt; Pix2Struct-
+    style gets DePlot's published prompt)."""
     log = logger.bind(
         page=figure.page_no,
         bbox=figure.bbox,
@@ -255,9 +345,41 @@ async def _extract_with_handle(
         figure.page_no,
         figure.bbox,
     )
+    prompt = _PROMPT_VLM if _is_vlm_handle(handle) else _PROMPT_DEPLOT
     markdown = await asyncio.to_thread(
-        _chart_ocr_transcribe_sync, handle, image, _PROMPT, max_new_tokens
+        _chart_ocr_transcribe_sync, handle, image, prompt, max_new_tokens
     )
+
+    # UNREADABLE-escape-hatch: when the VLM emits the literal token,
+    # treat the extraction as a refusal and return an empty
+    # ChartOCROutput. The stitch step skips empty results so the
+    # `<!-- image -->` placeholder stays unchanged. This is the
+    # primary hallucination-prevention signal for the VLM path.
+    if (
+        markdown
+        and _UNREADABLE_TOKEN in markdown.upper()
+        and len(markdown.split()) < 5
+    ):
+        log.info("chart_ocr.unreadable_refusal")
+        markdown = ""
+
+    # DePlot-output post-processing (P3.3 v2 Session 2 heuristic-cleanup
+    # fallback). Two cheap interventions:
+    # 1. Replace `<0x0A>` byte-sequence (Pix2Struct's newline encoding)
+    #    with actual `\n` so the agent's literal-presence rule can
+    #    parse the table rows as separate lines.
+    # 2. Reject extractions whose headers contain "Series1/Series2/etc"
+    #    — these are collapsed-multi-series outputs the agent cannot
+    #    disambiguate (e.g., is 0.8 power or density?). Better to
+    #    refuse than to ship ambiguous data.
+    if markdown:
+        markdown = _PIX2STRUCT_NEWLINE_RE.sub("\n", markdown)
+        if _AMBIGUOUS_HEADER_RE.search(markdown):
+            log.info(
+                "chart_ocr.ambiguous_series_refusal",
+                snippet=markdown[:100],
+            )
+            markdown = ""
 
     log.info("chart_ocr.done", chars=len(markdown))
     return ChartOCROutput(
