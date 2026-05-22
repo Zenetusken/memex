@@ -14,6 +14,7 @@ from pathlib import Path
 import structlog
 
 from memex.core.types import Chunk
+from memex.index.chunker import strip_chart_extracted_for_index
 
 logger = structlog.get_logger(__name__)
 
@@ -104,11 +105,24 @@ class FTSStore:
                 f"DELETE FROM chunks_meta WHERE chunk_id IN ({placeholders})",
                 ids,
             )
+            # P3.3 v3 follow-up: strip `[chart-extracted]` blocks
+            # from the BM25 body so dense numerical tokens in
+            # extracted chart tables don't inflate term frequency for
+            # unrelated queries. The chunk's `.text` field (and the
+            # row in chunks_meta) keeps the full content — only the
+            # FTS5 `text` column gets the stripped version. When the
+            # chunk is retrieved, the agent reads the FULL text and
+            # sees the chart-extracted block in its context.
             self._db.executemany(
                 "INSERT INTO chunks_fts (chunk_id, document_id, document_title, text) "
                 "VALUES (?, ?, ?, ?)",
                 [
-                    (c.chunk_id, c.document_id, c.document_title, c.text)
+                    (
+                        c.chunk_id,
+                        c.document_id,
+                        c.document_title,
+                        strip_chart_extracted_for_index(c.text),
+                    )
                     for c in deduped
                 ],
             )

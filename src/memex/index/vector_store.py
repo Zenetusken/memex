@@ -96,11 +96,18 @@ class VectorStore:
         path = vault_path / ".memex" / "embeddings.lance"
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         db = await lancedb.connect_async(str(path))
-        # Idempotent create. LanceDB 0.30 deprecated `table_names()` in
-        # favour of `list_tables()` (same return shape; the
-        # DeprecationWarning was surfacing on every open in the test
-        # harness).
-        names = await db.list_tables()
+        # Idempotent create. LanceDB 0.30 deprecated `table_names()`
+        # in favour of `list_tables()` — but the return shape differs:
+        # the older method returned `list[str]`; the newer returns a
+        # `ListTablesResponse` (a pydantic-like model with `tables`
+        # field). We pull the strings out of `.tables` so the
+        # membership test works against table names. Verified by
+        # `lancedb.connect_async(...).list_tables()` returning
+        # `ListTablesResponse(tables=['chunks'], page_token=None)`.
+        response = await db.list_tables()
+        names = (
+            response.tables if hasattr(response, "tables") else list(response)
+        )
         if _TABLE not in names:
             await db.create_table(_TABLE, schema=_ChunkRow)
         return cls(db)
