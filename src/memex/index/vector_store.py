@@ -96,8 +96,11 @@ class VectorStore:
         path = vault_path / ".memex" / "embeddings.lance"
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         db = await lancedb.connect_async(str(path))
-        # Idempotent create
-        names = await db.table_names()
+        # Idempotent create. LanceDB 0.30 deprecated `table_names()` in
+        # favour of `list_tables()` (same return shape; the
+        # DeprecationWarning was surfacing on every open in the test
+        # harness).
+        names = await db.list_tables()
         if _TABLE not in names:
             await db.create_table(_TABLE, schema=_ChunkRow)
         return cls(db)
