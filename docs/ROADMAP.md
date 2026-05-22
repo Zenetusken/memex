@@ -134,7 +134,7 @@ These need session-spanning investment but their completion unlocks several down
 These are ready to run once the corpus has the depth to discriminate between candidates.
 
 - **P2.1 — Qwen3-Reranker-0.6B quality A/B.** ◐ Infra shipped (commits `714dd32`, `b485748`); the swap is a quality play, not a memory play (~2.1 GB live, ~equal to bge). Run the same 15-query (eventually larger) set with `MEMEX_MODELS__RERANKER_BACKEND=qwen3` vs the default `cross_encoder`; pick the winner per category.
-- **P2.2 — Granite 4.1-8B-Instruct vs `Qwen/Qwen3-8B-AWQ`.** Apache-2.0 license + native OpenAI-tool-calling. Model-name change in `scripts/serve-vllm.sh`. Eval-gated.
+- **P2.2 — Granite 4.1-8B-FP8 vs `Qwen/Qwen3-8B-AWQ`.** ❌ **vLLM-blocked 2026-05-21**. Model downloaded (4 GB) but vLLM 0.21 hangs indefinitely at "Using FlashAttention version 2" in both cudagraph and `--enforce-eager` modes. Granite 4.1's hybrid Mamba2+attention architecture appears unsupported in vLLM 0.21 (deadlock during FA2 init for the hybrid backend). Resolution: vLLM 0.22+ with hybrid-arch support, OR GGUF variant via `--quantization gguf`, OR fall back to Granite 3.x.
 - **P2.3 — Qwen3-VL-8B-Instruct vs `Qwen2.5-VL-7B`.** +6–14 OCR points published; native 256 K context. Same AWQ-Int4 footprint. Currently disabled by default on 12 GB; the swap helps the larger-VRAM tier. Eval-gated.
 - **P1.6 chunker-size verdict.** Is `chunk_target_tokens=400` the right default, or should it be 500–600 with a longer model context? Needs corpus depth to be answerable.
 
@@ -161,7 +161,7 @@ These are ready to run once the corpus has the depth to discriminate between can
 
 1. ~~**🏗️ P3.3 chart-OCR pass over Docling figures**~~ — ✅ **Infrastructure shipped 2026-05-21 (mixed verdict; default OFF)**. 5 + 3 sessions total. Layered defense (pre-filter via Docling's built-in `DocumentPictureClassifier` + heuristic cleanup of DePlot output) progressively recovered 1→2→4 of the 9 baseline-answered queries. HARD GATES preserved at every stage (`refusal_cf=1.0`, hallucinations=0). **But chart-OCR enrichment shifts retrieval rankings**: +1 chart-numeric query gained (Q21 `-minimal` flag overhead) but −6 prose queries regressed (chart-extracted blocks outrank the prose-bearing chunks for unrelated queries). Net −5 ANS on this prose-heavy corpus; would likely flip positive on chart-heavy corpora (dashboards, scientific figures). Default `MEMEX_PARSE__DISABLE_CHART_OCR=True`; opt-in via env var. Three follow-up paths remain queued in `p33_tracker.md`: (a) autoawq/transformers compat → Qwen2.5-VL retry, (b) ADR amendment for `trust_remote_code` → OneChart retry, (c) understanding why chart-extracted blocks perturb retrieval (per-chunk weighting or de-embedding the chart annotations).
 2. **🎯 P0 corpus extension — multi-doc / multi-category** (Tier 2, multi-session). Within-category variance (3-5 slide decks) AND breadth across the other 6 categories. The current P4.2 + P2.1 verdicts are sourced from one corpus and one document; multi-doc would test generalisability.
-3. **🧰 Filler N1/N5** — Tier 1 atomic nits, <1 hour each. Useful when a contained scope is wanted.
+3. **🧰 Filler N2-N8** — Tier 1 atomic nits, <1 hour each. N1 ✅ shipped 2026-05-21 (LanceDB concurrent-search smoke; 3 new integration tests verify burst-of-20 concurrent reads + whitelist-filtered search-in-docs + multi-store independence + lancedb 0.30 deprecation cleanup). Remaining: N2-N8.
 4. **🪜 P2.2** (Granite vs Qwen3 at 8B orchestrator level) and **P2.3** (Qwen3-VL vs Qwen2.5-VL VLM swap). Single-session each; both should now respect the bounded-schema + KV-cache-dtype configurability that P4.2 shipped.
 
 Items below (P3.1 benchmark CI / P4.1 wikilink anchors / P4.3 trace retention) stay queued; pickup needs an external trigger (GPU runner commit, real cross-doc citation, Langfuse self-host).
@@ -325,7 +325,7 @@ Routes slide-deck-shaped documents to Docling instead of PyMuPDF via a new Tier 
 
 When bored, working from `docs/audits/00-synthesis.md`:
 
-- **N1** — LanceDB concurrent-search smoke test
+- ~~**N1**~~ ✅ shipped 2026-05-21 — LanceDB concurrent-search smoke test (3 integration tests; verified async surface tolerates burst-of-20 concurrent reads; multi-store independence + lancedb 0.30 deprecation cleanup as a bonus)
 - **N2** — `FTSStore` explicit `asyncio.Lock` for future `transaction()` use
 - **N3** — `configure_client` should close prior `_client` on re-call (httpx pool linger)
 - **N4** — Verify `GraphStore.close()` is no-op-safe on current ryugraph (Kuzu lineage needed it)
