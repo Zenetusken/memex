@@ -38,6 +38,7 @@ Usage:
 
 from __future__ import annotations
 
+import threading
 from typing import Annotated, Literal, TypedDict
 
 import structlog
@@ -712,6 +713,14 @@ def route_after_verify(
 
 
 _COMPILED_GRAPH: CompiledStateGraph | None = None
+# N6 (audit 2026-05-20): gate the lazy compile so concurrent first-call
+# threads don't both pay the compile cost (and don't race to write the
+# global). `threading.Lock` rather than `asyncio.Lock` because callers
+# include sync code paths (test setup, daemon bootstrap) and because
+# concurrent threads via `asyncio.to_thread` could otherwise hit a true
+# data race on the global. Single event-loop callers are already safe
+# under cooperative scheduling — the lock is uncontended in that case.
+_COMPILED_GRAPH_LOCK = threading.Lock()
 
 
 def get_compiled_graph() -> CompiledStateGraph:
@@ -720,17 +729,28 @@ def get_compiled_graph() -> CompiledStateGraph:
     Cached by module state so we pay the compile cost once per process,
     not once per query. Tests that need a fresh graph (e.g. after
     monkey-patching a node) call `reset_compiled_graph()`.
+
+    Thread-safe lazy init via `_COMPILED_GRAPH_LOCK`: double-checked
+    locking pattern — the fast path (cache hit) skips the lock; the
+    slow path (first call) takes the lock and re-checks before
+    building, so a concurrent compiler doesn't waste work.
     """
     global _COMPILED_GRAPH
-    if _COMPILED_GRAPH is None:
-        _COMPILED_GRAPH = build_answering_graph()
-    return _COMPILED_GRAPH
+    if _COMPILED_GRAPH is not None:
+        return _COMPILED_GRAPH
+    with _COMPILED_GRAPH_LOCK:
+        # Re-check under the lock — another thread may have compiled
+        # while we were waiting.
+        if _COMPILED_GRAPH is None:
+            _COMPILED_GRAPH = build_answering_graph()
+        return _COMPILED_GRAPH
 
 
 def reset_compiled_graph() -> None:
     """Drop the cached compiled graph. For tests."""
     global _COMPILED_GRAPH
-    _COMPILED_GRAPH = None
+    with _COMPILED_GRAPH_LOCK:
+        _COMPILED_GRAPH = None
 
 
 def build_answering_graph() -> CompiledStateGraph:

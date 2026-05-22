@@ -62,10 +62,23 @@ def _log_file(settings: MemexSettings) -> Path:
 def _pid_alive(pid: int) -> bool:
     """True if `pid` names a running process. POSIX-only — `kill(pid, 0)`.
 
-    EPERM is returned for processes we can't signal (different uid);
-    we treat that as alive-but-unkillable. `stop()` will see EPERM
-    from the signal call and bail rather than leak a kill against a
-    PID that may have been recycled.
+    N5 (audit 2026-05-20): the EPERM branch is **intentional** and
+    correct. `os.kill(pid, 0)` raises:
+    - `ESRCH` — no such process. We return False.
+    - `EPERM` — process exists but is owned by another uid (or is in
+      a different PID namespace). The process IS alive; we just can't
+      signal it. Returning True is correct: `_pid_alive` answers
+      "does the kernel show a process with this PID", not "can we
+      kill it". The downstream `stop()` path acquires its own EPERM
+      from the real signal call and bails out cleanly.
+    - Anything else — defensive False; an unrecognised errno from
+      kill(pid, 0) is more likely a bad PID than a live process.
+
+    When EPERM fires we emit a debug-level structlog event so an
+    operator chasing "memex says vLLM is running but I don't see it"
+    can spot the cross-uid mismatch. Not a warning — EPERM is a
+    legitimate state when the user re-installs Memex under a
+    different account or runs inside a container with its own uid.
     """
     if pid <= 0:
         return False
@@ -74,8 +87,21 @@ def _pid_alive(pid: int) -> bool:
     except OSError as e:
         if e.errno == errno.ESRCH:  # no such process
             return False
-        # EPERM means the process exists but we can't signal it.
-        return e.errno == errno.EPERM
+        if e.errno == errno.EPERM:
+            logger.debug(
+                "pid_alive.eperm",
+                pid=pid,
+                note="process exists but is owned by another uid",
+            )
+            return True
+        # Unrecognised errno — be conservative: report not-alive so
+        # the supervisor doesn't deadlock against a phantom PID.
+        logger.warning(
+            "pid_alive.unknown_errno",
+            pid=pid,
+            errno=e.errno,
+        )
+        return False
     return True
 
 

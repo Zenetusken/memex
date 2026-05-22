@@ -81,7 +81,16 @@ def _render_page_to_image(pdf_path: Path, page_number: int):
             )
         page = doc[idx]
         bitmap = page.render(scale=2.0)
-        return bitmap.to_pil()
+        # N7 (audit 2026-05-20): pypdfium2's `bitmap.to_pil()` returns
+        # a PIL.Image.Image whose pixel buffer is a VIEW into the
+        # bitmap's C-owned memory. When the `finally` block calls
+        # `doc.close()`, that memory is freed; any subsequent access
+        # to the returned image (e.g. `image.size`, `image.save`,
+        # processor preprocessing) reads freed memory — silent
+        # corruption or segfault depending on the libc. The `.copy()`
+        # forces PIL to allocate its own buffer and memcpy the bytes
+        # over BEFORE the doc closes, decoupling lifetimes.
+        return bitmap.to_pil().copy()
     finally:
         doc.close()
 

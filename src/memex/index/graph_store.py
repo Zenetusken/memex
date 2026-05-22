@@ -211,5 +211,23 @@ class GraphStore:
         return await asyncio.to_thread(_run)
 
     async def close(self) -> None:
-        # RyuGraph manages connection lifecycle; no explicit close needed.
+        """Release the ryugraph connection.
+
+        N4 (audit 2026-05-20): ryugraph (kuzu fork) doesn't expose an
+        explicit `close()` on its Connection / Database objects — they
+        rely on RAII: when the last Python reference is dropped, the
+        C++ destructor runs and flushes WAL / closes file handles.
+        Setting `self._conn = None` drops the only reference we hold,
+        which lets the destructor fire deterministically rather than
+        waiting for GC to notice. Idempotent: a second `close()` is a
+        no-op because the attribute is already `None`.
+
+        Callers that hold a `GraphStore` past close() will fail on the
+        next read with a clear AttributeError on the `None` conn —
+        better than the silent stale-data behaviour they'd get if we
+        kept the reference alive.
+        """
+        self._conn = None
+        # Yield once to keep the async contract — historically callers
+        # may have relied on this being awaitable.
         await asyncio.sleep(0)

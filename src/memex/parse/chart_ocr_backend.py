@@ -223,7 +223,15 @@ def _render_figure_to_image(
         # Y flip: top of crop in pixel coords = (page_height - y1) * scale
         px_y0 = int((page_height - y1) * px)
         px_y1 = int((page_height - y0) * px)
-        return full.crop((px_x0, px_y0, px_x1, px_y1))
+        # N7 (audit 2026-05-20): `bitmap.to_pil()` returns a view into
+        # the bitmap's C-owned buffer, and PIL's `.crop()` is lazy —
+        # it returns an Image that references the parent's pixel data
+        # without copying. When `doc.close()` runs in the finally
+        # block, the C buffer is freed; any subsequent read of the
+        # cropped image (size, save, processor preprocessing) hits
+        # freed memory. `.copy()` forces eager allocation + memcpy
+        # BEFORE the doc closes so the returned crop owns its bytes.
+        return full.crop((px_x0, px_y0, px_x1, px_y1)).copy()
     finally:
         doc.close()
 
