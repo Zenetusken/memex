@@ -96,9 +96,37 @@ def _inline_refs(schema: dict[str, Any]) -> dict[str, Any]:
 
 def configure_client(settings: InferenceSettings) -> None:
     """Initialise the singleton OpenAI client pointed at vLLM. Call once
-    at startup.
+    at startup; safe to call again to swap settings (the prior client's
+    httpx connection pool is best-effort closed first).
+
+    Audit item N3: a previous version simply reassigned `_client`,
+    leaking the prior httpx connection pool. AsyncOpenAI wraps an
+    httpx AsyncClient with persistent keep-alive connections; without
+    explicit `.close()` they linger until the GC reaps the orphan, at
+    which point httpx emits `ResourceWarning: unclosed transport`. In
+    a long-running daemon that re-reads config (e.g., SIGHUP-driven
+    reconfig, future orchestrator swap), this slowly exhausts the
+    file-descriptor budget. Best-effort sync cleanup: if we're inside
+    a running event loop, schedule the close as a fire-and-forget
+    task; if not (sync startup, test reconfiguration), log a warning
+    and rely on GC + httpx's TCP timeouts.
     """
     global _client
+    if _client is not None:
+        old = _client
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(old.close())
+        except RuntimeError:
+            logger.warning(
+                "configure_client.no_loop_for_cleanup",
+                note=(
+                    "previous OpenAI/httpx client cannot be closed without a "
+                    "running event loop; relying on GC + TCP timeouts. Call "
+                    "configure_client only at startup or from within an "
+                    "active asyncio loop to avoid connection-pool linger."
+                ),
+            )
     _client = AsyncOpenAI(
         base_url=settings.base_url,
         api_key=settings.api_key,
