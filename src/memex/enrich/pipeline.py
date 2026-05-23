@@ -67,6 +67,11 @@ _MAX_CONCURRENT = 4  # per-chunk extraction parallelism
 
 
 class EnrichResult(BaseModel):
+    """Summary of one enrich run — entities + citations extracted,
+    wikilinks inserted into the markdown, total chunks touched. Used
+    as the return type of `enrich_document` and serialized into the
+    manifest's `EnrichStage`."""
+
     doc_id: str
     correlation_id: str
     entities: list[Entity] = Field(default_factory=list)

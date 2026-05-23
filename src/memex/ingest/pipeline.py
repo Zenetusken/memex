@@ -45,11 +45,19 @@ _EXTENSION_FOR_KIND: dict[str, str] = {
 
 
 class IngestRequest(BaseModel):
+    """Caller-supplied ingest input — a path to the source file plus
+    the ULID correlation_id that threads through the whole pipeline
+    (logs + Langfuse traces)."""
+
     source_path: Path
     correlation_id: str = Field(default_factory=lambda: str(ulid.ULID()))
 
 
 class IngestResult(BaseModel):
+    """Outcome of one ingest call — whether the file was accepted,
+    its assigned `doc_id` (set on acceptance), and any rejection
+    diagnostics (kind / mime detection, rejection_reason)."""
+
     correlation_id: str
     source_path: str
     accepted: bool

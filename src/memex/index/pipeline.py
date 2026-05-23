@@ -51,6 +51,11 @@ logger = structlog.get_logger(__name__)
 
 
 class IndexResult(BaseModel):
+    """Return value of `index_document` — the post-index chunk count,
+    whether any embedding actually happened, and the partial-reindex
+    diff (added / deleted / unchanged) so callers can render a
+    meaningful progress line."""
+
     doc_id: str
     chunk_count: int                # total chunks now in the index for this doc
     embedded: bool                  # True if at least one chunk was embedded
@@ -75,6 +80,9 @@ class FailureItem(BaseModel):
 
 
 class ReindexReport(BaseModel):
+    """Aggregate report from `reindex_vault` — total docs processed,
+    chunks written, and a structured per-document failure list."""
+
     documents_processed: int
     chunks_written: int
     failures: list[FailureItem]

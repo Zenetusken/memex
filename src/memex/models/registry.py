@@ -99,6 +99,12 @@ ModelName = Literal["embedder", "reranker", "vlm", "chart_ocr"]
 
 
 class ModelHandle(BaseModel):
+    """Lightweight metadata record for a loaded model — its `name`
+    slot in the registry, the HF model_id, when it was loaded, and
+    a usage counter. Used by `ModelRegistry.status()` for the
+    doctor report; not the underlying torch handle (that lives in
+    `_models`)."""
+
     name: ModelName
     model_id: str
     loaded_at: datetime
@@ -148,6 +154,9 @@ class ModelRegistry:
             yield self._models[name]
 
     async def status(self) -> list[ModelHandle]:
+        """Snapshot of every currently-loaded model handle. Used by
+        `memex doctor` to report resident models + their usage
+        counts."""
         return list(self._handles.values())
 
     async def unload(self, name: ModelName) -> None:

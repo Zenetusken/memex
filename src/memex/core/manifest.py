@@ -25,6 +25,9 @@ from memex.core.errors import VaultIntegrityError
 
 
 class IngestStage(BaseModel):
+    """Audit record for the ingest step — what file came in, how big,
+    what mime, and (when rejected) why."""
+
     correlation_id: str
     ingested_at: datetime
     source_path: str
@@ -44,6 +47,10 @@ class PageDecision(BaseModel):
 
 
 class ParseStage(BaseModel):
+    """Audit record for the parse step — per-page routing decisions
+    (Docling / VLM / PyMuPDF / passthrough), counts of figures /
+    tables / equations, and any crash diagnostics."""
+
     correlation_id: str
     parsed_at: datetime
     parser_version: str
@@ -59,6 +66,11 @@ class ParseStage(BaseModel):
 
 
 class EnrichStage(BaseModel):
+    """Audit record for the enrich step — entity + citation counts,
+    wikilinks inserted into the markdown, and the prompt versions
+    used (so an eval regression can be tied to a specific prompt
+    change)."""
+
     correlation_id: str
     enriched_at: datetime
     entity_count: int
@@ -69,6 +81,10 @@ class EnrichStage(BaseModel):
 
 
 class IndexStage(BaseModel):
+    """Audit record for the index step — what embedder was used, how
+    many chunks landed, and the partial-reindex diff (chunks added /
+    deleted / unchanged)."""
+
     correlation_id: str
     indexed_at: datetime
     embedding_model: str
@@ -101,6 +117,10 @@ class Manifest(BaseModel):
     index: IndexStage | None = None
 
     def add_correlation_id(self, correlation_id: str) -> None:
+        """Append a new run's correlation_id to the manifest's
+        history list, skipping duplicates. Lets a single doc's full
+        ingest/parse/enrich/index trace be reconstructed from
+        Langfuse later."""
         if correlation_id not in self.correlation_ids:
             self.correlation_ids.append(correlation_id)
 
@@ -184,4 +204,7 @@ async def update_manifest(
 
 
 def now_utc() -> datetime:
+    """Current time, UTC + tz-aware. Use this anywhere a manifest
+    stage records `_at` timestamps so the JSON serialisation stays
+    consistent across hosts."""
     return datetime.now(UTC)

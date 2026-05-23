@@ -74,6 +74,11 @@ class GraphStore:
 
     @classmethod
     async def open(cls, vault_path: Path) -> GraphStore:
+        """Open (or create) the RyuGraph database under
+        `{vault_path}/.memex/graph.ryu` and apply the Cypher schema in
+        `index/schemas/graph.cypher`. Raises `ImportError` if the
+        `ryugraph` package isn't installed (the agent's
+        `expand_graph` node falls back gracefully)."""
         path = vault_path / ".memex" / "graph.ryu"
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
 
@@ -101,6 +106,9 @@ class GraphStore:
         return cls(conn)
 
     async def upsert_document(self, doc_id: str, title: str) -> None:
+        """Insert or update the Document node. Called once per
+        `index_document` run; the enrich stage adds MENTIONS / CITES
+        edges separately."""
         def _run() -> None:
             self._conn.execute(  # type: ignore[attr-defined]
                 "MERGE (d:Document {doc_id: $id}) SET d.title = $title;",
@@ -127,6 +135,9 @@ class GraphStore:
     async def link_mentions(
         self, doc_id: str, entity_id_: str, confidence: float
     ) -> None:
+        """Insert or update a `(Document)-[MENTIONS]->(Entity)` edge
+        with the extractor's confidence score. Idempotent on the
+        `(doc_id, entity_id)` pair."""
         def _run() -> None:
             self._conn.execute(  # type: ignore[attr-defined]
                 "MATCH (d:Document {doc_id: $doc_id}), "
@@ -148,6 +159,9 @@ class GraphStore:
         surface_text: str,
         confidence: float,
     ) -> None:
+        """Insert or update a `(Document)-[CITES]->(Document)` edge
+        carrying the resolved surface text (e.g., the wikilink target)
+        plus the resolver's confidence."""
         def _run() -> None:
             self._conn.execute(  # type: ignore[attr-defined]
                 "MATCH (a:Document {doc_id: $from_id}), "

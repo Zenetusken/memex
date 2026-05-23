@@ -59,6 +59,10 @@ _AUTHOR_YEAR_PATTERNS = (
 
 
 class CitationCandidate(BaseModel):
+    """LLM-emitted citation candidate — the surface text in the
+    passage (e.g., "Smith et al. 2021") plus a confidence band. The
+    resolver downstream tries to bind this to a vault document."""
+
     surface_text: str = Field(min_length=1)
     confidence: CitationConfidence
 

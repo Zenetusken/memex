@@ -36,6 +36,9 @@ class DaemonStartTimeout(MemexError):
 
 
 class DaemonStatus(BaseModel):
+    """Snapshot of the vLLM daemon's process + HTTP reachability state,
+    used by `memex daemon status` and the doctor report."""
+
     pid: int | None
     alive: bool
     reachable: bool

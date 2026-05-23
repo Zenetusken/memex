@@ -85,6 +85,11 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
+        """Starlette middleware entry point — extracts the
+        `Authorization: Bearer <token>` header and compares
+        constant-time against the configured token. Rejects with 401
+        on missing / malformed / invalid; otherwise forwards to the
+        next handler."""
         header = request.headers.get("authorization", "")
         scheme, _, token = header.partition(" ")
         if scheme.lower() != "bearer" or not token:

@@ -51,6 +51,11 @@ _jinja = Environment(
 
 
 class PromptSpec(BaseModel):
+    """Parsed metadata + Jinja template body for one prompt file
+    under `src/memex/prompts/`. Built from the `.md` file's YAML
+    frontmatter (name, version, role, target_model, schemas, eval
+    suite) and the Jinja body."""
+
     name: str
     version: str
     role: Literal["system", "user"] = "user"

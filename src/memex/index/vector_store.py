@@ -91,6 +91,10 @@ class VectorStore:
 
     @classmethod
     async def open(cls, vault_path: Path) -> VectorStore:
+        """Open (or create) the LanceDB instance under
+        `{vault_path}/.memex/embeddings.lance` and return a ready-to-use
+        store. The `chunks` table is created on first open via the
+        `_ChunkRow` schema."""
         import lancedb
 
         path = vault_path / ".memex" / "embeddings.lance"
@@ -115,6 +119,10 @@ class VectorStore:
     async def upsert(
         self, chunks: list[Chunk], embeddings: list[list[float]]
     ) -> None:
+        """Insert chunks + their parallel dense vectors. Duplicate
+        `chunk_id` rows are deleted first, then the new rows are
+        added (LanceDB's supported idempotency pattern). Raises
+        `ValueError` if `chunks` and `embeddings` differ in length."""
         if not chunks:
             return
         if len(chunks) != len(embeddings):
@@ -149,6 +157,9 @@ class VectorStore:
         logger.info("vector.upsert", count=len(rows), deduped=duplicates)
 
     async def delete_document(self, doc_id: str) -> int:
+        """Drop every chunk belonging to `doc_id`. Returns the count of
+        rows removed (LanceDB's delete doesn't surface a count, so we
+        count first then delete)."""
         table = await self._db.open_table(_TABLE)
         # No row count returned by LanceDB delete; we do a count before.
         where = f"document_id = {_sql_quote(doc_id)}"
@@ -176,6 +187,10 @@ class VectorStore:
     async def search(
         self, query_embedding: list[float], *, k: int
     ) -> list[Chunk]:
+        """Dense L2 search; returns top `k` chunks ordered by ascending
+        distance. The returned `Chunk.score` is a synthetic
+        rank-descending float so the downstream RRF fusion (which only
+        needs ordering) treats higher = better."""
         table = await self._db.open_table(_TABLE)
         # LanceDB 0.30+ split the surface: `table.search(...)` is async
         # and returns an `AsyncVectorQuery`; the builders (`.limit`,
@@ -221,6 +236,9 @@ class VectorStore:
         ]
 
     async def close(self) -> None:
+        """No-op today — LanceDB's `AsyncConnection` releases via GC.
+        Kept as an async surface so future driver versions can wire
+        an explicit close in without breaking callers."""
         # AsyncConnection has no explicit close in current LanceDB; left as
         # a hook for future driver versions / tests.
         await asyncio.sleep(0)

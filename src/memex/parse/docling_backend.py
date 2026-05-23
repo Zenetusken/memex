@@ -31,6 +31,10 @@ logger = structlog.get_logger(__name__)
 
 
 class DoclingPageOutput(BaseModel):
+    """Per-page Docling output — the rendered Markdown, the page
+    number, and Docling's self-reported confidence (used by the
+    parse-stage VLM-escalation router)."""
+
     page: int
     markdown: str
     confidence: float
@@ -65,6 +69,10 @@ class FigureMetadata(BaseModel):
 
 
 class DoclingConversion(BaseModel):
+    """The full output the Docling worker returns via IPC — stitched
+    Markdown, per-page outputs, figure / table / equation counts, and
+    (when chart-OCR pre-filter is enabled) the FigureMetadata list."""
+
     markdown: str
     pages: list[DoclingPageOutput]
     docling_version: str | None = None

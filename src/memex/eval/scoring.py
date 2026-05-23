@@ -128,6 +128,12 @@ class CitationPrecisionInput(BaseModel):
 
 
 def citation_precision(input_: CitationPrecisionInput) -> float:
+    """Fraction of cited chunks that appear in the relevant set.
+
+    Returns `1.0` when the agent emitted zero citations — a refused
+    answer has no false-positive citations. This inflates the
+    all-queries mean; `EvalReport` also reports the answered-only
+    variant for an honest signal."""
     if not input_.cited_chunk_ids:
         return 1.0  # no citations to be wrong about
     correct = sum(

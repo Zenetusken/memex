@@ -63,6 +63,10 @@ class FTSStore:
 
     @classmethod
     async def open(cls, vault_path: Path) -> FTSStore:
+        """Open (or create) the FTS5 database under
+        `{vault_path}/.memex/search.sqlite` and return a ready-to-use
+        store. The schema is created on first open via `_SCHEMA`.
+        """
         path = vault_path / ".memex" / "search.sqlite"
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
 
@@ -75,6 +79,10 @@ class FTSStore:
         return cls(db)
 
     async def upsert(self, chunks: list[Chunk]) -> None:
+        """Insert or replace chunks. Atomic across the multi-statement
+        write via `self._lock` (Filler N2). Idempotent on the same
+        `chunk_id` — re-upserting overwrites the prior row.
+        """
         if not chunks:
             return
 
@@ -151,6 +159,9 @@ class FTSStore:
         )
 
     async def delete_document(self, doc_id: str) -> int:
+        """Drop every chunk belonging to `doc_id` from both the FTS and
+        metadata tables. Returns the count of rows removed.
+        """
         def _delete() -> int:
             cur = self._db.execute(
                 "SELECT count(*) FROM chunks_meta WHERE document_id = ?",
@@ -211,6 +222,11 @@ class FTSStore:
         return await asyncio.to_thread(_read)
 
     async def search(self, query: str, *, k: int) -> list[Chunk]:
+        """BM25 phrase-match search over chunks_fts; returns top `k`
+        results joined with chunks_meta. The query is treated as a
+        literal phrase (whitespace + punctuation preserved) so callers
+        get predictable behaviour from natural-language inputs.
+        """
         # FTS5 MATCH treats some punctuation as operators; quote the whole
         # query to keep it literal. Users can use FTS5 syntax via raw_query.
         cleaned = _normalize_fts_query(query)
@@ -307,6 +323,9 @@ class FTSStore:
         return await asyncio.to_thread(_read)
 
     async def close(self) -> None:
+        """Close the underlying SQLite connection. Safe to call multiple
+        times — the connection is released; subsequent operations on
+        this store will fail at the SQLite layer."""
         await asyncio.to_thread(self._db.close)
 
 

@@ -89,6 +89,10 @@ class PdfSignals(BaseModel):
 
 
 class PyMuPDFPageOutput(BaseModel):
+    """Per-page PyMuPDF output — Markdown plus the signals
+    (`char_count`, `image_count`, `aspect_ratio`) the parse-stage
+    classifier uses to decide whether to escalate to Docling."""
+
     page: int
     markdown: str
     char_count: int
@@ -97,6 +101,10 @@ class PyMuPDFPageOutput(BaseModel):
 
 
 class PyMuPDFConversion(BaseModel):
+    """The full output the PyMuPDF worker returns via IPC — stitched
+    Markdown, per-page outputs, the document-level `PdfSignals` used
+    by the routing classifier, and the counts."""
+
     markdown: str
     pages: list[PyMuPDFPageOutput]
     pymupdf_version: str | None = None

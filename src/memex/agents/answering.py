@@ -77,6 +77,9 @@ logger = structlog.get_logger(__name__)
 # the fields it touches; typos in keys fail at type-check time instead
 # of becoming silent state drops.
 class AnswerStateUpdate(TypedDict, total=False):
+    """The shape every answering-graph node returns: a partial state
+    update. `total=False` means each node only declares the fields it
+    actually touches; LangGraph merges them onto the running state."""
     candidates: list[Chunk]
     reranked: list[Chunk]
     graph_expanded_doc_ids: list[str]
@@ -169,6 +172,8 @@ class VerificationResult(BaseModel):
 
     @property
     def all_grounded(self) -> bool:
+        """True when no claim was rejected by the verifier — answer can
+        ship without rewrites."""
         return not self.ungrounded
 
 
@@ -234,6 +239,9 @@ class AnswerState(BaseModel):
     final: FinalResponse | None = None
 
     def over_budget(self) -> bool:
+        """True when the agent has exhausted either the step budget
+        (`max_nodes_traversed`) or the token budget (`token_budget`).
+        Routing predicates short-circuit to `refuse` when this fires."""
         return (
             self.nodes_traversed >= self.max_nodes_traversed
             or self.tokens_used >= self.token_budget

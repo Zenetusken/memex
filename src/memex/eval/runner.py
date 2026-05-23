@@ -39,6 +39,11 @@ class EvalQuery(BaseModel):
 
 
 class EvalQueryResult(BaseModel):
+    """Per-query verdict from a single eval run — whether the agent
+    answered, the citation precision against the labeled chunks, and
+    (for refusals) the refusal-correctness flag against the
+    `should_refuse` label."""
+
     qid: str
     question: str
     answered: bool
@@ -48,6 +53,10 @@ class EvalQueryResult(BaseModel):
 
 
 class EvalReport(BaseModel):
+    """Aggregate report from one eval invocation — counts, the two
+    `mean_citation_precision` variants (all queries vs answered-only),
+    refusal-rate-on-counterfactuals, and the per-query verdicts."""
+
     run_id: str
     started_at: datetime
     finished_at: datetime

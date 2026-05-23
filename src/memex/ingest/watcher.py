@@ -69,9 +69,14 @@ class _Handler(FileSystemEventHandler):
         self._loop.call_soon_threadsafe(self._queue.put_nowait, path)
 
     def on_modified(self, event: FileSystemEvent) -> None:
+        """Watchdog callback — invoked by the OS-level watcher thread
+        when a file under the vault is modified."""
         self._enqueue(event)
 
     def on_created(self, event: FileSystemEvent) -> None:
+        """Watchdog callback — invoked when a new file appears under
+        the vault. Both creation and modification flow through the
+        same queue."""
         self._enqueue(event)
 
 

@@ -59,10 +59,14 @@ class CircuitBreaker(Generic[T]):
 
     @property
     def state(self) -> CircuitState:
+        """Current circuit state — `"closed"` (healthy), `"open"`
+        (tripped, fast-rejecting), or `"half_open"` (probing)."""
         return self._state
 
     @property
     def failures(self) -> int:
+        """Number of consecutive failures since the breaker last
+        closed. Resets to 0 on `_record_success()`."""
         return self._failures
 
     async def run(

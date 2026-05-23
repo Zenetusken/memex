@@ -153,6 +153,7 @@ def create_app() -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request) -> HTMLResponse:
+        """Landing page — renders the ask form."""
         return templates.TemplateResponse(request, "index.html", {})
 
     @app.post("/ask", response_class=HTMLResponse)
@@ -160,6 +161,9 @@ def create_app() -> FastAPI:
         request: Request,
         question: str = Form(..., max_length=_QUESTION_MAX_BYTES),
     ) -> HTMLResponse:
+        """Run the answering agent against `question` and render the
+        HTMX `_answer.html` partial. Typed MemexError subclasses render
+        as a refusal banner with status 503 rather than a bare 500."""
         from memex.core.errors import MemexError
 
         question = question.strip()
@@ -206,6 +210,7 @@ def create_app() -> FastAPI:
 
     @app.get("/documents", response_class=HTMLResponse)
     async def documents(request: Request) -> HTMLResponse:
+        """List every document in the vault (markdown filenames + refs)."""
         settings = get_settings()
         refs: list[Any] = []
         async for ref in list_documents(settings.vault_path):
@@ -216,6 +221,9 @@ def create_app() -> FastAPI:
 
     @app.get("/documents/{doc_id}", response_class=HTMLResponse)
     async def document(request: Request, doc_id: str) -> HTMLResponse:
+        """Render the extracted markdown body for `doc_id`. When a
+        `source.{pdf,png,...}` file is present, the template offers a
+        side-by-side preview via `/documents/{doc_id}/source`."""
         doc_id = _validate_doc_id(doc_id)
         settings = get_settings()
         try:
@@ -241,6 +249,9 @@ def create_app() -> FastAPI:
 
     @app.get("/documents/{doc_id}/source")
     async def document_source(doc_id: str) -> FileResponse:
+        """Serve the original source file (PDF / image) with the
+        correct Content-Type so the browser can render it inline
+        in the side-by-side preview panel."""
         doc_id = _validate_doc_id(doc_id)
         settings = get_settings()
         source = _find_source(settings.vault_path, doc_id)
@@ -258,6 +269,9 @@ def create_app() -> FastAPI:
 
     @app.get("/documents/{doc_id}/edit", response_class=HTMLResponse)
     async def document_edit(request: Request, doc_id: str) -> HTMLResponse:
+        """Render the document-body editor (HTMX-driven). Save POSTs to
+        `/documents/{doc_id}/body` which round-trips through the vault
+        CAS write path."""
         doc_id = _validate_doc_id(doc_id)
         settings = get_settings()
         try:
@@ -404,6 +418,9 @@ def create_app() -> FastAPI:
         doc_id: str,
         limit: int = 50,
     ) -> HTMLResponse:
+        """Render the one-hop neighbourhood for `doc_id` (Cytoscape.js
+        client-side). Returns `graph_available=False` + a fallback
+        panel when ryugraph isn't installed."""
         # GraphStore is re-exported at module top (see the import at the
         # head of this file) as a test seam — `tests/integration/test_webui.py`
         # monkeypatches `memex.webui.app.GraphStore.open`. This re-export
@@ -486,6 +503,10 @@ def create_app() -> FastAPI:
 
     @app.get("/healthz")
     async def healthz() -> dict[str, Any]:
+        """Health check — returns the vault path so external monitors
+        can confirm the right instance is responding. Always 200 OK
+        as long as settings load; deeper integrity check lives in
+        `memex doctor`."""
         settings = get_settings()
         return {
             "status": "ok",

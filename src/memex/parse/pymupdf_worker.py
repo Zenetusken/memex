@@ -501,6 +501,11 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Subprocess entry point — invoked by
+    `parse/pymupdf_backend.py::convert` via `python -m memex.parse.
+    pymupdf_worker <source_path>`. Returns the conversion as JSON on
+    stdout; non-zero exit code signals a crash. Runs under the
+    seccomp sandbox installed before pymupdf import."""
     args = argv if argv is not None else sys.argv[1:]
     if len(args) != 1:
         print(

@@ -28,6 +28,12 @@ from pydantic_settings import (
 
 
 class ModelSettings(BaseModel):
+    """Pydantic-settings record for every model the registry owns —
+    orchestrator (out-of-process via vLLM), embedder, reranker, VLM,
+    and chart-OCR. The defaults match the 12 GB RTX 4070 reference
+    rig; tighter rigs override via env vars (see `docs/deploy/
+    hardware-tiers.md`)."""
+
     orchestrator: str = "Qwen/Qwen3-8B-AWQ"
     # vLLM's GGUF path is flagged experimental; AWQ/GPTQ are the production
     # path on Ada (see ADR-0001 Revisit + ADR-0006). Default matches the
@@ -63,6 +69,11 @@ class ModelSettings(BaseModel):
 
 
 class HardwareSettings(BaseModel):
+    """Torch-level CUDA budget + concurrency knobs. `gpu_memory_fraction`
+    is the cap `torch.cuda.set_per_process_memory_fraction` enforces;
+    vLLM has its own `gpu_memory_utilization` flag set in
+    `scripts/serve-vllm.sh`."""
+
     gpu_memory_fraction: float = Field(default=0.85, ge=0.0, le=1.0)
     max_concurrent_documents: int = Field(default=2, ge=1)
     cpu_workers: int = Field(

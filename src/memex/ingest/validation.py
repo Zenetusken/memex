@@ -31,6 +31,11 @@ DetectedKind = Literal[
 
 
 class ValidationResult(BaseModel):
+    """Output of `validate_file` — the gate that decides whether an
+    ingest request gets accepted. Carries the detected kind/mime
+    (used by downstream parse routing), the size in bytes, and any
+    rejection diagnostics."""
+
     accepted: bool
     kind: DetectedKind
     mime: str

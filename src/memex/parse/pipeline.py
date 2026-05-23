@@ -88,6 +88,10 @@ _PARSER_VERSION: Final[str] = "memex.parse@v1"
 
 
 class ParseResult(BaseModel):
+    """Return value of `parse_document` — which engine handled the
+    document, the per-page routing record, and how much markdown was
+    written. Serialized into the manifest's `ParseStage`."""
+
     doc_id: str
     correlation_id: str
     engine: str
@@ -148,6 +152,9 @@ def reset_pymupdf_breaker() -> None:
 
 
 def get_pymupdf_breaker_state() -> tuple[str, int]:
+    """Current state + failure count of the PyMuPDF circuit breaker.
+    Surfaced by the `memex doctor` report (symmetric to
+    `get_docling_breaker_state`)."""
     b = _pymupdf_breaker()
     return (b.state, b.failures)
 
