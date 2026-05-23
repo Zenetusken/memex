@@ -170,6 +170,12 @@ Three parallel research subagents evaluated browser-side OCR/VLM technologies as
 - ✅ **Per-module docstring audit** — 78.2% → **100% public-surface coverage** (275/275). Pure documentation pass, no behaviour change.
 - ✅ **Browser-OCR research turn** — three candidate technologies rejected (Tesseract.js, Surya-via-Pyodide, InternVL3-9B-via-ONNX-Web).
 
+**P3.3-b OneChart retry (2026-05-23):**
+- ✅ **ADR-0006 amendment** — carved out `trust_remote_code=True` exception for the chart-OCR slot only, OneChart specifically. Documented mitigations (Apache 2.0, 0.3B params, opt-in via env var, seccomp-sandboxed parse-time process, `reliable_check` self-consistency gate).
+- ✅ **Backend implementation** — new `_load_chart_ocr` dispatch branch for OneChart; new `_chart_ocr_transcribe_onechart` helper with `reliable_check` parsing + dict-to-markdown conversion + defensive TypeError / RuntimeError handling. 5 new unit tests pin the contract.
+- ❌ **A/B/C eval verdict**: OneChart failed catastrophically on the CUDA deck — every single figure triggered a CUDA device-side assertion (position-embedding overflow on out-of-distribution chart imagery). Defensive handling kept HARD GATES intact (refusal_cf=1.0, mcp_ans=1.0) but the model produced zero usable extractions. Config A baseline 11 ANS = Config C OneChart 11 ANS (identical because no chart blocks were stitched). Config B DePlot 10 ANS (matches prior P3.3 v6 verdict). Full audit: [`docs/audits/onechart_2026-05-23.md`](audits/onechart_2026-05-23.md).
+- ✅ **Decision**: revert to DePlot-only as the documented chart-OCR backend. OneChart stays in tree behind the ADR-0006 carve-out for future re-attempts on chart-heavy corpora or upstream revisions. Default stays `disable_chart_ocr=True`.
+
 **French support hardening arc (2026-05-22 — 2026-05-23):**
 - ✅ **Multilingual chunker + FTS5** — `_SENTENCE_RE` extended to Latin-1 + Œ + Ÿ; FTS5 schema flipped from `porter unicode61` to `unicode61 remove_diacritics 2`. End-to-end validated against a French course PDF (CR350, 45 pages, 51 chunks via Docling).
 - ✅ **French eval corpus** — `tests/eval-data/french-course/queries.json` (5 ANS + 3 REF queries against the CR350 doc); HARD GATES pass at refusal_cf=1.0, mcp_ans=1.0.
