@@ -1,8 +1,8 @@
 {
-  "_description": "P0 eval-corpus, category: slide-decks. Source doc: Stephen Jones, 'CUDA: New Features and Beyond', GTC 2024. Extended 2026-05-21 from the rigorous baseline (15\u219230 queries) to give P2.x A/Bs statistical signal. New queries cover NVRTC compilation, kernel fusion, NVLink C2C, CUTLASS abstractions, LU factorization, performance-per-watt thesis, and unified memory.",
+  "_description": "P0 eval-corpus, category: slide-decks. Source doc: Stephen Jones, 'CUDA: New Features and Beyond', GTC 2024. Extended 2026-05-21 from the rigorous baseline (15\u219230 queries) to give P2.x A/Bs statistical signal. New queries cover NVRTC compilation, kernel fusion, NVLink C2C, CUTLASS abstractions, LU factorization, performance-per-watt thesis, and unified memory. Extended 2026-05-23 with 3 chart-content queries (31-33) targeting content exclusively in chart-extracted blocks (the P3.3 v7 unlock).",
   "_doc_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640",
-  "_query_count": 30,
-  "_mix": "17 answerable + 5 empty-retrieval refusals + 8 near-miss refusals",
+  "_query_count": 33,
+  "_mix": "20 answerable (17 prose + 3 chart-content) + 5 empty-retrieval refusals + 8 near-miss refusals",
   "_labelling_rule": "For each answerable query, run `memex search --k 10`; `relevant_chunk_ids` = every chunk in the top-10 whose text contains the literal answer (or equivalent paraphrase). Single-chunk labels appear when only one chunk has the answer text; multi-chunk labels appear when the chunker's overlap creates near-duplicate chunks.",
   "queries": [
     {
@@ -315,6 +315,33 @@
       "should_refuse": true,
       "_counterfactual_mode": "empty-retrieval",
       "_expected_answer": "(Refuse \u2014 although Python interfaces are mentioned for some libraries, the deck does not give a comprehensive answer to 'which languages can write CUDA kernels'.)"
+    },
+    {
+      "qid": "slide-decks-31",
+      "question": "What four design principles does the nvmath-python architecture figure highlight?",
+      "relevant_chunk_ids": [],
+      "should_refuse": false,
+      "_answer_type": "chart_content",
+      "_expected_answer": "Minimal lead-time, Inter-operability, Pythonic library interface, Platform-agnostic",
+      "_note": "CHART-TARGETED (P3.3 v7 follow-up). Content exists ONLY in the chart-extracted block from the nvmath-python architecture figure. Should answer under Docling+chart-OCR+v7 stack. Anchor unresolvable via FTS by design (chart blocks stripped from BM25)."
+    },
+    {
+      "qid": "slide-decks-32",
+      "question": "What duration is shown for the CameraGestureBase_accumulate_values operation in the Nsight Systems timeline figure?",
+      "relevant_chunk_ids": [],
+      "should_refuse": false,
+      "_answer_type": "chart_content",
+      "_expected_answer": "2,070 ms",
+      "_note": "CHART-TARGETED. Duration appears only in the chart-extracted Nsight timeline table (the v7 LaTeX\u2192markdown converter put it in a markdown table). Anchor unresolvable via FTS by design."
+    },
+    {
+      "qid": "slide-decks-33",
+      "question": "Per the nvmath-python architectural figure, which existing Python numeric libraries does it interoperate with?",
+      "relevant_chunk_ids": [],
+      "should_refuse": false,
+      "_answer_type": "chart_content",
+      "_expected_answer": "NumPy, SciPy, CuPy, PyTorch, scikit-learn, scikit-image",
+      "_note": "CHART-TARGETED. The library list exists ONLY in the chart-extracted block of the nvmath-python architecture figure. Anchor unresolvable via FTS by design."
     }
   ]
 }
