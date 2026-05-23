@@ -90,14 +90,14 @@ _VRAM_GB: dict[tuple[str, str | None], float] = {
     ("reranker", "qwen3"): 2.1,
     ("vlm", "awq_int4"): 7.0,
     ("vlm", "bf16"): 16.0,
-    # P3.3 chart-OCR: DePlot (Pix2Struct-large derivative) in BF16 ≈
-    # 2.3 GB live (1.13 GB safetensors on disk + ~1.2 GB forward-pass
-    # workspace at batch=1). Loaded transiently — only resident during
-    # parse, unloaded after. vLLM is paused (~8.5 GB freed) while
-    # chart-OCR runs, so the budget the manager needs is ~2.5 GB on top
-    # of embedder + reranker. Counted in the estimate only when
-    # `disable_chart_ocr=False` (opt-in flag).
-    ("chart_ocr", "bf16"): 2.5,
+    # Chart-OCR slot: covers Nemotron-Parse-v1.2 (the new default
+    # since the 2026-05-23 P3.3-c shootout) at ~3 GB live in BF16,
+    # plus the smaller alternatives (DePlot ~2.3 GB, UniChart ~0.8
+    # GB, OneChart ~0.6 GB). vLLM is paused (~8.5 GB freed) during
+    # chart-OCR, so the budget the manager needs is ~3 GB on top of
+    # embedder + reranker. Counted in the estimate only when
+    # `disable_chart_ocr=False` (default since 2026-05-23).
+    ("chart_ocr", "bf16"): 3.0,
 }
 # KV cache + processor + activations headroom. Empirical from the GUIDELINES
 # Part III VRAM table.
