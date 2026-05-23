@@ -31,10 +31,15 @@ _CONFIDENCE_TO_FLOAT: dict[EntityConfidence, float] = {
 class ExtractedEntity(BaseModel):
     """Model-emitted entity record."""
 
-    name: str = Field(min_length=1)
+    # Hardening (audit 2026-05-22 follow-up to v6 schema bound): cap
+    # the LLM-emit strings. Entity `name` legitimately runs ~3-50
+    # chars; allow some headroom for full names of organisations or
+    # multi-word concepts. `span_text` should be a quoted phrase from
+    # the passage — 200 chars covers a long sentence fragment.
+    name: str = Field(min_length=1, max_length=120)
     kind: EntityKind
     confidence: EntityConfidence
-    span_text: str = ""
+    span_text: str = Field(default="", max_length=200)
 
 
 class EntityList(BaseModel):

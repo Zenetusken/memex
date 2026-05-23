@@ -91,7 +91,14 @@ class AnswerStateUpdate(TypedDict, total=False):
 class CitedClaim(BaseModel):
     """A single factual claim with the chunk that supports it."""
 
-    claim: str = Field(description="One factual statement, self-contained.")
+    # Hardening (audit 2026-05-22 follow-up to v6 SufficiencyAssessment
+    # bound): bound the LLM-emit string at the schema level so xgrammar
+    # rejects runaway emission. "One factual statement, self-contained"
+    # legitimately runs ~50-300 chars; 500 is generous headroom.
+    claim: str = Field(
+        description="One factual statement, self-contained.",
+        max_length=500,
+    )
     source_chunk_id: str = Field(description="The chunk_id that supports the claim.")
     confidence: Literal["high", "medium", "low"]
 
@@ -99,9 +106,18 @@ class CitedClaim(BaseModel):
 class DraftAnswer(BaseModel):
     """The model's structured draft. Verified before it reaches the user."""
 
-    summary: str = Field(description="One or two sentences overviewing the answer.")
+    # Hardening: "one or two sentences" legitimately runs ~50-200 chars.
+    # 600 is the same headroom rationale as SufficiencyAssessment.reason
+    # (also bounded at 500). Prevents runaway emission past `max_tokens`
+    # in the answer node, which previously could trip schema validation
+    # mid-summary for verbose-prone queries.
+    summary: str = Field(
+        description="One or two sentences overviewing the answer.",
+        max_length=600,
+    )
     claims: list[CitedClaim] = Field(
-        description="Detailed claims, each with a citation."
+        description="Detailed claims, each with a citation.",
+        max_length=20,
     )
 
 
@@ -581,8 +597,16 @@ async def verify(state: AnswerState) -> AnswerStateUpdate:
             Annotated[list[int], Field(max_length=n)],
             Field(description=f"0-indexed positions in draft.claims (0..{n - 1}) whose cited chunk does NOT support the claim."),
         ),
+        # Hardening (audit 2026-05-22): bound each reason string's
+        # length too, not just the outer list. Same pathology as the
+        # v6 SufficiencyAssessment.reason: the model can ramble per
+        # ungrounded claim, exhausting max_tokens before closing the
+        # JSON. 250 chars per "one short reason" is generous.
         ungrounded_reasons=(
-            Annotated[list[str], Field(max_length=n)],
+            Annotated[
+                list[Annotated[str, Field(max_length=250)]],
+                Field(max_length=n),
+            ],
             Field(default_factory=list, description="Optional, parallel to `ungrounded`: one short reason per ungrounded claim."),
         ),
     )
