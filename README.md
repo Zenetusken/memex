@@ -280,7 +280,7 @@ Every knob is set via environment variable or `~/.config/memex/config.toml`. Env
 | `MEMEX_VLLM_PORT` | `8000` | Bind port. |
 | `MEMEX_VLLM_QUANTIZATION` | `awq_marlin` | Quantization kernel. Set `""` for unquantized or FP8 models, `awq` for the legacy kernel. |
 | `MEMEX_VLLM_MAX_MODEL_LEN` | `6144` | Max sequence length. Sized to fit the production answer prompt at `top_k=5` with chunks truncated to 1800 chars; the +2048 over the earlier 4096 ceiling costs ~1 GB KV-cache reservation under fp8_e5m2. |
-| `MEMEX_VLLM_GPU_FRACTION` | `0.72` | 12 GB-rig floor with the 8B-AWQ orchestrator. **8 GB tier: drop to `0.50`** to leave room for embedder + reranker alongside the smaller orchestrator. |
+| `MEMEX_VLLM_GPU_FRACTION` | `0.72` | 12 GB-rig floor with the 8B-AWQ orchestrator. **Drop to `0.68` when chart-OCR is enabled** (the default since 2026-05-23) — embedder + reranker + chart-OCR slot need the extra headroom. **8 GB tier: drop to `0.50`** to leave room for embedder + reranker alongside the smaller orchestrator. |
 | `MEMEX_VLLM_KV_CACHE_DTYPE` | `fp8_e5m2` | Halves KV-cache memory for AWQ-int4 checkpoints. **Set to `auto` for FP8-checkpoint models** (vLLM blocks fp8 KV cache + FP8 weights at startup). |
 | `CUDA_VISIBLE_DEVICES` | `0` | GPU device index. |
 | `MEMEX_VLLM_EAGER` | _(unset)_ | Set to anything to disable CUDA-graph compilation (slower decode, faster startup). |
@@ -293,6 +293,9 @@ Every knob is set via environment variable or `~/.config/memex/config.toml`. Env
 | `MEMEX_PARSE__PYMUPDF_MIN_CONFIDENCE` | `0.5` | Confidence threshold for trusting the PyMuPDF extraction. Lower to be more eager; raise to be conservative. |
 | `MEMEX_PARSE__PYMUPDF_MIXED_CONTENT_IMAGE_AREA_THRESHOLD` | `0.35` | Image-area share that triggers the mixed-content (force-OCR) routing path. Lower → more aggressive OCR. |
 | `MEMEX_PARSE__PYMUPDF_MIXED_CONTENT_MIN_IMAGE_HEAVY_PAGES` | `0.30` | Companion gate; both image-area AND image-heavy-pages must trip for mixed-content to fire. |
+| `MEMEX_PARSE__FORCE_DOCLING` | `false` | When `true`, the PyMuPDF classifier is bypassed and every PDF routes directly to Docling. Per-call: `memex parse <doc-id> --force-docling`. Cost: Docling is ~10× slower than PyMuPDF on text-heavy docs. Use to force chart-OCR onto born-digital text-heavy PDFs the classifier would otherwise send to the fast PyMuPDF path. |
+| `MEMEX_PARSE__DISABLE_CHART_OCR` | `false` | Disables the chart-OCR pass over Docling figures. Default enabled with `nvidia/NVIDIA-Nemotron-Parse-v1.2` since the 2026-05-23 P3.3-c shootout + v7 fix arc (Q08 "On Time 22 / Late 8" + Q31 "nvmath-python 4 principles" + 5 other chart-content REF→ANS flips across 3 corpora). |
+| `MEMEX_MODELS__CHART_OCR` | `nvidia/NVIDIA-Nemotron-Parse-v1.2` | Chart-OCR backend HF id. Alternatives in tree: `khhuang/chart-to-table` (UniChart, smaller + faster but −1 ANS on prose-heavy corpora), `google/deplot` (legacy P3.3 v6 default; same −1 ANS), `kppkkp/OneChart` (CUDA-asserts on OOD imagery — keep for chart-heavy-only re-attempts). |
 | `MEMEX_PARSE_DOCLING_OCR` | `0` | Set to `1` to force OCR on Docling. Default off (born-digital PDFs don't benefit; +10× wall time for no answer improvement on the canonical test deck). |
 
 ### Index stage
@@ -369,7 +372,7 @@ The only thing that talks to the network is the *initial model download* (one-ti
 ## 🧪 Run the tests
 
 ```sh
-uv run pytest                  # 144 tests, ~7 seconds, no GPU needed
+uv run pytest                  # 255 tests, ~9 seconds, no GPU needed
 uv run pytest tests/unit       # just the pure-function tests
 uv run pytest tests/integration  # full ingest→parse→index→ask flow with faked I/O
 ```

@@ -236,6 +236,8 @@ Question set composition (v1 target: 50 questions):
 
 The unanswerable and out-of-corpus questions are the most important — they test refusal, which is what makes the system trustworthy.
 
+**Chart-content sub-class (added 2026-05-23 with the P3.3 v7 fix arc).** Some answerable queries target content that exists ONLY in chart-extracted markdown blocks emitted by the chart-OCR backend (e.g. a Gantt chart's `On Time 22 / Late 8` status, an architecture figure's 4 design principles). These have an `_answer_type: "chart_content"` annotation and an empty `relevant_chunk_ids` array (the chart-extracted-block chunks aren't FTS-discoverable — they're stripped from BM25 per the P3.3 v3 defense, and live only in dense embeddings). The interesting metric for them is `answered_count` + `refusal_correct` per query, not citation_precision against canonical labels. The current corpora ship 7 chart-content queries across 3 docs (chart-types-08, annual-report-09/10, slide-decks-31/32/33, plus slide-decks-18 which the v7 chunker reflow promoted from REF to ANS via prose+chart-block-in-same-chunk).
+
 ### Per-PR delta reporting
 
 `memex eval` produces a JSON report. The CI diff against the last successful main-branch run highlights:
