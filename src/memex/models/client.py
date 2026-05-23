@@ -149,7 +149,10 @@ async def complete_structured(
     schema: type[T],
     *,
     model: str | None = None,
-    temperature: float = 0.0,
+    temperature: float = 0.1,
+    top_p: float = 0.8,
+    presence_penalty: float = 1.0,
+    seed: int | None = 42,
     max_tokens: int = 640,
     prompt_tag: str | None = None,
 ) -> tuple[T, int]:
@@ -158,6 +161,20 @@ async def complete_structured(
     Returns `(parsed instance of schema, total tokens used)`. Generic
     over `schema` so callers get back the exact subclass they asked
     for — `pyright --strict` keeps the chain typed.
+
+    Sampling defaults follow Qwen team's published non-thinking-mode
+    recommendation, scaled down for eval determinism:
+    - `temperature=0.1` — escapes Qwen-team-cautioned pure greedy
+      (`temperature=0.0` can degrade output quality on Qwen3) without
+      introducing noticeable nondeterminism at this batch size.
+    - `top_p=0.8` — Qwen team's non-thinking-mode default.
+    - `presence_penalty=1.0` — suppresses repetition. Capped at 1.0
+      because AWQ-quantized models are documented to trigger language
+      mixing under `presence_penalty > 1.5` (relevant for our
+      French/Spanish/etc. content).
+    - `seed=42` — reproducibility floor. vLLM 0.21 honors this in
+      OpenAI-compat mode; CUDA-kernel nondeterminism may still
+      introduce ±1 token variance.
 
     `prompt_tag` (e.g. "answer@v1") is forwarded to Langfuse as the
     span name; if absent, the schema class name is used.
@@ -174,7 +191,15 @@ async def complete_structured(
         prompt_tag=prompt_tag or schema.__name__,
         schema=schema.__name__,
     )
-    log.info("model_call.start", model=model, max_tokens=max_tokens)
+    log.info(
+        "model_call.start",
+        model=model,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        top_p=top_p,
+        presence_penalty=presence_penalty,
+        seed=seed,
+    )
 
     # Default the Langfuse span name to the schema class so traces are
     # meaningfully labelled even when the caller doesn't pass a tag.
@@ -187,6 +212,9 @@ async def complete_structured(
             model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=temperature,
+            top_p=top_p,
+            presence_penalty=presence_penalty,
+            seed=seed,
             max_tokens=max_tokens,
             response_format={
                 "type": "json_schema",
