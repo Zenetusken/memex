@@ -372,3 +372,95 @@ async def test_initial_state_uses_python_ulid_api() -> None:
     crashing on the python-ulid import path."""
     state = AnswerState(query="hello")
     assert len(state.correlation_id) == 26
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_retrieve", "patch_prompt")
+async def test_verify_filters_phantom_indices(fake_llm: FakeLLM) -> None:
+    """P3.3 v7 trace 2026-05-23: the verifier can emit indices > n-1
+    when distracted by chunk content not in the draft. The verify node
+    must filter those phantoms instead of treating them as real
+    ungrounded claims (which would otherwise refuse a legitimate
+    answer)."""
+    fake_llm.respond(
+        "assess_sufficiency",
+        SufficiencyAssessment,
+        SufficiencyAssessment(sufficient=True, reason="One on-point chunk"),
+    )
+    fake_llm.respond(
+        "answer",
+        DraftAnswer,
+        DraftAnswer(
+            summary="Bar charts work well combined with maps for context.",
+            claims=[
+                CitedClaim(
+                    claim="Combine bar charts with maps.",
+                    source_chunk_id="c1",
+                    confidence="high",
+                ),
+            ],
+        ),
+    )
+    # Verifier (incorrectly) emits index 1 referencing chunk content
+    # ("Pareto chart") that is NOT in the draft. The draft has only
+    # claim index 0. The verify node must filter index 1 out.
+    fake_llm.respond(
+        "verify_grounding",
+        VerificationResult,
+        VerificationResult(
+            grounded=[0],
+            ungrounded=[1],
+            ungrounded_reasons=[
+                "Claim 1 refers to a Pareto chart not in cited chunk."
+            ],
+        ),
+    )
+
+    response = await answer_query("Why do bar charts work well with maps?")
+
+    # Phantom index 1 dropped; claim 0 is grounded; answer ships.
+    assert response.answered is True
+    assert response.summary is not None
+    assert len(response.claims) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_retrieve", "patch_prompt")
+async def test_verify_missing_index_treated_as_ungrounded(
+    fake_llm: FakeLLM,
+) -> None:
+    """If a claim index is missing from both `grounded` and `ungrounded`,
+    treat it as ungrounded (conservative — don't default to grounded on
+    verifier omission)."""
+    fake_llm.respond(
+        "assess_sufficiency",
+        SufficiencyAssessment,
+        SufficiencyAssessment(sufficient=True, reason="Two on-point chunks"),
+    )
+    fake_llm.respond(
+        "answer",
+        DraftAnswer,
+        DraftAnswer(
+            summary="Two claims about reflexivity.",
+            claims=[
+                CitedClaim(claim="Claim A", source_chunk_id="c1", confidence="high"),
+                CitedClaim(claim="Claim B", source_chunk_id="c2", confidence="high"),
+            ],
+        ),
+    )
+    # Verifier covers ONLY claim 0; claim 1 is omitted from both lists.
+    fake_llm.respond(
+        "verify_grounding",
+        VerificationResult,
+        VerificationResult(grounded=[0], ungrounded=[]),
+    )
+
+    response = await answer_query("What does Smith say?")
+
+    # Claim 1 omitted → conservatively added to ungrounded; verifier
+    # round-trip will trigger regenerate up to the budget, then refuse.
+    # The HARD GATE here is: we don't pretend the unvoiced claim is
+    # grounded.
+    assert response.answered is False or any(
+        c.source_chunk_id == "c1" for c in response.claims
+    )

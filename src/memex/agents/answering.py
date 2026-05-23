@@ -616,10 +616,44 @@ async def verify(state: AnswerState) -> AnswerStateUpdate:
         prompt_tag="verify_grounding@v2",
     )
 
+    # Defensive index-filtering (P3.3 v7 trace, 2026-05-23). The verifier
+    # can emit phantom indices > n-1 when distracted by chunk content not
+    # in the draft (observed: 1-claim draft, verifier returned
+    # `grounded: [0], ungrounded: [1]` referencing "Pareto chart" from
+    # the chunk text but not the draft). The xgrammar `max_length=n`
+    # bounds list length, not index values. Filter to 0..n-1.
+    valid_grounded = [i for i in bounded.grounded if 0 <= i < n]
+    valid_ungrounded = [i for i in bounded.ungrounded if 0 <= i < n]
+    valid_reasons = [
+        bounded.ungrounded_reasons[k]
+        for k, idx in enumerate(bounded.ungrounded)
+        if 0 <= idx < n and k < len(bounded.ungrounded_reasons)
+    ]
+    # Any claim index missing from BOTH lists → treat as ungrounded
+    # (conservative: don't let a verifier omission falsely mark a claim
+    # as grounded by default).
+    mentioned = set(valid_grounded) | set(valid_ungrounded)
+    missing = [i for i in range(n) if i not in mentioned]
+    if missing:
+        log.info("verify.indices_missing", missing=missing, draft_claim_count=n)
+        valid_ungrounded.extend(missing)
+        valid_reasons.extend(
+            ["Verifier omitted this claim from its response."] * len(missing)
+        )
+    phantom_g = [i for i in bounded.grounded if not (0 <= i < n)]
+    phantom_u = [i for i in bounded.ungrounded if not (0 <= i < n)]
+    if phantom_g or phantom_u:
+        log.info(
+            "verify.phantom_indices_dropped",
+            phantom_grounded=phantom_g,
+            phantom_ungrounded=phantom_u,
+            draft_claim_count=n,
+        )
+
     verification = VerificationResult(
-        grounded=list(bounded.grounded),
-        ungrounded=list(bounded.ungrounded),
-        ungrounded_reasons=list(bounded.ungrounded_reasons),
+        grounded=valid_grounded,
+        ungrounded=valid_ungrounded,
+        ungrounded_reasons=valid_reasons,
     )
 
     return {
