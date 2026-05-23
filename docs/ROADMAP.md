@@ -1,6 +1,6 @@
 # Memex Roadmap
 
-**Last updated:** 2026-05-22 — 106 commits on `main`, 205/205 tests green. Foundation arc complete (P0–P4 phases + P1.x backlog + P2.1/P2.4/P3.2/P4.2 + Filler N1–N9 + P3.3 chart-OCR v1–v6 + defensive schema hardening + eval label refresh). Eval suite stable on Qwen3-4B-AWQ orchestrator: baseline `answered_count` 9.3 ± 0.5, `refusal_cf` 1.00, hallucinations 0, `mcp_ans` 1.00. **External-blocked items**: P0 multi-doc (needs source material), P2.2 Granite (vLLM hybrid-arch hang), P2.3 VLM swap (needs scan corpus), P3.3 follow-ups a/b/c (autoawq compat / ADR amendment / chart-heavy corpus).
+**Last updated:** 2026-05-22 — 115 commits on `main`, 215/215 tests green, **100% public-surface docstring coverage** (275/275). Foundation arc complete; audit-and-housekeeping arc complete. Eval suite stable on Qwen3-4B-AWQ orchestrator: baseline `answered_count` 9.3 ± 0.5, `refusal_cf` 1.00, hallucinations 0, `mcp_ans` 1.00. **External-blocked items**: P0 multi-doc (needs source material), P2.2 Granite (vLLM hybrid-arch hang), P2.3 VLM swap (needs scan corpus), P3.3 follow-ups a/b/c (autoawq compat / ADR amendment / chart-heavy corpus), P3.1 benchmark CI (GPU runner), P4.1/P4.3/P4.4 (various external triggers).
 
 The blueprint in [`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) is the architectural design — module signatures, cross-cutting concerns, build order. This document is the **operational view**: what is shipped today, what is measured, and what comes next.
 
@@ -33,9 +33,9 @@ The blueprint in [`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) is the archi
 | **P2.4 — Agent refusal calibration** | `prompts/answer/v2.md` with literal-presence rule | ✅ **Shipped + live-verified** (2026-05-21) — Q11 (FP128) + Q12 (FP4) hallucinations both eliminated; `refusal_rate_cf` 0.75 → 1.0; `mcp_ans` 0.33 → 0.67. **Q7 regression recovered** as a side effect of the retrieval-truncate-budget retune that shipped later the same day. |
 | **Retrieval truncate-budget retune** | `truncate(700)→1800` in prompts; `MEMEX_RERANK_TOP_K 10→5`; `max_tokens 1024→640`; `max-model-len 4096→6144` | ✅ **Shipped + live-verified** (2026-05-21) — three legitimate REF→ANS flips (Q2, Q7-recovered, Q20). Diagnosed by direct instrumentation: agent was operating on ~32% of every chunk's content because the answer prompt clipped chunks at 700 chars while median chunk is 2172 chars. |
 
-**File count:** 86 Python files in `src/memex/` + `tests/` + `scripts/`, all parse-clean. 7 ADRs. 8 audit reports under `docs/audits/`. 106 commits on `main` (public at `github.com/Zenetusken/memex`); the canonical count is `git rev-list --count main`.
+**File count:** 86 Python files in `src/memex/` + `tests/` + `scripts/`, all parse-clean. 7 ADRs. 8 audit reports under `docs/audits/`. 115 commits on `main` (public at `github.com/Zenetusken/memex`); the canonical count is `git rev-list --count main`.
 
-**Test suite:** 205/205 green on the reference rig. Linux + pyseccomp; 5 tests skip on Windows.
+**Test suite:** 215/215 green on the reference rig. Linux + pyseccomp; 5 tests skip on Windows.
 
 ---
 
@@ -149,6 +149,7 @@ Three parallel research subagents evaluated browser-side OCR/VLM technologies as
 
 ### Recently shipped this phase (compressed)
 
+**Feature work (P0–P4 main-line):**
 - ✅ **P0 30-query corpus + label refresh** — n=17 answerable; relabel 2026-05-22 restored `mcp_ans` from 0.0 → 1.0 after the Docling routing change orphaned the old PyMuPDF chunk_ids.
 - ✅ **xgrammar empty-draft short-circuit** — verify node bypasses model call on empty draft.
 - ✅ **Retrieval truncate-budget retune** — `truncate 700→1800`, `top_k 10→5`, `max_tokens 1024→640`, `max-model-len 4096→6144`. Three legitimate REF→ANS flips.
@@ -157,6 +158,17 @@ Three parallel research subagents evaluated browser-side OCR/VLM technologies as
 - ✅ **P3.3 chart-OCR v1–v6** — pipeline shipped opt-in; see Tier-2 entry above for the closed mixed-verdict narrative + p33_tracker.md for session-by-session detail.
 - ✅ **Filler N1–N9 audit-nit backlog** — closed; per-item one-liners in the §Filler section below.
 - ✅ **Defensive schema hardening** — bounded 5 LLM-emit `str` fields + `DraftAnswer.claims` list cap so xgrammar enforces emission limits at the grammar level. Same pattern as the v6 `SufficiencyAssessment.reason` bound that fixed the counterfactual-query crash.
+
+**Audit-and-housekeeping arc (2026-05-22):**
+- ✅ **ROADMAP narrative consolidation** — collapsed the chart-OCR saga into one Tier-2 entry; removed scattered references; tightened headers.
+- ✅ **CLAUDE.md ×3 drift audit** — synced project root + backend + webui to current code state (error subclasses, locking patterns, schema-bound convention, test counts).
+- ✅ **GUIDELINES.md drift audit** — fixed stale model-stack table, config example (AWQ + chart-OCR + reranker_backend), structured-output idiom (`response_format` not deprecated `guided_json`), agent state diagram (added `expand_graph` + `compose` nodes).
+- ✅ **ADR-0001/0006 outcome annotations** — every "candidate to evaluate" in ADR-0001 now has its shipped / blocked / eval-gated outcome.
+- ✅ **Per-file test-organization audit** — 16 directly-tested + 14 indirectly-covered + 7 acceptable-gap modules + 1 actionable gap closed (`retrieve/fusion.py` got 10 unit tests pinning the RRF contract).
+- ✅ **Pyright noise cleanup** — 33 systemic false positives suppressed via per-file pragmas (FastAPI/Typer handlers; `_FOO` module singletons). The remaining 307 errors are third-party stub gaps; 0 actual `Any` leaks from recent code.
+- ✅ **Dead-code sweep** — removed `convert_page` (singular VLM); wired `get_pymupdf_breaker_state` + `list_prompts` into `memex doctor`.
+- ✅ **Per-module docstring audit** — 78.2% → **100% public-surface coverage** (275/275). Pure documentation pass, no behaviour change.
+- ✅ **Browser-OCR research turn** — three candidate technologies rejected (Tesseract.js, Surya-via-Pyodide, InternVL3-9B-via-ONNX-Web).
 
 ### Next pickup — ranked by impact × feasibility
 
@@ -381,7 +393,7 @@ Detailed per-phase log lives in git history + `docs/audits/`. The compressed ver
 - **FU3.2.1 — `Type=notify` readiness gate for vLLM** (2026-05-21): `scripts/serve-vllm.sh` gained a backgrounded sidecar that polls `/v1/models` and calls `systemd-notify --ready --status="…"` on the first 2xx; `memex-vllm.service` switched from `Type=simple` to `Type=notify` + `NotifyAccess=all`. `systemctl --user start memex-vllm` now blocks until vLLM is genuinely serving (~31 s measured), so `After=memex-vllm.service` on downstream units (web, MCP, watcher) is a real readiness gate. Live-verified: full-stack cold boot returned after 32 s with **zero Connection-refused logs** in any downstream unit's journal — and a watcher reaction triggered immediately afterward fired clean `extract_entities@v1` + `extract_citations@v1` model calls against vLLM. The sidecar no-ops when `$NOTIFY_SOCKET` is unset, so Pattern B (manual) and Pattern C (`memex daemon start`) are unaffected.
 - **P3.2 — Daemon templates** (2026-05-21): three waves. (1) vLLM unit + plist + deploy guides. (2) `memex-web.service` + `memex-mcp.service` (+ matching plists/env) so the full stack boots together. (3) `memex-watch.service` (+ plist + env) for the vault file-watcher that re-enriches + re-indexes on canonical-markdown edits. Web + MCP + watcher all carry soft `Wants=memex-vllm.service` — they cluster but degrade gracefully if vLLM is down (search/get_document/list_documents work LLM-less; only `/ask` and enrich need vLLM). The wave-3 live verification was the most thorough: appended a line to the canonical CUDA-deck markdown → watcher logged `watcher.edit_confirmed` → 32 chunks went to enrich → vLLM was offline (cleanup state) so 32× `enrich.chunk_failed` → `enrich.done chunk_failures: 32` → watcher kept running → `index.done added: 1 deleted: 1 unchanged: 30 partial: true` (partial re-index isolated the changed chunk). Restoring the file fired another correct reaction. Two unit-template bugs caught during verification (StartLimitIntervalSec in `[Service]` instead of `[Unit]`, inline `#` comments on `ProtectHome=` line) — both fixed across all four units. No code change.
 
-For the full per-commit log: `git log --oneline` (106 commits at session close, 2026-05-22; the up-to-date number is `git rev-list --count main`).
+For the full per-commit log: `git log --oneline` (115 commits at session close, 2026-05-22; the up-to-date number is `git rev-list --count main`).
 
 ---
 
