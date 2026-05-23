@@ -431,7 +431,10 @@ async def test_verify_missing_index_treated_as_ungrounded(
 ) -> None:
     """If a claim index is missing from both `grounded` and `ungrounded`,
     treat it as ungrounded (conservative — don't default to grounded on
-    verifier omission)."""
+    verifier omission). Post-audit (2026-05-23): tightened from an `or`-
+    clause that accepted either outcome to an explicit assertion that
+    the omitted claim trips regenerate, then refusal — pinning the
+    'don't silently default to grounded' contract."""
     fake_llm.respond(
         "assess_sufficiency",
         SufficiencyAssessment,
@@ -449,6 +452,10 @@ async def test_verify_missing_index_treated_as_ungrounded(
         ),
     )
     # Verifier covers ONLY claim 0; claim 1 is omitted from both lists.
+    # The phantom-index filter will conservatively add claim 1 to
+    # ungrounded, which triggers the regenerate path. The regenerate
+    # path will re-call answer/verify; the same FakeLLM canned response
+    # fires again, so regenerate exhausts its budget and refuse() runs.
     fake_llm.respond(
         "verify_grounding",
         VerificationResult,
@@ -457,10 +464,14 @@ async def test_verify_missing_index_treated_as_ungrounded(
 
     response = await answer_query("What does Smith say?")
 
-    # Claim 1 omitted → conservatively added to ungrounded; verifier
-    # round-trip will trigger regenerate up to the budget, then refuse.
-    # The HARD GATE here is: we don't pretend the unvoiced claim is
-    # grounded.
-    assert response.answered is False or any(
-        c.source_chunk_id == "c1" for c in response.claims
+    # Strict contract: omitted claim must NOT be treated as grounded.
+    # Refusal is the correct outcome here — the verifier never confirmed
+    # claim 1, so the system can't ship it.
+    assert response.answered is False, (
+        "Omitted claim was silently treated as grounded; "
+        f"got answered=True with claims={[c.claim for c in response.claims]}"
+    )
+    assert response.regenerate_attempts >= 1, (
+        "Expected at least 1 regenerate attempt before refusal; "
+        f"got regenerate_attempts={response.regenerate_attempts}"
     )

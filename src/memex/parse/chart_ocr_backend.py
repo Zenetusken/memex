@@ -653,11 +653,71 @@ _LATEX_TABULAR_RE = re.compile(
 _LATEX_MULTICOLUMN_RE = re.compile(
     r"\\multicolumn\{\d+\}\{[^}]*\}\{([^}]*)\}",
 )
+# Used by `_flatten_multicolumns` for the nested-brace case
+# (`\multicolumn{2}{c}{Apr {x} Jun}` clips at the first `}` with the
+# above regex). The opener-only regex finds where each `\multicolumn`
+# starts; we then hand-balance braces to find the matching close.
+# Established by the post-v7 verification audit (2026-05-23).
+_LATEX_MULTICOLUMN_HEAD_RE = re.compile(
+    r"\\multicolumn\{\d+\}\{[^}]*\}\{"
+)
+
+
+def _flatten_multicolumns(content: str) -> str:
+    """Replace every `\\multicolumn{N}{spec}{content}` with its inner
+    `content`, brace-balanced. Falls back to the regex-based
+    flatten when no `\\multicolumn` is present (fast path).
+
+    Brace-balancing is needed for cases like `\\multicolumn{2}{c}{Apr
+    {x} Jun}` where the inner content contains nested braces — the
+    regex `\\{([^}]*)\\}` would clip at the first inner `}` and emit
+    `Apr {x`.
+    """
+    if "\\multicolumn" not in content:
+        return content
+    out: list[str] = []
+    i = 0
+    while i < len(content):
+        m = _LATEX_MULTICOLUMN_HEAD_RE.search(content, i)
+        if not m:
+            out.append(content[i:])
+            break
+        out.append(content[i : m.start()])
+        # Walk forward from m.end() balancing braces to find the close
+        depth = 1
+        j = m.end()
+        while j < len(content) and depth > 0:
+            ch = content[j]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        if depth == 0:
+            out.append(content[m.end() : j])
+            i = j + 1
+        else:
+            # Unbalanced — append the rest as-is and stop.
+            out.append(content[m.end() :])
+            break
+    return "".join(out)
 # Matches `**On Time 22**`, `Late 8`, `Status 12.5%` — a label followed
 # by a trailing number/percentage. Used to split chart-summary single-row
 # tabulars into key-value lines the LLM can parse unambiguously.
+#
+# Post-audit hardening (2026-05-23 verification audit):
+# - The value-half is bounded to 3 integer digits (`\d{1,3}(?:[,.]\d+)?`)
+#   so 4-digit years like "March 2026" don't get misread as
+#   `(label='March', value='2026')`. Counts in chart-summary tabulars
+#   (22, 8, 30, etc.) fit comfortably; if a future chart has 4-digit
+#   counts the row falls through to the markdown-table fallback, which
+#   is acceptable — the misread was worse than the fallback.
+# - Currency-prefixed cells (`$ 193,737`) fall through too: 193 is in
+#   range but `,737` extends past the integer-cap pattern.
 _LABEL_NUMBER_CELL_RE = re.compile(
-    r"^\*{0,2}\s*(.+?)\s+(-?\d[\d,.]*\s*%?)\s*\*{0,2}\s*$"
+    r"^\*{0,2}\s*([A-Za-z][\w\s]*?)\s+(-?\d{1,3}(?:[.,]\d{1,3})?\s*%?)\s*\*{0,2}\s*$"
 )
 
 
@@ -670,6 +730,15 @@ def _split_label_number_cells(cells: list[str]) -> list[tuple[str, str]] | None:
     concatenates the legend label and its value into one cell:
         `**On Time 22**` → `("On Time", "22")`
         `**Late 8**` → `("Late", "8")`
+
+    Post-audit (2026-05-23) hardening:
+    - Date-only cells (`March 2026`) no longer split (the regex requires
+      the label-half to contain a non-digit ending — `March 2026` →
+      label=`March 2026 ` (with trailing space) which the rstrip
+      normalizes, but the value-half then has to be a short number; the
+      `{0,7}` cap rejects long fragments).
+    - Currency-prefixed cells (`$ 193,737`) fall through to the table
+      fallback because the value-half exceeds 8 chars.
     """
     splits: list[tuple[str, str]] = []
     for c in cells:
@@ -697,10 +766,13 @@ def _latex_tabular_to_markdown(content: str) -> str:
     - Multi-row tabulars: emit a full markdown table with the first
       non-empty row as the header.
     - ``\\multicolumn{N}{spec}{content}`` is flattened to just
-      ``content`` (we drop the spanning).
+      ``content`` (we drop the spanning). Brace-balanced via
+      ``_flatten_multicolumns`` so nested braces in the content
+      (``Apr {x} Jun``) survive — fix shipped post-v7 audit
+      (2026-05-23).
     - Markdown ``**bold**`` markers are kept (valid markdown).
     """
-    content = _LATEX_MULTICOLUMN_RE.sub(r"\1", content)
+    content = _flatten_multicolumns(content)
     rows_raw = re.split(r"\\\\", content)
 
     parsed: list[list[str]] = []

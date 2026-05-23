@@ -966,3 +966,94 @@ async def test_onechart_chat_signature_mismatch_returns_empty(
     )
     assert isinstance(out[0], ChartOCROutput)
     assert out[0].markdown == ""
+
+
+# ----------------------------------------------------------------------
+# Post-v7 audit hardening (2026-05-23): nested-brace multicolumn +
+# date-only label-number false-split + currency-prefix fallthrough.
+# ----------------------------------------------------------------------
+
+
+def test_multicolumn_nested_braces_preserved() -> None:
+    """`\\multicolumn{2}{c}{Apr {x} Jun}` must keep the entire inner
+    content (`Apr {x} Jun`). Pre-v7-audit regex `\\{([^}]*)\\}` clipped
+    at the first `}` → emitted `Apr {x`. Now uses the brace-balanced
+    helper.
+    """
+    from memex.parse.chart_ocr_backend import _flatten_multicolumns
+
+    raw = "\\multicolumn{2}{c}{Apr {x} Jun}"
+    out = _flatten_multicolumns(raw)
+    assert out == "Apr {x} Jun"
+
+
+def test_multicolumn_deeply_nested_braces() -> None:
+    """Multiple levels of nesting brace-balance correctly."""
+    from memex.parse.chart_ocr_backend import _flatten_multicolumns
+
+    raw = "\\multicolumn{3}{c}{outer {mid {inner} mid2} outer2}"
+    out = _flatten_multicolumns(raw)
+    assert out == "outer {mid {inner} mid2} outer2"
+
+
+def test_multicolumn_no_multicolumn_passes_through() -> None:
+    """Fast path: text without `\\multicolumn` passes through unchanged."""
+    from memex.parse.chart_ocr_backend import _flatten_multicolumns
+
+    raw = "plain content with no LaTeX commands"
+    assert _flatten_multicolumns(raw) == raw
+
+
+def test_multicolumn_unbalanced_braces_safe_fallthrough() -> None:
+    """Unbalanced (truncated) multicolumn: emit what we have so far,
+    don't crash. Defense for chart-OCR output truncated mid-emission."""
+    from memex.parse.chart_ocr_backend import _flatten_multicolumns
+
+    raw = "\\multicolumn{2}{c}{Apr Jun"  # no closing brace
+    out = _flatten_multicolumns(raw)
+    # Either the inner content or empty — but no crash, no exception
+    assert "Apr Jun" in out or out == ""
+
+
+def test_split_label_number_rejects_date_labels() -> None:
+    """`March 2026` must NOT split into `(label='March', value='2026')`.
+    Year-like 4-digit values are out-of-range for the chart-summary
+    counts the heuristic targets — pre-audit regex would have wrongly
+    classified them. Post-audit fix: value capped at 3 digits.
+    """
+    from memex.parse.chart_ocr_backend import _split_label_number_cells
+
+    # All cells are date labels — should return None (fall through to
+    # the markdown-table format, not bullets)
+    assert _split_label_number_cells(["March 2026", "April 2026"]) is None
+    assert _split_label_number_cells(["December 2024"]) is None
+
+
+def test_split_label_number_rejects_currency_prefixed() -> None:
+    """`Revenue $ 193,737` is a financial table cell, not a chart-
+    summary key-value. Must fall through to the markdown-table format."""
+    from memex.parse.chart_ocr_backend import _split_label_number_cells
+
+    assert _split_label_number_cells(["Revenue $ 193,737"]) is None
+    assert _split_label_number_cells(["Total $ 215,900"]) is None
+
+
+def test_split_label_number_still_accepts_chart_summary_pattern() -> None:
+    """Regression: the post-audit tightening must NOT break the original
+    nvmath-python Gantt-chart use case that motivated the heuristic."""
+    from memex.parse.chart_ocr_backend import _split_label_number_cells
+
+    splits = _split_label_number_cells(["**On Time 22**", "**Late 8**"])
+    assert splits is not None
+    assert ("On Time", "22") in splits
+    assert ("Late", "8") in splits
+
+
+def test_split_label_number_accepts_short_decimals_and_percentages() -> None:
+    """Counts with decimals (`12.5`) and percentages (`12.5%`) still
+    split — the cap is on integer-digit count, not total length."""
+    from memex.parse.chart_ocr_backend import _split_label_number_cells
+
+    splits = _split_label_number_cells(["Status 12.5%"])
+    assert splits is not None
+    assert splits[0] == ("Status", "12.5%")

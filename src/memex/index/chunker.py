@@ -90,7 +90,12 @@ def _budget_word_count(s: str) -> int:
     return _word_count(strip_chart_extracted_for_index(s))
 
 
-def _heading_path_at(text: str, offset: int) -> list[str]:
+def _heading_path_at(
+    text: str,
+    offset: int,
+    *,
+    chart_spans: list[tuple[int, int]] | None = None,
+) -> list[str]:
     """The active heading stack at character offset `offset`.
 
     Walks every heading at or before `offset`, maintaining a stack
@@ -99,8 +104,16 @@ def _heading_path_at(text: str, offset: int) -> list[str]:
     `[chart-extracted]` blocks are inert chart labels, not real
     document headings, and must not pollute the heading path of the
     chunks following the chart.
+
+    `chart_spans` is an optional precomputed result of
+    `chart_extracted_spans(text)`. Passing it lets the caller
+    (`chunk_document`) compute spans ONCE per document instead of
+    re-scanning the body on every heading-path call (post-v7 audit
+    perf fix 2026-05-23). When omitted, recomputed locally for
+    standalone callers + tests.
     """
-    chart_spans = chart_extracted_spans(text)
+    if chart_spans is None:
+        chart_spans = chart_extracted_spans(text)
     stack: dict[int, str] = {}
     for m in _HEADING_RE.finditer(text):
         if m.start() > offset:
@@ -120,7 +133,11 @@ def _stable_chunk_id(doc_id: str, text: str) -> str:
     return f"{doc_id}#{digest}"
 
 
-def _split_into_sections(body: str) -> list[tuple[int, str]]:
+def _split_into_sections(
+    body: str,
+    *,
+    chart_spans: list[tuple[int, int]] | None = None,
+) -> list[tuple[int, str]]:
     """Yield (start_offset, section_text) where section_text is the body
     between successive headings (or top-of-doc to first heading).
 
@@ -132,8 +149,14 @@ def _split_into_sections(body: str) -> list[tuple[int, str]]:
     boundaries, splitting a single chart block across multiple chunks
     (the eval trace showed only the LAST principle reached the
     reranker's top-5).
+
+    `chart_spans` is an optional precomputed result of
+    `chart_extracted_spans(body)`. Passing it lets the caller
+    (`chunk_document`) share spans with `_heading_path_at` — see
+    that function's docstring + the post-v7 audit perf fix.
     """
-    chart_spans = chart_extracted_spans(body)
+    if chart_spans is None:
+        chart_spans = chart_extracted_spans(body)
     headings = [
         m for m in _HEADING_RE.finditer(body)
         if not is_inside_any_span(m.start(), chart_spans)
@@ -244,15 +267,23 @@ def chunk_document(doc: VaultDocument) -> list[Chunk]:
         overlap = OVERLAP_TOKENS
 
     title = doc.frontmatter.title or doc.ref.doc_id
+    # Post-audit perf fix (2026-05-23): compute chart-extracted spans
+    # ONCE per document instead of N+1 times (once in
+    # `_split_into_sections`, then once per `_heading_path_at` call
+    # inside the inner loop). On a 200 KB slide deck at the default
+    # chunk size, that's ~50-150× over-scan saved per document parse.
+    chart_spans = chart_extracted_spans(doc.body)
     out: list[Chunk] = []
-    for section_offset, section_text in _split_into_sections(doc.body):
+    for section_offset, section_text in _split_into_sections(
+        doc.body, chart_spans=chart_spans
+    ):
         for cs, ce, text in _split_section_into_chunks(
             section_text,
             section_offset,
             target_tokens=target,
             overlap_tokens=overlap,
         ):
-            heading_path = _heading_path_at(doc.body, cs)
+            heading_path = _heading_path_at(doc.body, cs, chart_spans=chart_spans)
             out.append(
                 Chunk(
                     chunk_id=_stable_chunk_id(doc.ref.doc_id, text),

@@ -629,6 +629,20 @@ async def verify(state: AnswerState) -> AnswerStateUpdate:
         for k, idx in enumerate(bounded.ungrounded)
         if 0 <= idx < n and k < len(bounded.ungrounded_reasons)
     ]
+    # Post-audit defense (2026-05-23 verification audit): if the verifier
+    # over-emitted reasons relative to ungrounded indices (e.g. ungrounded
+    # had 1 entry, reasons had 3), the excess is silently dropped by the
+    # enumerate-zip above. Log when this happens so wrong-reason-attribution
+    # surfaces in observability; the dropped reasons would otherwise mislead
+    # the regenerate-feedback loop.
+    overflow = max(0, len(bounded.ungrounded_reasons) - len(bounded.ungrounded))
+    if overflow:
+        log.info(
+            "verify.reasons_overflow_dropped",
+            overflow_count=overflow,
+            ungrounded_count=len(bounded.ungrounded),
+            reasons_count=len(bounded.ungrounded_reasons),
+        )
     # Any claim index missing from BOTH lists → treat as ungrounded
     # (conservative: don't let a verifier omission falsely mark a claim
     # as grounded by default).

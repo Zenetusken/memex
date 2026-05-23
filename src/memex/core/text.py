@@ -19,24 +19,30 @@ _CHART_EXTRACTED_RE = re.compile(
     flags=re.DOTALL,
 )
 
+# Matches an orphan `[chart-extracted]` opener with no matching closer
+# until end-of-text. Used by `chart_extracted_spans` as a fall-through:
+# if a chunk got truncated mid-block (or a user-edited vault doc dropped
+# the close tag), the section-splitting filter still needs to know the
+# orphan range so inert chart-figure `# H1` labels don't get treated as
+# document headings. The closer-only regex is a paired safety net.
+_CHART_EXTRACTED_OPEN_RE = re.compile(r"\[chart-extracted\]", flags=re.DOTALL)
+_CHART_EXTRACTED_CLOSE_RE = re.compile(r"\[/chart-extracted\]", flags=re.DOTALL)
+
 
 def strip_chart_extracted_for_index(text: str) -> str:
     """Remove `[chart-extracted]...[/chart-extracted]` blocks.
 
-    Used at two layers (P3.3 v3, v5):
+    Used at the **index layer** (`index.fts_store::upsert`) only: strips
+    the FTS body so chart-extracted dense numerical tokens (years,
+    percentages, raw values) don't inflate BM25 term frequency for
+    unrelated queries.
 
-    1. **Index layer** (`index.fts_store::upsert`): strips the FTS
-       body so chart-extracted dense numerical tokens (years,
-       percentages, raw values) don't inflate BM25 term frequency
-       for unrelated queries.
-
-    2. **Agent layer** (`agents.answering::answer` / `verify`):
-       strips the chunk text BEFORE rendering the answer / verify
-       prompt. Prevents long chart-block headers (DePlot's
-       degenerate "10-bit\\n10-bit\\n..." emissions on
-       niche-domain charts) from eating the prompt's truncate
-       budget and pushing the actual answer table (e.g.,
-       `| FP16 | FMA | 0.5x |`) past the truncation cut-off.
+    Previously also used at the agent layer (P3.3 v3, v5, v6) to keep
+    long chart-block headers from eating the answer/verify prompt's
+    `truncate(N)` budget. The P3.3 v7 fix (commit a9e8326) removed the
+    agent-layer strips: the v7 chart-OCR backend emits compact markdown
+    (~50-150 chars per block) that fits comfortably alongside prose, and
+    the strips were actively masking chart-content answering capability.
 
     The stored chunk text (LanceDB + chunks_meta + vault markdown)
     is preserved unchanged so display / MCP / future trace tooling
@@ -49,7 +55,7 @@ def strip_chart_extracted_for_index(text: str) -> str:
 
 def chart_extracted_spans(text: str) -> list[tuple[int, int]]:
     """Return `(start, end)` char offsets of each
-    `[chart-extracted]...[/chart-extracted]` block.
+    `[chart-extracted]...[/chart-extracted]` block in `text`.
 
     Used by `index.chunker._split_into_sections` so heading-detection
     can skip `# H1` lines that appear INSIDE chart-extracted blocks.
@@ -62,10 +68,32 @@ def chart_extracted_spans(text: str) -> list[tuple[int, int]]:
     architecture figure revealed only the last principle was reaching
     the reranker's top-5.
 
-    Returns the inclusive-exclusive `(start, end)` of each match in
-    `text`. Empty list if no chart blocks. Order-stable.
+    Truncation-tolerant: if a `[chart-extracted]` opener has no matching
+    closer (e.g. mid-chunk truncation, user-edited vault) the orphan
+    span extends to end-of-text. A `[/chart-extracted]` closer with no
+    opener extends from start-of-text to the closer position. Both
+    defensive cases prevent silent regressions of the P3.3 v7 chunker
+    fix the original audit (2026-05-23 post-v7) flagged.
+
+    Returns the inclusive-exclusive `(start, end)` of each span in
+    `text`. Empty list if no chart-block tags present. Order-stable
+    (sorted by start offset).
     """
-    return [(m.start(), m.end()) for m in _CHART_EXTRACTED_RE.finditer(text)]
+    spans: list[tuple[int, int]] = list(
+        (m.start(), m.end()) for m in _CHART_EXTRACTED_RE.finditer(text)
+    )
+    consumed_open: set[int] = {start for start, _ in spans}
+    consumed_close: set[int] = {end for _, end in spans}
+
+    for m in _CHART_EXTRACTED_OPEN_RE.finditer(text):
+        if m.start() not in consumed_open:
+            spans.append((m.start(), len(text)))
+    for m in _CHART_EXTRACTED_CLOSE_RE.finditer(text):
+        if m.end() not in consumed_close:
+            spans.append((0, m.end()))
+
+    spans.sort(key=lambda s: s[0])
+    return spans
 
 
 def is_inside_any_span(offset: int, spans: list[tuple[int, int]]) -> bool:
