@@ -1,0 +1,22 @@
+{
+  "benchmark": "MIRACL-FR-Reranking-benchmark (OrdalieTech, MTEB)",
+  "stack": {
+    "embedder": "google/embeddinggemma-300m",
+    "reranker": "BAAI/bge-reranker-v2-m3"
+  },
+  "n_queries": 343,
+  "dense_only": {
+    "ndcg_at_10": 0.7547464211401242,
+    "mrr_at_10": 0.699500208246564,
+    "map": 0.6425152438688465,
+    "queries": 343,
+    "elapsed_s": 26.418276071548462
+  },
+  "dense_plus_rerank": {
+    "ndcg_at_10": 0.8073183895513552,
+    "mrr_at_10": 0.7847806469526586,
+    "map": 0.7103242338399565,
+    "queries": 343,
+    "elapsed_s": 40.331143856048584
+  }
+}
