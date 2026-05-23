@@ -25,7 +25,20 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
     document_id UNINDEXED,
     document_title UNINDEXED,
     text,
-    tokenize='porter unicode61'
+    -- Multilingual word segmentation via unicode61. `remove_diacritics 2`
+    -- maps accented letters to their base form during BOTH indexing
+    -- and query (FTS5's default mode 1 only strips a small set;
+    -- mode 2 is the modern "strip all diacritics" behaviour). This
+    -- makes `café` and `cafe` interchangeable — a common need when
+    -- French users type queries without accents. Trade-off: drops
+    -- the porter stemmer so English `running` / `runs` / `ran` no
+    -- longer stem-match each other; the dense embedder picks up that
+    -- slack on semantic match anyway, and porter was actively wrong
+    -- on non-English content. Migration: existing vaults need
+    -- `memex reindex --force` to drop the old chunks_fts table —
+    -- FTS5's IF NOT EXISTS silently ignores tokenize changes on an
+    -- already-created table.
+    tokenize='unicode61 remove_diacritics 2'
 );
 
 CREATE TABLE IF NOT EXISTS chunks_meta (

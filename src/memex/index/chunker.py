@@ -28,9 +28,16 @@ from memex.vault.store import VaultDocument
 
 # A heading line: 1–6 hashes, a space, then text.
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
-# Conservative sentence boundary — splits on `.`, `!`, `?` followed by space
-# and uppercase or digit. Markdown's "paragraph" is two newlines.
-_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9])")
+# Conservative sentence boundary — splits on `.`, `!`, `?` followed by
+# space and an uppercase letter or digit. Multilingual: the character
+# class includes Latin-1 uppercase (À-Ö, Ø-Þ) + Œ + Ÿ so French
+# (Élève, Ça, Êtes-vous, Œuvre), German (Ärger, Über), Spanish (Él,
+# Único), Italian, and Portuguese sentence starts are recognised.
+# ASCII A-Z + digit are first in the class for fast-path matching.
+# Markdown's "paragraph" is two newlines.
+_SENTENCE_RE = re.compile(
+    r"(?<=[.!?])\s+(?=[A-Z0-9ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞŒŸ])"
+)
 _PARAGRAPH_RE = re.compile(r"\n\s*\n")
 
 # Re-exported from core/text.py so existing callers keep working
