@@ -1,0 +1,104 @@
+{
+  "_description": "French-language eval corpus — 8 queries against the CR350 'Réseautique et sécurité' course PDF (45 pages, 51 chunks via Docling). Mix mirrors the slide-decks corpus structure: ANS queries with one or more relevant_chunk_ids, REF queries with should_refuse=true and empty relevant_chunk_ids. Diagnostic _-prefixed fields are notes for future audits.",
+  "_doc_id": "5795b16a-pdf-cr350-cours-1",
+  "_query_count": 8,
+  "_mix": {
+    "ans": 5,
+    "ref": 3,
+    "by_answer_type": {
+      "single_fact": 1,
+      "definitional": 2,
+      "listing": 1,
+      "concept": 1,
+      "counterfactual": 3
+    }
+  },
+  "_labelling_rule": "ANS queries: relevant_chunk_ids enumerates every chunk that contains a piece of the literal answer (the agent's citation_precision counts hits against this whitelist). REF queries: relevant_chunk_ids=[] and should_refuse=true — content is intentionally NOT in the corpus.",
+  "_created": "2026-05-22",
+  "_purpose": "Phase 1 of the French support hardening sequence — baseline eval data to A/B prompt changes against. Pinned during the multilingual ship (commit e6f821b).",
+  "queries": [
+    {
+      "qid": "french-course-01",
+      "question": "Qui est le chargé de cours du CR350 ?",
+      "relevant_chunk_ids": [
+        "5795b16a-pdf-cr350-cours-1#45cec0a97e"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "Charles Tounou (from the title-page slide listing 'Chargé de cours : Charles Tounou').",
+      "_answer_type": "single_fact",
+      "_note": "Validated working end-to-end during the multilingual ship; the agent answered with confidence=high and reranker score 0.98 on the title chunk."
+    },
+    {
+      "qid": "french-course-02",
+      "question": "Qu'est-ce qu'un réseau selon le cours CR350 ?",
+      "relevant_chunk_ids": [
+        "5795b16a-pdf-cr350-cours-1#3646a0ca0d"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "Une collection d'entités interconnectées telles que des ordinateurs, serveurs, mainframes, appareils et autres périphériques, capables de communiquer entre eux et de partager des ressources.",
+      "_answer_type": "definitional",
+      "_note": "**THE TEST CASE FOR STEP 2.** Retrieval finds the definition chunk (rerank 0.78), but answer/v1 returned empty claims during validation — model refused conservatively on a multi-sentence French definition under the English prompt. Step 2's answer/v3 (language-mirror directive) should flip this from REF→ANS."
+    },
+    {
+      "qid": "french-course-03",
+      "question": "Quels sont les protocoles sécurisés mentionnés dans le cours ?",
+      "relevant_chunk_ids": [
+        "5795b16a-pdf-cr350-cours-1#e4fd69f614"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "FTP sécurisé, SSH, HTTPS (listed under 'Contrôle et sécurité des flux de données').",
+      "_answer_type": "listing",
+      "_note": "Listing query — the chunk has explicit '- ⚬ FTP sécurisé, SSH, HTTPS, etc.' Tests whether the model emits multiple claims from a single list-shaped chunk."
+    },
+    {
+      "qid": "french-course-04",
+      "question": "Pourquoi ARPANET est-il à l'origine des problèmes de sécurité d'Internet ?",
+      "relevant_chunk_ids": [
+        "5795b16a-pdf-cr350-cours-1#a9c4727e5c"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "ARPANET a privilégié l'établissement de connexions plutôt que la protection des données, créant des vulnérabilités lors du développement en réseau mondial. Les protocoles clés comme TCP/IP manquaient de robustesse en matière de sécurité.",
+      "_answer_type": "multi_chunk_synthesis",
+      "_note": "Multi-sentence answer requiring synthesis from the bullet list on the 'Quel est le problème ?' slide. Tests longer answer construction in French."
+    },
+    {
+      "qid": "french-course-05",
+      "question": "Qu'est-ce que la défense en profondeur en sécurité réseau ?",
+      "relevant_chunk_ids": [
+        "5795b16a-pdf-cr350-cours-1#ad0d2c85af",
+        "5795b16a-pdf-cr350-cours-1#b2aeee8afe"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "Une stratégie qui repose sur plusieurs couches de défense pour protéger les réseaux informatiques (du chunk principal 'Défense en profondeur des réseaux informatiques'). L'application implique d'évaluer les risques et actifs critiques.",
+      "_answer_type": "concept",
+      "_note": "Two relevant chunks: ad0d2c85af defines the concept, b2aeee8afe describes its application. The agent should cite at least one; ideal answer uses both."
+    },
+    {
+      "qid": "french-course-06",
+      "question": "Quel est le coût total du certificat CR350 en dollars ?",
+      "relevant_chunk_ids": [],
+      "should_refuse": true,
+      "_expected_answer": "REFUSE — pricing information is not in the parsed slide deck.",
+      "_answer_type": "counterfactual",
+      "_note": "HARD GATE counterfactual. The slide deck mentions 'Programme des certificats' but no dollar figures, no tuition data. Refusal must be the answer."
+    },
+    {
+      "qid": "french-course-07",
+      "question": "Comment configurer un pare-feu Cisco PIX selon le cours ?",
+      "relevant_chunk_ids": [],
+      "should_refuse": true,
+      "_expected_answer": "REFUSE — the deck discusses firewalls generically (Firewalls under 'Sécurité du périmètre') but never mentions Cisco PIX or any vendor-specific configuration.",
+      "_answer_type": "counterfactual",
+      "_note": "HARD GATE — vendor-specific hallucination bait. The model must not synthesize Cisco PIX details from the generic 'Firewalls' bullet."
+    },
+    {
+      "qid": "french-course-08",
+      "question": "Combien d'étudiants sont inscrits au CR350 cette année ?",
+      "relevant_chunk_ids": [],
+      "should_refuse": true,
+      "_expected_answer": "REFUSE — enrollment numbers are not in the slide deck.",
+      "_answer_type": "counterfactual",
+      "_note": "HARD GATE — administrative-fact counterfactual. The deck has course content, no roster data."
+    }
+  ]
+}

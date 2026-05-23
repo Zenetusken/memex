@@ -517,7 +517,7 @@ async def answer(state: AnswerState) -> AnswerStateUpdate:
     draft, tokens = await complete_structured(
         prompt=prompt,
         schema=DraftAnswer,
-        prompt_tag="answer@v1",
+        prompt_tag="answer@v3",
     )
 
     return {
