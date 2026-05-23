@@ -31,6 +31,17 @@ logger = structlog.get_logger(__name__)
 _client: AsyncOpenAI | None = None
 
 
+class _Unset:
+    """Sentinel for kwargs where `None` is a meaningful value distinct
+    from "use the settings default." Used by `complete_structured`'s
+    `seed` parameter: `None` means "no seed," `_UNSET` means
+    "fall back to `MemexSettings.inference.sampling.seed`."
+    """
+
+
+_UNSET = _Unset()
+
+
 def _inline_refs(schema: dict[str, Any]) -> dict[str, Any]:
     """Inline `$defs`/`$ref` so vLLM's xgrammar backend doesn't silently
     fall back to Outlines on nested pydantic schemas.
@@ -149,11 +160,11 @@ async def complete_structured(
     schema: type[T],
     *,
     model: str | None = None,
-    temperature: float = 0.1,
-    top_p: float = 0.8,
-    presence_penalty: float = 1.0,
-    seed: int | None = 42,
-    max_tokens: int = 1024,
+    temperature: float | None = None,
+    top_p: float | None = None,
+    presence_penalty: float | None = None,
+    seed: int | None | _Unset = _UNSET,
+    max_tokens: int | None = None,
     prompt_tag: str | None = None,
 ) -> tuple[T, int]:
     """Call the orchestrator with grammar-constrained decoding.
@@ -171,31 +182,39 @@ async def complete_structured(
       multi-message form lets vLLM cache the prefix of the system
       block across calls with different user content.
 
-    Sampling defaults follow Qwen team's published non-thinking-mode
-    recommendation, scaled down for eval determinism:
-    - `temperature=0.1` — escapes Qwen-team-cautioned pure greedy
-      (`temperature=0.0` can degrade output quality on Qwen3) without
-      introducing noticeable nondeterminism at this batch size.
-    - `top_p=0.8` — Qwen team's non-thinking-mode default.
-    - `presence_penalty=1.0` — suppresses repetition. Capped at 1.0
-      because AWQ-quantized models are documented to trigger language
-      mixing under `presence_penalty > 1.5` (relevant for our
-      French/Spanish/etc. content).
-    - `seed=42` — reproducibility floor. vLLM 0.21 honors this in
-      OpenAI-compat mode; CUDA-kernel nondeterminism may still
-      introduce ±1 token variance.
+    Sampling defaults come from `MemexSettings.inference.sampling`
+    (`SamplingSettings` in `core/config.py`). The values shipped are
+    Qwen team's published non-thinking-mode recommendation, scaled
+    down for eval determinism. Per-call kwargs override the settings
+    defaults; pass `None` (or omit) to use the settings value.
+
+    `seed` uses a sentinel (`_UNSET`) rather than `None` because
+    `None` is a meaningful value ("no seed; vLLM picks one"). The
+    sentinel means "use the settings default."
 
     `prompt_tag` (e.g. "answer@v1") is forwarded to Langfuse as the
     span name; if absent, the schema class name is used.
     """
+    from memex.core.config import get_settings
+
+    settings = get_settings()
+    sampling = settings.inference.sampling
+
+    # Resolve per-call kwargs against the settings defaults.
+    temperature = temperature if temperature is not None else sampling.temperature
+    top_p = top_p if top_p is not None else sampling.top_p
+    presence_penalty = (
+        presence_penalty if presence_penalty is not None else sampling.presence_penalty
+    )
+    seed_val = sampling.seed if isinstance(seed, _Unset) else seed
+    max_tokens = max_tokens if max_tokens is not None else sampling.max_tokens
+
     client = get_client()
     if model is None:
         # vLLM 0.21+ requires the served model name in chat completions
         # ("default" is no longer accepted as a fallback). The orchestrator
         # string in settings is the same id `vllm serve` was launched with.
-        from memex.core.config import get_settings
-
-        model = get_settings().models.orchestrator
+        model = settings.models.orchestrator
     log = logger.bind(
         prompt_tag=prompt_tag or schema.__name__,
         schema=schema.__name__,
@@ -215,7 +234,7 @@ async def complete_structured(
         temperature=temperature,
         top_p=top_p,
         presence_penalty=presence_penalty,
-        seed=seed,
+        seed=seed_val,
         message_count=len(messages),
     )
 
@@ -232,7 +251,7 @@ async def complete_structured(
             temperature=temperature,
             top_p=top_p,
             presence_penalty=presence_penalty,
-            seed=seed,
+            seed=seed_val,
             max_tokens=max_tokens,
             response_format={
                 "type": "json_schema",

@@ -82,6 +82,33 @@ class HardwareSettings(BaseModel):
     )
 
 
+class SamplingSettings(BaseModel):
+    """Sampling defaults for `complete_structured` — see the Qwen3
+    prompt-engineering research notes
+    (`docs/audits/qwen3_prompt_engineering_2026-05-22.md`).
+
+    These values came out of the published Qwen team guidance for
+    non-thinking-mode Qwen3-8B-AWQ, scaled down for eval determinism:
+    - `temperature=0.1` — escapes Qwen-team-cautioned pure greedy
+      without introducing noticeable nondeterminism at this batch size.
+    - `top_p=0.8` — Qwen team's non-thinking-mode default.
+    - `presence_penalty=1.0` — suppresses repetition. Capped at 1.0
+      because AWQ-quantized models trigger language mixing under
+      `presence_penalty > 1.5` (relevant for multilingual content).
+    - `seed=42` — reproducibility floor across runs.
+    - `max_tokens=1024` — Path C tightening; comfortably above the
+      ~940-token worst-case `DraftAnswer` schema output.
+
+    Per-call kwargs to `complete_structured` still override these.
+    """
+
+    temperature: float = Field(default=0.1, ge=0.0, le=2.0)
+    top_p: float = Field(default=0.8, ge=0.0, le=1.0)
+    presence_penalty: float = Field(default=1.0, ge=-2.0, le=2.0)
+    seed: int | None = 42
+    max_tokens: int = Field(default=1024, ge=1)
+
+
 class InferenceSettings(BaseModel):
     """vLLM endpoint — see ADR-0001."""
 
@@ -93,6 +120,9 @@ class InferenceSettings(BaseModel):
     # `MEMEX_INFERENCE__SERVE_SCRIPT=/path/to/serve-vllm.sh`.
     serve_script: Path = Field(default=Path("scripts/serve-vllm.sh"))
     daemon_startup_timeout_s: int = Field(default=120, ge=10)
+    # Sampling defaults for `complete_structured`. Override via
+    # `MEMEX_INFERENCE__SAMPLING__TEMPERATURE=0.0` etc.
+    sampling: SamplingSettings = SamplingSettings()
 
 
 class IngestSettings(BaseModel):
