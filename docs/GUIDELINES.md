@@ -181,7 +181,7 @@ class ModelSettings(BaseModel):
     vlm_quantization: Literal["awq_int4", "bf16"] = "awq_int4"
     embedder: str = "google/embeddinggemma-300m"
     reranker: str = "BAAI/bge-reranker-v2-m3"
-    chart_ocr: str = "google/deplot"
+    chart_ocr: str = "nvidia/NVIDIA-Nemotron-Parse-v1.2"
     reranker_backend: Literal["cross_encoder", "qwen3"] = "cross_encoder"
 
 class HardwareSettings(BaseModel):
@@ -213,10 +213,10 @@ The reference target is an RTX 4070 (12GB VRAM) with 32GB system RAM. Every mode
 | EmbeddingGemma 300M | Embeddings | bf16 | ~0.6 GB | Always (registry) |
 | bge-reranker-v2-m3 | Reranking | bf16 | ~1.0 GB | Always (registry) |
 | Qwen2.5-VL 7B AWQ | Page transcription fallback | AWQ-Int4 + bf16 activations | ~5.0 GB | Lazy + `disable_vlm=True` by default on 12 GB |
-| DePlot | Chart-OCR over Docling figures | bf16 | ~2.3 GB | Lazy + opt-in via `MEMEX_PARSE__DISABLE_CHART_OCR=false` |
+| Nemotron-Parse-v1.2 | Chart-OCR over Docling figures (default since 2026-05-23) | bf16 | ~3.0 GB | Lazy + **enabled by default**; opt-out via `MEMEX_PARSE__DISABLE_CHART_OCR=true` |
 | KV cache + vLLM overhead | — | — | ~2.0 GB | — |
 
-Steady-state on 12 GB tier (vLLM + embedder + reranker + KV cache): ~9 GB. **VLM + chart-OCR are both disabled by default** — they live behind opt-in env vars and use the pause-vLLM strategy when activated during parse (see P3.3 in ROADMAP for the trade-off). On the 8 GB tier (P4.2), `Qwen3-4B-AWQ + gpu_memory_utilization=0.50` ships as the documented profile in `docs/deploy/hardware-tiers.md`.
+Steady-state on 12 GB tier (vLLM + embedder + reranker + KV cache): ~9 GB. **VLM is disabled by default; chart-OCR is enabled by default** (per the 2026-05-23 P3.3-c shootout — Nemotron-Parse-v1.2 achieves no prose regression). Both use the pause-vLLM strategy when activated during parse (see P3.3 in ROADMAP for the trade-off, and `docs/audits/chart_ocr_shootout_2026-05-23.md` for the backend verdict). On the 8 GB tier (P4.2), `Qwen3-4B-AWQ + gpu_memory_utilization=0.50` ships as the documented profile in `docs/deploy/hardware-tiers.md`. On the reference 12 GB rig with chart-OCR enabled, `MEMEX_VLLM_GPU_FRACTION=0.68` is recommended.
 
 ### VRAM management
 
