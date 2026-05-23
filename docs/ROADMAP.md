@@ -1,6 +1,6 @@
 # Memex Roadmap
 
-**Last updated:** 2026-05-22 (phase wrap — P1 backlog + P3.2 daemon stack + P2.1 infra + P0 rigorous baseline + slide-deck Docling routing + **P2.4 refusal calibration** + **xgrammar empty-draft short-circuit** + **P0 corpus extension to 30 queries** + **retrieval-truncate-budget retune** + **P2.1 verdict (cross_encoder wins)** + **P4.2 smaller-orchestrator tier** + **P3.3 chart-OCR v1-v6** + **Filler N1-N9 complete** + **defensive schema hardening** + **eval label refresh** all shipped. **P2.2 Granite 4.1-8B-FP8 attempted, vLLM-blocked**. **Browser-OCR research turn**: Tesseract.js v7 / Surya-via-Pyodide / InternVL3-9B-via-ONNX-Web all rejected. 105 commits on `main`, 205/205 tests green. **Eval label refresh** (commit 9cea471): `queries.json` `relevant_chunk_ids` were stale from PyMuPDF era → all `mcp_ans` reads 0.0 since Docling routing changed chunk_ids. Refreshed all 17 ANS-query labels by searching the current FTS body with distinctive answer tokens. **mcp_ans restored: 0.0 → 1.00**. HARD GATES held throughout (refusal_cf=1.0, hallucinations=0, answered_count=9 within baseline mean ±σ). Next pickup: P0 multi-doc (needs source material) or P3.3 follow-up paths (all external-blocked).)
+**Last updated:** 2026-05-22 — 106 commits on `main`, 205/205 tests green. Foundation arc complete (P0–P4 phases + P1.x backlog + P2.1/P2.4/P3.2/P4.2 + Filler N1–N9 + P3.3 chart-OCR v1–v6 + defensive schema hardening + eval label refresh). Eval suite stable on Qwen3-4B-AWQ orchestrator: baseline `answered_count` 9.3 ± 0.5, `refusal_cf` 1.00, hallucinations 0, `mcp_ans` 1.00. **External-blocked items**: P0 multi-doc (needs source material), P2.2 Granite (vLLM hybrid-arch hang), P2.3 VLM swap (needs scan corpus), P3.3 follow-ups a/b/c (autoawq compat / ADR amendment / chart-heavy corpus).
 
 The blueprint in [`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) is the architectural design — module signatures, cross-cutting concerns, build order. This document is the **operational view**: what is shipped today, what is measured, and what comes next.
 
@@ -33,9 +33,9 @@ The blueprint in [`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) is the archi
 | **P2.4 — Agent refusal calibration** | `prompts/answer/v2.md` with literal-presence rule | ✅ **Shipped + live-verified** (2026-05-21) — Q11 (FP128) + Q12 (FP4) hallucinations both eliminated; `refusal_rate_cf` 0.75 → 1.0; `mcp_ans` 0.33 → 0.67. **Q7 regression recovered** as a side effect of the retrieval-truncate-budget retune that shipped later the same day. |
 | **Retrieval truncate-budget retune** | `truncate(700)→1800` in prompts; `MEMEX_RERANK_TOP_K 10→5`; `max_tokens 1024→640`; `max-model-len 4096→6144` | ✅ **Shipped + live-verified** (2026-05-21) — three legitimate REF→ANS flips (Q2, Q7-recovered, Q20). Diagnosed by direct instrumentation: agent was operating on ~32% of every chunk's content because the answer prompt clipped chunks at 700 chars while median chunk is 2172 chars. |
 
-**File count:** 84 Python files in `src/memex/` + `tests/` + `scripts/`, all parse-clean. 7 ADRs. 8 audit reports under `docs/audits/`. 86 commits on `main` (public at `github.com/Zenetusken/memex`); the canonical count is `git rev-list --count main`.
+**File count:** 86 Python files in `src/memex/` + `tests/` + `scripts/`, all parse-clean. 7 ADRs. 8 audit reports under `docs/audits/`. 106 commits on `main` (public at `github.com/Zenetusken/memex`); the canonical count is `git rev-list --count main`.
 
-**Test suite:** 147/147 green on the reference rig. Linux + pyseccomp; 5 tests skip on Windows.
+**Test suite:** 205/205 green on the reference rig. Linux + pyseccomp; 5 tests skip on Windows.
 
 ---
 
@@ -101,33 +101,23 @@ PDFs now run through a tiered classifier before Docling. Producer metadata is th
 
 ## What's next — prioritised
 
-**Phase wrap, 2026-05-21.** This session closes a long stretch of deployment + evaluation + parser-quality + agent-prompt work:
+**Foundation arc complete (2026-05-22).** Phases 0–4 + P1.x backlog + P2.1/P2.4/P3.2/P4.2 verdicts + chart-OCR (v1–v6, opt-in) + Filler N1–N9 + defensive schema hardening + eval label refresh all shipped. Per-item ship summaries live in the §"Recently shipped this phase" subsection further down + the §"Status at a glance" table above.
 
-- **P1 backlog** shipped (PyMuPDF pre-filter, chunker tuning, MCP HTTP auth, annotation UI 409, cross-process vault lock).
-- **P2.1 infra** shipped (Qwen3-Reranker backend behind a feature flag; honest verdict on the memory footprint).
-- **P3.2 daemon stack** shipped end-to-end (vLLM + web + MCP + watcher + vault-backup timer) with all four FU3.2.* follow-ups (Type=notify gating, `memex upgrade` CLI, vault-backup timer, FastMCP startup warning fix).
-- **P0 eval corpus** shipped its first rigorous baseline (15 queries against the GTC 2024 CUDA deck; `top_k ∈ {4,6,8}` sweep; `mcp_answered_only ≈ 0.5–0.6`; `refusal_rate_cf ≈ 0.75`).
-- **Parser quality investigation** delivered an evidence-backed verdict — Docling beats PyMuPDF on slide decks (+50% legitimate answer rate) — and **shipped the routing override** as Tier 0.5 of the classifier.
-- **P2.4 agent refusal calibration** shipped as `prompts/answer/v2.md` (literal-presence rule). Eliminated both near-miss hallucinations (Q11 FP128, Q12 FP4); `refusal_rate_cf 0.75 → 1.0`; `mcp_answered_only 0.33 → 0.67`. Cost: one regression on Q7 (5-bit/10-bit half — diagram grounding became too strict under the new rule). The follow-up `verify_grounding/v2` xgrammar crash was diagnosed and fixed: root cause was empty-draft renders to verify under unbounded `list[int]` schema (greedy decoding ran away into `[0, 1, 2, ...]+`); fix is an empty-draft short-circuit in the verify node. With the fix, `verify_grounding/v2` ships safely. Q7 regression is independent (verify-grounding can't confidently land claims on the precision-bit diagram even under v2) and expected to self-resolve under Docling re-ingest.
-
-**Beyond this phase.** The Memex pipeline is now end-to-end shippable, observable, eval-instrumented, and refusal-calibrated. Remaining work falls into five tiers, ranked by pickability and impact. **The single most-impactful pending work item is P0 corpus extension** — every P2.x quality A/B verdict (reranker, orchestrator, VLM) is gated on it, and even one category bumped from 15 → 30+ queries unlocks statistically-meaningful comparisons.
+**Beyond this phase.** The pipeline is end-to-end shippable, observable, eval-instrumented, and refusal-calibrated. Remaining work falls into five tiers, ranked by pickability and impact. **The single most-impactful pending work item is P0 multi-doc/multi-category extension** — every cross-corpus claim depends on it, and current verdicts are all sourced from one document (CUDA deck) in one category (slide-decks).
 
 ### Tier 1 — pickable now (no corpus / infra dependency)
 
-These items have everything they need to be picked up immediately and shipped in one session. P2.4 (the previous tier-1 pickup) is shipped; full ship narrative is in the status table above. Open items:
-
-- ~~**xgrammar-interaction investigation**~~ — ✅ **Diagnosed + fixed 2026-05-21.** Root cause was empty-draft renders to verify under unbounded `list[int]` schema; greedy decoding ran away. Fix: empty-draft short-circuit in `agents/answering.py::verify`. Insight for P3.3: any structured output with unbounded array fields (Pix2Struct's tables, ChartQA's row sequences) needs an EMPTY-INPUT short-circuit OR a `max_length` constraint on the array; xgrammar will happily emit forever otherwise.
-- **Filler N1–N8.** Audit-surfaced minor hardening — see the §Filler list at the end of this section. Each is small, atomic, and pickable in <1 hour. Useful when the user wants something contained while waiting on a bigger pickup.
+All Tier-1 items shipped: xgrammar empty-draft short-circuit, Filler N1–N9 audit-nit backlog, defensive schema hardening, eval label refresh. Pickable when a new contained-scope task lands.
 
 ### Tier 2 — multi-session foundational (unblocks downstream verdicts)
 
 These need session-spanning investment but their completion unlocks several downstream items in tier 3.
 
-- **P0 corpus extension** (curator-time, multi-session). The single most-impactful pending work item; gates P2.1, P2.2, P2.3, and the P1.6 chunker tuning verdict.
-  1. Extend `slide-decks` to 30–50 queries across 3–5 documents.
+- **P0 corpus extension** (curator-time, multi-session). The single most-impactful pending work item; would lift multi-doc generalisability. **Single-doc 30-query extension within slide-decks ✅ shipped 2026-05-21** (n=17 answerable); multi-doc + multi-category remains pending. Sub-goals:
+  1. Extend `slide-decks` to 3–5 documents (within-category variance).
   2. Bootstrap each of the other 6 categories from `docs/eval-corpus-plan.md`: modern-printed, scientific-papers, technical-docs, historical-scans, handwritten, forms.
   3. Wire CER/WER/structural-F1 from `src/memex/eval/scoring.py` into `runner.py`; needs per-doc hand-curated reference markdown (Phase 2 of the spec).
-- **P3.3 — Chart-data extraction (chart-OCR over Docling figures).** Surfaced by the parser investigation: query 04 ("transistor density 2004–2022 per TSMC chart") stayed refused under both PyMuPDF and Docling, because the year-by-year numerics live inside chart imagery that Docling represents as `<!-- image -->` placeholders. A DocVQA-style chart-OCR pass over those figures (input: Docling-tagged figure crops; output: a structured GFM table or key:value list appended to the parent chunk's markdown) would extract them. Candidate models: ChartQA-style finetunes, DePlot, Pix2Struct. New parse-stage post-processor (sandbox-able alongside the existing Docling worker); new VRAM footprint to budget. Multi-session: model selection + load + integration + eval pass.
+- ~~**P3.3 — Chart-data extraction**~~ ✅ **Investigation closed 2026-05-22 with mixed verdict**. 6 implementation iterations spanning 5+ engineering sessions. Origin: queries Q4/Q16/Q21 ("transistor density 2004–2022 per TSMC chart" etc.) referenced numerics living inside chart imagery that Docling represents as `<!-- image -->` placeholders. **Pipeline shipped**: Docling `DocumentPictureClassifier` pre-filter (245 → 63 candidate figures on the canonical CUDA deck) + pause-vLLM during parse + DePlot OCR + chart-block-aware chunker + FTS-side strip + answer/verify/assess prompt-render strip. **Multi-run variance** (3 runs each, Qwen3-4B-AWQ): baseline 10/9/9 ANS (mean 9.3), v6 chart-OCR ON 8/8/8 (deterministic). HARD GATES (`refusal_cf=1.00`, hallucinations=0) preserved across all 6 runs. **Net trade-off** on this prose-heavy corpus: ~1.3 ANS below baseline; +Q2 gained as a retrieval-signal bonus, −Q21 is the irreducible chart-numeric loss (stripping chart blocks from the agent's prompt view prevents truncate from eating answers but also removes the only chart-numeric content the agent reads). Default `MEMEX_PARSE__DISABLE_CHART_OCR=True`; opt-in via env var. Full session-by-session detail in `~/.claude/projects/.../memory/p33_tracker.md`. **Three follow-up paths** queued: (a) Qwen2.5-VL retry (needs autoawq / transformers compat), (b) OneChart (needs ADR-0006 amendment for `trust_remote_code`), (c) validation on a chart-heavy corpus where the trade-off would flip positive.
 
 ### Tier 3 — eval-gated stack swaps (unlocked by Tier 2 P0 extension)
 
@@ -151,30 +141,31 @@ These are ready to run once the corpus has the depth to discriminate between can
 
 ### Browser-OCR research turn 2026-05-21 — three candidates rejected
 
-Three parallel research subagents evaluated browser-side OCR/VLM technologies the user raised. **All three rejected** for Memex's current needs (no movement on chart-OCR; orthogonal to the actual problem):
+Three parallel research subagents evaluated browser-side OCR/VLM technologies as candidates for the chart-OCR problem. All three rejected; orthogonal to the actual problem.
 
-- **Tesseract.js** (current v7.0.0, Apache 2.0): mature, ~15–25 MB first-load, pure text OCR with PSM modes. **Doesn't address chart-OCR** (same axis-label weakness as DePlot per ChartOCR/GenPlot/Scatteract literature); Docling already calls Tesseract server-side. **Niche utility**: client-side image-paste OCR UX only. **Verdict**: defer.
-- **Surya OCR via Pyodide** (Surya 0.17.1 + Pyodide 0.29.4): **Pyodide path fundamentally blocked** — PyTorch on WASM has no working port and no announced roadmap (`pyodide/pyodide#1625` open since June 2021). License: Surya GPL-3.0 + model weights under custom Open RAIL-M. **Verdict**: drop Pyodide route; consider server-side Surya only if Docling becomes a bottleneck AND GPL is acceptable.
-- **InternVL3-9B via ONNX Runtime Web**: **infeasible**. No ONNX export of 8B+ InternVL3 exists; 9B q4 (~4.5 GB) exceeds ONNX Runtime Web's 4 GB WASM ceiling; Safari Metal caps at 256 MB on older iPhones; cold-start would be 5-6 GB download. Qwen2.5-VL-7B-AWQ already in our stack matches/exceeds InternVL3-9B on DocVQA (95.7 vs 92.7) and OCRBench (88.8 vs ~85) at 5 GB CUDA. **Verdict**: drop.
+- **Tesseract.js** (current v7.0.0, Apache 2.0): mature, ~15–25 MB first-load, pure text OCR. Same axis-label weakness as DePlot per ChartOCR / GenPlot / Scatteract literature; Docling already calls Tesseract server-side. Niche utility: client-side image-paste OCR UX only.
+- **Surya OCR via Pyodide** (Surya 0.17.1 + Pyodide 0.29.4): Pyodide path fundamentally blocked — PyTorch on WASM has no working port and no announced roadmap (`pyodide/pyodide#1625` open since June 2021). License: Surya GPL-3.0 + model weights under custom Open RAIL-M.
+- **InternVL3-9B via ONNX Runtime Web**: infeasible. No ONNX export of 8B+ InternVL3 exists; 9B q4 (~4.5 GB) exceeds ORT-Web's 4 GB WASM ceiling. Qwen2.5-VL-7B-AWQ already in our stack matches/exceeds on DocVQA (95.7 vs 92.7) and OCRBench (88.8 vs ~85) at 5 GB CUDA.
 
-The three honest leverage points for chart-OCR remain in `p33_tracker.md`: (a) OneChart with `trust_remote_code` ADR amendment, (b) Qwen2.5-VL with autoawq/transformers compat fix, (c) retrieval-layer fix for why chart-extracted blocks perturb rankings (the −6 prose regression cause).
+### Recently shipped this phase (compressed)
 
-### Recently shipped this phase (foundation cleanup)
-
-- ✅ **P0 corpus extension to 30 queries** — n=17 answerable queries gives Tier-3 A/Bs statistical signal.
-- ✅ **xgrammar empty-draft short-circuit** — diagnosed + fixed; verify node bypasses model call when draft is empty; insight saved for P3.3 (structured outputs with unbounded array fields need explicit empty-input handling).
-- ✅ **Retrieval truncate-budget retune** — root cause was content-visibility; bumped truncate 700→1800 in prompts, top_k 10→5, max_tokens 1024→640, vLLM max-model-len 4096→6144. Three legitimate REF→ANS flips (Q2, Q7-recovered, Q20); zero new hallucinations.
-- ✅ **P2.1 Qwen3-Reranker quality A/B** — resolved at the 4B stack: cross_encoder wins clearly; default stays unchanged.
-- ✅ **P4.2 smaller-orchestrator tier** — Qwen3-4B-AWQ at gpu_fraction=0.50 ships as the 8 GB tier; eval-verified HARD GATES; full env-var matrix at `docs/deploy/hardware-tiers.md`.
+- ✅ **P0 30-query corpus + label refresh** — n=17 answerable; relabel 2026-05-22 restored `mcp_ans` from 0.0 → 1.0 after the Docling routing change orphaned the old PyMuPDF chunk_ids.
+- ✅ **xgrammar empty-draft short-circuit** — verify node bypasses model call on empty draft.
+- ✅ **Retrieval truncate-budget retune** — `truncate 700→1800`, `top_k 10→5`, `max_tokens 1024→640`, `max-model-len 4096→6144`. Three legitimate REF→ANS flips.
+- ✅ **P2.1 Qwen3-Reranker quality A/B** — cross_encoder wins clearly at the 4B stack; default unchanged.
+- ✅ **P4.2 smaller-orchestrator tier** — `Qwen3-4B-AWQ + gpu_fraction=0.50` ships as the 8 GB tier; full env-var matrix at `docs/deploy/hardware-tiers.md`.
+- ✅ **P3.3 chart-OCR v1–v6** — pipeline shipped opt-in; see Tier-2 entry above for the closed mixed-verdict narrative + p33_tracker.md for session-by-session detail.
+- ✅ **Filler N1–N9 audit-nit backlog** — closed; per-item one-liners in the §Filler section below.
+- ✅ **Defensive schema hardening** — bounded 5 LLM-emit `str` fields + `DraftAnswer.claims` list cap so xgrammar enforces emission limits at the grammar level. Same pattern as the v6 `SufficiencyAssessment.reason` bound that fixed the counterfactual-query crash.
 
 ### Next pickup — ranked by impact × feasibility
 
-1. ~~**🏗️ P3.3 chart-OCR pass over Docling figures**~~ — ✅ **Infrastructure shipped 2026-05-21 (mixed verdict; default OFF)**. 5 + 3 sessions total. Layered defense (pre-filter via Docling's built-in `DocumentPictureClassifier` + heuristic cleanup of DePlot output) progressively recovered 1→2→4 of the 9 baseline-answered queries. HARD GATES preserved at every stage (`refusal_cf=1.0`, hallucinations=0). **But chart-OCR enrichment shifts retrieval rankings**: +1 chart-numeric query gained (Q21 `-minimal` flag overhead) but −6 prose queries regressed (chart-extracted blocks outrank the prose-bearing chunks for unrelated queries). Net −5 ANS on this prose-heavy corpus; would likely flip positive on chart-heavy corpora (dashboards, scientific figures). Default `MEMEX_PARSE__DISABLE_CHART_OCR=True`; opt-in via env var. Three follow-up paths remain queued in `p33_tracker.md`: (a) autoawq/transformers compat → Qwen2.5-VL retry, (b) ADR amendment for `trust_remote_code` → OneChart retry, (c) understanding why chart-extracted blocks perturb retrieval (per-chunk weighting or de-embedding the chart annotations).
-2. **🎯 P0 corpus extension — multi-doc / multi-category** (Tier 2, multi-session). Within-category variance (3-5 slide decks) AND breadth across the other 6 categories. The current P4.2 + P2.1 verdicts are sourced from one corpus and one document; multi-doc would test generalisability.
-3. ~~**🧰 Filler N1-N9**~~ ✅ all shipped 2026-05-21 — the audit-nit backlog is closed. See the §Filler list below for per-item summaries.
-4. **🪜 P2.2** (Granite vs Qwen3 at 8B orchestrator level) and **P2.3** (Qwen3-VL vs Qwen2.5-VL VLM swap). Single-session each; both should now respect the bounded-schema + KV-cache-dtype configurability that P4.2 shipped.
+1. **🎯 P0 corpus extension — multi-doc / multi-category** (Tier 2, multi-session). The single biggest pending validation: all current quality verdicts come from one document. **Needs user-provided source material** — not autonomously executable.
+2. **🔧 P3.3 follow-up paths** — three available unblock paths in `p33_tracker.md`. All external-blocked: (a) autoawq / transformers compat → Qwen2.5-VL retry; (b) ADR-0006 amendment → OneChart retry; (c) chart-heavy corpus for the trade-off to flip positive.
+3. **🪜 P2.2 Granite 4.1-8B vs Qwen3-8B** — vLLM-blocked; unblocks on vLLM 0.22+ hybrid-arch support OR Granite GGUF variant OR fallback to Granite 3.x.
+4. **🪜 P2.3 Qwen3-VL vs Qwen2.5-VL VLM swap** — eval-gated; needs a scan-style document corpus to actually exercise the VLM path.
 
-Items below (P3.1 benchmark CI / P4.1 wikilink anchors / P4.3 trace retention) stay queued; pickup needs an external trigger (GPU runner commit, real cross-doc citation, Langfuse self-host).
+Items below (P3.1 benchmark CI / P4.1 wikilink anchors / P4.3 trace retention / P4.4 Dynamic VRAM Manager) stay queued; pickup needs an external trigger (GPU runner, real cross-doc citation, Langfuse self-host, forcing function).
 
 ---
 
@@ -390,7 +381,7 @@ Detailed per-phase log lives in git history + `docs/audits/`. The compressed ver
 - **FU3.2.1 — `Type=notify` readiness gate for vLLM** (2026-05-21): `scripts/serve-vllm.sh` gained a backgrounded sidecar that polls `/v1/models` and calls `systemd-notify --ready --status="…"` on the first 2xx; `memex-vllm.service` switched from `Type=simple` to `Type=notify` + `NotifyAccess=all`. `systemctl --user start memex-vllm` now blocks until vLLM is genuinely serving (~31 s measured), so `After=memex-vllm.service` on downstream units (web, MCP, watcher) is a real readiness gate. Live-verified: full-stack cold boot returned after 32 s with **zero Connection-refused logs** in any downstream unit's journal — and a watcher reaction triggered immediately afterward fired clean `extract_entities@v1` + `extract_citations@v1` model calls against vLLM. The sidecar no-ops when `$NOTIFY_SOCKET` is unset, so Pattern B (manual) and Pattern C (`memex daemon start`) are unaffected.
 - **P3.2 — Daemon templates** (2026-05-21): three waves. (1) vLLM unit + plist + deploy guides. (2) `memex-web.service` + `memex-mcp.service` (+ matching plists/env) so the full stack boots together. (3) `memex-watch.service` (+ plist + env) for the vault file-watcher that re-enriches + re-indexes on canonical-markdown edits. Web + MCP + watcher all carry soft `Wants=memex-vllm.service` — they cluster but degrade gracefully if vLLM is down (search/get_document/list_documents work LLM-less; only `/ask` and enrich need vLLM). The wave-3 live verification was the most thorough: appended a line to the canonical CUDA-deck markdown → watcher logged `watcher.edit_confirmed` → 32 chunks went to enrich → vLLM was offline (cleanup state) so 32× `enrich.chunk_failed` → `enrich.done chunk_failures: 32` → watcher kept running → `index.done added: 1 deleted: 1 unchanged: 30 partial: true` (partial re-index isolated the changed chunk). Restoring the file fired another correct reaction. Two unit-template bugs caught during verification (StartLimitIntervalSec in `[Service]` instead of `[Unit]`, inline `#` comments on `ProtectHome=` line) — both fixed across all four units. No code change.
 
-For the full per-commit log: `git log --oneline` (86 commits at session close, 2026-05-21; the up-to-date number is `git rev-list --count main`).
+For the full per-commit log: `git log --oneline` (106 commits at session close, 2026-05-22; the up-to-date number is `git rev-list --count main`).
 
 ---
 
