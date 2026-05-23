@@ -54,7 +54,6 @@ from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, Field, create_model
 
 from memex.core.errors import AnswerStateInvariantError
-from memex.core.text import strip_chart_extracted_for_index
 from memex.core.types import Chunk
 from memex.models.client import complete_structured
 from memex.observability.tracing import (
@@ -435,22 +434,19 @@ async def assess(state: AnswerState) -> AnswerStateUpdate:
             "nodes_traversed": state.nodes_traversed + 1,
         }
 
-    # P3.3 v6 (audit 2026-05-22): the assess prompt has the same
-    # `truncate(1200)` interaction with chart-extracted blocks as
-    # the answer prompt. If chart noise eats the truncate budget,
-    # the assess model only sees chart noise and can return
-    # `sufficient: false` because it never reaches the prose +
-    # Docling tables in the chunk. Strip the chart blocks here too
-    # so all three prompt stages (assess / answer / verify) see the
-    # same content view.
-    stripped_chunks_for_assess = [
-        c.model_copy(update={"text": strip_chart_extracted_for_index(c.text)})
-        for c in state.reranked
-    ]
+    # P3.3 v7 (2026-05-23 force-docling A/B trace): keep
+    # `[chart-extracted]` blocks visible to the assessor. The v3-v6
+    # defenses stripped them to prevent verbose LaTeX from eating
+    # the `truncate(1200)` budget; the v7 chart-OCR backend emits
+    # compact markdown tables / key-value bullets (~50-150 chars per
+    # block) which fit within the truncate budget alongside prose.
+    # Stripping was masking the chart-OCR upside on chart-content
+    # questions (the right chunk reaches rank-1 then gets blanked
+    # before the LLM sees it).
     prompt = render_prompt(
         "assess_sufficiency",
         query=state.query,
-        chunks=stripped_chunks_for_assess,
+        chunks=state.reranked,
     )
     sufficiency, tokens = await complete_structured(
         prompt=prompt,
@@ -498,26 +494,15 @@ async def answer(state: AnswerState) -> AnswerStateUpdate:
                 "Drop or rephrase any claim that goes beyond what the chunks state."
             )
 
-    # P3.3 v5 (audit 2026-05-22 trace): strip `[chart-extracted]`
-    # blocks from the chunk text before rendering the prompt.
-    # Rationale: the v3 FTS-side strip prevented BM25 perturbation
-    # but the chunks the agent reads STILL have chart blocks
-    # (LanceDB stored full text + RRF preserves dense chunks first).
-    # The truncate(1800) filter in the prompt template was getting
-    # eaten by a chart block at the TOP of the chunk, pushing the
-    # actual answer table (`| FP16 | FMA | 0.5x |`) past the
-    # truncation cut-off. Stripping at prompt-render time keeps the
-    # chunk's stored text intact (display, MCP UX, embedding signal)
-    # while letting the answer LLM see the prose + Docling tables
-    # the agent actually needs.
-    stripped_chunks = [
-        c.model_copy(update={"text": strip_chart_extracted_for_index(c.text)})
-        for c in state.reranked
-    ]
+    # P3.3 v7 (2026-05-23): keep `[chart-extracted]` blocks visible
+    # to the answer LLM. See assess() above for the rationale. The
+    # markdown-table emission from chart_ocr_backend._latex_tabular_
+    # to_markdown + _split_label_number_cells keeps chart blocks
+    # compact enough to live alongside prose within truncate(1800).
     messages = render_messages(
         "answer",
         query=state.query,
-        chunks=stripped_chunks,
+        chunks=state.reranked,
         feedback=feedback,
     )
     draft, tokens = await complete_structured(
@@ -575,17 +560,11 @@ async def verify(state: AnswerState) -> AnswerStateUpdate:
             "nodes_traversed": state.nodes_traversed + 1,
         }
 
-    # P3.3 v5: same strip as the answer node — the verify prompt's
-    # literal-presence check needs to see the same chunk text the
-    # answer model used. Otherwise the verifier might reject a
-    # legitimate claim because the chart block ate the truncate
-    # budget and the actual support text is past the cut-off.
-    chunk_by_id = {
-        c.chunk_id: c.model_copy(
-            update={"text": strip_chart_extracted_for_index(c.text)}
-        )
-        for c in state.reranked
-    }
+    # P3.3 v7 (2026-05-23): same as assess()/answer() — preserve
+    # chart-extracted blocks in the verifier's view so chart-content
+    # citations are checkable. The compact markdown emission means
+    # chart blocks no longer eat the truncate budget.
+    chunk_by_id = {c.chunk_id: c for c in state.reranked}
 
     prompt = render_prompt(
         "verify_grounding",

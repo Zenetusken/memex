@@ -1,11 +1,13 @@
 {
   "_description": "Hand-labelled eval corpus for the Tableau 'Which Chart or Graph Is Right For You?' tutorial PDF. 18-page Adobe-InDesign-produced doc that routed via PyMuPDF (Tier 1.A high confidence, born-digital) \u2014 chart-OCR was NOT applied. Tests prose-retrieval on a chart-knowledge-tutorial domain.",
   "_doc_id": "1797d794-which-chart-or-graph-is-right-for-you",
-  "_query_count": 7,
+  "_query_count": 9,
   "_mix": {
-    "ans": 5,
-    "ref": 2
+    "ans": 7,
+    "ref": 2,
+    "chart_targeted": 2
   },
+  "_chart_targeted_note": "Queries 08-09 target content that exists ONLY in chart-extracted markdown blocks (Gantt chart project status figure). Used for A/B-testing chart-OCR's net upside on chart-content questions.",
   "_labelling_rule": "ANS queries: _anchor_phrase = distinctive substring from the chunk with the answer; resolved via scripts/extend_corpus.py resolve. REF queries: should_refuse=true; relevant_chunk_ids=[].",
   "_created": "2026-05-23",
   "_purpose": "Third corpus for the eval matrix (after slide-decks + french-course + annual-report). Validates the scaffolding workflow on a real chart-tutorial PDF and tests prose-retrieval over chart-knowledge content.",
@@ -19,7 +21,7 @@
       "_note": "Author attribution from the title page.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "1797d794-which-chart-or-graph-is-right-for-you#2f6d2b49f9"
+        "1797d794-which-chart-or-graph-is-right-for-you#efd8eb8982"
       ]
     },
     {
@@ -31,7 +33,7 @@
       "_note": "Concept question \u2014 tests prose retrieval on a bullet-list usage section.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "1797d794-which-chart-or-graph-is-right-for-you#838c33c96c"
+        "1797d794-which-chart-or-graph-is-right-for-you#298fcbe8a4"
       ]
     },
     {
@@ -43,7 +45,7 @@
       "_note": "Critical analysis from the pie chart section.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "1797d794-which-chart-or-graph-is-right-for-you#cb9facc97a"
+        "1797d794-which-chart-or-graph-is-right-for-you#6dc5690cb7"
       ]
     },
     {
@@ -55,7 +57,7 @@
       "_note": "Tests a specific chart-type concept; should pull from the bar-chart tips section.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "1797d794-which-chart-or-graph-is-right-for-you#838c33c96c"
+        "1797d794-which-chart-or-graph-is-right-for-you#298fcbe8a4"
       ]
     },
     {
@@ -67,7 +69,7 @@
       "_note": "Tests the bar-chart + map combination guidance.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "1797d794-which-chart-or-graph-is-right-for-you#838c33c96c"
+        "1797d794-which-chart-or-graph-is-right-for-you#298fcbe8a4"
       ]
     },
     {
@@ -89,7 +91,27 @@
       "_note": "HARD GATE refusal. Out-of-scope chart types. Tests the agent's not-in-corpus discipline.",
       "should_refuse": true,
       "relevant_chunk_ids": []
+    },
+    {
+      "qid": "chart-types-08",
+      "question": "In the Gantt chart project status example shown in the paper, how many projects are 'On Time' versus 'Late'?",
+      "_anchor_phrase": "On Time 22",
+      "_expected_answer": "22 projects on time, 8 late (from the Gantt chart example figure).",
+      "_answer_type": "chart_content",
+      "_note": "CHART-TARGETED: content exists ONLY in the chart-extracted block of the Gantt chart figure ('On Time 22 ... Late 8'). Under PyMuPDF, the figure is not OCR'd so the agent should refuse. Under Docling+chart-OCR it should answer. Anchor unresolvable via FTS because chart-extracted blocks are stripped from BM25 (P3.3-v3 defense); the chunk lives in dense embeddings only.",
+      "should_refuse": false,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "chart-types-09",
+      "question": "Which team members in the Gantt chart example are assigned to GIF projects?",
+      "_anchor_phrase": "Emily",
+      "_expected_answer": "Emily, Kevin, Mariasa, Piper, Ryan, and Stephanie (from the Gantt chart's project-by-owner figure).",
+      "_answer_type": "chart_content",
+      "_note": "CHART-TARGETED: chart-extracted-block content (the team-by-project Gantt table). Under PyMuPDF, refuse. Under Docling+chart-OCR, answer. Anchor unresolvable via FTS by design.",
+      "should_refuse": false,
+      "relevant_chunk_ids": []
     }
   ],
-  "_resolved_at": "2026-05-23T19:45:57Z"
+  "_resolved_at": "2026-05-23T20:52:04Z"
 }

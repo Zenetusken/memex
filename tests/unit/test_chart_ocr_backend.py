@@ -641,6 +641,108 @@ def test_unichart_table_to_markdown_single_row() -> None:
     assert "| --- | --- | --- |" in md
 
 
+# ----------------------------------------------------------------------
+# LaTeX-tabular → markdown converter (Nemotron-Parse-v1.2 P3.3-c v3 fix)
+# ----------------------------------------------------------------------
+
+
+def test_latex_tabular_to_markdown_single_row_label_number_splits() -> None:
+    """Nemotron-Parse-v1.2 single-row chart-summary tabulars get split
+    into key-value bullets. The cell `**On Time 22**` would otherwise
+    be ambiguous to the LLM (label vs. label+value).
+    """
+    from memex.parse.chart_ocr_backend import _latex_tabular_to_markdown
+
+    md = _latex_tabular_to_markdown("**On Time 22** & **Late 8**\\\\")
+    assert "- On Time: 22" in md
+    assert "- Late: 8" in md
+
+
+def test_latex_tabular_to_markdown_single_row_no_split_falls_back() -> None:
+    """If cells don't all match `label <number>`, fall back to the
+    standard pipe-line markdown."""
+    from memex.parse.chart_ocr_backend import _latex_tabular_to_markdown
+
+    md = _latex_tabular_to_markdown("Apple & Banana & Cherry\\\\")
+    assert md == "| Apple | Banana | Cherry |"
+
+
+def test_latex_tabular_to_markdown_multi_row_header() -> None:
+    """Multi-row tabulars: first row → header, subsequent rows → body."""
+    from memex.parse.chart_ocr_backend import _latex_tabular_to_markdown
+
+    raw = (
+        "**Assigned** & **Project**\\\\"
+        "Emily & GIF\\\\"
+        "Jan & Presentation\\\\"
+    )
+    md = _latex_tabular_to_markdown(raw)
+    assert "| **Assigned** | **Project** |" in md
+    assert "| --- | --- |" in md
+    assert "| Emily | GIF |" in md
+    assert "| Jan | Presentation |" in md
+
+
+def test_latex_tabular_to_markdown_multicolumn_flattens() -> None:
+    """`\\multicolumn{N}{spec}{content}` → just `content`. Drops the
+    span; keeps the data."""
+    from memex.parse.chart_ocr_backend import _latex_tabular_to_markdown
+
+    raw = (
+        "**Quarter** & **Revenue**\\\\"
+        "\\multicolumn{2}{c}{Apr Jun Sep Dec}\\\\"
+    )
+    md = _latex_tabular_to_markdown(raw)
+    assert "Apr Jun Sep Dec" in md
+
+
+def test_normalize_latex_tabulars_in_mixed_text() -> None:
+    """End-to-end: `\\begin{tabular}...\\end{tabular}` blocks within
+    surrounding prose get replaced; prose lines pass through."""
+    from memex.parse.chart_ocr_backend import _normalize_latex_tabulars
+
+    text = (
+        "Content Team Project Status\n"
+        "Click below to interact\n"
+        "\\begin{tabular}{cc}\n"
+        "**On Time 22** & **Late 8**\\\\\n"
+        "\\end{tabular}\n"
+        "Projects by Owner\n"
+    )
+    out = _normalize_latex_tabulars(text)
+    assert "Content Team Project Status" in out
+    assert "- On Time: 22" in out
+    assert "- Late: 8" in out
+    assert "\\begin{tabular}" not in out
+    assert "\\end{tabular}" not in out
+    assert "Projects by Owner" in out
+
+
+def test_normalize_latex_tabulars_handles_truncated() -> None:
+    """Truncated tabular (no closing tag) still converts the visible
+    rows. Common Nemotron-Parse output when max_new_tokens cuts off
+    mid-table."""
+    from memex.parse.chart_ocr_backend import _normalize_latex_tabulars
+
+    text = (
+        "Some intro\n\\begin{tabular}{ccc}\n"
+        "A & B & C\\\\\nD & E & F\\\\\n"
+        "(no closing tag follows)"
+    )
+    out = _normalize_latex_tabulars(text)
+    assert "| A | B | C |" in out
+    assert "\\begin{tabular}" not in out
+
+
+def test_latex_tabular_to_markdown_empty_returns_empty() -> None:
+    """Whitespace-only and empty bodies collapse cleanly."""
+    from memex.parse.chart_ocr_backend import _latex_tabular_to_markdown
+
+    assert _latex_tabular_to_markdown("") == ""
+    assert _latex_tabular_to_markdown("   ") == ""
+    assert _latex_tabular_to_markdown("\\\\\\\\") == ""
+
+
 class _FakeUniChartEncoder:
     """Stand-in encoder so `_is_unichart_handle` recognises the class
     name. Match against 'DonutSwin' family."""

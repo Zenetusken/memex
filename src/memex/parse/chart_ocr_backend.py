@@ -646,6 +646,109 @@ def _chart_ocr_transcribe_unichart(handle, image, max_new_tokens: int) -> str:
     return _unichart_table_to_markdown(table_raw)
 
 
+_LATEX_TABULAR_RE = re.compile(
+    r"\\begin\{tabular\}\{[^}]*\}(.*?)(?:\\end\{tabular\}|\Z)",
+    re.DOTALL,
+)
+_LATEX_MULTICOLUMN_RE = re.compile(
+    r"\\multicolumn\{\d+\}\{[^}]*\}\{([^}]*)\}",
+)
+# Matches `**On Time 22**`, `Late 8`, `Status 12.5%` — a label followed
+# by a trailing number/percentage. Used to split chart-summary single-row
+# tabulars into key-value lines the LLM can parse unambiguously.
+_LABEL_NUMBER_CELL_RE = re.compile(
+    r"^\*{0,2}\s*(.+?)\s+(-?\d[\d,.]*\s*%?)\s*\*{0,2}\s*$"
+)
+
+
+def _split_label_number_cells(cells: list[str]) -> list[tuple[str, str]] | None:
+    """If every cell in `cells` matches the `label <number>` pattern,
+    return the split as `[(label, number), ...]`. Otherwise return
+    None (caller falls back to the raw markdown table).
+
+    Used for chart-summary single-row tabulars where Nemotron-Parse
+    concatenates the legend label and its value into one cell:
+        `**On Time 22**` → `("On Time", "22")`
+        `**Late 8**` → `("Late", "8")`
+    """
+    splits: list[tuple[str, str]] = []
+    for c in cells:
+        if not c.strip():
+            continue
+        m = _LABEL_NUMBER_CELL_RE.match(c.strip())
+        if not m:
+            return None
+        splits.append((m.group(1).strip(), m.group(2).strip()))
+    return splits or None
+
+
+def _latex_tabular_to_markdown(content: str) -> str:
+    """Convert one LaTeX tabular body to a markdown table.
+
+    Nemotron-Parse-v1.2 emits chart tabular data as
+    ``\\begin{tabular}{cc} **On Time 22** & **Late 8** \\\\ \\end{tabular}``
+    which the Qwen3-8B-AWQ assessor misreads. This converter
+    flattens to the markdown equivalent, which the assessor reads
+    natively.
+
+    Behavior:
+    - Single-row tabulars: emit ``| cell | cell |`` (no separator;
+      a one-row "table" is just a pipe-separated line).
+    - Multi-row tabulars: emit a full markdown table with the first
+      non-empty row as the header.
+    - ``\\multicolumn{N}{spec}{content}`` is flattened to just
+      ``content`` (we drop the spanning).
+    - Markdown ``**bold**`` markers are kept (valid markdown).
+    """
+    content = _LATEX_MULTICOLUMN_RE.sub(r"\1", content)
+    rows_raw = re.split(r"\\\\", content)
+
+    parsed: list[list[str]] = []
+    for row in rows_raw:
+        row = row.strip()
+        if not row:
+            continue
+        cells = [c.strip() for c in row.split("&")]
+        if any(cell for cell in cells):
+            parsed.append(cells)
+
+    if not parsed:
+        return ""
+
+    max_cols = max(len(r) for r in parsed)
+    parsed = [r + [""] * (max_cols - len(r)) for r in parsed]
+
+    if len(parsed) == 1:
+        non_empty = [c for c in parsed[0] if c]
+        if not non_empty:
+            return ""
+        # If every cell looks like `<label> <number>` (a chart-summary
+        # row from Nemotron-Parse), emit as key-value bullets instead
+        # of a pipe-row. Reason: a cell like `**On Time 22**` is
+        # ambiguous to the LLM — could be a category label or a
+        # label-value pair. Bullets disambiguate.
+        split = _split_label_number_cells(non_empty)
+        if split:
+            return "\n".join(f"- {label}: {value}" for label, value in split)
+        return "| " + " | ".join(non_empty) + " |"
+
+    header = "| " + " | ".join(parsed[0]) + " |"
+    separator = "| " + " | ".join(["---"] * max_cols) + " |"
+    body = ["| " + " | ".join(r) + " |" for r in parsed[1:]]
+    return "\n".join([header, separator, *body])
+
+
+def _normalize_latex_tabulars(text: str) -> str:
+    """Replace every ``\\begin{tabular}...\\end{tabular}`` block with a
+    markdown table. Tolerates truncated tabulars (no closing tag) by
+    converting whatever rows were emitted before the cutoff.
+    """
+    return _LATEX_TABULAR_RE.sub(
+        lambda m: _latex_tabular_to_markdown(m.group(1)),
+        text,
+    )
+
+
 def _unichart_table_to_markdown(raw: str) -> str:
     """Convert UniChart's `row1col1 | row1col2 &&& row2col1 | row2col2`
     format to a standard markdown table.
@@ -765,6 +868,12 @@ def _chart_ocr_transcribe_nemotron_parse(
     cleaned = _NEMOTRON_TAG_RE.sub(" ", generated_text)
     # Collapse multi-space runs introduced by tag removal.
     cleaned = re.sub(r"[ \t]+", " ", cleaned)
+    # Convert any `\begin{tabular}...\end{tabular}` blocks to markdown
+    # tables. Raw LaTeX tabular is illegible to the downstream LLM
+    # assessor: the v3 chart-OCR A/B confirmed the right chunk reaches
+    # rank 1 in the reranker but assess_sufficiency misreads the LaTeX
+    # cells as "no specific numbers." Markdown tables are LLM-native.
+    cleaned = _normalize_latex_tabulars(cleaned)
     # Strip leading/trailing whitespace per line; drop empty lines.
     lines = [line.strip() for line in cleaned.splitlines()]
     lines = [line for line in lines if line]

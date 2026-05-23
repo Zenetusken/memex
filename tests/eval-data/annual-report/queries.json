@@ -1,11 +1,13 @@
 {
   "_description": "Hand-labelled eval corpus for NVIDIA's 2026 Annual Review / 10-K. The doc is ~656 KB markdown, 540 chunks via PyMuPDF parse (born-digital fonted PDF). Mostly text + financial tables; only ~5 actual charts (none routed through chart-OCR because PyMuPDF handled the parse cleanly). Tests prose-retrieval, financial-table extraction, and HARD GATES on real corporate content.",
   "_doc_id": "0e725ba0-2026-annual-report-web",
-  "_query_count": 8,
+  "_query_count": 10,
   "_mix": {
-    "ans": 5,
-    "ref": 3
+    "ans": 7,
+    "ref": 3,
+    "chart_targeted": 2
   },
+  "_chart_targeted_note": "Queries 09-10 target content that exists ONLY in the chart-extracted markdown block from the Compensation Committee timeline figure (which Docling+chart-OCR fires on but PyMuPDF skips). Used for A/B testing chart-OCR's net upside on actual chart-content questions.",
   "_labelling_rule": "ANS queries: _anchor_phrase = distinctive substring (5-12 words) from the chunk with the literal answer; populated via scripts/extend_corpus.py resolve. REF queries: should_refuse=true; relevant_chunk_ids=[].",
   "_created": "2026-05-23",
   "_purpose": "Extension of the eval matrix to a real-world hybrid corpus (financial annual report). Demonstrates the scaffolding workflow (extend_corpus.py) and adds a third corpus to the eval matrix alongside slide-decks (English) and french-course (French).",
@@ -19,7 +21,7 @@
       "_note": "Headline financial metric from the CEO letter. Should match exactly.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "0e725ba0-2026-annual-report-web#0eee97300a"
+        "0e725ba0-2026-annual-report-web#32e5decf09"
       ]
     },
     {
@@ -31,7 +33,7 @@
       "_note": "Bottom-line metric. The number 4.90 appears in both the CEO letter and the financials section.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "0e725ba0-2026-annual-report-web#0eee97300a"
+        "0e725ba0-2026-annual-report-web#32e5decf09"
       ]
     },
     {
@@ -43,7 +45,7 @@
       "_note": "Segment-level revenue. Tests whether segment-specific figures are retrievable.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "0e725ba0-2026-annual-report-web#299dce7724"
+        "0e725ba0-2026-annual-report-web#5fe6a69fb1"
       ]
     },
     {
@@ -55,7 +57,7 @@
       "_note": "Forward-looking figure. The 'trillion' number is distinctive and appears once.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "0e725ba0-2026-annual-report-web#ee6f9cbd4e"
+        "0e725ba0-2026-annual-report-web#a2f8d0d81f"
       ]
     },
     {
@@ -67,7 +69,7 @@
       "_note": "Margin metric. Tests precise-number retrieval from a financial summary table.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "0e725ba0-2026-annual-report-web#9c0dbd1206"
+        "0e725ba0-2026-annual-report-web#c1c7b2aefb"
       ]
     },
     {
@@ -99,7 +101,27 @@
       "_note": "HARD GATE refusal. The doc mentions cumulative through 2027 but no specific FY2028 Q1 number.",
       "should_refuse": true,
       "relevant_chunk_ids": []
+    },
+    {
+      "qid": "annual-report-09",
+      "question": "According to the Compensation Committee process timeline figure, what did the CC do in December 2024?",
+      "_anchor_phrase": "CC determined peer companies",
+      "_expected_answer": "The CC determined peer companies. (From the CC process timeline figure.)",
+      "_answer_type": "chart_content",
+      "_note": "CHART-TARGETED: content exists ONLY in the chart-extracted block of the Compensation Committee timeline graphic. Under PyMuPDF, the figure is not OCR'd, so the agent should refuse. Under Docling+chart-OCR, it should answer. Anchor unresolvable via FTS because chart-extracted blocks are stripped from BM25 (P3.3-v3 defense); the chunk lives in dense embeddings only.",
+      "should_refuse": false,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "annual-report-10",
+      "question": "Per the Compensation Committee timeline figure, when did the CC certify achievement and payouts for the Fiscal 2026 Variable Cash Plan?",
+      "_anchor_phrase": "CC certified achievement and payouts for Fiscal 2026",
+      "_expected_answer": "March 2026 (according to the CC process timeline figure).",
+      "_answer_type": "chart_content",
+      "_note": "CHART-TARGETED: chart-extracted-block content. The timeline associates 'March 2026' with the certification step. Anchor unresolvable via FTS by design.",
+      "should_refuse": false,
+      "relevant_chunk_ids": []
     }
   ],
-  "_resolved_at": "2026-05-23T19:32:26Z"
+  "_resolved_at": "2026-05-23T20:52:00Z"
 }
