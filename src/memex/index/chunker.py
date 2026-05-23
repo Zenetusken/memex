@@ -33,57 +33,12 @@ _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
 _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9])")
 _PARAGRAPH_RE = re.compile(r"\n\s*\n")
 
-# Matches a `[chart-extracted]...[/chart-extracted]` block emitted by
-# the P3.3 chart-OCR stitch step (see parse/pipeline.py::_stitch_chart_
-# extractions). The dot-all flag lets `.` span newlines so multi-line
-# extracted tables match.
-_CHART_EXTRACTED_RE = re.compile(
-    r"\[chart-extracted\].*?\[/chart-extracted\]",
-    flags=re.DOTALL,
-)
-
-
-def strip_chart_extracted_for_index(text: str) -> str:
-    """Remove `[chart-extracted]...[/chart-extracted]` blocks from
-    text destined for BM25 + dense-embedding indexing.
-
-    Background (P3.3 v3 follow-up, audit 2026-05-21):
-    The P3.3 chart-OCR pipeline injects `[chart-extracted]` blocks
-    containing DePlot's extracted chart values (years, percentages,
-    raw numerics). When those blocks land inside a chunk's text,
-    they:
-    - Inflate BM25 term frequency for dense numerical tokens that
-      happen to appear in unrelated queries (a chart that lists
-      "2014, 2018, 2022" inadvertently boosts a chunk's rank for
-      ANY query mentioning those years), AND
-    - Perturb the dense-embedding centroid by shifting it toward the
-      numerical-table region of embedding space.
-
-    The empirical effect on the CUDA deck: +1 chart-numeric win (Q21
-    where the chart-extracted "1.6x" matched) but −6 prose
-    regressions where chart-bearing chunks outranked the prose
-    chunks the agent actually needed for queries about unrelated
-    topics. Net −5 ANS vs the no-chart-OCR baseline.
-
-    The fix: strip the blocks BEFORE indexing so the retrieval
-    layer sees the chunk's prose only. The chunk's `Chunk.text`
-    field is left intact, so when the chunk IS retrieved (via
-    surrounding prose), the agent still sees the chart-extracted
-    block in its context window. Chart-numeric queries still work
-    when the prose around the chart matches the query (e.g., Q21's
-    "NVRTC -minimal vs -O3" matches the slide title even with the
-    chart body stripped from the index).
-
-    The strip is also a defence in depth: future audits won't have
-    to worry about adversarial chart content (a chart that
-    extracts to e.g. medical metrics on an architecture deck)
-    skewing retrieval.
-
-    Idempotent — text without chart blocks passes through unchanged.
-    Leading/trailing whitespace from the placeholder is preserved
-    intentionally; the indexer doesn't care about exact whitespace.
-    """
-    return _CHART_EXTRACTED_RE.sub("", text)
+# Re-exported from core/text.py so existing callers keep working
+# (`from memex.index.chunker import strip_chart_extracted_for_index`).
+# The helper itself lives in core/ because both `index/` and
+# `agents/` need it and the module-import direction forbids
+# `agents/ → index/` (see CLAUDE.md).
+from memex.core.text import strip_chart_extracted_for_index  # noqa: E402
 
 # Defaults — overridable per-call via IndexSettings. Kept as module
 # constants so test helpers can reference them without importing the

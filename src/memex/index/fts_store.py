@@ -13,8 +13,8 @@ from pathlib import Path
 
 import structlog
 
+from memex.core.text import strip_chart_extracted_for_index
 from memex.core.types import Chunk
-from memex.index.chunker import strip_chart_extracted_for_index
 
 logger = structlog.get_logger(__name__)
 

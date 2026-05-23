@@ -48,6 +48,7 @@ from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, Field, create_model
 
 from memex.core.errors import AnswerStateInvariantError
+from memex.core.text import strip_chart_extracted_for_index
 from memex.core.types import Chunk
 from memex.models.client import complete_structured
 from memex.observability.tracing import (
@@ -437,10 +438,26 @@ async def answer(state: AnswerState) -> AnswerStateUpdate:
                 "Drop or rephrase any claim that goes beyond what the chunks state."
             )
 
+    # P3.3 v5 (audit 2026-05-22 trace): strip `[chart-extracted]`
+    # blocks from the chunk text before rendering the prompt.
+    # Rationale: the v3 FTS-side strip prevented BM25 perturbation
+    # but the chunks the agent reads STILL have chart blocks
+    # (LanceDB stored full text + RRF preserves dense chunks first).
+    # The truncate(1800) filter in the prompt template was getting
+    # eaten by a chart block at the TOP of the chunk, pushing the
+    # actual answer table (`| FP16 | FMA | 0.5x |`) past the
+    # truncation cut-off. Stripping at prompt-render time keeps the
+    # chunk's stored text intact (display, MCP UX, embedding signal)
+    # while letting the answer LLM see the prose + Docling tables
+    # the agent actually needs.
+    stripped_chunks = [
+        c.model_copy(update={"text": strip_chart_extracted_for_index(c.text)})
+        for c in state.reranked
+    ]
     prompt = render_prompt(
         "answer",
         query=state.query,
-        chunks=state.reranked,
+        chunks=stripped_chunks,
         feedback=feedback,
     )
     draft, tokens = await complete_structured(
@@ -498,7 +515,17 @@ async def verify(state: AnswerState) -> AnswerStateUpdate:
             "nodes_traversed": state.nodes_traversed + 1,
         }
 
-    chunk_by_id = {c.chunk_id: c for c in state.reranked}
+    # P3.3 v5: same strip as the answer node — the verify prompt's
+    # literal-presence check needs to see the same chunk text the
+    # answer model used. Otherwise the verifier might reject a
+    # legitimate claim because the chart block ate the truncate
+    # budget and the actual support text is past the cut-off.
+    chunk_by_id = {
+        c.chunk_id: c.model_copy(
+            update={"text": strip_chart_extracted_for_index(c.text)}
+        )
+        for c in state.reranked
+    }
 
     prompt = render_prompt(
         "verify_grounding",
