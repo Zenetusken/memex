@@ -61,9 +61,10 @@ memex/
 ├── uv.lock                    # committed; reproducible builds
 ├── README.md
 ├── docs/
-│   ├── adrs/                  # architectural decision records
-│   ├── user/                  # end-user docs
-│   └── dev/                   # this file lives here
+│   ├── adr/                   # architectural decision records (ADR-0001 ... 0006)
+│   ├── audits/                # multi-agent audit reports + per-phase findings
+│   ├── deploy/                # systemd + launchd templates, hardware-tiers.md
+│   └── *.md                   # ROADMAP, IMPLEMENTATION-PLAN, VISION, this file
 ├── src/memex/
 │   ├── __init__.py
 │   ├── cli/                   # typer entry points
@@ -174,16 +175,19 @@ A single `MemexSettings` pydantic-settings model is the source of truth. Loaded 
 ```python
 # src/memex/core/config.py
 class ModelSettings(BaseModel):
-    orchestrator: str = "Qwen/Qwen3-8B-Instruct"
-    orchestrator_quantization: Literal["Q4_K_M", "Q5_K_M", "Q8_0"] = "Q4_K_M"
-    vlm: str = "Qwen/Qwen2.5-VL-7B-Instruct"
+    orchestrator: str = "Qwen/Qwen3-8B-AWQ"
+    orchestrator_quantization: Literal["AWQ", "GPTQ", "Q4_K_M", "Q5_K_M", "Q8_0"] = "AWQ"
+    vlm: str = "Qwen/Qwen2.5-VL-7B-Instruct-AWQ"
+    vlm_quantization: Literal["awq_int4", "bf16"] = "awq_int4"
     embedder: str = "google/embeddinggemma-300m"
     reranker: str = "BAAI/bge-reranker-v2-m3"
+    chart_ocr: str = "google/deplot"
+    reranker_backend: Literal["cross_encoder", "qwen3"] = "cross_encoder"
 
 class HardwareSettings(BaseModel):
-    gpu_memory_fraction: float = 0.85
+    gpu_memory_fraction: float = 0.85   # torch-level cap; vLLM has its own knob
     max_concurrent_documents: int = 2
-    cpu_workers: int = Field(default_factory=lambda: max(1, os.cpu_count() - 1))
+    cpu_workers: int = Field(default_factory=lambda: max(1, (os.cpu_count() or 2) - 1))
 
 class MemexSettings(BaseSettings):
     vault_path: Path
@@ -193,7 +197,7 @@ class MemexSettings(BaseSettings):
     model_config = SettingsConfigDict(toml_file="~/.config/memex/config.toml")
 ```
 
-If the user has 8GB of VRAM instead of 12GB, the validator drops `orchestrator_quantization` to a smaller model rather than letting the application crash at first inference. Fail loudly at startup, never silently at runtime.
+For tight-VRAM rigs (8 GB tier), P4.2 ships a documented `Qwen3-4B-AWQ + gpu_memory_utilization=0.50` profile rather than a runtime auto-downgrade — see `docs/deploy/hardware-tiers.md`. Fail loudly at startup, never silently at runtime.
 
 ---
 
@@ -201,17 +205,18 @@ If the user has 8GB of VRAM instead of 12GB, the validator drops `orchestrator_q
 
 ### The model stack and VRAM budget
 
-The reference target is an RTX 4070 (12GB VRAM) with 32GB system RAM. Every model choice is constrained by this.
+The reference target is an RTX 4070 (12GB VRAM) with 32GB system RAM. Every model choice is constrained by this. **bf16 across the stack on Ada** (ADR-0006); the orchestrator and VLM use AWQ-Int4 for weight compression but their activations stay bf16.
 
-| Model | Role | Quantization | VRAM | Resident? |
+| Model | Role | Quantization | VRAM (live) | Resident? |
 |---|---|---|---|---|
-| Qwen3-8B-Instruct | Orchestrator, answerer | Q4_K_M | ~5.0 GB | Always |
-| EmbeddingGemma 300M | Embeddings | FP16 | ~0.6 GB | Always |
-| bge-reranker-v2-m3 | Reranking | FP16 | ~0.6 GB | On demand |
-| Qwen2.5-VL 7B | Vision fallback | Q4_K_M | ~5.5 GB | Swapped in |
-| KV cache + overhead | — | — | ~2.5 GB | — |
+| Qwen3-8B-AWQ | Orchestrator, answerer | AWQ-Int4 (out-of-process via vLLM) | ~5.5 GB | vLLM daemon |
+| EmbeddingGemma 300M | Embeddings | bf16 | ~0.6 GB | Always (registry) |
+| bge-reranker-v2-m3 | Reranking | bf16 | ~1.0 GB | Always (registry) |
+| Qwen2.5-VL 7B AWQ | Page transcription fallback | AWQ-Int4 + bf16 activations | ~5.0 GB | Lazy + `disable_vlm=True` by default on 12 GB |
+| DePlot | Chart-OCR over Docling figures | bf16 | ~2.3 GB | Lazy + opt-in via `MEMEX_PARSE__DISABLE_CHART_OCR=false` |
+| KV cache + vLLM overhead | — | — | ~2.0 GB | — |
 
-Co-resident steady state (orchestrator + embedder + cache): ~8 GB, leaving headroom. The VLM is swapped in only when Docling's confidence on a page falls below threshold; the reranker is loaded on first query and stays resident.
+Steady-state on 12 GB tier (vLLM + embedder + reranker + KV cache): ~9 GB. **VLM + chart-OCR are both disabled by default** — they live behind opt-in env vars and use the pause-vLLM strategy when activated during parse (see P3.3 in ROADMAP for the trade-off). On the 8 GB tier (P4.2), `Qwen3-4B-AWQ + gpu_memory_utilization=0.50` ships as the documented profile in `docs/deploy/hardware-tiers.md`.
 
 ### VRAM management
 
@@ -236,27 +241,29 @@ Agents in Memex are **state machines with budgets**, not free-form ReAct loops. 
 The answering agent looks roughly like:
 
 ```
-[start] → retrieve → rerank → assess_sufficiency
-                                  │
-                          ┌───────┴────────┐
-                          │                │
-                  [sufficient]      [insufficient]
-                          │                │
-                          ▼                ▼
-                       answer           refuse_or_clarify
-                          │                │
-                          ▼                ▼
-                       verify          [end]
-                          │
-                  ┌───────┴────────┐
-                  │                │
-              [grounded]      [hallucination]
-                  │                │
-                  ▼                ▼
-              [end]           regenerate ───┐
-                                  │         │
-                                  └─────────┘
-                              (with budget cap)
+[start] → retrieve → expand_graph → rerank → assess_sufficiency
+                                                   │
+                                          ┌────────┴────────┐
+                                          │                 │
+                                  [sufficient]       [insufficient]
+                                          │                 │
+                                          ▼                 ▼
+                                       answer            refuse
+                                          │                 │
+                                          ▼                 ▼
+                                       verify           [end]
+                                          │
+                          ┌───────────────┼───────────────┐
+                          │               │               │
+                     [grounded]    [some ungrounded]  [empty draft]
+                          │               │               │
+                          ▼               ▼               ▼
+                       compose      regenerate         refuse
+                          │               │               │
+                          ▼               └───→ answer ───┘
+                        [end]            (with budget cap;
+                                          empty-draft shortcircuit
+                                          bypasses model call)
 ```
 
 The `verify` node is non-negotiable. Before an answer reaches the user, a second model pass checks that every claim in the answer is grounded in a retrieved chunk. Ungrounded claims get marked or removed. This is the difference between an agent that's useful and an agent that's a liability.
@@ -265,27 +272,30 @@ The `verify` node is non-negotiable. Before an answer reaches the user, a second
 
 Local models without guided decoding hallucinate JSON like it's a creative writing exercise. We don't let them.
 
-- Every model call that expects structured output uses **vLLM's guided decoding** (via `guided_json` or `guided_regex`) with a pydantic schema.
+- Every model call that expects structured output uses **OpenAI-standard `response_format={"type": "json_schema", ...}`** (portable across vLLM, SGLang, llama-server), preferred over vLLM's deprecated `extra_body={"guided_json": ...}` — see ADR-0001 Revisit. The grammar back-end is xgrammar.
 - No regex-parsing of free-text model output. Ever. If you find yourself writing `re.search(r"answer: (.+)", response)`, stop and use a schema.
+- **Bound every LLM-emit `str` and `list[T]` with `max_length=N`.** xgrammar enforces the bound at the grammar level, so the model cannot emit past it. Unbounded fields can run away on counterfactual or out-of-distribution queries, trip `max_tokens` mid-emission, and crash JSON validation. Established by `SufficiencyAssessment.reason` (v6) and extended to every other LLM-emit schema.
 
 ```python
 class CitedClaim(BaseModel):
-    claim: str
+    claim: str = Field(max_length=500)
     source_chunk_id: str
     confidence: Literal["high", "medium", "low"]
 
-class Answer(BaseModel):
-    claims: list[CitedClaim]
-    summary: str
-    refused: bool = False
-    refusal_reason: str | None = None
+class DraftAnswer(BaseModel):
+    summary: str = Field(max_length=600)
+    claims: list[CitedClaim] = Field(max_length=20)
 
-# vLLM call with guided decoding
-response = await llm.complete(
+# Use the project's `complete_structured` helper — wraps vLLM's
+# response_format + Langfuse generation span + bounded-schema
+# construction in one call.
+from memex.models.client import complete_structured
+
+draft, tokens_used = await complete_structured(
     prompt=prompt,
-    guided_json=Answer.model_json_schema(),
+    schema=DraftAnswer,
+    prompt_tag="answer@v1",
 )
-parsed = Answer.model_validate_json(response.text)
 ```
 
 ### Prompt management
@@ -515,15 +525,23 @@ Every model call goes through `memex.models.client`, which imports the Langfuse 
 
 ```python
 # src/memex/models/client.py
-from langfuse.openai import openai  # drop-in wrapper around the openai SDK
+from langfuse.openai import AsyncOpenAI  # drop-in wrapper around the openai SDK
 
-async def complete_structured(prompt, schema):
-    response = await openai.chat.completions.create(
+async def complete_structured(*, prompt, schema, prompt_tag=None, ...):
+    response = await client.chat.completions.create(
         model=settings.models.orchestrator,
         messages=[{"role": "user", "content": prompt}],
-        extra_body={"guided_json": schema.model_json_schema()},
+        response_format={
+            "type": "json_schema",
+            "json_schema": {
+                "name": schema.__name__,
+                "schema": _inline_refs(schema.model_json_schema()),
+                "strict": True,
+            },
+        },
+        name=prompt_tag or schema.__name__,  # Langfuse span name
     )
-    ...
+    return schema.model_validate_json(response.choices[0].message.content), tokens
 ```
 
 No callsite manually wraps anything. The generation span lands under whichever trace is active in the calling context.
