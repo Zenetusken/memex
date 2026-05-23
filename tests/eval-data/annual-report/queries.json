@@ -1,0 +1,105 @@
+{
+  "_description": "Hand-labelled eval corpus for NVIDIA's 2026 Annual Review / 10-K. The doc is ~656 KB markdown, 540 chunks via PyMuPDF parse (born-digital fonted PDF). Mostly text + financial tables; only ~5 actual charts (none routed through chart-OCR because PyMuPDF handled the parse cleanly). Tests prose-retrieval, financial-table extraction, and HARD GATES on real corporate content.",
+  "_doc_id": "0e725ba0-2026-annual-report-web",
+  "_query_count": 8,
+  "_mix": {
+    "ans": 5,
+    "ref": 3
+  },
+  "_labelling_rule": "ANS queries: _anchor_phrase = distinctive substring (5-12 words) from the chunk with the literal answer; populated via scripts/extend_corpus.py resolve. REF queries: should_refuse=true; relevant_chunk_ids=[].",
+  "_created": "2026-05-23",
+  "_purpose": "Extension of the eval matrix to a real-world hybrid corpus (financial annual report). Demonstrates the scaffolding workflow (extend_corpus.py) and adds a third corpus to the eval matrix alongside slide-decks (English) and french-course (French).",
+  "queries": [
+    {
+      "qid": "annual-report-01",
+      "question": "What was NVIDIA's total revenue in fiscal 2026?",
+      "_anchor_phrase": "Revenue grew 65 percent to 216 billion",
+      "_expected_answer": "$216 billion (revenue grew 65% year over year; the precise figure is $215.9 billion).",
+      "_answer_type": "single_fact",
+      "_note": "Headline financial metric from the CEO letter. Should match exactly.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "0e725ba0-2026-annual-report-web#0eee97300a"
+      ]
+    },
+    {
+      "qid": "annual-report-02",
+      "question": "What was NVIDIA's diluted earnings per share in fiscal 2026?",
+      "_anchor_phrase": "Diluted EPS increased 67 percent to",
+      "_expected_answer": "$4.90 (up 67% year over year).",
+      "_answer_type": "single_fact",
+      "_note": "Bottom-line metric. The number 4.90 appears in both the CEO letter and the financials section.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "0e725ba0-2026-annual-report-web#0eee97300a"
+      ]
+    },
+    {
+      "qid": "annual-report-03",
+      "question": "What was NVIDIA's Data Center revenue in fiscal 2026?",
+      "_anchor_phrase": "Data Center revenue reached 194 billion",
+      "_expected_answer": "$194 billion (up 68% year over year).",
+      "_answer_type": "single_fact",
+      "_note": "Segment-level revenue. Tests whether segment-specific figures are retrievable.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "0e725ba0-2026-annual-report-web#299dce7724"
+      ]
+    },
+    {
+      "qid": "annual-report-04",
+      "question": "How much cumulative Blackwell and Rubin revenue does NVIDIA see visibility into through 2027?",
+      "_anchor_phrase": "more than 1 trillion in cumulative Blackwell and Rubin revenue",
+      "_expected_answer": "More than $1 trillion (from the start of 2025 through 2027).",
+      "_answer_type": "single_fact",
+      "_note": "Forward-looking figure. The 'trillion' number is distinctive and appears once.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "0e725ba0-2026-annual-report-web#ee6f9cbd4e"
+      ]
+    },
+    {
+      "qid": "annual-report-05",
+      "question": "What was NVIDIA's gross margin in fiscal 2026?",
+      "_anchor_phrase": "Gross margin was 71.1",
+      "_expected_answer": "71.1%",
+      "_answer_type": "single_fact",
+      "_note": "Margin metric. Tests precise-number retrieval from a financial summary table.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "0e725ba0-2026-annual-report-web#9c0dbd1206"
+      ]
+    },
+    {
+      "qid": "annual-report-06",
+      "question": "What is the home address of NVIDIA's Chief Financial Officer?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 personal addresses of executives are not in a public 10-K.",
+      "_answer_type": "counterfactual",
+      "_note": "HARD GATE refusal. Personal information of executives is never in a public filing.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "annual-report-07",
+      "question": "How many NVIDIA employees work specifically in the Stuttgart office in Germany?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 office-level employee counts are not disclosed at this granularity in 10-K filings.",
+      "_answer_type": "counterfactual",
+      "_note": "HARD GATE refusal. Country-or-city-specific employee counts are not in this doc.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "annual-report-08",
+      "question": "What was NVIDIA's projected revenue for fiscal Q1 2028?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 the document doesn't provide quarter-by-quarter forward guidance for FY2028.",
+      "_answer_type": "counterfactual",
+      "_note": "HARD GATE refusal. The doc mentions cumulative through 2027 but no specific FY2028 Q1 number.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    }
+  ],
+  "_resolved_at": "2026-05-23T19:32:26Z"
+}
