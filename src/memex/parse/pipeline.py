@@ -1326,7 +1326,11 @@ async def _parse_with_pymupdf(
 
 
 async def _parse_pdf(
-    vault_path: Path, doc_id: str, source: Path
+    vault_path: Path,
+    doc_id: str,
+    source: Path,
+    *,
+    force_docling: bool = False,
 ) -> ParseResult:
     """Route a PDF through PyMuPDF pre-filter → Docling fallback.
 
@@ -1334,7 +1338,15 @@ async def _parse_pdf(
     either wins outright (high-confidence born-digital) or falls
     through with a hint about whether Docling should force OCR on
     (mixed-content, scan-like, image-heavy).
+
+    When `force_docling=True`, the PyMuPDF pre-filter is bypassed
+    entirely and the source goes straight to Docling. Use to enable
+    chart-OCR on docs the classifier would otherwise route to
+    PyMuPDF (chart-OCR only fires on the Docling path).
     """
+    if force_docling:
+        logger.bind(doc_id=doc_id, engine="docling").info("parse.force_docling")
+        return await _parse_with_docling(vault_path, doc_id, source)
     decision = await _parse_with_pymupdf(vault_path, doc_id, source)
     if decision.result is not None:
         return decision.result
@@ -1343,15 +1355,33 @@ async def _parse_pdf(
     )
 
 
-async def parse_document(doc_id: str) -> ParseResult:
-    """Parse the document with `doc_id`'s source into canonical markdown."""
+async def parse_document(
+    doc_id: str, *, force_docling: bool | None = None
+) -> ParseResult:
+    """Parse the document with `doc_id`'s source into canonical markdown.
+
+    `force_docling` overrides the classifier and routes the source
+    straight to Docling. `None` (default) means "use the
+    `ParseSettings.force_docling` value." Explicit `True`/`False`
+    overrides the setting for this call.
+    """
     settings = get_settings()
+    effective_force = (
+        force_docling
+        if force_docling is not None
+        else settings.parse.force_docling
+    )
     source = _source_file(settings.vault_path, doc_id)
 
     if source.suffix.lower() in {".md", ".markdown"}:
         return await _passthrough_markdown(settings.vault_path, doc_id, source)
 
     if source.suffix.lower() == ".pdf":
-        return await _parse_pdf(settings.vault_path, doc_id, source)
+        return await _parse_pdf(
+            settings.vault_path,
+            doc_id,
+            source,
+            force_docling=effective_force,
+        )
 
     return await _parse_with_docling(settings.vault_path, doc_id, source)

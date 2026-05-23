@@ -158,6 +158,16 @@ class ParseSettings(BaseModel):
     # confirmed Nemotron-Parse-v1.2 doesn't regress prose answering
     # (ANS == baseline on the CUDA deck).
     disable_chart_ocr: bool = False
+    # Force Docling routing, bypassing the PyMuPDF pre-filter. The
+    # classifier would normally win PyMuPDF on born-digital text-heavy
+    # PDFs (Adobe InDesign / Acrobat output / etc.); this flag overrides
+    # that. Useful when you want chart-OCR to fire on a doc the
+    # classifier sees as "no need to OCR" (e.g. a Tableau visualization
+    # guide or a 10-K with a few charts). Cost: Docling is ~10× slower
+    # than PyMuPDF on text-heavy docs. Set via
+    # `MEMEX_PARSE__FORCE_DOCLING=true` or per-call via the
+    # `--force-docling` CLI flag on `memex parse` / `memex ingest`.
+    force_docling: bool = False
     # 1200s headroom (20 min). The original 300s default fit 30-page
     # papers; 600s was still tight on 100-page slide decks because the
     # layout model is CPU-bound. Most slide decks finish in 3-5 min

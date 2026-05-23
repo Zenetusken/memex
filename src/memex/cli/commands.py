@@ -73,9 +73,15 @@ async def _ingest_path_chain(
     skip_parse: bool,
     ingest_only: bool,
     do_index: bool,
+    force_docling: bool = False,
 ) -> list[IngestResult]:
     """Run a single file (or every file in a directory) through the
     full ingest → parse → index chain.
+
+    `force_docling` is forwarded to `parse_document` per call; when
+    True, the parse stage bypasses the PyMuPDF classifier and goes
+    straight to Docling (useful for chart-OCR validation on otherwise-
+    PyMuPDF-routed docs).
     """
     results: list[IngestResult] = []
 
@@ -102,7 +108,7 @@ async def _ingest_path_chain(
         if not result.accepted or ingest_only or result.doc_id is None:
             return result
 
-        await parse_document(result.doc_id)
+        await parse_document(result.doc_id, force_docling=force_docling)
         if do_index:
             await index_document(result.doc_id)
         return result
@@ -128,7 +134,7 @@ async def _ingest_path_chain(
                 # Honour --skip-parse for directory items too.
                 results.append(r)
                 continue
-            await parse_document(r.doc_id)
+            await parse_document(r.doc_id, force_docling=force_docling)
             if do_index:
                 await index_document(r.doc_id)
             results.append(r)
@@ -159,6 +165,15 @@ def register(app: typer.Typer) -> None:
         no_index: bool = typer.Option(
             False, "--no-index", help="Parse but don't index."
         ),
+        force_docling: bool = typer.Option(
+            False,
+            "--force-docling",
+            help=(
+                "Bypass the PyMuPDF classifier and route directly to Docling. "
+                "Use to enable chart-OCR on born-digital text-heavy PDFs the "
+                "classifier would normally route to PyMuPDF."
+            ),
+        ),
     ) -> None:
         """Validate, copy, parse, and index input files."""
 
@@ -172,6 +187,7 @@ def register(app: typer.Typer) -> None:
                         skip_parse=skip_parse,
                         ingest_only=ingest_only,
                         do_index=not no_index,
+                        force_docling=force_docling,
                     )
                 )
             return out
@@ -181,11 +197,22 @@ def register(app: typer.Typer) -> None:
             _print(r)
 
     @app.command(name="parse")
-    def parse_cmd(doc_id: str) -> None:
+    def parse_cmd(
+        doc_id: str,
+        force_docling: bool = typer.Option(
+            False,
+            "--force-docling",
+            help=(
+                "Bypass the PyMuPDF classifier and route directly to Docling. "
+                "Use to enable chart-OCR on born-digital text-heavy PDFs the "
+                "classifier would normally route to PyMuPDF."
+            ),
+        ),
+    ) -> None:
         """Re-parse a document already in the vault."""
         async def _run():
             bootstrap()
-            return await parse_document(doc_id)
+            return await parse_document(doc_id, force_docling=force_docling)
 
         _print(asyncio.run(_run()))
 
