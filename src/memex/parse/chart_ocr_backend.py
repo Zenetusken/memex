@@ -259,6 +259,40 @@ def _is_onechart_handle(handle) -> bool:
     return "onechart" in cls
 
 
+def _is_nemotron_parse_handle(handle) -> bool:
+    """True when the chart-OCR handle wraps the NVIDIA Nemotron-Parse
+    model (P3.3-c, Path C). The class name is
+    `NemotronParseForConditionalGeneration`."""
+    cls = type(handle.model).__name__.lower()
+    return "nemotronparse" in cls or "nemotron_parse" in cls
+
+
+# Nemotron-Parse-v1.2 prompt prefix per the model card. The four
+# task tokens declare:
+#   <predict_bbox>     — emit bounding-box metadata
+#   <predict_classes>  — emit element-class metadata
+#   <output_markdown>  — format extracted text as markdown
+#   <predict_no_text_in_pic> — skip OCR of text WITHIN picture
+#       elements (we want the chart-block content, not in-image
+#       text fragments)
+_PROMPT_NEMOTRON_PARSE = (
+    "</s><s><predict_bbox><predict_classes>"
+    "<output_markdown><predict_no_text_in_pic>"
+)
+
+
+# Nemotron-Parse output structure tokens. The model emits:
+#   - `<bbox_*>` / `<class_*>` — element bounding boxes + classes
+#   - `<x_0.XXXX>` / `<y_0.XXXX>` — normalised coordinate markers
+#   - `<md_*>` / `<patch_*>` / `<extra_*>` — additional metadata
+# We strip all of these at post-processing time so only the
+# human-readable text content lands in the chart-extracted block.
+_NEMOTRON_TAG_RE = re.compile(
+    r"<(?:bbox|class|md|patch|extra|x|y)_[^>]*>",
+    re.IGNORECASE,
+)
+
+
 def _is_unichart_handle(handle) -> bool:
     """True when the chart-OCR handle wraps a UniChart-family
     VisionEncoderDecoder model (P3.3-c, Path A). Detection: model is
@@ -332,6 +366,11 @@ def _chart_ocr_transcribe_sync(
 
     if _is_unichart_handle(handle):
         return _chart_ocr_transcribe_unichart(handle, image, max_new_tokens)
+
+    if _is_nemotron_parse_handle(handle):
+        return _chart_ocr_transcribe_nemotron_parse(
+            handle, image, max_new_tokens
+        )
 
     is_vlm = _is_vlm_handle(handle)
 
@@ -643,6 +682,95 @@ def _unichart_table_to_markdown(raw: str) -> str:
     return "\n".join([header, separator, *body_rows])
 
 
+def _chart_ocr_transcribe_nemotron_parse(
+    handle, image, max_new_tokens: int
+) -> str:
+    """Nemotron-Parse-v1.2 inference path (Path C, P3.3-c).
+
+    NVIDIA's 885M document parser. Per the model card recipe:
+      inputs = processor(images=[image], text=task_prompt,
+                         return_tensors="pt", add_special_tokens=False)
+      generation_config = GenerationConfig.from_pretrained(model_path)
+      outputs = model.generate(**inputs, generation_config=...)
+      generated_text = processor.batch_decode(outputs, skip_special_tokens=True)[0]
+
+    The raw output contains `<bbox_*>` + `<class_*>` metadata tags
+    interspersed with markdown content. We strip the tags via
+    `_NEMOTRON_TAG_RE` so only the human-readable markdown lands
+    in the chart-extracted block. The `<predict_no_text_in_pic>`
+    task token in the prompt instructs the model to skip OCR of
+    text within picture elements, focusing the output on chart-
+    block content.
+
+    Defensive try/except: RuntimeError (CUDA-side issue) or
+    ValueError (processor mismatch) produce empty markdown rather
+    than crashing the parse pass.
+    """
+    import torch
+
+    log = logger.bind(handle=type(handle.model).__name__)
+
+    try:
+        with torch.inference_mode():
+            inputs = handle.processor(
+                images=[image.convert("RGB")],
+                text=_PROMPT_NEMOTRON_PARSE,
+                return_tensors="pt",
+                add_special_tokens=False,
+            ).to(handle.model.device)
+
+            # Try to load the model's published GenerationConfig
+            # (includes carefully-tuned stop tokens + repetition
+            # penalty); fall back to inline kwargs if the import
+            # fails (e.g. older transformers version doesn't have
+            # the symbol).
+            try:
+                from transformers import GenerationConfig
+
+                generation_config = GenerationConfig.from_pretrained(
+                    handle.model.config._name_or_path,
+                    trust_remote_code=True,
+                )
+                # Bound emission with the caller's max_new_tokens
+                generation_config.max_new_tokens = max_new_tokens
+                outputs = handle.model.generate(
+                    **inputs, generation_config=generation_config
+                )
+            except (ImportError, OSError):
+                # Fallback: explicit kwargs
+                outputs = handle.model.generate(
+                    **inputs,
+                    max_new_tokens=max_new_tokens,
+                    do_sample=False,
+                    repetition_penalty=1.1,
+                )
+
+        generated_text = handle.processor.batch_decode(
+            outputs, skip_special_tokens=True
+        )[0]
+    except (RuntimeError, ValueError) as e:
+        log.warning(
+            "chart_ocr.nemotron_parse.inference_failed",
+            error=str(e)[:160],
+        )
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        return ""
+    finally:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    # Strip Nemotron-Parse structural tags (`<bbox_*>`, `<class_*>`,
+    # etc.) so only markdown text content lands in the chart block.
+    cleaned = _NEMOTRON_TAG_RE.sub(" ", generated_text)
+    # Collapse multi-space runs introduced by tag removal.
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+    # Strip leading/trailing whitespace per line; drop empty lines.
+    lines = [line.strip() for line in cleaned.splitlines()]
+    lines = [line for line in lines if line]
+    return "\n".join(lines)
+
+
 def _onechart_dict_to_markdown(d: object) -> str:
     """Convert OneChart's `{title, source, values: {label: value}}`
     dict to a markdown table. Handles the common shapes; falls back
@@ -695,6 +823,8 @@ async def _extract_with_handle(
         prompt = _PROMPT_ONECHART  # passed through but not used directly
     elif _is_unichart_handle(handle):
         prompt = _PROMPT_UNICHART  # passed through but not used directly
+    elif _is_nemotron_parse_handle(handle):
+        prompt = _PROMPT_NEMOTRON_PARSE  # passed through
     else:
         prompt = _PROMPT_VLM if _is_vlm_handle(handle) else _PROMPT_DEPLOT
     markdown = await asyncio.to_thread(

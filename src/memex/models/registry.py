@@ -490,6 +490,39 @@ class ModelRegistry:
                 attn_implementation=attn_impl,
                 low_cpu_mem_usage=True,
             )
+        elif "nemotron-parse" in lid:
+            # Path C: NVIDIA Nemotron-Parse-v1.2 (P3.3-c follow-up,
+            # 2026-05-23). 885M-param VisionEncoderDecoder-style
+            # document parser. NVIDIA Nemotron Open License,
+            # vLLM-compatible. Uses custom `NemotronParseForConditional
+            # Generation` class via `auto_map` → requires
+            # `trust_remote_code=True` (covered by ADR-0006
+            # amendment 2026-05-23 chart-OCR carve-out).
+            from transformers import (
+                AutoModel,
+                AutoProcessor,
+                AutoTokenizer,
+            )
+
+            tokenizer = AutoTokenizer.from_pretrained(
+                model_id, trust_remote_code=True
+            )
+            processor = AutoProcessor.from_pretrained(
+                model_id, trust_remote_code=True
+            )
+            # Store both tokenizer + processor on the handle. Attach
+            # the tokenizer as a private attribute on the processor
+            # so the backend has a single dispatch point.
+            processor._memex_tokenizer = tokenizer  # type: ignore[attr-defined]
+            model = AutoModel.from_pretrained(
+                model_id,
+                trust_remote_code=True,
+                torch_dtype=torch.bfloat16,
+                device_map={"": "cuda:0"},
+                low_cpu_mem_usage=True,
+            )
+            model.eval()
+            return ChartOCRHandle(model=model, processor=processor)
         elif "chart-to-table" in lid or "unichart" in lid:
             # Path A: UniChart Donut-style VisionEncoderDecoder
             # (P3.3-c follow-up, 2026-05-23). 0.2B params, Apache 2.0,
