@@ -47,36 +47,51 @@ def test_sufficiency_assessment_reason_rejects_over_max_length() -> None:
 
 
 def test_cited_claim_claim_rejects_over_max_length() -> None:
-    """Per-claim runaway: each claim is "one factual statement" — 500
-    chars is plenty. Bound prevents per-claim ramble exhausting
-    max_tokens before the claims list closes."""
+    """Per-claim runaway: each claim is "one factual statement" — 300
+    chars is plenty (Path C tightening fits worst-case schema output
+    within max_tokens=1024). Bound prevents per-claim ramble
+    exhausting max_tokens before the claims list closes."""
     CitedClaim(
-        claim="x" * 500, source_chunk_id="abc", confidence="high"
+        claim="x" * 300, source_chunk_id="abc", confidence="high"
     )
     with pytest.raises(ValidationError):
         CitedClaim(
-            claim="x" * 501, source_chunk_id="abc", confidence="high"
+            claim="x" * 301, source_chunk_id="abc", confidence="high"
+        )
+
+
+def test_cited_claim_source_chunk_id_rejects_over_max_length() -> None:
+    """Path C: source_chunk_id is bounded so a hallucinated chunk_id
+    (e.g. model dumping chunk text into the id field) can't run away.
+    Real chunk_ids are ~40 chars (sha1[:10] + slug); 80 is headroom."""
+    CitedClaim(
+        claim="ok", source_chunk_id="x" * 80, confidence="high"
+    )
+    with pytest.raises(ValidationError):
+        CitedClaim(
+            claim="ok", source_chunk_id="x" * 81, confidence="high"
         )
 
 
 def test_draft_answer_summary_rejects_over_max_length() -> None:
-    """Answer-node summary is "one or two sentences" — 600 chars
-    headroom. Bound prevents runaway emission that previously could
-    eat max_tokens before the claims list opened."""
-    DraftAnswer(summary="x" * 600, claims=[])
+    """Answer-node summary is "one or two sentences" — 300 chars
+    headroom (Path C tightening). Bound prevents runaway emission
+    that previously could eat max_tokens before the claims list
+    opened."""
+    DraftAnswer(summary="x" * 300, claims=[])
     with pytest.raises(ValidationError):
-        DraftAnswer(summary="x" * 601, claims=[])
+        DraftAnswer(summary="x" * 301, claims=[])
 
 
 def test_draft_answer_claims_list_bounded() -> None:
     """Top-k retrieval surfaces 5 chunks; the answer model legitimately
-    emits ~5 claims (one per chunk). Cap at 20 is generous; prevents
-    runaway list emission under pathological model state."""
+    emits ~5 claims (one per chunk). Cap at 8 (Path C tightening)
+    keeps worst-case schema output under max_tokens=1024."""
     DraftAnswer(
         summary="ok",
         claims=[
             CitedClaim(claim=f"c{i}", source_chunk_id=f"id{i}", confidence="high")
-            for i in range(20)
+            for i in range(8)
         ],
     )
     with pytest.raises(ValidationError):
@@ -84,7 +99,7 @@ def test_draft_answer_claims_list_bounded() -> None:
             summary="ok",
             claims=[
                 CitedClaim(claim=f"c{i}", source_chunk_id=f"id{i}", confidence="high")
-                for i in range(21)
+                for i in range(9)
             ],
         )
 

@@ -100,33 +100,39 @@ class AnswerStateUpdate(TypedDict, total=False):
 class CitedClaim(BaseModel):
     """A single factual claim with the chunk that supports it."""
 
-    # Hardening (audit 2026-05-22 follow-up to v6 SufficiencyAssessment
-    # bound): bound the LLM-emit string at the schema level so xgrammar
-    # rejects runaway emission. "One factual statement, self-contained"
-    # legitimately runs ~50-300 chars; 500 is generous headroom.
+    # Path C tightening (2026-05-22): bounds reduced from earlier
+    # hardening pass so xgrammar-forced JSON-close at max_length
+    # leaves enough budget under `max_tokens` to actually close the
+    # object cleanly. Math: a `claims` array at max_items=8 with
+    # each claim at max_length=300 + chunk_id at max_length=80 +
+    # ~52-char JSON overhead = ~3,456 chars (≈865 tokens) for the
+    # array alone. Plus summary at max_length=300 = ~75 tokens.
+    # Comfortably under max_tokens=1024.
     claim: str = Field(
         description="One factual statement, self-contained.",
-        max_length=500,
+        max_length=300,
     )
-    source_chunk_id: str = Field(description="The chunk_id that supports the claim.")
+    source_chunk_id: str = Field(
+        description="The chunk_id that supports the claim.",
+        max_length=80,
+    )
     confidence: Literal["high", "medium", "low"]
 
 
 class DraftAnswer(BaseModel):
     """The model's structured draft. Verified before it reaches the user."""
 
-    # Hardening: "one or two sentences" legitimately runs ~50-200 chars.
-    # 600 is the same headroom rationale as SufficiencyAssessment.reason
-    # (also bounded at 500). Prevents runaway emission past `max_tokens`
-    # in the answer node, which previously could trip schema validation
-    # mid-summary for verbose-prone queries.
+    # Path C tightening (2026-05-22): see CitedClaim for the budget
+    # rationale. "One or two sentences" overview legitimately runs
+    # 50-200 chars; 300 is generous headroom while leaving room for
+    # up to 8 claims under max_tokens=1024.
     summary: str = Field(
         description="One or two sentences overviewing the answer.",
-        max_length=600,
+        max_length=300,
     )
     claims: list[CitedClaim] = Field(
         description="Detailed claims, each with a citation.",
-        max_length=20,
+        max_length=8,
     )
 
 

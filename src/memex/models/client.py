@@ -153,7 +153,7 @@ async def complete_structured(
     top_p: float = 0.8,
     presence_penalty: float = 1.0,
     seed: int | None = 42,
-    max_tokens: int = 640,
+    max_tokens: int = 1024,
     prompt_tag: str | None = None,
 ) -> tuple[T, int]:
     """Call the orchestrator with grammar-constrained decoding.
