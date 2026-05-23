@@ -1,3 +1,10 @@
+# pyright: reportUnusedFunction=false
+# FastAPI route handlers are decorated with `@app.get`/`@app.post`
+# which registers them in the ASGI app's route table. Pyright can't
+# introspect the decorator's side effect and flags every route
+# handler as "not accessed." All 10 routes in this module are
+# reached via the FastAPI dispatcher.
+
 """Local FastAPI + HTMX web UI — see IMPLEMENTATION-PLAN §1.10.
 
 Server-rendered HTML, no SPA build step. HTMX handles the partial

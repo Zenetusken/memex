@@ -1,3 +1,9 @@
+# pyright: reportConstantRedefinition=false
+# `_LANGFUSE` is an uppercase module-level singleton intentionally
+# rebound by `configure_tracing()` (bootstrap path) — the SDK
+# itself is a process-wide singleton; we cache the handle here for
+# the per-call helpers.
+
 """Langfuse tracing — see ADR-0004.
 
 Targets the Langfuse v4 Python SDK. The v2 `langfuse.callback` import

@@ -1,3 +1,9 @@
+# pyright: reportConstantRedefinition=false
+# `_COMPILED_GRAPH` is an uppercase module-level singleton intentionally
+# rebound by the lazy-init helpers (see `get_compiled_graph` /
+# `reset_compiled_graph`). Pyright's "uppercase = literal constant"
+# heuristic doesn't fit the cache-singleton pattern.
+
 """
 Memex Answering Agent
 =====================

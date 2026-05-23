@@ -1,3 +1,8 @@
+# pyright: reportConstantRedefinition=false
+# `_REGISTRY` is an uppercase module-level singleton intentionally
+# rebound by `set_registry()` (bootstrap path) and reset by
+# `reset_registry()` (teardown / test cleanup).
+
 """Local-process model registry — see IMPLEMENTATION-PLAN.md §2.2.
 
 Owns the embedder, reranker, and VLM handles. The orchestrator

@@ -162,6 +162,14 @@ strict = ["src/memex"]
 pythonVersion = "3.12"
 reportMissingImports = "error"
 reportMissingTypeStubs = "warning"
+# Per-file `# pyright: reportUnusedFunction=false` pragmas live at
+# the top of `cli/commands.py` and `webui/app.py` to silence false
+# positives on framework-decorated route handlers + Typer commands.
+# Per-file `# pyright: reportConstantRedefinition=false` pragmas
+# live at the top of files that maintain uppercase module-level
+# singletons (`_BUS`, `_SETTINGS`, `_REGISTRY`, `_COMPILED_GRAPH`,
+# `_DOCLING_BREAKER`, `_LANGFUSE`) intentionally rebound by lazy-
+# init helpers and reset utilities.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,3 +1,7 @@
+# pyright: reportConstantRedefinition=false
+# `_BUS` is an uppercase module-level singleton intentionally rebound
+# by `set_bus()` for test isolation and `reset_bus()` for teardown.
+
 """In-process event bus — see GUIDELINES.md Part II and IMPLEMENTATION-PLAN.md §2.1.
 
 Asyncio pubsub with synchronous append-to-SQLite as the persistence

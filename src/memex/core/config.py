@@ -1,3 +1,8 @@
+# pyright: reportConstantRedefinition=false
+# `_SETTINGS` is an uppercase module-level singleton intentionally
+# rebound by `set_settings()` (test setup / bootstrap) and cleared
+# by `reset_settings()`.
+
 """Centralized settings — see GUIDELINES.md Part II "Configuration".
 
 A single `MemexSettings` model is the source of truth. Loaded once at

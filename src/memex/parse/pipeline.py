@@ -1,3 +1,9 @@
+# pyright: reportConstantRedefinition=false
+# `_DOCLING_BREAKER` and `_PYMUPDF_BREAKER` are uppercase module-level
+# singletons intentionally rebound by their lazy-init helpers
+# (`_docling_breaker()`, `_pymupdf_breaker()`) and the test-facing
+# reset utilities (`reset_docling_breaker`, `reset_pymupdf_breaker`).
+
 """Parse stage entry point.
 
 `parse_document(doc_id)` reads `vault/documents/{doc_id}/source.{ext}`,

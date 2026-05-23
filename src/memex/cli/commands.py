@@ -7,6 +7,13 @@ before doing any work (loads settings, configures observability,
 asserts CUDA availability, registers the event bus).
 """
 
+# pyright: reportUnusedFunction=false
+# Typer command handlers are decorated with `@app.command()` which
+# registers them in typer's command table. Pyright can't introspect
+# the decorator's side effect and flags every command function as
+# "not accessed." All 12 commands in this module are reached via the
+# Typer CLI entry point.
+
 from __future__ import annotations
 
 import asyncio
