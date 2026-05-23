@@ -51,10 +51,16 @@ class ModelSettings(BaseModel):
     reranker: str = "BAAI/bge-reranker-v2-m3"
     # P3.3 chart-OCR model — default `google/deplot` per Session 1
     # verdict (Apache 2.0, fine-tuned for plot→linearised-table,
-    # ~2.3 GB live in BF16). Disabled by default via
-    # `ParseSettings.disable_chart_ocr` (the model is opt-in until
-    # Session 5's eval validates HARD GATES).
-    chart_ocr: str = "google/deplot"
+    # Chart-OCR backend. Default `nvidia/NVIDIA-Nemotron-Parse-v1.2`
+    # since the 2026-05-23 P3.3-c shootout (see
+    # `docs/audits/chart_ocr_shootout_2026-05-23.md`) — first
+    # backend that doesn't regress on prose-heavy corpora
+    # (ANS == baseline; mcp_ans 0.955; refusal_cf 1.0). 0.88B params,
+    # ~3 GB live in BF16. Requires `trust_remote_code=True` per the
+    # ADR-0006 broadened amendment (chart-OCR slot only, opt-in by
+    # env var). Alternatives in tree: `google/deplot`,
+    # `khhuang/chart-to-table`, `kppkkp/OneChart`.
+    chart_ocr: str = "nvidia/NVIDIA-Nemotron-Parse-v1.2"
     # Reranker backend selector. `cross_encoder` (default) loads the
     # `sentence_transformers.CrossEncoder` model named in `reranker`
     # (today: bge-reranker-v2-m3). `qwen3` loads a Qwen3-Reranker
@@ -147,8 +153,11 @@ class ParseSettings(BaseModel):
     # ~30s parse-call overhead (vLLM is paused, chart-OCR loaded,
     # figures processed, model unloaded, vLLM restarted). Opt in once
     # Session 5's eval verifies HARD GATES + Q4/Q16/Q21 flips.
-    # Set via `MEMEX_PARSE__DISABLE_CHART_OCR=false` to enable.
-    disable_chart_ocr: bool = True
+    # Set via `MEMEX_PARSE__DISABLE_CHART_OCR=true` to disable.
+    # Default flipped to False on 2026-05-23 after the P3.3-c shootout
+    # confirmed Nemotron-Parse-v1.2 doesn't regress prose answering
+    # (ANS == baseline on the CUDA deck).
+    disable_chart_ocr: bool = False
     # 1200s headroom (20 min). The original 300s default fit 30-page
     # papers; 600s was still tight on 100-page slide decks because the
     # layout model is CPU-bound. Most slide decks finish in 3-5 min

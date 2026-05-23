@@ -88,6 +88,16 @@ parse = [
     "pymupdf4llm>=1.27,<2",
     "pypdfium2>=4.30",
     "pyseccomp>=0.1 ; sys_platform == 'linux'",
+    # Chart-OCR deps. Required by the default chart-OCR backend
+    # (`nvidia/NVIDIA-Nemotron-Parse-v1.2`; see the P3.3-c shootout
+    # audit + ADR-0006 amendment). `albumentations` is used by
+    # Nemotron-Parse's processor for image augmentations; `timm`
+    # powers the C-RADIO ViT-H vision encoder; `open_clip_torch`
+    # provides shared open-CLIP utilities that some Nemotron-family
+    # processors import.
+    "albumentations>=2.0",
+    "timm>=1.0",
+    "open_clip_torch>=3.0",
 ]
 # vLLM orchestrator. Memex talks to it over the OpenAI-compatible HTTP
 # endpoint (ADR-0001); the daemon is started/stopped via
