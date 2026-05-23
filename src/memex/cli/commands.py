@@ -568,7 +568,11 @@ async def _doctor_report() -> dict[str, object]:
     from memex.core.config import get_settings
     from memex.core.manifest import read_manifest
     from memex.models.client import get_client
-    from memex.parse.pipeline import get_docling_breaker_state
+    from memex.parse.pipeline import (
+        get_docling_breaker_state,
+        get_pymupdf_breaker_state,
+    )
+    from memex.prompts.loader import list_prompts
     from memex.vault.store import hash_bytes, list_documents
 
     settings = get_settings()
@@ -608,14 +612,28 @@ async def _doctor_report() -> dict[str, object]:
             "error": str(e),
         }
 
-    # Breaker state.
-    state, failures = get_docling_breaker_state()
+    # Breaker state — both parser breakers surfaced so an operator
+    # can spot the asymmetric tripped case (e.g. PyMuPDF crashed but
+    # Docling is still healthy).
+    docling_state, docling_failures = get_docling_breaker_state()
+    pymupdf_state, pymupdf_failures = get_pymupdf_breaker_state()
     breakers = {
         "docling": {
-            "state": state,
-            "failures": failures,
-        }
+            "state": docling_state,
+            "failures": docling_failures,
+        },
+        "pymupdf": {
+            "state": pymupdf_state,
+            "failures": pymupdf_failures,
+        },
     }
+
+    # Prompt versions — surfaces what's actually loaded so an
+    # operator can confirm e.g. `answer/v2.md` is the active answer
+    # template (vs an accidental rollback to v1).
+    prompts = [
+        {"name": p.name, "version": p.version} for p in list_prompts()
+    ]
 
     return {
         "vault_path": str(settings.vault_path),
@@ -624,6 +642,7 @@ async def _doctor_report() -> dict[str, object]:
         "issues": issues,
         "daemon": daemon,
         "breakers": breakers,
+        "prompts": prompts,
     }
 
 

@@ -156,25 +156,6 @@ async def _convert_with_handle(
     )
 
 
-async def convert_page(
-    *,
-    source_pdf: Path,
-    page_number: int,
-    max_new_tokens: int = _MAX_NEW_TOKENS,
-) -> DoclingPageOutput:
-    """Single-page convenience: acquire the VLM, transcribe, release.
-
-    For multi-page jobs from the same source, call `convert_pages`
-    instead — one context acquisition per document is much cheaper
-    than one per page.
-    """
-    registry = get_registry()
-    async with registry.use("vlm") as handle:
-        return await _convert_with_handle(
-            handle, source_pdf, page_number, max_new_tokens
-        )
-
-
 async def convert_pages(
     *,
     source_pdf: Path,
