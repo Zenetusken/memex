@@ -36,4 +36,4 @@ Memex is a local-first, fully agentic document-understanding system. Runs entire
 
 - Read the relevant ADR first — they explain *why*.
 - Check `docs/ROADMAP.md` to see if your idea is already queued or deliberately deferred.
-- Memory under `/home/drei/.claude/projects/-home-drei-project-Doc-Flo/memory/` captures time-sensitive context: stack-currency audit 2026-05-19, CUDA audit 2026-05-20, multi-agent bug-hunt audit 2026-05-20 (`audit_2026_05_20.md`), and current build status (`build_status.md`).
+- Memory under `/home/drei/.claude/projects/-home-drei-project-Doc-Flo/memory/` captures time-sensitive context. Active trackers: `MEMORY.md` (the index), `next_priorities.md` (current pickup list), `p33_tracker.md` (closed chart-OCR investigation with mixed verdict + 3 follow-up paths), `build_status.md` (last phase-wrap snapshot). Reference history: `stack_currency_audit.md` (2026-05-19), `cuda_audit.md` (2026-05-20), `audit_2026_05_20.md` (multi-agent bug-hunt), `p42_tracker.md` (closed smaller-orchestrator A/B), `p42_plan.md` (closed), `pymupdf_prefilter_ship.md`.
