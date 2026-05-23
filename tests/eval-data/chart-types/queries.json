@@ -33,7 +33,7 @@
       "_note": "Concept question \u2014 tests prose retrieval on a bullet-list usage section.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "1797d794-which-chart-or-graph-is-right-for-you#298fcbe8a4"
+        "1797d794-which-chart-or-graph-is-right-for-you#0439c746b7"
       ]
     },
     {
@@ -57,7 +57,7 @@
       "_note": "Tests a specific chart-type concept; should pull from the bar-chart tips section.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "1797d794-which-chart-or-graph-is-right-for-you#298fcbe8a4"
+        "1797d794-which-chart-or-graph-is-right-for-you#0439c746b7"
       ]
     },
     {
@@ -69,7 +69,7 @@
       "_note": "Tests the bar-chart + map combination guidance.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "1797d794-which-chart-or-graph-is-right-for-you#298fcbe8a4"
+        "1797d794-which-chart-or-graph-is-right-for-you#0439c746b7"
       ]
     },
     {
@@ -113,5 +113,5 @@
       "relevant_chunk_ids": []
     }
   ],
-  "_resolved_at": "2026-05-23T20:52:04Z"
+  "_resolved_at": "2026-05-23T22:44:33Z"
 }

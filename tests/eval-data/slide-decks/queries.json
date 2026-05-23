@@ -343,5 +343,6 @@
       "_expected_answer": "NumPy, SciPy, CuPy, PyTorch, scikit-learn, scikit-image",
       "_note": "CHART-TARGETED. The library list exists ONLY in the chart-extracted block of the nvmath-python architecture figure. Anchor unresolvable via FTS by design."
     }
-  ]
+  ],
+  "_resolved_at": "2026-05-23T22:46:02Z"
 }

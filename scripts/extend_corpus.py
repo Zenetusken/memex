@@ -306,10 +306,15 @@ async def cmd_resolve(args: argparse.Namespace) -> int:
     finally:
         await fts.close()
 
-    # Update query count + mix
+    # Update query count + mix. `_mix` is usually a dict but the legacy
+    # slide-decks corpus uses a free-form string ("17 answerable + 5
+    # empty-retrieval refusals + 8 near-miss refusals"). Only update
+    # dict-shaped _mix; leave string-shaped untouched to avoid clobbering
+    # the categorisation note.
     data["_query_count"] = len(queries)
-    data["_mix"]["ans"] = sum(1 for q in queries if not q.get("should_refuse"))
-    data["_mix"]["ref"] = sum(1 for q in queries if q.get("should_refuse"))
+    if isinstance(data.get("_mix"), dict):
+        data["_mix"]["ans"] = sum(1 for q in queries if not q.get("should_refuse"))
+        data["_mix"]["ref"] = sum(1 for q in queries if q.get("should_refuse"))
     data["_resolved_at"] = dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
     queries_path.write_text(json.dumps(data, indent=2) + "\n")
