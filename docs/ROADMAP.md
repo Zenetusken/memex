@@ -170,6 +170,14 @@ Three parallel research subagents evaluated browser-side OCR/VLM technologies as
 - ✅ **Per-module docstring audit** — 78.2% → **100% public-surface coverage** (275/275). Pure documentation pass, no behaviour change.
 - ✅ **Browser-OCR research turn** — three candidate technologies rejected (Tesseract.js, Surya-via-Pyodide, InternVL3-9B-via-ONNX-Web).
 
+**P3.3-c chart-OCR shootout (2026-05-23):**
+- ✅ **Three-agent landscape research** — investigated OneChart root cause + NVIDIA offerings + broader 2025-2026 landscape. Three agents converged on the architectural insight: Donut/VisionEncoderDecoder is the safe family. Captured in [`docs/audits/chart_ocr_landscape_2026-05-23.md`](audits/chart_ocr_landscape_2026-05-23.md).
+- ✅ **Three-agent fine-tuning research** — official fine-tuning workflows for each candidate (UniChart, NeMo Retriever 2-stage, Nemotron-Parse-v1.2). Captured in [`docs/audits/chart_ocr_finetune_research_2026-05-23.md`](audits/chart_ocr_finetune_research_2026-05-23.md).
+- ✅ **Path A — UniChart/chart-to-table** integration shipped + A/B eval (commit `8292169`). Donut-style VisionEncoderDecoder, 200M params, Apache 2.0, CUDA-stable. **Verdict: −1 ANS (10/30, same as DePlot)** on prose-heavy corpus.
+- ✅ **Path C — NVIDIA Nemotron-Parse-v1.2** integration shipped + A/B eval (commit `68acac1`). 885M VisionEncoderDecoder; required ADR-0006 carve-out broadening (chart-OCR slot trust_remote_code now covers OneChart + Nemotron-Parse). **Verdict: ✅ ANS=11/30 (==baseline), refusal_cf=1.0, mcp_ans=0.955** — first chart-OCR backend that doesn't regress on prose-heavy corpora. Generates only 11 chart blocks (vs DePlot's 50, UniChart's 60); the conservative extraction is the architectural lever that finally aligns chart-OCR with prose-heavy use cases.
+- ✅ **Final shootout audit**: [`docs/audits/chart_ocr_shootout_2026-05-23.md`](audits/chart_ocr_shootout_2026-05-23.md). Decision: **Nemotron-Parse-v1.2 is the recommended chart-OCR backend** when chart-OCR is desired; default stays `disable_chart_ocr=True`. Path B (NeMo Retriever 2-stage) deferred — single-model winner is sufficient.
+- ✅ **Operational note**: 12 GB rig needs `MEMEX_VLLM_GPU_FRACTION=0.68` when chart-OCR is enabled.
+
 **P3.3-b OneChart retry (2026-05-23):**
 - ✅ **ADR-0006 amendment** — carved out `trust_remote_code=True` exception for the chart-OCR slot only, OneChart specifically. Documented mitigations (Apache 2.0, 0.3B params, opt-in via env var, seccomp-sandboxed parse-time process, `reliable_check` self-consistency gate).
 - ✅ **Backend implementation** — new `_load_chart_ocr` dispatch branch for OneChart; new `_chart_ocr_transcribe_onechart` helper with `reliable_check` parsing + dict-to-markdown conversion + defensive TypeError / RuntimeError handling. 5 new unit tests pin the contract.
