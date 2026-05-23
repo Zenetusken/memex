@@ -76,7 +76,7 @@ Every CLI / daemon entry point calls `cli/bootstrap.py:bootstrap()`, which is ex
 3. Assert `torch.cuda.is_available()`; raise `InsufficientVRAMError` with a clear remediation message if not.
 4. Call `torch.cuda.set_per_process_memory_fraction(settings.hardware.gpu_memory_fraction)` so the dead field is wired.
 
-`MemexSettings` gains a `@model_validator` that consults a static GB table (orchestrator 5.0 + embedder 0.6 + reranker 0.6 + VLM AWQ-Int4 7.0 + overhead 2.5) and asserts the fit at startup before any model load is attempted.
+`MemexSettings` gains a `@model_validator` that consults a static GB table (orchestrator 5.0 + embedder 0.6 + reranker 0.6 + VLM AWQ-Int4 5.0 + overhead 2.0 + chart-OCR 2.5 when opt-in) and asserts the fit at startup before any model load is attempted. The VLM and chart-OCR are gated on `disable_vlm` / `disable_chart_ocr` so the budget check only counts the models that will actually load; the live table lives in `cli/bootstrap.py::_VRAM_GB`.
 
 ## Consequences
 
@@ -112,7 +112,7 @@ Smaller memory in some kernels, but the EmbeddingGemma activation-overflow issue
 
 ### Default VLM to a smaller model (Qwen3-VL-4B)
 
-A real option. Qwen3-VL-4B fits BF16 on 12 GB with room to spare and avoids the AWQ build dependency. We chose Qwen3-VL-8B AWQ-Int4 because the 8B's OCR quality is materially better for the parser fallback workload that motivates having a VLM at all. Revisit if AWQ becomes a maintenance burden or if a Qwen3-VL-4B Int4 build matches the 8B AWQ quality.
+A real option. Qwen3-VL-4B fits BF16 on 12 GB with room to spare and avoids the AWQ build dependency. We chose AWQ-Int4 for the VLM because the larger model's OCR quality is materially better for the parser fallback workload that motivates having a VLM at all. **Current default**: `Qwen/Qwen2.5-VL-7B-Instruct-AWQ` (the 7B variant is what's in production today; Qwen3-VL-8B is the eval-gated successor under P2.3 — see ADR-0001's revisit candidates). Revisit if AWQ becomes a maintenance burden or if a Qwen3-VL-4B Int4 build matches the larger model's quality.
 
 ### Route VLM through a second vLLM process
 
