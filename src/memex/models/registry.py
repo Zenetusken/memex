@@ -490,6 +490,22 @@ class ModelRegistry:
                 attn_implementation=attn_impl,
                 low_cpu_mem_usage=True,
             )
+        elif "chart-to-table" in lid or "unichart" in lid:
+            # Path A: UniChart Donut-style VisionEncoderDecoder
+            # (P3.3-c follow-up, 2026-05-23). 0.2B params, Apache 2.0,
+            # `donut-swin` encoder + `mbart` decoder, max_position_
+            # embeddings=1536 (well-bounded; no OneChart-style overflow
+            # risk). Loads via stock transformers — no
+            # `trust_remote_code` needed. Uses `DonutProcessor`.
+            from transformers import DonutProcessor, VisionEncoderDecoderModel
+
+            processor = DonutProcessor.from_pretrained(model_id)
+            model = VisionEncoderDecoderModel.from_pretrained(
+                model_id,
+                torch_dtype=torch.bfloat16,
+                device_map={"": "cuda:0"},
+                low_cpu_mem_usage=True,
+            )
         else:
             from transformers import (
                 Pix2StructForConditionalGeneration,

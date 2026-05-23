@@ -373,6 +373,12 @@ class _FakeImage:
         with open(str(path), "wb") as f:
             f.write(b"\x00")
 
+    def convert(self, mode: str) -> "_FakeImage":  # noqa: ARG002
+        # The UniChart transcribe path calls `image.convert("RGB")`
+        # before passing to the processor. Return self to keep the
+        # chain working.
+        return self
+
     def __repr__(self) -> str:
         return f"<FakeImage page={self.page}>"
 
@@ -558,6 +564,246 @@ async def test_onechart_string_only_return_parses_reliable_from_text(
     monkeypatch.setattr(
         "memex.parse.chart_ocr_backend.get_registry",
         lambda: _onechart_registry(handle),
+    )
+    monkeypatch.setattr(
+        chart_ocr_backend,
+        "_render_figure_to_image",
+        lambda pdf, page, bbox, scale=2.5: _FakeImage(page),
+    )
+
+    figures = [
+        FigureMetadata(
+            page_no=1,
+            bbox=(0.0, 0.0, 500.0, 400.0),
+            classification="bar_chart",
+            classification_confidence=0.97,
+        ),
+    ]
+    out = await chart_ocr_extract(
+        source_pdf=Path("/fake.pdf"),
+        figures=figures,
+        min_area_sqpt=0.0,
+    )
+    assert isinstance(out[0], ChartOCROutput)
+    assert out[0].markdown == ""
+
+
+# ----------------------------------------------------------------------
+# P3.3-c Path A — UniChart Donut VisionEncoderDecoder tests
+# ----------------------------------------------------------------------
+
+
+def test_unichart_table_to_markdown_basic() -> None:
+    """`row1col1 | row1col2 &&& row2col1 | row2col2` → markdown table.
+    First row is the header by convention."""
+    from memex.parse.chart_ocr_backend import _unichart_table_to_markdown
+
+    raw = "Year | Revenue &&& 2020 | 1.2 &&& 2021 | 2.4"
+    md = _unichart_table_to_markdown(raw)
+    assert "| Year | Revenue |" in md
+    assert "| --- | --- |" in md
+    assert "| 2020 | 1.2 |" in md
+    assert "| 2021 | 2.4 |" in md
+
+
+def test_unichart_table_to_markdown_empty_returns_empty() -> None:
+    """Degenerate inputs collapse to empty markdown so the stitch step
+    leaves the placeholder unchanged."""
+    from memex.parse.chart_ocr_backend import _unichart_table_to_markdown
+
+    assert _unichart_table_to_markdown("") == ""
+    assert _unichart_table_to_markdown("   ") == ""
+    assert _unichart_table_to_markdown("&&&") == ""
+
+
+def test_unichart_table_to_markdown_padding() -> None:
+    """When rows have unequal column counts, the shorter rows are
+    right-padded with empty cells so the markdown table is well-formed."""
+    from memex.parse.chart_ocr_backend import _unichart_table_to_markdown
+
+    raw = "A | B | C &&& 1 | 2 &&& X | Y | Z"
+    md = _unichart_table_to_markdown(raw)
+    # Header should set column count to 3
+    assert "| A | B | C |" in md
+    # Short row padded with empty cell
+    assert "| 1 | 2 |  |" in md
+    # Full row passes through
+    assert "| X | Y | Z |" in md
+
+
+def test_unichart_table_to_markdown_single_row() -> None:
+    """One-row output: emit just the header row (no data). Better than
+    silently swallowing the extraction."""
+    from memex.parse.chart_ocr_backend import _unichart_table_to_markdown
+
+    md = _unichart_table_to_markdown("Only | One | Row")
+    assert "| Only | One | Row |" in md
+    assert "| --- | --- | --- |" in md
+
+
+class _FakeUniChartEncoder:
+    """Stand-in encoder so `_is_unichart_handle` recognises the class
+    name. Match against 'DonutSwin' family."""
+
+    pass
+
+
+_FakeUniChartEncoder.__name__ = "DonutSwinModel"
+
+
+class _FakeUniChartModel:
+    """Mimics a VisionEncoderDecoder model exposing the surface the
+    UniChart transcribe path uses: `.encoder` (for dispatch detection),
+    `.decoder.config.max_position_embeddings`, `.generate()`, `.device`,
+    `.dtype`."""
+
+    def __init__(self, sequences: object) -> None:
+        # Class name must be VisionEncoderDecoderModel so the
+        # `_is_unichart_handle` first guard passes.
+        self.encoder = _FakeUniChartEncoder()
+        self.decoder = type(
+            "D", (), {"config": type("C", (), {"max_position_embeddings": 1536})}
+        )()
+        self._sequences = sequences
+        # Stub device/dtype attributes used by the transcribe path.
+        # Both must be torch-typed for the `.to(device, dtype=...)` call
+        # the helper makes on the processor's pixel_values.
+        import torch
+
+        self.device = torch.device("cpu")
+        self.dtype = torch.float32
+
+    def generate(self, *args, **kwargs):  # noqa: ARG002
+        import torch
+        # Return a namespace whose `.sequences` attribute is what the
+        # processor.batch_decode() call will consume.
+        return type("Out", (), {"sequences": torch.zeros(1, 10, dtype=torch.long)})()
+
+
+_FakeUniChartModel.__name__ = "VisionEncoderDecoderModel"
+
+
+class _FakeUniChartProcessor:
+    """Mimics DonutProcessor: callable for image input, `.tokenizer`
+    sub-object with `pad_token_id`/`eos_token_id`/`unk_token_id` +
+    `pad_token`/`eos_token` strings + `__call__` for prompt tokenisation,
+    `.batch_decode` for output."""
+
+    def __init__(self, decoded: str) -> None:
+        self._decoded = decoded
+
+        class _Tok:
+            pad_token_id = 0
+            eos_token_id = 1
+            unk_token_id = 2
+            pad_token = "<pad>"
+            eos_token = "</s>"
+
+            def __call__(self_inner, text, **kw):  # noqa: ARG002, N805
+                import torch
+
+                return type("T", (), {"input_ids": torch.zeros(1, 3, dtype=torch.long)})()
+
+        self.tokenizer = _Tok()
+
+    def __call__(self, image, **kw):  # noqa: ARG002
+        import torch
+
+        return type("P", (), {"pixel_values": torch.zeros(1, 3, 32, 32)})()
+
+    def batch_decode(self, sequences, **kw):  # noqa: ARG002
+        return [self._decoded]
+
+
+class _FakeUniChartHandle:
+    def __init__(self, decoded: str) -> None:
+        self.model = _FakeUniChartModel(sequences=None)
+        self.processor = _FakeUniChartProcessor(decoded=decoded)
+
+
+def _unichart_registry(handle: _FakeUniChartHandle) -> Any:
+    class _Reg:
+        def use(self, name: str) -> Any:  # noqa: ARG002
+            return _yields(handle)
+
+    return _Reg()
+
+
+def test_is_unichart_handle_detects_class_name() -> None:
+    """`_is_unichart_handle` matches `VisionEncoderDecoderModel` with
+    a `donut-swin` encoder."""
+    from memex.parse.chart_ocr_backend import _is_unichart_handle
+
+    handle = _FakeUniChartHandle(decoded="")
+    assert _is_unichart_handle(handle) is True
+
+    # Negative: a Pix2Struct-style handle must NOT be detected as UniChart.
+    deplot_handle = _FakeChartOCRHandle()
+    assert _is_unichart_handle(deplot_handle) is False
+
+
+@pytest.mark.asyncio
+async def test_unichart_success_returns_markdown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """UniChart emits a `&&&`/`|` table; the backend converts it to
+    markdown and threads through as the chunk's markdown."""
+    decoded = (
+        "<pad><pad><data_table_generation> <s_answer>"
+        "Year | Revenue &&& 2020 | 1.2 &&& 2021 | 2.4</s>"
+    )
+    handle = _FakeUniChartHandle(decoded=decoded)
+    monkeypatch.setattr(
+        "memex.parse.chart_ocr_backend.get_registry",
+        lambda: _unichart_registry(handle),
+    )
+    monkeypatch.setattr(
+        chart_ocr_backend,
+        "_render_figure_to_image",
+        lambda pdf, page, bbox, scale=2.5: _FakeImage(page),
+    )
+
+    figures = [
+        FigureMetadata(
+            page_no=1,
+            bbox=(0.0, 0.0, 500.0, 400.0),
+            classification="bar_chart",
+            classification_confidence=0.97,
+        ),
+    ]
+    out = await chart_ocr_extract(
+        source_pdf=Path("/fake.pdf"),
+        figures=figures,
+        min_area_sqpt=0.0,
+    )
+    assert len(out) == 1
+    assert isinstance(out[0], ChartOCROutput)
+    md = out[0].markdown
+    assert "| Year | Revenue |" in md
+    assert "| 2020 | 1.2 |" in md
+
+
+@pytest.mark.asyncio
+async def test_unichart_runtime_error_returns_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RuntimeError during generate() (CUDA OOM mid-beam-search,
+    processor input mismatch, etc.) must NOT crash the whole pass;
+    the affected figure returns empty markdown."""
+
+    class _ErrorHandle:
+        def __init__(self) -> None:
+            self.model = _FakeUniChartModel(sequences=None)
+            # Override generate to raise RuntimeError.
+            self.model.generate = lambda *a, **kw: (_ for _ in ()).throw(  # type: ignore
+                RuntimeError("CUDA OOM mid-beam")
+            )
+            self.processor = _FakeUniChartProcessor(decoded="")
+
+    handle = _ErrorHandle()
+    monkeypatch.setattr(
+        "memex.parse.chart_ocr_backend.get_registry",
+        lambda: _unichart_registry(handle),  # type: ignore[arg-type]
     )
     monkeypatch.setattr(
         chart_ocr_backend,

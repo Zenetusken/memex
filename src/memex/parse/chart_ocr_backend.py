@@ -259,6 +259,34 @@ def _is_onechart_handle(handle) -> bool:
     return "onechart" in cls
 
 
+def _is_unichart_handle(handle) -> bool:
+    """True when the chart-OCR handle wraps a UniChart-family
+    VisionEncoderDecoder model (P3.3-c, Path A). Detection: model is
+    `VisionEncoderDecoderModel` AND has a `donut-swin` encoder. This
+    catches `khhuang/chart-to-table` and any future UniChart variants
+    without depending on model-id substring matching.
+    """
+    cls = type(handle.model).__name__
+    if cls != "VisionEncoderDecoderModel":
+        return False
+    encoder_cls = type(getattr(handle.model, "encoder", None)).__name__.lower()
+    return "donutswin" in encoder_cls or "donut_swin" in encoder_cls
+
+
+# UniChart chart-to-table prompt. Per the model card
+# (https://huggingface.co/khhuang/chart-to-table), this is the exact
+# task token the model expects; deviating produces empty output.
+_PROMPT_UNICHART = "<data_table_generation> <s_answer>"
+
+# UniChart's table-serialization format:
+#   row1col1 | row1col2 | row1col3 &&& row2col1 | row2col2 | row2col3
+# We convert this to a markdown table for the agent's downstream
+# consumption (markdown is the canonical chart-extracted block format
+# in the rest of the pipeline).
+_UNICHART_ROW_DELIM = "&&&"
+_UNICHART_COL_DELIM = "|"
+
+
 # OneChart's auxiliary self-consistency token. When the model's
 # generated output contains this followed by "True"/"False" (or the
 # model returns a tuple containing the boolean separately depending
@@ -301,6 +329,9 @@ def _chart_ocr_transcribe_sync(
 
     if _is_onechart_handle(handle):
         return _chart_ocr_transcribe_onechart(handle, image, max_new_tokens)
+
+    if _is_unichart_handle(handle):
+        return _chart_ocr_transcribe_unichart(handle, image, max_new_tokens)
 
     is_vlm = _is_vlm_handle(handle)
 
@@ -485,6 +516,133 @@ def _chart_ocr_transcribe_onechart(handle, image, max_new_tokens: int) -> str:
         return text
 
 
+def _chart_ocr_transcribe_unichart(handle, image, max_new_tokens: int) -> str:
+    """UniChart Donut-style transcription path (Path A, P3.3-c).
+
+    Model: `VisionEncoderDecoderModel` with `donut-swin` encoder +
+    `mbart` decoder. Verified upstream inference recipe (model card
+    on `khhuang/chart-to-table`):
+
+      input_prompt = "<data_table_generation> <s_answer>"
+      pixel_values = processor(img, random_padding=False).pixel_values
+      decoder_input_ids = tokenizer(prompt, add_special_tokens=False)
+      outputs = model.generate(
+          pixel_values, decoder_input_ids,
+          max_length=model.decoder.config.max_position_embeddings,
+          num_beams=4, early_stopping=True,
+          pad_token_id=..., eos_token_id=...,
+          bad_words_ids=[[unk_token_id]],
+      )
+
+    The output is split on `<s_answer>` to extract the table portion.
+    Tables use `&&&` for row delimiter, `|` for column delimiter.
+    We convert this to a standard markdown table for the rest of the
+    pipeline.
+
+    `max_new_tokens` is honored by capping `max_length` to
+    `min(model.decoder.config.max_position_embeddings, max_new_tokens + decoder_input_ids.shape[-1])`.
+    """
+    import torch
+
+    log = logger.bind(handle=type(handle.model).__name__)
+
+    try:
+        with torch.inference_mode():
+            pixel_values = handle.processor(
+                image.convert("RGB"),
+                random_padding=False,
+                return_tensors="pt",
+            ).pixel_values.to(handle.model.device, dtype=handle.model.dtype)
+
+            decoder_input_ids = handle.processor.tokenizer(
+                _PROMPT_UNICHART,
+                add_special_tokens=False,
+                return_tensors="pt",
+                max_length=510,
+            ).input_ids.to(handle.model.device)
+
+            # Bound generation: never exceed the model's
+            # max_position_embeddings AND never exceed the caller's
+            # max_new_tokens budget. Whichever is tighter wins.
+            decoder_max = handle.model.decoder.config.max_position_embeddings
+            prompt_len = decoder_input_ids.shape[-1]
+            max_length = min(decoder_max, prompt_len + max_new_tokens)
+
+            outputs = handle.model.generate(
+                pixel_values,
+                decoder_input_ids=decoder_input_ids,
+                max_length=max_length,
+                early_stopping=True,
+                pad_token_id=handle.processor.tokenizer.pad_token_id,
+                eos_token_id=handle.processor.tokenizer.eos_token_id,
+                use_cache=True,
+                num_beams=4,
+                bad_words_ids=[[handle.processor.tokenizer.unk_token_id]],
+                return_dict_in_generate=True,
+            )
+
+        sequence = handle.processor.batch_decode(outputs.sequences)[0]
+        sequence = sequence.replace(
+            handle.processor.tokenizer.eos_token, ""
+        ).replace(handle.processor.tokenizer.pad_token, "")
+
+        if "<s_answer>" in sequence:
+            table_raw = sequence.split("<s_answer>")[1].strip()
+        else:
+            table_raw = sequence.strip()
+    except (RuntimeError, ValueError) as e:
+        # Defensive: any inference-time failure (CUDA OOM during the
+        # beam search, processor input shape mismatch, etc.) becomes
+        # an empty extraction rather than crashing the parse pass.
+        log.warning(
+            "chart_ocr.unichart.inference_failed", error=str(e)[:160]
+        )
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        return ""
+    finally:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    return _unichart_table_to_markdown(table_raw)
+
+
+def _unichart_table_to_markdown(raw: str) -> str:
+    """Convert UniChart's `row1col1 | row1col2 &&& row2col1 | row2col2`
+    format to a standard markdown table.
+
+    The first row is treated as the header. If only one row is
+    produced (degenerate output), still emit a single-row markdown
+    table so the downstream agent can read it.
+    """
+    raw = raw.strip()
+    if not raw:
+        return ""
+
+    rows = [r.strip() for r in raw.split(_UNICHART_ROW_DELIM) if r.strip()]
+    if not rows:
+        return ""
+
+    parsed: list[list[str]] = []
+    for row in rows:
+        cells = [c.strip() for c in row.split(_UNICHART_COL_DELIM)]
+        if cells:
+            parsed.append(cells)
+
+    if not parsed:
+        return ""
+
+    # Normalise column count to the longest row (pad with empty cells).
+    max_cols = max(len(row) for row in parsed)
+    parsed = [row + [""] * (max_cols - len(row)) for row in parsed]
+
+    header = "| " + " | ".join(parsed[0]) + " |"
+    separator = "| " + " | ".join(["---"] * max_cols) + " |"
+    body_rows = ["| " + " | ".join(row) + " |" for row in parsed[1:]]
+
+    return "\n".join([header, separator, *body_rows])
+
+
 def _onechart_dict_to_markdown(d: object) -> str:
     """Convert OneChart's `{title, source, values: {label: value}}`
     dict to a markdown table. Handles the common shapes; falls back
@@ -529,11 +687,14 @@ async def _extract_with_handle(
         figure.page_no,
         figure.bbox,
     )
-    # Prompt selection: OneChart uses its own published prompt
-    # (handled inside _chart_ocr_transcribe_onechart); the prompt
-    # arg here is the fallback for the VLM / Pix2Struct paths.
+    # Prompt selection: OneChart + UniChart each use their own
+    # published prompt (handled inside their respective transcribe
+    # helpers); the prompt arg here is the fallback for the VLM /
+    # Pix2Struct paths.
     if _is_onechart_handle(handle):
         prompt = _PROMPT_ONECHART  # passed through but not used directly
+    elif _is_unichart_handle(handle):
+        prompt = _PROMPT_UNICHART  # passed through but not used directly
     else:
         prompt = _PROMPT_VLM if _is_vlm_handle(handle) else _PROMPT_DEPLOT
     markdown = await asyncio.to_thread(
