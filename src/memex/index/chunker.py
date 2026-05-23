@@ -96,6 +96,34 @@ def _word_count(s: str) -> int:
     return len(s.split())
 
 
+def _budget_word_count(s: str) -> int:
+    """Word count for chunker-budget purposes only.
+
+    P3.3 v4 (audit 2026-05-22): excludes
+    `[chart-extracted]...[/chart-extracted]` block contents so
+    chart-OCR enrichment doesn't shift chunk boundaries away from
+    the no-chart-OCR baseline.
+
+    The chunker uses word count as a token-count proxy when deciding
+    whether to close a chunk and start a new one (the
+    `chunk_target_tokens` budget). Inline chart-extracted blocks
+    (added by `parse/pipeline.py::_stitch_chart_extractions`) can be
+    several hundred "words" — when a paragraph plus its post-figure
+    chart block bumps the budget, the chunker closes the window
+    early and pushes the next paragraph into a new chunk. The
+    P3.3 v2/v3 eval data showed this is the dominant cause of the
+    −6 prose-query regression on the CUDA deck (chunks shifted
+    away from their paired prose).
+
+    Counting chart-block words as ZERO for budget purposes keeps
+    chunk boundaries at the no-chart-OCR baseline. The chart block
+    still appears in the chunk's text (used by the agent at answer
+    time), and FTS-side stripping (P3.3 v3, see fts_store.upsert)
+    keeps the chart-numeric tokens out of BM25.
+    """
+    return _word_count(strip_chart_extracted_for_index(s))
+
+
 def _heading_path_at(text: str, offset: int) -> list[str]:
     """The active heading stack at character offset `offset`.
 
@@ -155,21 +183,27 @@ def _split_section_into_chunks(
     if not paragraphs:
         return []
 
+    # P3.3 v4: use `_budget_word_count` for all chunk-size decisions
+    # (closes early-or-not, paragraph-oversize check). Chart-extracted
+    # blocks contribute zero to the budget so chunk boundaries match
+    # the no-chart-OCR baseline. The full paragraph text (including
+    # chart blocks) is still appended to `cur` and ends up in the
+    # final chunk text.
     windows: list[list[str]] = []
     cur: list[str] = []
     cur_tokens = 0
     for p in paragraphs:
-        pt = _word_count(p)
+        pt = _budget_word_count(p)
         if pt > target_tokens:
             # Sentence-split oversized paragraphs.
             sentences = _SENTENCE_RE.split(p)
             for s in sentences:
-                st = _word_count(s)
+                st = _budget_word_count(s)
                 if cur and cur_tokens + st > target_tokens:
                     windows.append(cur)
                     overlap_words = " ".join(cur).split()[-overlap_tokens:]
                     cur = [" ".join(overlap_words)] if overlap_words else []
-                    cur_tokens = _word_count(cur[0]) if cur else 0
+                    cur_tokens = _budget_word_count(cur[0]) if cur else 0
                 cur.append(s)
                 cur_tokens += st
         else:
@@ -177,7 +211,7 @@ def _split_section_into_chunks(
                 windows.append(cur)
                 overlap_words = " ".join(cur).split()[-overlap_tokens:]
                 cur = [" ".join(overlap_words)] if overlap_words else []
-                cur_tokens = _word_count(cur[0]) if cur else 0
+                cur_tokens = _budget_word_count(cur[0]) if cur else 0
             cur.append(p)
             cur_tokens += pt
     if cur:

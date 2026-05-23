@@ -95,15 +95,14 @@ async def _embed_chunks(chunks: list[Chunk]) -> list[list[float]]:
         return []
     batch_size = int(os.environ.get("MEMEX_INDEX_EMBED_BATCH", "32"))
     registry = get_registry()
-    # P3.3 v3 follow-up: leave the dense-embedding text UNSTRIPPED
-    # of `[chart-extracted]` blocks so chart-numeric queries (e.g.
-    # Q21's "NVRTC -minimal 1.6x lower than -O3") can still match
-    # the chart-bearing chunk via dense vector similarity. The FTS
-    # (BM25) body IS stripped at insert time — see FTSStore.upsert —
-    # to prevent the harder term-frequency perturbation that pulls
-    # chart-bearing chunks above prose for queries that incidentally
-    # share tokens (years, percentages). Dense embedding is more
-    # diffuse and less prone to that failure mode.
+    # P3.3 v3/v4: leave the dense-embedding text UNSTRIPPED of
+    # `[chart-extracted]` blocks. The FTS body IS stripped (see
+    # FTSStore.upsert) — that's where the term-frequency
+    # perturbation lived. Dense embedding is more diffuse; empirically
+    # (v4b eval 2026-05-22), stripping it loses Q21's chart-OCR win
+    # without recovering any prose queries. Keep chart content in the
+    # embedded text so chart-numeric queries can match via dense
+    # vector similarity.
     async with registry.use("embedder") as embedder:
         # SentenceTransformer.encode is sync + heavy; offload.
         def _encode() -> Any:
