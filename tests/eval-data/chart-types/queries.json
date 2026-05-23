@@ -1,0 +1,95 @@
+{
+  "_description": "Hand-labelled eval corpus for the Tableau 'Which Chart or Graph Is Right For You?' tutorial PDF. 18-page Adobe-InDesign-produced doc that routed via PyMuPDF (Tier 1.A high confidence, born-digital) \u2014 chart-OCR was NOT applied. Tests prose-retrieval on a chart-knowledge-tutorial domain.",
+  "_doc_id": "1797d794-which-chart-or-graph-is-right-for-you",
+  "_query_count": 7,
+  "_mix": {
+    "ans": 5,
+    "ref": 2
+  },
+  "_labelling_rule": "ANS queries: _anchor_phrase = distinctive substring from the chunk with the answer; resolved via scripts/extend_corpus.py resolve. REF queries: should_refuse=true; relevant_chunk_ids=[].",
+  "_created": "2026-05-23",
+  "_purpose": "Third corpus for the eval matrix (after slide-decks + french-course + annual-report). Validates the scaffolding workflow on a real chart-tutorial PDF and tests prose-retrieval over chart-knowledge content.",
+  "queries": [
+    {
+      "qid": "chart-types-01",
+      "question": "Who wrote the Tableau paper on which chart or graph to use?",
+      "_anchor_phrase": "Tracy Rodgers Product Marketing Manager",
+      "_expected_answer": "Tracy Rodgers (Product Marketing Manager) and Robert Bloom (Tableau Engineer).",
+      "_answer_type": "single_fact",
+      "_note": "Author attribution from the title page.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "1797d794-which-chart-or-graph-is-right-for-you#2f6d2b49f9"
+      ]
+    },
+    {
+      "qid": "chart-types-02",
+      "question": "When should you use a bar chart according to this paper?",
+      "_anchor_phrase": "Compare data across categories",
+      "_expected_answer": "To compare data across categories (best suited for data that can be split into several groups, e.g., volume of shirts in different sizes, website traffic by referrer).",
+      "_answer_type": "concept",
+      "_note": "Concept question \u2014 tests prose retrieval on a bullet-list usage section.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "1797d794-which-chart-or-graph-is-right-for-you#838c33c96c"
+      ]
+    },
+    {
+      "qid": "chart-types-03",
+      "question": "What is the main weakness of pie charts according to this paper?",
+      "_anchor_phrase": "pie chart doesn't give the viewer a way to quickly and accurately compare",
+      "_expected_answer": "Pie charts don't give viewers a way to quickly and accurately compare information; the viewer has to create context on their own, missing key points.",
+      "_answer_type": "concept",
+      "_note": "Critical analysis from the pie chart section.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "1797d794-which-chart-or-graph-is-right-for-you#cb9facc97a"
+      ]
+    },
+    {
+      "qid": "chart-types-04",
+      "question": "What is a Pareto chart?",
+      "_anchor_phrase": "Pareto chart showing the accumulation of multiple categories",
+      "_expected_answer": "A chart showing the accumulation of multiple categories \u2014 created by combining bar charts with table calculations.",
+      "_answer_type": "concept",
+      "_note": "Tests a specific chart-type concept; should pull from the bar-chart tips section.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "1797d794-which-chart-or-graph-is-right-for-you#838c33c96c"
+      ]
+    },
+    {
+      "qid": "chart-types-05",
+      "question": "Why do bar charts work well combined with maps?",
+      "_anchor_phrase": "Maps are a powerful and intuitive way to visualize data",
+      "_expected_answer": "Maps are a powerful and intuitive way to visualize data; using a map as a filter lets viewers drill down and find detailed answers.",
+      "_answer_type": "concept",
+      "_note": "Tests the bar-chart + map combination guidance.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "1797d794-which-chart-or-graph-is-right-for-you#838c33c96c"
+      ]
+    },
+    {
+      "qid": "chart-types-06",
+      "question": "What was Tableau's revenue in 2026?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 this paper is about chart selection, not Tableau's financials.",
+      "_answer_type": "counterfactual",
+      "_note": "HARD GATE refusal. The doc is a how-to guide, not a financial report.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "chart-types-07",
+      "question": "What's the difference between a Sankey diagram and a Sunburst chart according to this paper?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 this paper doesn't cover Sankey diagrams or Sunburst charts; it focuses on bar charts, line charts, pie charts, scatter plots, etc.",
+      "_answer_type": "counterfactual",
+      "_note": "HARD GATE refusal. Out-of-scope chart types. Tests the agent's not-in-corpus discipline.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    }
+  ],
+  "_resolved_at": "2026-05-23T19:45:57Z"
+}
