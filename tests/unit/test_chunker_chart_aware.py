@@ -151,3 +151,90 @@ def test_chart_block_words_count_zero_toward_budget() -> None:
     # One chunk; chart fully intact (no sentence-split mangling).
     assert len(chunks) == 1
     assert "row199 | col1" in chunks[0].text
+
+
+# ----------------------------------------------------------------------
+# P3.3 v7 chunker fix (2026-05-23): headings INSIDE chart-extracted
+# blocks must not be treated as document-section boundaries.
+# ----------------------------------------------------------------------
+
+
+def test_h1_inside_chart_block_does_not_split_section() -> None:
+    """The nvmath-python case: Nemotron-Parse emits H1 labels for the
+    4 design principles INSIDE a single chart-extracted block. The
+    chunker must NOT split on those — they're inert chart-figure
+    labels, not document headings. Without the fix, only the LAST
+    principle reached the reranker's top-5."""
+    body = (
+        "## nvmath-python\n\n"
+        "Easy Pythonic access to CUDA Math library functionality.\n\n"
+        "<!-- image -->\n\n"
+        "[chart-extracted]\n"
+        "# Minimal lead-time\n"
+        "to access new CUDA library features from Python\n"
+        "# Inter-operability\n"
+        "with core Python numeric packages\n"
+        "# Pythonic library interface\n"
+        "to CUDA accelerated libraries\n"
+        "# Platform-agnostic\n"
+        "Runs on GPU, CPU (x86 & Arm) and Grace-Hopper\n"
+        "[/chart-extracted]\n\n"
+        "Logo\n"
+    )
+
+    chunks = chunk_document(_doc(body))
+    # The entire ## nvmath-python section must be a single chunk —
+    # the four H1 lines inside the chart block must NOT trigger
+    # section splits.
+    assert len(chunks) == 1
+    text = chunks[0].text
+    # All four principle labels are present in the same chunk.
+    assert "Minimal lead-time" in text
+    assert "Inter-operability" in text
+    assert "Pythonic library interface" in text
+    assert "Platform-agnostic" in text
+
+
+def test_real_h1_outside_chart_block_still_splits() -> None:
+    """Sanity: real document H1 headings OUTSIDE chart blocks continue
+    to split into sections. The v7 fix is narrow — it only ignores H1s
+    inside `[chart-extracted]...[/chart-extracted]` ranges."""
+    body = (
+        "# Real Section One\n\n"
+        "Some prose.\n\n"
+        "[chart-extracted]\n"
+        "# Inner Chart Label\n"
+        "ignored\n"
+        "[/chart-extracted]\n\n"
+        "# Real Section Two\n\n"
+        "More prose.\n"
+    )
+
+    chunks = chunk_document(_doc(body))
+    # Two real sections → at least two chunks; the inner H1 didn't
+    # produce a third section.
+    section_starts = {c.heading_path[0] for c in chunks if c.heading_path}
+    assert "Real Section One" in section_starts
+    assert "Real Section Two" in section_starts
+    assert "Inner Chart Label" not in section_starts
+
+
+def test_heading_path_skips_chart_block_h1() -> None:
+    """The heading-path metadata for chunks after a chart block must
+    reflect the document's real heading state, not chart-figure H1
+    labels."""
+    body = (
+        "## Real H2 section\n\n"
+        "Intro prose.\n\n"
+        "[chart-extracted]\n"
+        "# Chart Label\n"
+        "filler\n"
+        "[/chart-extracted]\n\n"
+        "Trailing prose after chart.\n"
+    )
+
+    chunks = chunk_document(_doc(body))
+    assert len(chunks) == 1
+    # The trailing prose lives under `## Real H2 section`, NOT
+    # `# Chart Label`.
+    assert chunks[0].heading_path == ["Real H2 section"]

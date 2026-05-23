@@ -45,7 +45,11 @@ _PARAGRAPH_RE = re.compile(r"\n\s*\n")
 # The helper itself lives in core/ because both `index/` and
 # `agents/` need it and the module-import direction forbids
 # `agents/ → index/` (see CLAUDE.md).
-from memex.core.text import strip_chart_extracted_for_index  # noqa: E402
+from memex.core.text import (  # noqa: E402
+    chart_extracted_spans,
+    is_inside_any_span,
+    strip_chart_extracted_for_index,
+)
 
 # Defaults — overridable per-call via IndexSettings. Kept as module
 # constants so test helpers can reference them without importing the
@@ -90,12 +94,19 @@ def _heading_path_at(text: str, offset: int) -> list[str]:
     """The active heading stack at character offset `offset`.
 
     Walks every heading at or before `offset`, maintaining a stack
-    keyed by hash count.
+    keyed by hash count. Same chart-block-aware filter as
+    `_split_into_sections` (P3.3 v7): `# H1`-style matches inside
+    `[chart-extracted]` blocks are inert chart labels, not real
+    document headings, and must not pollute the heading path of the
+    chunks following the chart.
     """
+    chart_spans = chart_extracted_spans(text)
     stack: dict[int, str] = {}
     for m in _HEADING_RE.finditer(text):
         if m.start() > offset:
             break
+        if is_inside_any_span(m.start(), chart_spans):
+            continue
         level = len(m.group(1))
         # Drop any deeper headings — new heading at this level supersedes
         for deeper in [k for k in stack if k >= level]:
@@ -111,8 +122,22 @@ def _stable_chunk_id(doc_id: str, text: str) -> str:
 
 def _split_into_sections(body: str) -> list[tuple[int, str]]:
     """Yield (start_offset, section_text) where section_text is the body
-    between successive headings (or top-of-doc to first heading)."""
-    headings = list(_HEADING_RE.finditer(body))
+    between successive headings (or top-of-doc to first heading).
+
+    P3.3 v7 (2026-05-23): heading-detection skips `# H1`-style matches
+    that fall INSIDE `[chart-extracted]...[/chart-extracted]` blocks.
+    Nemotron-Parse emits H1 labels for chart-figure-section names
+    (e.g. nvmath-python's `# Minimal lead-time`, `# Inter-operability`)
+    which the chunker would otherwise treat as document-section
+    boundaries, splitting a single chart block across multiple chunks
+    (the eval trace showed only the LAST principle reached the
+    reranker's top-5).
+    """
+    chart_spans = chart_extracted_spans(body)
+    headings = [
+        m for m in _HEADING_RE.finditer(body)
+        if not is_inside_any_span(m.start(), chart_spans)
+    ]
     if not headings:
         return [(0, body)]
     sections: list[tuple[int, str]] = []
