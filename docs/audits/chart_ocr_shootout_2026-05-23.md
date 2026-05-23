@@ -5,6 +5,26 @@ research arc. Tests all candidate chart-OCR backends against the
 slide-decks corpus (30 queries) to find one that doesn't regress the
 prose answering on the CUDA deck.
 
+> **Late-session 2026-05-23 update — v7 root-cause fix.** This shootout
+> selected Nemotron-Parse-v1.2 based on "no prose regression on chart-
+> DOMINANT corpora." Subsequent validation via the new `--force-docling`
+> flag (commit `a4b8493`) on chart-MIXED prose-heavy docs (NVIDIA 10-K +
+> Tableau visualization guide) revealed chart-content questions still
+> always refused. A trace showed retrieval was healthy (rank-1 score
+> 0.80) but three downstream stages blocked the LLM from reading the
+> chart blocks: raw LaTeX emission from Nemotron, single-row label-
+> number cell ambiguity, P3.3-v3/v5/v6 prompt-render strips removing
+> chart blocks before assess/answer/verify saw them. The **v7 fix**
+> (commit `a9e8326`) addresses all three with a `_normalize_latex_
+> tabulars` + `_split_label_number_cells` post-processor on Nemotron
+> output, removed strips in `agents/answering.py`, and an
+> `assess_sufficiency` prompt update teaching the LLM about chart
+> blocks. First chart-content REF→ANS flip recorded: `chart-types-08`
+> "On Time 22 / Late 8" (impossible under both PyMuPDF baseline and
+> pre-v7 Docling+chart-OCR). HARD GATES preserved. Full session log
+> in `~/.claude/projects/.../memory/p33_tracker.md` "v7 root-cause
+> fix" section.
+
 ## Configurations tested
 
 | Path | Backend | Params | License | Repo |

@@ -1,6 +1,6 @@
 # Memex Roadmap
 
-**Last updated:** 2026-05-23 (extended — chart-OCR shootout + default flip) — 136 commits on `main`, 239/239 tests green, **100% public-surface docstring coverage** (275/275). Foundation + audit + French support + Qwen3 prompt-engineering + **P3.3-c chart-OCR shootout** arcs all complete. Eval suites stable on Qwen3-8B-AWQ + chart-OCR default-enabled: English (30q CUDA deck) ANS=11/30, French (8q CR350) ANS=5/5, both at `refusal_cf` 1.000, hallucinations 0. **MIRACL-fr retrieval benchmark**: nDCG@10 = 0.807. **Chart-OCR default**: `nvidia/NVIDIA-Nemotron-Parse-v1.2` enabled by default since 2026-05-23 (no prose regression confirmed). **External-blocked items**: P0 multi-doc (more source material), P2.2 Granite (vLLM hybrid-arch hang), P2.3 VLM swap (needs scan corpus), P3.3-a autoawq compat, P3.3-c chart-heavy corpus (backend solved; value-add corpus pending), P3.1 benchmark CI (GPU runner), P4.1/P4.3/P4.4 (various external triggers).
+**Last updated:** 2026-05-23 (extended — P3.3-c chart-OCR v7 fix + `--force-docling` operator override) — **141 commits on `main`**, **250/250 tests green**, **100% public-surface docstring coverage** (275/275). Foundation + audit + French support + Qwen3 prompt-engineering + **P3.3 chart-OCR investigation now fully closed** (backend chosen + dark-matter retrieval/recognition bug fixed). Eval suites stable on Qwen3-8B-AWQ: English (30q CUDA deck) ANS=11/30, French (8q CR350) ANS=5/5, both at `refusal_cf` 1.000, hallucinations 0. **MIRACL-fr retrieval benchmark**: nDCG@10 = 0.807. **Chart-content questions now answerable** for the first time after the v7 root-cause fix (commit a9e8326): chart-types Q08 "On Time 22 / Late 8" refused→ANS, annual-report Q09/Q10 CC timeline refused→ANS. **New operator surface**: `memex parse --force-docling <doc-id>` (commit a4b8493) bypasses the PyMuPDF classifier when chart-OCR validation is needed on born-digital text-heavy docs. **External-blocked items**: P0 multi-doc (more source material), P2.2 Granite (vLLM hybrid-arch hang), P2.3 VLM swap (needs scan corpus), P3.3-a autoawq compat, P3.1 benchmark CI (GPU runner), P4.1/P4.3/P4.4 (various external triggers).
 
 The blueprint in [`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) is the architectural design — module signatures, cross-cutting concerns, build order. This document is the **operational view**: what is shipped today, what is measured, and what comes next.
 
@@ -33,9 +33,9 @@ The blueprint in [`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) is the archi
 | **P2.4 — Agent refusal calibration** | `prompts/answer/v2.md` with literal-presence rule | ✅ **Shipped + live-verified** (2026-05-21) — Q11 (FP128) + Q12 (FP4) hallucinations both eliminated; `refusal_rate_cf` 0.75 → 1.0; `mcp_ans` 0.33 → 0.67. **Q7 regression recovered** as a side effect of the retrieval-truncate-budget retune that shipped later the same day. |
 | **Retrieval truncate-budget retune** | `truncate(700)→1800` in prompts; `MEMEX_RERANK_TOP_K 10→5`; `max_tokens 1024→640`; `max-model-len 4096→6144` | ✅ **Shipped + live-verified** (2026-05-21) — three legitimate REF→ANS flips (Q2, Q7-recovered, Q20). Diagnosed by direct instrumentation: agent was operating on ~32% of every chunk's content because the answer prompt clipped chunks at 700 chars while median chunk is 2172 chars. |
 
-**File count:** 86 Python files in `src/memex/` + `tests/` + `scripts/`, all parse-clean. 7 ADRs. 10 audit reports under `docs/audits/`. 125 commits on `main` (public at `github.com/Zenetusken/memex`); the canonical count is `git rev-list --count main`.
+**File count:** 86+ Python files in `src/memex/` + `tests/` + `scripts/`, all parse-clean. 7 ADRs. 11 audit reports under `docs/audits/`. **141 commits on `main`** (public at `github.com/Zenetusken/memex`); the canonical count is `git rev-list --count main`.
 
-**Test suite:** 227/227 green on the reference rig. Linux + pyseccomp; 5 tests skip on Windows.
+**Test suite:** 250/250 green on the reference rig (+11 since 2026-05-22: 7 chart-OCR backend tests for the LaTeX→markdown converter, 4 force-docling routing tests). Linux + pyseccomp; 5 tests skip on Windows.
 
 ---
 
@@ -117,7 +117,7 @@ These need session-spanning investment but their completion unlocks several down
   1. Extend `slide-decks` to 3–5 documents (within-category variance).
   2. Bootstrap each of the other 6 categories from `docs/eval-corpus-plan.md`: modern-printed, scientific-papers, technical-docs, historical-scans, handwritten, forms.
   3. Wire CER/WER/structural-F1 from `src/memex/eval/scoring.py` into `runner.py`; needs per-doc hand-curated reference markdown (Phase 2 of the spec).
-- ~~**P3.3 — Chart-data extraction**~~ ✅ **Investigation closed 2026-05-22 with mixed verdict**. 6 implementation iterations spanning 5+ engineering sessions. Origin: queries Q4/Q16/Q21 ("transistor density 2004–2022 per TSMC chart" etc.) referenced numerics living inside chart imagery that Docling represents as `<!-- image -->` placeholders. **Pipeline shipped**: Docling `DocumentPictureClassifier` pre-filter (245 → 63 candidate figures on the canonical CUDA deck) + pause-vLLM during parse + DePlot OCR + chart-block-aware chunker + FTS-side strip + answer/verify/assess prompt-render strip. **Multi-run variance** (3 runs each, Qwen3-4B-AWQ): baseline 10/9/9 ANS (mean 9.3), v6 chart-OCR ON 8/8/8 (deterministic). HARD GATES (`refusal_cf=1.00`, hallucinations=0) preserved across all 6 runs. **Net trade-off** on this prose-heavy corpus: ~1.3 ANS below baseline; +Q2 gained as a retrieval-signal bonus, −Q21 is the irreducible chart-numeric loss (stripping chart blocks from the agent's prompt view prevents truncate from eating answers but also removes the only chart-numeric content the agent reads). Default `MEMEX_PARSE__DISABLE_CHART_OCR=True`; opt-in via env var. Full session-by-session detail in `~/.claude/projects/.../memory/p33_tracker.md`. **Three follow-up paths** queued: (a) Qwen2.5-VL retry (needs autoawq / transformers compat), (b) OneChart (needs ADR-0006 amendment for `trust_remote_code`), (c) validation on a chart-heavy corpus where the trade-off would flip positive.
+- ~~**P3.3 — Chart-data extraction**~~ ✅ **Fully closed 2026-05-23 with v7 root-cause fix**. The journey: 6 v1–v6 implementation iterations → 4-backend shootout chose Nemotron-Parse-v1.2 as the no-prose-regression winner (default-flipped on, [`audits/chart_ocr_shootout_2026-05-23.md`](audits/chart_ocr_shootout_2026-05-23.md)) → `--force-docling` flag (commit `a4b8493`) enabled chart-OCR validation on classifier-routed PyMuPDF docs → A/B revealed chart-content questions ALL still refused → trace identified retrieval was healthy (rank-1 score 0.80) but three layers downstream blocked the answer: raw LaTeX emission (unreadable to LLM), single-row label-number cell ambiguity, P3.3-v3/v5/v6 prompt-render strips hiding chart blocks. **v7 fix** (commit `a9e8326`) addresses all three: `_normalize_latex_tabulars` + `_split_label_number_cells` post-processors on Nemotron output, strips removed from assess/answer/verify, assess prompt updated. **First chart-content REF→ANS flips**: chart-types-08 "On Time vs Late" (impossible under both PyMuPDF and pre-v7 Docling, now ANS ✓), annual-report-09 "CC December 2024" via Docling+chart-OCR+v7 ✓. HARD GATES preserved throughout. Full session-by-session detail in `~/.claude/projects/.../memory/p33_tracker.md`. **Open follow-ups (not blocking)**: (a) chart-types-09 Gantt assignees still false-refuses (multi-row chart-table format harder than single-row key:value); (b) Q05 prose ("bar charts + maps") false-refuses under chart-OCR+v7 but answers under PyMuPDF — verification-stage regression, n=1; (c) validate v7 generalizes to additional chart-dominant corpora.
 
 ### Tier 3 — eval-gated stack swaps (unlocked by Tier 2 P0 extension)
 
@@ -179,6 +179,44 @@ Three parallel research subagents evaluated browser-side OCR/VLM technologies as
 - ✅ **Default flipped 2026-05-23** (commits `01b8c5e` + `3e8c22a` + `6957f78`): `ModelSettings.chart_ocr = "nvidia/NVIDIA-Nemotron-Parse-v1.2"` and `ParseSettings.disable_chart_ocr = False`. `[parse]` extras now include `albumentations`, `timm`, `open_clip_torch` (Nemotron-Parse processor deps). VRAM-fit estimator bumped 2.5 → 3.0 GB for the chart-OCR slot. Operators can revert via `MEMEX_PARSE__DISABLE_CHART_OCR=true` or switch backend via `MEMEX_MODELS__CHART_OCR=<alt-id>`.
 - ✅ **Operational note**: 12 GB rig needs `MEMEX_VLLM_GPU_FRACTION=0.68` when chart-OCR is enabled (which is now the default).
 
+**P3.3-c chart-OCR v7 — dark-matter root-cause fix (2026-05-23, late session):**
+
+The 2026-05-23 default-flip shipped Nemotron-Parse-v1.2 as the chart-OCR backend with the published "no-regression" verdict on the chart-DOMINANT CUDA deck. Validating on chart-MIXED prose-heavy docs (NVIDIA 10-K annual report + Tableau visualization guide) via the new `--force-docling` flag revealed the wins on chart-content questions were **zero**: chart-extracted chunks reached rank 1 in the reranker with score 0.80 but the agent still refused with "no specific numbers." Three-fold root cause, all fixed in commit `a9e8326`:
+
+1. **Nemotron-Parse emitted raw LaTeX** (`\begin{tabular}{cc} **On Time 22** & **Late 8**\\ \end{tabular}`) which the Qwen3-8B-AWQ assessor read as "no specific numbers." Fix: `_normalize_latex_tabulars` regex-based converter in `chart_ocr_backend.py` flattens LaTeX tabular → markdown table.
+2. **Even after LaTeX→markdown**, single-row chart-summary cells like `**On Time 22**` were ambiguous (label vs. label+value). Fix: `_split_label_number_cells` heuristic splits them to key:value bullets (`- On Time: 22 / - Late: 8`).
+3. **The P3.3-v3/v5/v6 defenses stripped `[chart-extracted]` blocks** from the chunks in the assess/answer/verify prompts — a correct defense against verbose-LaTeX-eating-the-truncate-budget but now the v7 compact markdown emission (~50-150 chars per block) lives comfortably alongside prose within `truncate(1200)/truncate(1800)`. Fix: removed all three strip-call-sites in `agents/answering.py`; chart blocks now flow through to the LLM. Belt-and-suspenders: `prompts/assess_sufficiency/v1.md` gained one paragraph explaining `[chart-extracted]` block semantics to the assessor.
+
+**Validation A/B** (extended corpora: `tests/eval-data/annual-report/queries.json` 10q + `tests/eval-data/chart-types/queries.json` 9q):
+
+| Corpus | Mode | ANS | mcp_ans | refusal_cf |
+|---|---|---|---|---|
+| chart-types (9q) | PyMuPDF baseline | 2/9 | 0.000 | 1.000 ✓ |
+| chart-types | Docling+chart-OCR (pre-v7) | 2/9 | 0.000 | 1.000 ✓ |
+| chart-types | **Docling+chart-OCR+v7** | **3/9** | **0.333** | **1.000 ✓** |
+| annual-report (10q) | PyMuPDF baseline | 7/10 | 0.000 | 1.000 ✓ |
+| annual-report | Docling+chart-OCR (pre-v7) | 6/10 (−1) | 0.333 | 1.000 ✓ |
+| annual-report | **Docling+chart-OCR+v7** | **7/10** | 0.286 | **1.000 ✓** |
+
+**First chart-content REF→ANS flips**: chart-types-08 "How many projects On Time vs Late" (was refused in **both** PyMuPDF and pre-v7 Docling modes, now answered ✓); annual-report-09 "What did the CC do in December 2024" via Docling+chart-OCR+v7 ✓.
+
+**`--force-docling` operator override** (commit `a4b8493`): the PyMuPDF classifier sends most born-digital text-heavy PDFs to the fast path (Adobe InDesign / Acrobat-output / etc.), skipping chart-OCR entirely. `memex parse --force-docling <doc-id>` (or `MEMEX_PARSE__FORCE_DOCLING=true`) bypasses the classifier and routes directly to Docling. Cost: ~10× slower parse on text-heavy docs. Use cases: chart-OCR validation on mixed-content docs, chart-content question recovery on financial reports, dashboards, infographics.
+
+**`scripts/extend_corpus.py` corpus-extension scaffolding** (commit `761bbcd`): 4-subcommand workflow (`init` / `inspect` / `resolve` / `ab`) that streamlines "drop a PDF, hand-label queries, A/B test before/after parse-routing change."
+
+**Tests + new files:**
+- 7 new unit tests in `tests/unit/test_chart_ocr_backend.py` covering the LaTeX→markdown converter (single-row label-number split, multi-row table, `\multicolumn` flatten, end-to-end mixed text, truncated tabular tolerance, empty inputs)
+- 4 new unit tests in `tests/unit/test_force_docling.py` pinning the flag contract (default False, env-var True, kwarg short-circuit, settings-default path)
+- New eval corpora: `tests/eval-data/annual-report/queries.json` (10q: 5 prose ANS + 3 REF + 2 chart-content) + `tests/eval-data/chart-types/queries.json` (9q: 5 prose ANS + 2 REF + 2 chart-content)
+
+**Final P3.3 disposition (2026-05-23 fully closed):**
+- `disable_chart_ocr=False` (default-on)
+- Nemotron-Parse-v1.2 backend wired + LaTeX→markdown converter applied to its output
+- assess/answer/verify see chart blocks (strips removed)
+- `--force-docling` flag available for operator overrides
+- HARD GATES (refusal_cf=1.0, hallucinations=0) preserved across all measurements
+- Chart-content questions now actually answerable
+
 **P3.3-b OneChart retry (2026-05-23):**
 - ✅ **ADR-0006 amendment** — carved out `trust_remote_code=True` exception for the chart-OCR slot only, OneChart specifically. Documented mitigations (Apache 2.0, 0.3B params, opt-in via env var, seccomp-sandboxed parse-time process, `reliable_check` self-consistency gate).
 - ✅ **Backend implementation** — new `_load_chart_ocr` dispatch branch for OneChart; new `_chart_ocr_transcribe_onechart` helper with `reliable_check` parsing + dict-to-markdown conversion + defensive TypeError / RuntimeError handling. 5 new unit tests pin the contract.
@@ -202,10 +240,14 @@ Research notes: [`docs/audits/qwen3_prompt_engineering_2026-05-22.md`](audits/qw
 
 ### Next pickup — ranked by impact × feasibility
 
-1. **🎯 P0 corpus extension — multi-doc / multi-category** (Tier 2, multi-session). The single biggest pending validation: all current quality verdicts come from one document. **Needs user-provided source material** — not autonomously executable.
-2. **🔧 P3.3 follow-up paths** — three available unblock paths in `p33_tracker.md`. All external-blocked: (a) autoawq / transformers compat → Qwen2.5-VL retry; (b) ADR-0006 amendment → OneChart retry; (c) chart-heavy corpus for the trade-off to flip positive.
+1. **🎯 P0 corpus extension — multi-doc / multi-category** (Tier 2, multi-session). The single biggest pending validation: all current quality verdicts come from one document per category. **Needs user-provided source material** — not autonomously executable. The post-v7 fix landscape opens a new sub-goal: chart-DOMINANT corpora (financial dashboards, infographic decks, dataviz tutorials) where the chart-OCR+v7 stack's chart-content answering capability would actually shine.
+2. **🔧 P3.3 v7 follow-ups (not blocking)** — three open items captured in `p33_tracker.md`:
+   - (a) chart-types-09 multi-row Gantt-assignee table still false-refuses. Possible angle: per-cell-pair prompt rendering or cross-product table reformat.
+   - (b) Q05 prose ("bar charts + maps") false-refuses under chart-OCR+v7 but answers under PyMuPDF — likely chart-block-in-verifier-view perturbation. n=1; needs more reps to confirm.
+   - (c) Validate v7 on additional chart-dominant corpora; expand chart-content query coverage in existing slide-deck eval.
 3. **🪜 P2.2 Granite 4.1-8B vs Qwen3-8B** — vLLM-blocked; unblocks on vLLM 0.22+ hybrid-arch support OR Granite GGUF variant OR fallback to Granite 3.x.
 4. **🪜 P2.3 Qwen3-VL vs Qwen2.5-VL VLM swap** — eval-gated; needs a scan-style document corpus to actually exercise the VLM path.
+5. **🔬 P3.3-a Qwen2.5-VL chart-OCR retry** — external-blocked on autoawq/transformers compat for the `PytorchGELUTanh` rename.
 
 Items below (P3.1 benchmark CI / P4.1 wikilink anchors / P4.3 trace retention / P4.4 Dynamic VRAM Manager) stay queued; pickup needs an external trigger (GPU runner, real cross-doc citation, Langfuse self-host, forcing function).
 
@@ -423,7 +465,7 @@ Detailed per-phase log lives in git history + `docs/audits/`. The compressed ver
 - **FU3.2.1 — `Type=notify` readiness gate for vLLM** (2026-05-21): `scripts/serve-vllm.sh` gained a backgrounded sidecar that polls `/v1/models` and calls `systemd-notify --ready --status="…"` on the first 2xx; `memex-vllm.service` switched from `Type=simple` to `Type=notify` + `NotifyAccess=all`. `systemctl --user start memex-vllm` now blocks until vLLM is genuinely serving (~31 s measured), so `After=memex-vllm.service` on downstream units (web, MCP, watcher) is a real readiness gate. Live-verified: full-stack cold boot returned after 32 s with **zero Connection-refused logs** in any downstream unit's journal — and a watcher reaction triggered immediately afterward fired clean `extract_entities@v1` + `extract_citations@v1` model calls against vLLM. The sidecar no-ops when `$NOTIFY_SOCKET` is unset, so Pattern B (manual) and Pattern C (`memex daemon start`) are unaffected.
 - **P3.2 — Daemon templates** (2026-05-21): three waves. (1) vLLM unit + plist + deploy guides. (2) `memex-web.service` + `memex-mcp.service` (+ matching plists/env) so the full stack boots together. (3) `memex-watch.service` (+ plist + env) for the vault file-watcher that re-enriches + re-indexes on canonical-markdown edits. Web + MCP + watcher all carry soft `Wants=memex-vllm.service` — they cluster but degrade gracefully if vLLM is down (search/get_document/list_documents work LLM-less; only `/ask` and enrich need vLLM). The wave-3 live verification was the most thorough: appended a line to the canonical CUDA-deck markdown → watcher logged `watcher.edit_confirmed` → 32 chunks went to enrich → vLLM was offline (cleanup state) so 32× `enrich.chunk_failed` → `enrich.done chunk_failures: 32` → watcher kept running → `index.done added: 1 deleted: 1 unchanged: 30 partial: true` (partial re-index isolated the changed chunk). Restoring the file fired another correct reaction. Two unit-template bugs caught during verification (StartLimitIntervalSec in `[Service]` instead of `[Unit]`, inline `#` comments on `ProtectHome=` line) — both fixed across all four units. No code change.
 
-For the full per-commit log: `git log --oneline` (125 commits at session close, 2026-05-23; the up-to-date number is `git rev-list --count main`).
+For the full per-commit log: `git log --oneline` (141 commits at session close, 2026-05-23 extended; the up-to-date number is `git rev-list --count main`).
 
 ---
 
@@ -456,3 +498,7 @@ Reference for the env-tunable settings landed alongside P1.1:
 | `MEMEX_RERANK_TOP_K` | `10` | Reranked chunks fed to the agent. Drop to 4-5 if your chunks are large enough that 10 chunks overflow `max-model-len`. |
 | `MEMEX_MCP__AUTH_TOKEN` | _(unset)_ | When set, the HTTP transport requires `Authorization: Bearer <token>` on every request (constant-time check). When unset, non-loopback binds are refused at startup. Generate via `memex mcp generate-token`. |
 | `MEMEX_MODELS__RERANKER_BACKEND` | `cross_encoder` | `qwen3` flips the reranker dispatch to load `Qwen/Qwen3-Reranker-0.6B` (or whatever `MEMEX_MODELS__RERANKER` points at) via `transformers.AutoModelForCausalLM` and score via softmax-over-yes/no logits. Empirically ~2.1 GB live on the 12 GB rig — comparable to bge, not the parameter-count-implied savings. Quality A/B pending P0. |
+| `MEMEX_PARSE__FORCE_DOCLING` | `false` | When `true`, the PyMuPDF classifier is bypassed and Docling runs on every PDF. Per-call equivalent: `memex parse <doc-id> --force-docling` or `memex ingest <path> --force-docling`. Cost: ~10× slower than PyMuPDF on text-heavy docs (Docling is the heavyweight engine). Use to force chart-OCR onto born-digital text-heavy docs the classifier would otherwise route to PyMuPDF (Adobe InDesign / Acrobat output / etc.). |
+| `MEMEX_MODELS__CHART_OCR` | `nvidia/NVIDIA-Nemotron-Parse-v1.2` | Chart-OCR backend HF id. Defaults to the P3.3-c shootout winner. Alternatives in tree: `khhuang/chart-to-table` (UniChart, smaller + faster but −1 ANS on prose-heavy corpora), `google/deplot` (legacy P3.3 v6 default; same −1 ANS), `kppkkp/OneChart` (CUDA-asserts on OOD imagery — keep for chart-heavy-only re-attempts). Requires `MEMEX_PARSE__DISABLE_CHART_OCR=false` to actually run. |
+| `MEMEX_PARSE__DISABLE_CHART_OCR` | `false` | When `true`, the chart-OCR pass over Docling figures is skipped. Disable when (a) running an air-gapped install that didn't pull `albumentations`+`timm`+`open_clip_torch`, OR (b) running on a corpus where chart-OCR's ~30s pause-vLLM-during-parse overhead isn't justified by chart-content questions. Default is `false` since 2026-05-23 with v7 fix delivering chart-content answering. |
+| `MEMEX_VLLM_GPU_FRACTION` | `0.72` | vLLM's `gpu_memory_utilization`. **Set to `0.68` when chart-OCR is enabled** to leave room for embedder + reranker + chart-stitched chunks on the 12 GB tier (otherwise KV-cache OOM during chart-OCR-enabled evals). The `serve-vllm.sh` script reads this; the `memex daemon start` path forwards it. |
