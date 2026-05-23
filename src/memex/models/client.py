@@ -145,7 +145,7 @@ def get_client() -> AsyncOpenAI:
 
 
 async def complete_structured(
-    prompt: str,
+    prompt: str | list[dict[str, str]],
     schema: type[T],
     *,
     model: str | None = None,
@@ -161,6 +161,15 @@ async def complete_structured(
     Returns `(parsed instance of schema, total tokens used)`. Generic
     over `schema` so callers get back the exact subclass they asked
     for — `pyright --strict` keeps the chain typed.
+
+    `prompt` accepts either:
+    - A single string — wrapped in `[{"role":"user","content":prompt}]`
+      (legacy behaviour, same as before this function was generalised).
+    - A list of OpenAI-style message dicts — passed through directly.
+      Use this when the prompt is split into a system + user pair via
+      `render_messages` (see `src/memex/prompts/loader.py`). The
+      multi-message form lets vLLM cache the prefix of the system
+      block across calls with different user content.
 
     Sampling defaults follow Qwen team's published non-thinking-mode
     recommendation, scaled down for eval determinism:
@@ -191,6 +200,14 @@ async def complete_structured(
         prompt_tag=prompt_tag or schema.__name__,
         schema=schema.__name__,
     )
+    # Coerce single-string `prompt` to the OpenAI message shape; pass
+    # multi-message lists through unchanged.
+    messages: list[dict[str, str]] = (
+        [{"role": "user", "content": prompt}]
+        if isinstance(prompt, str)
+        else prompt
+    )
+
     log.info(
         "model_call.start",
         model=model,
@@ -199,6 +216,7 @@ async def complete_structured(
         top_p=top_p,
         presence_penalty=presence_penalty,
         seed=seed,
+        message_count=len(messages),
     )
 
     # Default the Langfuse span name to the schema class so traces are
@@ -210,7 +228,7 @@ async def complete_structured(
     try:
         response = await client.chat.completions.create(
             model=model,
-            messages=[{"role": "user", "content": prompt}],
+            messages=messages,
             temperature=temperature,
             top_p=top_p,
             presence_penalty=presence_penalty,

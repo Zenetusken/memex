@@ -41,6 +41,12 @@ from memex.core.errors import MemexError
 _PROMPTS_ROOT = Path(__file__).parent
 _VERSION_RE = re.compile(r"^v(\d+)\.md$")
 
+# Marker line that splits a prompt template into a `system` block (above)
+# and a `user` block (below). Used by `render_messages`. Distinctive
+# enough that legitimate prompt content won't collide; rendered prompts
+# without it fall through as a single user message (backwards-compatible).
+_USER_MARKER = "<!-- ===USER=== -->"
+
 _jinja = Environment(
     undefined=StrictUndefined,
     autoescape=False,  # prompts are not HTML
@@ -127,12 +133,51 @@ def render_prompt(name: str, **kwargs: Any) -> str:
     Appends a tag comment for trace correlation. Raises if a referenced
     variable is missing (StrictUndefined) so template/caller drift
     fails loudly.
+
+    Backwards-compatible: when a template uses `_USER_MARKER` to split
+    into system + user blocks (see `render_messages`), this function
+    still returns the concatenated string so legacy callers see no
+    behavior change. New callers should use `render_messages` to get
+    the explicit multi-message structure.
     """
     spec = load_prompt_spec(name)
     template = _jinja.from_string(spec.template)
     rendered = template.render(**kwargs)
     tag = f"<!-- prompt: {spec.name}@{spec.version} -->"
+    # Drop the split marker if present — single-string callers should
+    # see a flat prompt body, not the structural marker.
+    rendered = rendered.replace(_USER_MARKER, "")
     return f"{rendered.rstrip()}\n\n{tag}\n"
+
+
+def render_messages(name: str, **kwargs: Any) -> list[dict[str, str]]:
+    """Render the active version of `name` as an OpenAI-style messages list.
+
+    If the template contains `_USER_MARKER` on its own line, the content
+    above the marker becomes a `system` message and the content below
+    becomes a `user` message — the standard OpenAI / ChatML pattern.
+    This enables vLLM prefix-cache reuse on the static system block
+    across calls with different user content.
+
+    If the marker is absent, the whole rendered body becomes a single
+    `user` message — same content as `render_prompt`, just wrapped.
+
+    The `<!-- prompt: name@vN -->` tag attaches to the LAST (user)
+    message so Langfuse traces still capture which version produced
+    the output.
+    """
+    spec = load_prompt_spec(name)
+    template = _jinja.from_string(spec.template)
+    rendered = template.render(**kwargs)
+    tag = f"<!-- prompt: {spec.name}@{spec.version} -->"
+
+    if _USER_MARKER in rendered:
+        system_part, user_part = rendered.split(_USER_MARKER, 1)
+        return [
+            {"role": "system", "content": system_part.strip()},
+            {"role": "user", "content": f"{user_part.strip()}\n\n{tag}"},
+        ]
+    return [{"role": "user", "content": f"{rendered.rstrip()}\n\n{tag}"}]
 
 
 def list_prompts() -> list[PromptSpec]:

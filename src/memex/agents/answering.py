@@ -63,7 +63,7 @@ from memex.observability.tracing import (
     clear_run_context,
     run_attributes,
 )
-from memex.prompts import render_prompt
+from memex.prompts import render_messages, render_prompt
 from memex.retrieve import (
     cross_encoder_rerank,
     hybrid_search,
@@ -514,14 +514,14 @@ async def answer(state: AnswerState) -> AnswerStateUpdate:
         c.model_copy(update={"text": strip_chart_extracted_for_index(c.text)})
         for c in state.reranked
     ]
-    prompt = render_prompt(
+    messages = render_messages(
         "answer",
         query=state.query,
         chunks=stripped_chunks,
         feedback=feedback,
     )
     draft, tokens = await complete_structured(
-        prompt=prompt,
+        prompt=messages,
         schema=DraftAnswer,
         prompt_tag="answer@v3",
     )

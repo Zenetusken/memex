@@ -100,12 +100,26 @@ class FakeLLM:
         self._responses[(prompt_fragment, schema)] = value
 
     async def __call__(
-        self, *, prompt: str, schema: type, **_kw: object
+        self,
+        *,
+        prompt: str | list[dict[str, str]],
+        schema: type,
+        **_kw: object,
     ) -> tuple[Any, int]:
         # `**_kw` absorbs forward-compatible kwargs the real
         # `complete_structured` accepts (e.g. `prompt_tag`, `model`,
         # `temperature`) without changing the fake's behaviour.
-        self.calls.append((prompt, schema))
+        # `prompt` may be a single string (legacy callers) OR a list
+        # of OpenAI-style message dicts (callers that use
+        # `render_messages` for the system/user split). Concatenate
+        # the message contents for fragment matching so a single
+        # `respond(...)` call works against either shape.
+        prompt_text = (
+            prompt
+            if isinstance(prompt, str)
+            else "\n".join(m["content"] for m in prompt)
+        )
+        self.calls.append((prompt_text, schema))
         for (frag, sch), value in self._responses.items():
             # Match by class identity OR by class name. The latter lets a
             # dynamically-constructed subclass (e.g. the bounded
@@ -113,10 +127,10 @@ class FakeLLM:
             # with `max_length=len(claims)` to constrain xgrammar) match
             # against a canned response keyed on the logical type. The
             # bounded variant retains `__name__ == "VerificationResult"`.
-            if (sch is schema or sch.__name__ == schema.__name__) and frag in prompt:
+            if (sch is schema or sch.__name__ == schema.__name__) and frag in prompt_text:
                 return value, 10
         raise AssertionError(
-            f"no canned response for ({prompt!r}, {schema.__name__})"
+            f"no canned response for ({prompt_text!r}, {schema.__name__})"
         )
 
 
