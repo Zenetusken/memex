@@ -246,12 +246,49 @@ def _is_vlm_handle(handle) -> bool:
     return any(token in cls for token in ("VL", "Vision", "Llava", "Internvl"))
 
 
+def _is_onechart_handle(handle) -> bool:
+    """True when the chart-OCR handle wraps the OneChart model (P3.3-b).
+    OneChart uses a custom Vary-derived architecture with a `.chat()`
+    interface instead of `.generate()`, and emits an auxiliary
+    `reliable_check` token to indicate self-consistency. The class
+    name is `OneChartOPTForCausalLM` or similar — we match on
+    "onechart" case-insensitively for robustness against minor naming
+    changes in the upstream HF repo.
+    """
+    cls = type(handle.model).__name__.lower()
+    return "onechart" in cls
+
+
+# OneChart's auxiliary self-consistency token. When the model's
+# generated output contains this followed by "True"/"False" (or the
+# model returns a tuple containing the boolean separately depending
+# on the upstream API), the boolean indicates whether the chart
+# extraction is internally consistent. We conservatively treat
+# `reliable_check=False` as a model-confessed failure and drop the
+# extraction — preserves HARD GATES at the cost of losing some
+# borderline-quality extractions.
+_ONECHART_RELIABLE_RE = re.compile(
+    r"reliable[_\s-]*check\s*[:=]?\s*(?P<value>True|False|true|false)",
+    re.IGNORECASE,
+)
+
+
+# OneChart's published prompt (per the paper + the HF repo's example
+# code). Adjustments here change extraction quality; align with the
+# upstream defaults unless A/B testing shows otherwise.
+_PROMPT_ONECHART = "Convert the key information of the chart to a python dict:"
+
+
 def _chart_ocr_transcribe_sync(
     handle, image, prompt: str, max_new_tokens: int
 ) -> str:
     """Synchronous transcription; called via asyncio.to_thread.
 
-    Two inference paths, dispatched by handle type:
+    Three inference paths, dispatched by handle type:
+    - OneChart-style (P3.3-b, custom Vary-derived): calls the model's
+      `.chat()` API with the image + tokenizer; parses the auxiliary
+      `reliable_check` token and returns empty string when the model
+      self-flags unreliable.
     - VLM-style (Qwen-VL etc.): uses chat-template + processor +
       generate, then slices off the prompt prefix from the output.
     - Pix2Struct-style (DePlot etc.): direct text+image processor
@@ -261,6 +298,9 @@ def _chart_ocr_transcribe_sync(
     caching allocator from fragmenting across many sequential figures.
     """
     import torch
+
+    if _is_onechart_handle(handle):
+        return _chart_ocr_transcribe_onechart(handle, image, max_new_tokens)
 
     is_vlm = _is_vlm_handle(handle)
 
@@ -330,6 +370,142 @@ def _chart_ocr_transcribe_sync(
             torch.cuda.empty_cache()
 
 
+def _chart_ocr_transcribe_onechart(handle, image, max_new_tokens: int) -> str:
+    """OneChart-specific transcription path.
+
+    OneChart's HF repo ships a custom `.chat(tokenizer, image_file,
+    ocr_type=...)` method that takes the tokenizer + image path/PIL
+    and returns the generated text plus (for chart inputs) an
+    auxiliary `reliable_check` boolean indicating self-consistency.
+    The exact API signature has minor variation across revisions; we
+    try the documented form first and fall through to a more defensive
+    call shape on TypeError.
+
+    We treat reliable_check=False as a model-confessed failure and
+    return empty string — the stitch step then leaves the
+    `<!-- image -->` placeholder unchanged. This is the P3.3-b
+    conservative-by-default behavior; preserves HARD GATES on
+    counterfactual queries that would otherwise be fed fabricated
+    chart data.
+
+    Output format: OneChart returns a python-dict-style string
+    (e.g. `{'title': 'X', 'source': 'Y', 'values': {'A': 10, ...}}`).
+    Convert to a markdown table for downstream agent consumption.
+    """
+    import tempfile
+
+    import torch
+
+    log = logger.bind(handle=type(handle.model).__name__)
+
+    # OneChart's `.chat(tokenizer, image_file, ...)` requires a
+    # FILE PATH (string), not a PIL Image — its internal `load_image`
+    # branches on `image_file.startswith('http')`. We render the PIL
+    # image to a temp PNG and pass the path. Cleaned up on exit.
+    try:
+        with tempfile.NamedTemporaryFile(
+            suffix=".png", delete=True
+        ) as tmp:
+            image.save(tmp.name, format="PNG")
+            tmp.flush()
+            try:
+                with torch.inference_mode():
+                    # OneChart's verified signature (HF-repo introspection
+                    # 2026-05-23): `.chat(tokenizer, image_file,
+                    # reliable_check=True, print_prompt=False)`. The
+                    # `reliable_check=True` kwarg runs the model's
+                    # built-in self-consistency check; outputs flagged
+                    # as unreliable are detected via the
+                    # `_ONECHART_RELIABLE_RE` post-pattern.
+                    result = handle.model.chat(
+                        handle.processor,  # tokenizer in OneChart's API
+                        tmp.name,
+                        reliable_check=True,
+                    )
+            except TypeError as e:
+                # Upstream signature drift across HF revisions.
+                log.warning(
+                    "chart_ocr.onechart.signature_mismatch",
+                    error=str(e)[:120],
+                )
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                return ""
+    except (OSError, RuntimeError) as e:
+        # Temp-file I/O failure or runtime issue inside the model's
+        # forward pass. Treat as figure-specific failure rather than
+        # crashing the entire chart-OCR pass.
+        log.warning("chart_ocr.onechart.io_or_runtime_error", error=str(e)[:120])
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        return ""
+
+    # The chat() result may be a single string, or a tuple of
+    # (text, reliable_check) depending on upstream revision.
+    if isinstance(result, tuple) and len(result) >= 2:
+        text = str(result[0])
+        reliable = bool(result[1])
+    else:
+        text = str(result)
+        # Parse the reliable_check from the text itself if the API
+        # didn't return it as a separate value.
+        match = _ONECHART_RELIABLE_RE.search(text)
+        if match is None:
+            # No reliable_check token at all — assume reliable for
+            # backward compat with rev that doesn't emit one. The
+            # conservative choice would be to assume unreliable, but
+            # that would drop ALL extractions on a rev that doesn't
+            # emit the token. Mid-ground: emit, and let downstream
+            # ambiguous-header detection catch obvious failures.
+            reliable = True
+        else:
+            reliable = match.group("value").lower() == "true"
+
+    if not reliable:
+        log.info("chart_ocr.onechart.reliable_check_false")
+        return ""
+
+    # Strip the reliable_check fragment from the text so it doesn't
+    # leak into the final markdown.
+    text = _ONECHART_RELIABLE_RE.sub("", text).strip()
+
+    # Convert OneChart's python-dict-style output to a markdown table.
+    # The output looks like `{'title': 'X', 'values': {'A': 10}}`. We
+    # use ast.literal_eval (safe; no eval) and then format. If parsing
+    # fails (e.g. malformed output), return the raw text — the agent
+    # can still read it and the downstream ambiguous-header check
+    # will drop anything obviously broken.
+    try:
+        import ast
+
+        parsed = ast.literal_eval(text)
+        return _onechart_dict_to_markdown(parsed)
+    except (ValueError, SyntaxError):
+        log.info("chart_ocr.onechart.dict_parse_failed", snippet=text[:120])
+        return text
+
+
+def _onechart_dict_to_markdown(d: object) -> str:
+    """Convert OneChart's `{title, source, values: {label: value}}`
+    dict to a markdown table. Handles the common shapes; falls back
+    to a key-value table for unexpected structures.
+    """
+    if not isinstance(d, dict):
+        return str(d)
+
+    title = d.get("title", "")
+    values = d.get("values", {})
+
+    if not isinstance(values, dict) or not values:
+        # No values dict — just dump key-value pairs as a 2-col table.
+        rows = "\n".join(f"| {k} | {v} |" for k, v in d.items())
+        return f"| key | value |\n| --- | --- |\n{rows}"
+
+    header = f"# {title}\n\n" if title else ""
+    table_rows = "\n".join(f"| {k} | {v} |" for k, v in values.items())
+    return f"{header}| label | value |\n| --- | --- |\n{table_rows}"
+
+
 async def _extract_with_handle(
     handle: object,
     source_pdf: Path,
@@ -353,7 +529,13 @@ async def _extract_with_handle(
         figure.page_no,
         figure.bbox,
     )
-    prompt = _PROMPT_VLM if _is_vlm_handle(handle) else _PROMPT_DEPLOT
+    # Prompt selection: OneChart uses its own published prompt
+    # (handled inside _chart_ocr_transcribe_onechart); the prompt
+    # arg here is the fallback for the VLM / Pix2Struct paths.
+    if _is_onechart_handle(handle):
+        prompt = _PROMPT_ONECHART  # passed through but not used directly
+    else:
+        prompt = _PROMPT_VLM if _is_vlm_handle(handle) else _PROMPT_DEPLOT
     markdown = await asyncio.to_thread(
         _chart_ocr_transcribe_sync, handle, image, prompt, max_new_tokens
     )

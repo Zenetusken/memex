@@ -349,3 +349,272 @@ async def test_render_error_returned_per_figure(
     assert isinstance(out[0], ChartOCROutput)
     assert isinstance(out[1], PDFFigureRenderError)
     assert isinstance(out[2], ChartOCROutput)
+
+
+# ----------------------------------------------------------------------
+# P3.3-b — OneChart backend tests
+# ----------------------------------------------------------------------
+
+
+class _FakeImage:
+    """Minimal stand-in for PIL.Image that supports `.save(path, format=...)`
+    and stringifies meaningfully for fragment matching. The OneChart
+    transcribe path saves the image to a temp PNG before invoking
+    `.chat()`; the fake `.save()` writes a tiny placeholder file so the
+    real OneChart-fake's `.chat()` would have something to load if the
+    test ever pushed through to that point."""
+
+    def __init__(self, page: int) -> None:
+        self.page = page
+
+    def save(self, path: object, format: str = "PNG") -> None:  # noqa: A002, ARG002
+        # Write a 1-byte placeholder so the file exists on disk; the
+        # OneChart-fake's `.chat()` never actually reads it.
+        with open(str(path), "wb") as f:
+            f.write(b"\x00")
+
+    def __repr__(self) -> str:
+        return f"<FakeImage page={self.page}>"
+
+
+class _FakeOneChartModel:
+    """Stand-in OneChart model. Class name contains 'OneChart' so
+    `_is_onechart_handle` recognises it and dispatches to the
+    `.chat()`-based transcription path instead of `.generate()`.
+
+    Test instances configure `chat_return` to either a string or a
+    `(text, reliable_check_bool)` tuple, matching the variation across
+    OneChart HF-repo revisions.
+    """
+
+    def __init__(self, chat_return: object) -> None:
+        self._chat_return = chat_return
+        self.calls: list[dict[str, object]] = []
+
+    def chat(
+        self,
+        tokenizer,
+        image_file: str,
+        reliable_check: bool = True,
+        print_prompt: bool = False,
+    ) -> object:
+        """Mirror OneChart's verified `.chat()` signature (HF-repo
+        introspection 2026-05-23): `(tokenizer, image_file,
+        reliable_check=True, print_prompt=False)`. `image_file` is a
+        path string — the backend writes a temp PNG and passes that.
+        """
+        self.calls.append(
+            {
+                "tokenizer": tokenizer,
+                "image_file": image_file,
+                "reliable_check": reliable_check,
+                "print_prompt": print_prompt,
+            }
+        )
+        if isinstance(self._chat_return, Exception):
+            raise self._chat_return
+        return self._chat_return
+
+
+class _FakeOneChartHandle:
+    """OneChart-shaped handle: `processor` slot holds the tokenizer
+    (per the registry's OneChart branch); `model` is the fake with
+    a `.chat()` method instead of `.generate()`."""
+
+    def __init__(self, chat_return: object) -> None:
+        self.model = _FakeOneChartModel(chat_return)
+        self.processor = "fake-tokenizer"  # OneChart uses tokenizer not processor
+
+
+def _onechart_registry(handle: _FakeOneChartHandle) -> Any:
+    """Build a fake registry that yields the provided OneChart handle."""
+
+    class _Reg:
+        def use(self, name: str) -> Any:  # noqa: ARG002
+            return _yields(handle)
+
+    return _Reg()
+
+
+def test_is_onechart_handle_detects_class_name() -> None:
+    """`_is_onechart_handle` matches against model class name
+    case-insensitively. This is the dispatch gate that selects the
+    `.chat()` path."""
+    from memex.parse.chart_ocr_backend import _is_onechart_handle
+
+    handle = _FakeOneChartHandle(chat_return="x")
+    assert _is_onechart_handle(handle) is True
+
+    # Negative: a DePlot/Pix2Struct-style handle must NOT be detected
+    # as OneChart.
+    deplot_handle = _FakeChartOCRHandle()
+    assert _is_onechart_handle(deplot_handle) is False
+
+
+@pytest.mark.asyncio
+async def test_onechart_success_returns_markdown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OneChart returns a python-dict-style string + reliable_check
+    True. The backend parses the dict, converts to markdown, and
+    threads it through as the chunk's `markdown` field."""
+    handle = _FakeOneChartHandle(
+        chat_return=(
+            "{'title': 'Transistor density', 'values': "
+            "{'2004': 117, '2010': 1170, '2022': 50000}} "
+            "reliable_check: True",
+            True,
+        )
+    )
+    monkeypatch.setattr(
+        "memex.parse.chart_ocr_backend.get_registry",
+        lambda: _onechart_registry(handle),
+    )
+    monkeypatch.setattr(
+        chart_ocr_backend,
+        "_render_figure_to_image",
+        lambda pdf, page, bbox, scale=2.5: _FakeImage(page),
+    )
+
+    figures = [
+        FigureMetadata(
+            page_no=1,
+            bbox=(0.0, 0.0, 500.0, 400.0),
+            classification="bar_chart",
+            classification_confidence=0.97,
+        ),
+    ]
+    out = await chart_ocr_extract(
+        source_pdf=Path("/fake.pdf"),
+        figures=figures,
+        min_area_sqpt=0.0,
+    )
+    assert len(out) == 1
+    assert isinstance(out[0], ChartOCROutput)
+    md = out[0].markdown
+    assert "Transistor density" in md
+    assert "2022" in md
+    assert "50000" in md
+    # The markdown is a table, not python dict syntax.
+    assert "| label | value |" in md
+    # reliable_check token leaked-out check — it must be stripped.
+    assert "reliable_check" not in md
+
+
+@pytest.mark.asyncio
+async def test_onechart_unreliable_check_returns_empty_markdown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When OneChart's `reliable_check=False`, the backend treats the
+    extraction as a model-confessed failure and returns empty markdown.
+    The stitch step then leaves the `<!-- image -->` placeholder
+    unchanged. Preserves HARD GATES on counterfactual queries."""
+    handle = _FakeOneChartHandle(
+        chat_return=(
+            "{'title': 'X', 'values': {'A': 999}}",
+            False,  # reliable_check=False — model self-flags unreliable
+        )
+    )
+    monkeypatch.setattr(
+        "memex.parse.chart_ocr_backend.get_registry",
+        lambda: _onechart_registry(handle),
+    )
+    monkeypatch.setattr(
+        chart_ocr_backend,
+        "_render_figure_to_image",
+        lambda pdf, page, bbox, scale=2.5: _FakeImage(page),
+    )
+
+    figures = [
+        FigureMetadata(
+            page_no=1,
+            bbox=(0.0, 0.0, 500.0, 400.0),
+            classification="bar_chart",
+            classification_confidence=0.97,
+        ),
+    ]
+    out = await chart_ocr_extract(
+        source_pdf=Path("/fake.pdf"),
+        figures=figures,
+        min_area_sqpt=0.0,
+    )
+    assert len(out) == 1
+    assert isinstance(out[0], ChartOCROutput)
+    assert out[0].markdown == ""  # empty → stitch leaves placeholder
+
+
+@pytest.mark.asyncio
+async def test_onechart_string_only_return_parses_reliable_from_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Some OneChart revisions return only a string (not a tuple).
+    The backend then scans the text for the `reliable_check` token
+    and gates on it. Tests both True and False from-text variants.
+    """
+    # Case 1: text contains reliable_check=False → return empty.
+    handle = _FakeOneChartHandle(
+        chat_return="{'a': 1} reliable_check=False"
+    )
+    monkeypatch.setattr(
+        "memex.parse.chart_ocr_backend.get_registry",
+        lambda: _onechart_registry(handle),
+    )
+    monkeypatch.setattr(
+        chart_ocr_backend,
+        "_render_figure_to_image",
+        lambda pdf, page, bbox, scale=2.5: _FakeImage(page),
+    )
+
+    figures = [
+        FigureMetadata(
+            page_no=1,
+            bbox=(0.0, 0.0, 500.0, 400.0),
+            classification="bar_chart",
+            classification_confidence=0.97,
+        ),
+    ]
+    out = await chart_ocr_extract(
+        source_pdf=Path("/fake.pdf"),
+        figures=figures,
+        min_area_sqpt=0.0,
+    )
+    assert isinstance(out[0], ChartOCROutput)
+    assert out[0].markdown == ""
+
+
+@pytest.mark.asyncio
+async def test_onechart_chat_signature_mismatch_returns_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A TypeError from OneChart's `.chat()` (signature drift across
+    upstream revisions) must NOT crash the entire chart-OCR pass.
+    Instead, the affected figure returns empty markdown and the
+    siblings continue."""
+    handle = _FakeOneChartHandle(
+        chat_return=TypeError("chat() got unexpected keyword argument 'render'")
+    )
+    monkeypatch.setattr(
+        "memex.parse.chart_ocr_backend.get_registry",
+        lambda: _onechart_registry(handle),
+    )
+    monkeypatch.setattr(
+        chart_ocr_backend,
+        "_render_figure_to_image",
+        lambda pdf, page, bbox, scale=2.5: _FakeImage(page),
+    )
+
+    figures = [
+        FigureMetadata(
+            page_no=1,
+            bbox=(0.0, 0.0, 500.0, 400.0),
+            classification="bar_chart",
+            classification_confidence=0.97,
+        ),
+    ]
+    out = await chart_ocr_extract(
+        source_pdf=Path("/fake.pdf"),
+        figures=figures,
+        min_area_sqpt=0.0,
+    )
+    assert isinstance(out[0], ChartOCROutput)
+    assert out[0].markdown == ""

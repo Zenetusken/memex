@@ -388,7 +388,7 @@ class ModelRegistry:
     def _load_chart_ocr(model_id: str) -> ChartOCRHandle:
         """Load the chart-OCR model + its processor.
 
-        Two backends supported, dispatched by model_id substring:
+        Three backends supported, dispatched by model_id substring:
 
         - **DePlot-style** (default, `google/deplot`): Pix2Struct
           derivative fine-tuned for plot→linearised-table. 0.3B / 1.13
@@ -404,16 +404,27 @@ class ModelRegistry:
           with FA2 + BF16, mirroring `_load_vlm`. ~5-6 GB live for the
           Qwen2.5-VL-7B AWQ variant.
 
+        - **OneChart-style** (`kppkkp/OneChart`, P3.3-b): a 0.3B-param
+          specialty model with a custom Vary-derived architecture
+          + auxiliary `reliable_check` self-consistency token. Loaded
+          via `AutoModel` with `trust_remote_code=True` per the
+          ADR-0006 amendment (the only carve-out from the general
+          `trust_remote_code` prohibition; see ADR §4). Uses a custom
+          `.chat()` interface rather than `.generate()`; the backend
+          dispatches on handle class name.
+
         The VLM-style handle is transient: chart_ocr_backend explicitly
         calls `registry.unload("chart_ocr")` after the extraction pass
         so the model doesn't compete with vLLM's KV cache during query
-        time. The DePlot-style handle is small enough to stay resident
-        without strain.
+        time. DePlot + OneChart handles are small enough to stay
+        resident without strain.
         """
         # Heuristic: model IDs that contain "VL" / "vision" / "VLM"
-        # use the VLM loading pattern. Anything else assumes a
-        # Pix2Struct-style chart specialist.
+        # use the VLM loading pattern. "onechart" gets its own
+        # trust_remote_code branch (ADR-0006 amendment). Anything else
+        # assumes a Pix2Struct-style chart specialist.
         lid = model_id.lower()
+        is_onechart = "onechart" in lid
         is_vlm = (
             "-vl-" in lid
             or lid.endswith("-vl")
@@ -422,7 +433,34 @@ class ModelRegistry:
         )
         import torch
 
-        if is_vlm:
+        if is_onechart:
+            from transformers import AutoModel, AutoTokenizer
+
+            # ADR-0006 amendment carve-out: OneChart needs
+            # trust_remote_code=True because its custom Vary-derived
+            # architecture lives in the HF repo, not in transformers
+            # proper. Acceptable here ONLY because: (a) the model is
+            # opt-in via env-var; (b) it's 0.3B + Apache 2.0 + human-
+            # auditable; (c) the backend gates output on the model's
+            # own reliable_check self-consistency token.
+            tokenizer = AutoTokenizer.from_pretrained(
+                model_id, trust_remote_code=True
+            )
+            model = AutoModel.from_pretrained(
+                model_id,
+                trust_remote_code=True,
+                torch_dtype=torch.bfloat16,
+                device_map={"": "cuda:0"},
+                low_cpu_mem_usage=True,
+            )
+            model.eval()
+            # OneChart's `.chat()` API takes the tokenizer directly
+            # (no processor). Store the tokenizer in the `processor`
+            # slot so the rest of the backend has a uniform handle
+            # shape; the backend's dispatcher detects OneChart by
+            # model class name and uses tokenizer-style preprocessing.
+            return ChartOCRHandle(model=model, processor=tokenizer)
+        elif is_vlm:
             from transformers import AutoModelForImageTextToText, AutoProcessor
 
             # Match `_load_vlm`'s processor config so chart crops get
