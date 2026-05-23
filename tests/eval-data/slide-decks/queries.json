@@ -1,5 +1,5 @@
 {
-  "_description": "P0 eval-corpus, category: slide-decks. Source doc: Stephen Jones, 'CUDA: New Features and Beyond', GTC 2024. Extended 2026-05-21 from the rigorous baseline (15→30 queries) to give P2.x A/Bs statistical signal. New queries cover NVRTC compilation, kernel fusion, NVLink C2C, CUTLASS abstractions, LU factorization, performance-per-watt thesis, and unified memory.",
+  "_description": "P0 eval-corpus, category: slide-decks. Source doc: Stephen Jones, 'CUDA: New Features and Beyond', GTC 2024. Extended 2026-05-21 from the rigorous baseline (15\u219230 queries) to give P2.x A/Bs statistical signal. New queries cover NVRTC compilation, kernel fusion, NVLink C2C, CUTLASS abstractions, LU factorization, performance-per-watt thesis, and unified memory.",
   "_doc_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640",
   "_query_count": 30,
   "_mix": "17 answerable + 5 empty-retrieval refusals + 8 near-miss refusals",
@@ -9,9 +9,11 @@
       "qid": "slide-decks-01",
       "question": "What is the energy cost of FP16 matrix multiplication relative to FP32, in FMA operations?",
       "relevant_chunk_ids": [
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3a6c6789e8",
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#68dbf5fd57",
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3033839212"
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#b84538efc1",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#a33a479bcb",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#66c00bb5f5",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3a4d2e67cd",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#b19c7160e5"
       ],
       "should_refuse": false,
       "_expected_answer": "0.5x (from the Energy per FLOP table for matrix multiply)",
@@ -22,7 +24,7 @@
       "qid": "slide-decks-02",
       "question": "What are the two main categories where modern processors spend power, according to the slides?",
       "relevant_chunk_ids": [
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3a6c6789e8"
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#c1617eaa7e"
       ],
       "should_refuse": false,
       "_expected_answer": "1. Data movement, 2. Computation",
@@ -33,8 +35,11 @@
       "qid": "slide-decks-03",
       "question": "How does the power cost of floating point arithmetic scale with the mantissa length?",
       "relevant_chunk_ids": [
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3a6c6789e8",
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3033839212"
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3a4d2e67cd",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#b19c7160e5",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#b84538efc1",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#a33a479bcb",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#66c00bb5f5"
       ],
       "should_refuse": false,
       "_expected_answer": "Power of floating point arithmetic generally scales as the square of the mantissa length.",
@@ -44,8 +49,7 @@
       "qid": "slide-decks-04",
       "question": "What changed about transistor density and power efficiency between 2004 and 2022, per the TSMC chart?",
       "relevant_chunk_ids": [
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3a6c6789e8",
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#f41f19dbc0"
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#53c1cc7a7f"
       ],
       "should_refuse": false,
       "_expected_answer": "Transistor density grew massively (120x), but transistors got less power-efficient over the same window; the deck calls out this divergence as the energy-efficiency motivation.",
@@ -55,7 +59,7 @@
       "qid": "slide-decks-05",
       "question": "Why is data movement a key concern for power efficiency in modern processors?",
       "relevant_chunk_ids": [
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3a6c6789e8"
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#c1617eaa7e"
       ],
       "should_refuse": false,
       "_expected_answer": "Modern processors spend significant power on data movement (one of the two categories of power consumption); reducing it is one of the headline strategies in the deck.",
@@ -66,8 +70,11 @@
       "qid": "slide-decks-06",
       "question": "What is the energy cost of FP8 tensor core matrix multiplication relative to an FP32 FMA?",
       "relevant_chunk_ids": [
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3a6c6789e8",
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3033839212"
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#b84538efc1",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#a33a479bcb",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#66c00bb5f5",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3a4d2e67cd",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#b19c7160e5"
       ],
       "should_refuse": false,
       "_expected_answer": "0.06x (from the Energy per FLOP table; Tensor Core MMA in FP8).",
@@ -77,11 +84,12 @@
       "qid": "slide-decks-07",
       "question": "Which floating-point format has a 5-bit exponent and 10-bit mantissa?",
       "relevant_chunk_ids": [
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3a6c6789e8",
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3033839212"
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#b8875587ae",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3a4d2e67cd",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#b19c7160e5"
       ],
       "should_refuse": false,
-      "_expected_answer": "half (FP16) — listed in the precision sign/exponent/mantissa diagram.",
+      "_expected_answer": "half (FP16) \u2014 listed in the precision sign/exponent/mantissa diagram.",
       "_baseline_rerank_top1": 0.9179
     },
     {
@@ -90,7 +98,7 @@
       "relevant_chunk_ids": [],
       "should_refuse": true,
       "_counterfactual_mode": "empty-retrieval",
-      "_expected_answer": "(Refuse — the deck is about CUDA architecture, not corporate M&A history.)"
+      "_expected_answer": "(Refuse \u2014 the deck is about CUDA architecture, not corporate M&A history.)"
     },
     {
       "qid": "slide-decks-09",
@@ -98,7 +106,7 @@
       "relevant_chunk_ids": [],
       "should_refuse": true,
       "_counterfactual_mode": "empty-retrieval",
-      "_expected_answer": "(Refuse — RAG is unrelated to a CUDA architecture deck.)"
+      "_expected_answer": "(Refuse \u2014 RAG is unrelated to a CUDA architecture deck.)"
     },
     {
       "qid": "slide-decks-10",
@@ -106,7 +114,7 @@
       "relevant_chunk_ids": [],
       "should_refuse": true,
       "_counterfactual_mode": "empty-retrieval",
-      "_expected_answer": "(Refuse — pricing is not discussed in this technical deck.)"
+      "_expected_answer": "(Refuse \u2014 pricing is not discussed in this technical deck.)"
     },
     {
       "qid": "slide-decks-11",
@@ -114,7 +122,7 @@
       "relevant_chunk_ids": [],
       "should_refuse": true,
       "_counterfactual_mode": "near-miss",
-      "_expected_answer": "(Refuse — the Energy per FLOP table covers FP64/FP32/FP16/FP8/Int8 but not FP128.) This should pull the precision-table chunks at high rerank but the agent should recognise FP128 is absent.",
+      "_expected_answer": "(Refuse \u2014 the Energy per FLOP table covers FP64/FP32/FP16/FP8/Int8 but not FP128.) This should pull the precision-table chunks at high rerank but the agent should recognise FP128 is absent.",
       "_note": "Tests near-miss refusal: retrieval will route to the FP-precision chunk which is the right neighbourhood, but the specific value asked isn't there."
     },
     {
@@ -123,7 +131,7 @@
       "relevant_chunk_ids": [],
       "should_refuse": true,
       "_counterfactual_mode": "near-miss",
-      "_expected_answer": "(Refuse — the table lists FP8 as the smallest tensor-core precision; FP4 is not in this deck.)",
+      "_expected_answer": "(Refuse \u2014 the table lists FP8 as the smallest tensor-core precision; FP4 is not in this deck.)",
       "_note": "Same chunk-neighbourhood as the precision-table answerable queries; tests whether the agent grounds on the specific value or hallucinates by analogy."
     },
     {
@@ -132,7 +140,7 @@
       "relevant_chunk_ids": [],
       "should_refuse": true,
       "_counterfactual_mode": "near-miss",
-      "_expected_answer": "(Refuse — Grace-Hopper bandwidth is discussed but Blackwell isn't covered in this 2024 deck.)",
+      "_expected_answer": "(Refuse \u2014 Grace-Hopper bandwidth is discussed but Blackwell isn't covered in this 2024 deck.)",
       "_note": "Pulls the NVLink-bandwidth chunks; the agent must distinguish Grace-Hopper from a non-existent Hopper-Blackwell pairing."
     },
     {
@@ -141,7 +149,7 @@
       "relevant_chunk_ids": [],
       "should_refuse": true,
       "_counterfactual_mode": "near-miss",
-      "_expected_answer": "(Refuse — the deck discusses transistor density and SM architecture but does not list CUDA core counts.)",
+      "_expected_answer": "(Refuse \u2014 the deck discusses transistor density and SM architecture but does not list CUDA core counts.)",
       "_note": "Tests whether the agent over-claims about GPU specs based on architecture-discussion chunks."
     },
     {
@@ -150,14 +158,14 @@
       "relevant_chunk_ids": [],
       "should_refuse": true,
       "_counterfactual_mode": "near-miss",
-      "_expected_answer": "(Refuse — kernel fusion is discussed but the example given is FP32→FP16, not FP32→INT8.)",
-      "_note": "Tests whether the agent substitutes the FP32→FP16 example as if it answered the FP32→INT8 question."
+      "_expected_answer": "(Refuse \u2014 kernel fusion is discussed but the example given is FP32\u2192FP16, not FP32\u2192INT8.)",
+      "_note": "Tests whether the agent substitutes the FP32\u2192FP16 example as if it answered the FP32\u2192INT8 question."
     },
     {
       "qid": "slide-decks-16",
       "question": "By how much has NVRTC compilation time improved since CUDA 11.8 for a hello-world kernel?",
       "relevant_chunk_ids": [
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#ba5b556a6b"
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#41f2ad2aa5"
       ],
       "should_refuse": false,
       "_expected_answer": "6x speedup since CUDA 11.8 (from the NVRTC compile-time chart).",
@@ -165,20 +173,21 @@
     },
     {
       "qid": "slide-decks-17",
-      "question": "In the deck's basic kernel-fusion example, how many kernel launches does the unfused FP32→FP16 multiplication require versus the single fused version?",
+      "question": "In the deck's basic kernel-fusion example, how many kernel launches does the unfused FP32\u2192FP16 multiplication require versus the single fused version?",
       "relevant_chunk_ids": [
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#ba5b556a6b"
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#65ccf92372"
       ],
       "should_refuse": false,
       "_expected_answer": "3 kernel launches unfused vs 1 launch fused.",
-      "_baseline_rerank_top1": 0.9570
+      "_baseline_rerank_top1": 0.957
     },
     {
       "qid": "slide-decks-18",
       "question": "What is the NVLink C2C bandwidth between the Grace CPU and Hopper GPU?",
       "relevant_chunk_ids": [
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#1cb48b9127",
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#166905082f"
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#2e5c45611e",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#5e568f6d33",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#218cb4b84d"
       ],
       "should_refuse": false,
       "_expected_answer": "900 GB/s NVLink C2C.",
@@ -188,8 +197,10 @@
       "qid": "slide-decks-19",
       "question": "Which two programming-language abstractions does CUTLASS provide for tensor cores?",
       "relevant_chunk_ids": [
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#f651c446b9",
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#4f6743cd3d"
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#775b854ba3",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#bddb7b4a88",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#8d0c0e603a",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#c384042f67"
       ],
       "should_refuse": false,
       "_expected_answer": "C++ and Python abstractions.",
@@ -199,7 +210,7 @@
       "qid": "slide-decks-20",
       "question": "What new NVRTC flag reduces front-end compilation time by excluding rarely-used compile-time-expensive features?",
       "relevant_chunk_ids": [
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#ba5b556a6b"
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#41f2ad2aa5"
       ],
       "should_refuse": false,
       "_expected_answer": "The '-minimal' flag.",
@@ -209,7 +220,7 @@
       "qid": "slide-decks-21",
       "question": "How much lower are the overheads of the NVRTC '-minimal' flag compared to the default '-O3'?",
       "relevant_chunk_ids": [
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#ba5b556a6b"
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#41f2ad2aa5"
       ],
       "should_refuse": false,
       "_expected_answer": "1.6x lower overheads than default '-O3'.",
@@ -219,8 +230,8 @@
       "qid": "slide-decks-22",
       "question": "What method does the deck describe for getting IEEE-754 FP64-accurate results from FP16 tensor cores?",
       "relevant_chunk_ids": [
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#68dbf5fd57",
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#6f445df66b"
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#da11cc7c31",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#66c00bb5f5"
       ],
       "should_refuse": false,
       "_expected_answer": "Mixed-precision LU factorization with GMRES iterative refinement: do the LU factorisation in FP16 on tensor cores, then refine in FP64 until accurate enough.",
@@ -230,8 +241,8 @@
       "qid": "slide-decks-23",
       "question": "What does the Grace-Hopper unified memory address space refer to in the deck?",
       "relevant_chunk_ids": [
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#166905082f",
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#1cb48b9127"
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#5fb2a93187",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#07afd6e8db"
       ],
       "should_refuse": false,
       "_expected_answer": "Two memory systems (Grace LPDDR5X + Hopper HBM) presented as one address space accessible by both CPU and GPU.",
@@ -241,9 +252,11 @@
       "qid": "slide-decks-24",
       "question": "What is the energy cost of an FP16 Tensor Core MMA matrix multiply relative to an FP32 FMA?",
       "relevant_chunk_ids": [
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3a6c6789e8",
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#68dbf5fd57",
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3033839212"
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#b84538efc1",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#a33a479bcb",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#66c00bb5f5",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3a4d2e67cd",
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#b19c7160e5"
       ],
       "should_refuse": false,
       "_expected_answer": "0.12x (from the Energy per FLOP table; Tensor Core MMA in FP16).",
@@ -253,12 +266,12 @@
       "qid": "slide-decks-25",
       "question": "What is the deck's central thesis about the right performance metric to optimise in modern accelerators?",
       "relevant_chunk_ids": [
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#f41f19dbc0"
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#aa706aa390"
       ],
       "should_refuse": false,
       "_expected_answer": "It's about performance per watt (the section is titled '_It's about Performance per Watt_').",
       "_baseline_rerank_top1": 0.2636,
-      "_note": "Borderline rerank score (0.26) — the answer is the deck's THESIS, captured in section heading. Useful test of whether the agent grounds on heading-level structural signal."
+      "_note": "Borderline rerank score (0.26) \u2014 the answer is the deck's THESIS, captured in section heading. Useful test of whether the agent grounds on heading-level structural signal."
     },
     {
       "qid": "slide-decks-26",
@@ -266,7 +279,7 @@
       "relevant_chunk_ids": [],
       "should_refuse": true,
       "_counterfactual_mode": "near-miss",
-      "_expected_answer": "(Refuse — the precision-bit table covers FP64/32/16/8/Int8 mantissa lengths but FP4 is not in the table.)",
+      "_expected_answer": "(Refuse \u2014 the precision-bit table covers FP64/32/16/8/Int8 mantissa lengths but FP4 is not in the table.)",
       "_note": "Sister near-miss to slide-decks-12 (FP4 tensor core cost). Tests whether the agent extrapolates a mantissa value by analogy with FP8 (3-bit) when FP4 is absent."
     },
     {
@@ -275,7 +288,7 @@
       "relevant_chunk_ids": [],
       "should_refuse": true,
       "_counterfactual_mode": "near-miss",
-      "_expected_answer": "(Refuse — the NVRTC chart shows speedups SINCE CUDA 11.8; CUDA 11.0 is not present.)",
+      "_expected_answer": "(Refuse \u2014 the NVRTC chart shows speedups SINCE CUDA 11.8; CUDA 11.0 is not present.)",
       "_note": "Tests whether the agent extrapolates a value from the chart's domain. Should refuse because 11.0 is outside the chart's range."
     },
     {
@@ -284,7 +297,7 @@
       "relevant_chunk_ids": [],
       "should_refuse": true,
       "_counterfactual_mode": "near-miss",
-      "_expected_answer": "(Refuse — bandwidth is given (900 GB/s), but latency is not.)",
+      "_expected_answer": "(Refuse \u2014 bandwidth is given (900 GB/s), but latency is not.)",
       "_note": "Tests whether the agent substitutes bandwidth for latency. The bandwidth/latency confusion is a common LLM near-miss failure."
     },
     {
@@ -293,15 +306,15 @@
       "relevant_chunk_ids": [],
       "should_refuse": true,
       "_counterfactual_mode": "empty-retrieval",
-      "_expected_answer": "(Refuse — TDP / cooling specs are not in this architectural deck.)"
+      "_expected_answer": "(Refuse \u2014 TDP / cooling specs are not in this architectural deck.)"
     },
     {
       "qid": "slide-decks-30",
-      "question": "What programming language must I use to write CUDA kernels — only C++, or are other options supported?",
+      "question": "What programming language must I use to write CUDA kernels \u2014 only C++, or are other options supported?",
       "relevant_chunk_ids": [],
       "should_refuse": true,
       "_counterfactual_mode": "empty-retrieval",
-      "_expected_answer": "(Refuse — although Python interfaces are mentioned for some libraries, the deck does not give a comprehensive answer to 'which languages can write CUDA kernels'.)"
+      "_expected_answer": "(Refuse \u2014 although Python interfaces are mentioned for some libraries, the deck does not give a comprehensive answer to 'which languages can write CUDA kernels'.)"
     }
   ]
 }
