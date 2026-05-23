@@ -110,8 +110,20 @@ class SufficiencyAssessment(BaseModel):
 
     sufficient: bool
     reason: str = Field(
-        description="If insufficient, what is missing? If sufficient, why?"
+        description="If insufficient, what is missing? If sufficient, why?",
+        max_length=500,
     )
+
+    # P3.3 v6 (audit 2026-05-22): xgrammar enforces this max_length at
+    # the grammar level, bounding emission so the model can't run away
+    # in the `reason` field and trip max_tokens before closing the
+    # JSON object. The crash this fixes: on counterfactual queries
+    # like "What is the energy cost of FP128..." (which the deck
+    # doesn't cover), Qwen3-4B-AWQ would emit a 2000+ char ramble in
+    # `reason` explaining why the chunks were insufficient — past
+    # max_tokens=640, JSON gets cut off, schema-validate fails,
+    # ModelCallError aborts the eval. 500 chars is plenty for "one
+    # sentence" per the prompt.
 
 
 class VerificationResult(BaseModel):
@@ -387,10 +399,22 @@ async def assess(state: AnswerState) -> AnswerStateUpdate:
             "nodes_traversed": state.nodes_traversed + 1,
         }
 
+    # P3.3 v6 (audit 2026-05-22): the assess prompt has the same
+    # `truncate(1200)` interaction with chart-extracted blocks as
+    # the answer prompt. If chart noise eats the truncate budget,
+    # the assess model only sees chart noise and can return
+    # `sufficient: false` because it never reaches the prose +
+    # Docling tables in the chunk. Strip the chart blocks here too
+    # so all three prompt stages (assess / answer / verify) see the
+    # same content view.
+    stripped_chunks_for_assess = [
+        c.model_copy(update={"text": strip_chart_extracted_for_index(c.text)})
+        for c in state.reranked
+    ]
     prompt = render_prompt(
         "assess_sufficiency",
         query=state.query,
-        chunks=state.reranked,
+        chunks=stripped_chunks_for_assess,
     )
     sufficiency, tokens = await complete_structured(
         prompt=prompt,
