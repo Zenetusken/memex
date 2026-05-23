@@ -1,6 +1,6 @@
 # Memex Roadmap
 
-**Last updated:** 2026-05-22 — 115 commits on `main`, 215/215 tests green, **100% public-surface docstring coverage** (275/275). Foundation arc complete; audit-and-housekeeping arc complete. Eval suite stable on Qwen3-4B-AWQ orchestrator: baseline `answered_count` 9.3 ± 0.5, `refusal_cf` 1.00, hallucinations 0, `mcp_ans` 1.00. **External-blocked items**: P0 multi-doc (needs source material), P2.2 Granite (vLLM hybrid-arch hang), P2.3 VLM swap (needs scan corpus), P3.3 follow-ups a/b/c (autoawq compat / ADR amendment / chart-heavy corpus), P3.1 benchmark CI (GPU runner), P4.1/P4.3/P4.4 (various external triggers).
+**Last updated:** 2026-05-23 — 125 commits on `main`, 227/227 tests green, **100% public-surface docstring coverage** (275/275). Foundation + audit + **French support + Qwen3 prompt-engineering** arcs all complete. Eval suites stable on Qwen3-8B-AWQ orchestrator: English (30q CUDA deck) `answered_count` 11, French (8q CR350) `answered_count` 5/5 ANS, both at `refusal_cf` 1.00, hallucinations 0, `mcp_ans` 1.00. **MIRACL-fr retrieval benchmark**: nDCG@10 = 0.807. **External-blocked items**: P0 multi-doc (more source material), P2.2 Granite (vLLM hybrid-arch hang), P2.3 VLM swap (needs scan corpus), P3.3 follow-ups a/b/c (autoawq compat / ADR amendment / chart-heavy corpus), P3.1 benchmark CI (GPU runner), P4.1/P4.3/P4.4 (various external triggers).
 
 The blueprint in [`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) is the architectural design — module signatures, cross-cutting concerns, build order. This document is the **operational view**: what is shipped today, what is measured, and what comes next.
 
@@ -33,9 +33,9 @@ The blueprint in [`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) is the archi
 | **P2.4 — Agent refusal calibration** | `prompts/answer/v2.md` with literal-presence rule | ✅ **Shipped + live-verified** (2026-05-21) — Q11 (FP128) + Q12 (FP4) hallucinations both eliminated; `refusal_rate_cf` 0.75 → 1.0; `mcp_ans` 0.33 → 0.67. **Q7 regression recovered** as a side effect of the retrieval-truncate-budget retune that shipped later the same day. |
 | **Retrieval truncate-budget retune** | `truncate(700)→1800` in prompts; `MEMEX_RERANK_TOP_K 10→5`; `max_tokens 1024→640`; `max-model-len 4096→6144` | ✅ **Shipped + live-verified** (2026-05-21) — three legitimate REF→ANS flips (Q2, Q7-recovered, Q20). Diagnosed by direct instrumentation: agent was operating on ~32% of every chunk's content because the answer prompt clipped chunks at 700 chars while median chunk is 2172 chars. |
 
-**File count:** 86 Python files in `src/memex/` + `tests/` + `scripts/`, all parse-clean. 7 ADRs. 8 audit reports under `docs/audits/`. 115 commits on `main` (public at `github.com/Zenetusken/memex`); the canonical count is `git rev-list --count main`.
+**File count:** 86 Python files in `src/memex/` + `tests/` + `scripts/`, all parse-clean. 7 ADRs. 10 audit reports under `docs/audits/`. 125 commits on `main` (public at `github.com/Zenetusken/memex`); the canonical count is `git rev-list --count main`.
 
-**Test suite:** 215/215 green on the reference rig. Linux + pyseccomp; 5 tests skip on Windows.
+**Test suite:** 227/227 green on the reference rig. Linux + pyseccomp; 5 tests skip on Windows.
 
 ---
 
@@ -169,6 +169,21 @@ Three parallel research subagents evaluated browser-side OCR/VLM technologies as
 - ✅ **Dead-code sweep** — removed `convert_page` (singular VLM); wired `get_pymupdf_breaker_state` + `list_prompts` into `memex doctor`.
 - ✅ **Per-module docstring audit** — 78.2% → **100% public-surface coverage** (275/275). Pure documentation pass, no behaviour change.
 - ✅ **Browser-OCR research turn** — three candidate technologies rejected (Tesseract.js, Surya-via-Pyodide, InternVL3-9B-via-ONNX-Web).
+
+**French support hardening arc (2026-05-22 — 2026-05-23):**
+- ✅ **Multilingual chunker + FTS5** — `_SENTENCE_RE` extended to Latin-1 + Œ + Ÿ; FTS5 schema flipped from `porter unicode61` to `unicode61 remove_diacritics 2`. End-to-end validated against a French course PDF (CR350, 45 pages, 51 chunks via Docling).
+- ✅ **French eval corpus** — `tests/eval-data/french-course/queries.json` (5 ANS + 3 REF queries against the CR350 doc); HARD GATES pass at refusal_cf=1.0, mcp_ans=1.0.
+- ✅ **Language-mirror answer prompt (`answer/v3`)** — adds an explicit "write summary + claims in the query's language" directive; positioning study found recency-bias matters (rule at top → refusal_cf dropped to 0.77; rule at end with explicit hedge → 1.0 preserved).
+- ✅ **MIRACL-fr retrieval benchmark** — published 0.807 nDCG@10 with cross_encoder rerank (vs 0.755 dense-only); matches bge-reranker-v2-m3 published range. Validates bf16 dispatch + retrieval-pipeline composition.
+
+**Qwen3 prompt-engineering follow-ups (all shipped 2026-05-22 — 2026-05-23):**
+- ✅ **#1 Positive worked example** in `answer/v3` — required Path C schema tightening (max_length 600→300, max_items 20→8, source_chunk_id max_length=80) + `max_tokens` 640→1024 to avoid schema-overflow crash. Net English ANS +2.
+- ✅ **#2 Sampling tuning + seed** — temperature 0.0→0.1, top_p=0.8, presence_penalty=1.0 (capped — >1.5 triggers AWQ language mixing), seed=42. English mcp_ans 0.955→1.0.
+- ✅ **#3 System/user message split** — `render_messages()` + `<!-- ===USER=== -->` marker; answer node now sends a 2-message ChatML structure (system block ~800 tokens, user block dynamic). Enables vLLM prefix-cache reuse on the static system block.
+- ✅ **#4 Schema-block trim** — removed redundant in-prompt JSON-schema spec (~80 tokens saved per call); xgrammar enforces the schema at the grammar level. Research had warned against this for <10B models; empirical A/B disproved the concern at our scale.
+- ✅ **#5 SamplingSettings centralization** — sampling defaults moved from hardcoded `complete_structured` kwargs to `MemexSettings.inference.sampling`. Per-deployment override via `MEMEX_INFERENCE__SAMPLING__*` env vars.
+
+Research notes: [`docs/audits/qwen3_prompt_engineering_2026-05-22.md`](audits/qwen3_prompt_engineering_2026-05-22.md). MIRACL-fr results: [`docs/audits/miracl_fr_2026-05-22.md`](audits/miracl_fr_2026-05-22.md).
 
 ### Next pickup — ranked by impact × feasibility
 
@@ -393,7 +408,7 @@ Detailed per-phase log lives in git history + `docs/audits/`. The compressed ver
 - **FU3.2.1 — `Type=notify` readiness gate for vLLM** (2026-05-21): `scripts/serve-vllm.sh` gained a backgrounded sidecar that polls `/v1/models` and calls `systemd-notify --ready --status="…"` on the first 2xx; `memex-vllm.service` switched from `Type=simple` to `Type=notify` + `NotifyAccess=all`. `systemctl --user start memex-vllm` now blocks until vLLM is genuinely serving (~31 s measured), so `After=memex-vllm.service` on downstream units (web, MCP, watcher) is a real readiness gate. Live-verified: full-stack cold boot returned after 32 s with **zero Connection-refused logs** in any downstream unit's journal — and a watcher reaction triggered immediately afterward fired clean `extract_entities@v1` + `extract_citations@v1` model calls against vLLM. The sidecar no-ops when `$NOTIFY_SOCKET` is unset, so Pattern B (manual) and Pattern C (`memex daemon start`) are unaffected.
 - **P3.2 — Daemon templates** (2026-05-21): three waves. (1) vLLM unit + plist + deploy guides. (2) `memex-web.service` + `memex-mcp.service` (+ matching plists/env) so the full stack boots together. (3) `memex-watch.service` (+ plist + env) for the vault file-watcher that re-enriches + re-indexes on canonical-markdown edits. Web + MCP + watcher all carry soft `Wants=memex-vllm.service` — they cluster but degrade gracefully if vLLM is down (search/get_document/list_documents work LLM-less; only `/ask` and enrich need vLLM). The wave-3 live verification was the most thorough: appended a line to the canonical CUDA-deck markdown → watcher logged `watcher.edit_confirmed` → 32 chunks went to enrich → vLLM was offline (cleanup state) so 32× `enrich.chunk_failed` → `enrich.done chunk_failures: 32` → watcher kept running → `index.done added: 1 deleted: 1 unchanged: 30 partial: true` (partial re-index isolated the changed chunk). Restoring the file fired another correct reaction. Two unit-template bugs caught during verification (StartLimitIntervalSec in `[Service]` instead of `[Unit]`, inline `#` comments on `ProtectHome=` line) — both fixed across all four units. No code change.
 
-For the full per-commit log: `git log --oneline` (115 commits at session close, 2026-05-22; the up-to-date number is `git rev-list --count main`).
+For the full per-commit log: `git log --oneline` (125 commits at session close, 2026-05-23; the up-to-date number is `git rev-list --count main`).
 
 ---
 
