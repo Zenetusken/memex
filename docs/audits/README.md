@@ -18,6 +18,7 @@ of fixes survives long after the commits land.
 | 2026-05-23 | Chart-OCR fine-tuning research | three parallel agents on official fine-tuning workflows for UniChart / NeMo Retriever / Nemotron-Parse — see `chart_ocr_finetune_research_2026-05-23.md` |
 | 2026-05-23 | Chart-OCR backend shootout (P3.3-c) | A/B/C/D eval of DePlot / UniChart / OneChart / Nemotron-Parse-v1.2 against the slide-decks corpus. Nemotron-Parse wins (no prose regression). Late-session v7 banner added after the chunker / converter / prompt fixes — see `chart_ocr_shootout_2026-05-23.md` |
 | 2026-05-23 | OneChart retry (P3.3-b) | A/B/C eval revealed CUDA device-side assertion on every chart figure (OPT decoder positional-embedding overflow on OOD imagery); default stays DePlot-only — see `onechart_2026-05-23.md` |
+| 2026-05-23 | Post-v7 verification audit | four parallel agents (resource/concurrency, error/edge, wiring, quality) fanned out on the v7 fix arc; 6 critical/important findings fixed inline (truncated-chart-block defense, multicolumn nested-brace fix, label-number heuristic tightening, ungrounded_reasons overflow log, chunker N+1 regex elimination, stale-docstring fix); 21 new tests; 255 → 276 passing; no eval regression — see `post_v7_2026-05-23.md` |
 
 ## Pattern
 
