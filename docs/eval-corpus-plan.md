@@ -312,12 +312,17 @@ The corpus is itself versioned semantically.
 > `modern-printed/tidewater-maintenance-log` (prose + lists + HTML table),
 > `forms/quarterly-uptime-report` (native `.fodt` → its table parses as a
 > proper **GFM table**), `technical-docs/widget-cli-reference` (deep
-> H1–H4 + code blocks). Full-corpus `memex eval-parse`: **3/3 pass, mean
-> CER 0.037 / WER 0.121 / structural-F1 0.566**. Findings: native ODF
-> tables parse as GFM + **code blocks parse with high fidelity**, but
-> **pymupdf4llm collapses all heading levels to `##`** (caps structural-F1
-> — queued as a Tier-1 parser fix in the ROADMAP) and the table header row
-> splits. (An earlier PyMuPDF `Story` render dropped some post-heading
+> H1–H4 + code blocks). Full-corpus `memex eval-parse` (post the
+> heading-level-recovery parser fix): **3/3 pass, mean CER 0.036 / WER
+> 0.106 / structural-F1 0.974** (was 0.566 before the fix). Findings:
+> native ODF tables parse as GFM + **code blocks parse with high
+> fidelity**; the table header row still splits. **The
+> heading-collapse defect these fixtures surfaced is now FIXED**
+> (commit `bb66c82`): pymupdf4llm 1.27.x emitted every heading as `##`
+> regardless of font size, so `parse/pymupdf_worker.py` re-derives the
+> level from font size (`_heading_size_to_level` + `_remap_heading_levels`)
+> — forms 0.75→1.0, technical-docs 0.33→1.0, tidewater 0.615→0.923.
+> (An earlier PyMuPDF `Story` render dropped some post-heading
 > paragraphs — a *Story artifact*, not a real-PDF weakness.) Still to do:
 > table + equation structural-F1, the retrieval/answer metric halves, and
 > — the bulk — hand-curated **real** documents per category.
