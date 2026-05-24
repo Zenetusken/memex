@@ -67,6 +67,11 @@ _ENTITY_PROMPT_NAME = "extract_entities"
 _ENTITY_PROMPT_VERSION = "v2"
 _CITATION_PROMPT_NAME = "extract_citations"
 _CITATION_PROMPT_VERSION = "v2"
+# Per-call output budget for entity/citation extraction. Above the 1024
+# default so the bounded (max_length=24) lists complete within budget even on
+# dense table passages, well under the 6144 model-len once the truncated
+# prompt (≤6000 chars) is accounted for.
+_ENRICH_MAX_TOKENS = 1536
 
 _MAX_CONCURRENT = 4  # per-chunk extraction parallelism
 
@@ -112,15 +117,20 @@ async def _extract_chunk(chunk: Chunk, title: str) -> tuple[list[Entity], list[C
     entity_prompt = render_prompt(_ENTITY_PROMPT_NAME, document_title=title, passage=chunk.text)
     citation_prompt = render_prompt(_CITATION_PROMPT_NAME, document_title=title, passage=chunk.text)
 
+    # Headroom so the (now bounded, max_length=24) entity/citation lists
+    # complete within budget on dense passages — the JSON must finish before
+    # `max_tokens` or `model_validate_json` rejects the truncated output.
     entity_task = complete_structured(
         prompt=entity_prompt,
         schema=EntityList,
         prompt_tag=f"{_ENTITY_PROMPT_NAME}@{_ENTITY_PROMPT_VERSION}",
+        max_tokens=_ENRICH_MAX_TOKENS,
     )
     citation_task = complete_structured(
         prompt=citation_prompt,
         schema=CitationList,
         prompt_tag=f"{_CITATION_PROMPT_NAME}@{_CITATION_PROMPT_VERSION}",
+        max_tokens=_ENRICH_MAX_TOKENS,
     )
     (entity_raw, _), (citation_raw, _) = await asyncio.gather(entity_task, citation_task)
     # `complete_structured` is typed to return the schema instance, so this

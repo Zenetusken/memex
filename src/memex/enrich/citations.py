@@ -64,14 +64,18 @@ class CitationCandidate(BaseModel):
     passage (e.g., "Smith et al. 2021") plus a confidence band. The
     resolver downstream tries to bind this to a vault document."""
 
-    surface_text: str = Field(min_length=1)
+    surface_text: str = Field(min_length=1, max_length=200)
     confidence: CitationConfidence
 
 
 class CitationList(BaseModel):
     """Top-level output schema for the `extract_citations` prompt."""
 
-    citations: list[CitationCandidate] = Field(default_factory=list[CitationCandidate])
+    # Bounded for the same reason as `EntityList.entities`: a dense passage
+    # must not run the citation list past `max_tokens` and truncate the JSON.
+    citations: list[CitationCandidate] = Field(
+        default_factory=list[CitationCandidate], max_length=24
+    )
 
 
 class CitationExtractionInput(BaseModel):

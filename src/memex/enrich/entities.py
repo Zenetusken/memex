@@ -43,7 +43,14 @@ class ExtractedEntity(BaseModel):
 class EntityList(BaseModel):
     """Top-level output schema for the extract_entities prompt."""
 
-    entities: list[ExtractedEntity] = Field(default_factory=list[ExtractedEntity])
+    # Bound the list length (xgrammar enforces maxItems at the grammar level)
+    # so a dense passage — e.g. a 10-K financial TABLE with dozens of numbers
+    # and names — can't make the model emit an unbounded entity list that runs
+    # past `max_tokens` and truncates the JSON mid-emission, which fails
+    # `model_validate_json` ("Model output did not match the requested
+    # schema.") and drops the whole chunk. 24 fits the per-call token budget;
+    # prose chunks rarely approach it. Mirrors `DraftAnswer.claims` (CLAUDE.md).
+    entities: list[ExtractedEntity] = Field(default_factory=list[ExtractedEntity], max_length=24)
 
 
 class EntityExtractionInput(BaseModel):
