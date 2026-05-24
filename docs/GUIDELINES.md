@@ -93,7 +93,7 @@ memex/
 
 ### Coding standards
 
-**Types are not optional.** Every function signature, every dataclass, every pydantic model. `pyright --strict` runs in CI. Untyped `Any` requires a comment explaining why.
+**Types are not optional.** Every function signature, every dataclass, every pydantic model. `pyright --strict` runs in CI and `src/memex` is kept at **0 errors / 0 warnings**. Untyped `Any` requires a comment explaining why. When a third-party library ships no usable types, give it a minimal `.pyi` stub under `stubs/` (wired via `stubPath`) covering only the surface Memex uses — don't silence at the call site. For libraries that ship a partial `py.typed` (torch, transformers, openai, typer), don't shadow them with a competing stub; fix at the call site with precise annotations, a single typed wrapper, or `typing.cast`. `# type: ignore[rule]` is a last resort and always carries a trailing `# reason`.
 
 **Pydantic models cross module boundaries, dicts don't.** If two modules need to exchange a `ParsedDocument`, it's a pydantic model in `core/types.py`, not `dict[str, Any]`. This rule alone prevents most integration bugs.
 

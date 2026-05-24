@@ -205,6 +205,17 @@ $EDITOR ~/.memex/vault/documents/2f96ae1c-some-paper.md
 
 The watcher service notices the sha change, re-enriches, and re-indexes the doc within seconds. No manual `memex reindex` needed.
 
+### Rename a document's title
+
+A document's title is pure metadata — it isn't part of the embedded text or the chunk IDs — so renaming it never re-embeds anything:
+
+```sh
+uv run memex retitle 2f96ae1c-some-paper "A Clean Human Title"   # explicit
+uv run memex retitle 2f96ae1c-some-paper --derive                # from the source filename
+```
+
+This rewrites the frontmatter title and fans it out to the FTS, vector, and graph indexes in one cheap, GPU-free pass (it doubles as a way to repair a stale title). The web UI exposes the same thing: click **rename** next to the document title, edit inline, save. A clean title also helps cross-document citation resolution, which scores against other docs' titles.
+
 ### Update to a newer Memex
 
 ```sh
@@ -372,7 +383,7 @@ The only thing that talks to the network is the *initial model download* (one-ti
 ## 🧪 Run the tests
 
 ```sh
-uv run pytest                  # 346 tests, ~9 seconds, no GPU needed
+uv run pytest                  # 378 tests, ~9 seconds, no GPU needed
 uv run pytest tests/unit       # just the pure-function tests
 uv run pytest tests/integration  # full ingest→parse→index→ask flow with faked I/O
 ```

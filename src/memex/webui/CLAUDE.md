@@ -45,6 +45,11 @@ The document view renders the canonical markdown body inside a `<pre>` for fidel
 3. If it's an HTMX target, name the partial `_name.html` and **omit** `{% extends %}`.
 4. Add a test in `tests/integration/test_webui.py` using `TestClient(create_app())`, or unit-test pure render helpers in `tests/unit/test_webui_rendering.py`.
 
+## Two inline-edit flows (both HTMX view/edit toggles)
+
+- **Body**: the `edit` button swaps `#md-pane` (`/documents/{id}/edit` → form; `/documents/{id}/review` POST writes through `vault.write_document` with optimistic-CAS conflict handling; `/documents/{id}/body` is the view partial).
+- **Title** (2026-05-24): the `rename` button swaps `#doc-title` (`/documents/{id}/title/edit` → form; `/documents/{id}/title` POST → `index.retitle_document`; `/documents/{id}/title` GET is the view partial). Partials `_document_title.html` / `_document_title_edit.html`. The POST calls `retitle_document` directly — the one sanctioned `webui → index` write path besides the `graph_store` test seam — because the rename must fan the title out to the FTS/vector/graph copies *without* a re-embed, which the watcher's partial reindex can't do (the body, hence every chunk, is unchanged).
+
 ## When in doubt
 
 The web UI's job is the *visual* parts of the workflow the CLI can't do well (per IMPLEMENTATION-PLAN §1.10): side-by-side preview of source PDF and extracted Markdown (Phase 4), graph visualisation, per-document annotation correction. Everything else should be a CLI invocation. If a route doesn't make a visual workflow easier, push back on adding it.
