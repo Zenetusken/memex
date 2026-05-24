@@ -197,6 +197,11 @@ strict = ["src/memex"]
 pythonVersion = "3.12"
 reportMissingImports = "error"
 reportMissingTypeStubs = "warning"
+# Local stub packages for third-party libs that ship no usable types
+# (langgraph, lancedb, openai surfaces, torch/transformers slices,
+# docling, pypdfium2, pyseccomp, langfuse). Each stub covers only the
+# surface Memex actually uses — see stubs/README.md.
+stubPath = "stubs"
 # Per-file `# pyright: reportUnusedFunction=false` pragmas live at
 # the top of `cli/commands.py` and `webui/app.py` to silence false
 # positives on framework-decorated route handlers + Typer commands.

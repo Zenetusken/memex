@@ -697,6 +697,7 @@ async def verify(state: AnswerState) -> AnswerStateUpdate:
     # tests/integration/test_answering_with_fakes.py.
     BoundedVerificationResult = create_model(
         "VerificationResult",
+        __base__=VerificationResult,
         grounded=(
             Annotated[list[int], Field(max_length=n)],
             Field(
@@ -726,6 +727,10 @@ async def verify(state: AnswerState) -> AnswerStateUpdate:
         ),
     )
 
+    # `__base__=VerificationResult` above makes the dynamic model a true
+    # subclass, so pyright infers `bounded` as VerificationResult and the
+    # `.grounded` / `.ungrounded` / `.ungrounded_reasons` accesses below
+    # stay typed — no cast needed.
     bounded, tokens = await complete_structured(
         prompt=prompt,
         schema=BoundedVerificationResult,
