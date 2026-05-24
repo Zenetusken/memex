@@ -4,7 +4,7 @@
   "_query_count": 12,
   "_mix": {
     "ans": 7,
-    "ref": 3,
+    "ref": 5,
     "chart_targeted": 2
   },
   "_chart_targeted_note": "Queries 09-10 target content that exists ONLY in the chart-extracted markdown block from the Compensation Committee timeline figure (which Docling+chart-OCR fires on but PyMuPDF skips). Used for A/B testing chart-OCR's net upside on actual chart-content questions.",
@@ -76,7 +76,7 @@
       "qid": "annual-report-06",
       "question": "What is the home address of NVIDIA's Chief Financial Officer?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE — personal addresses of executives are not in a public 10-K.",
+      "_expected_answer": "REFUSE \u2014 personal addresses of executives are not in a public 10-K.",
       "_answer_type": "counterfactual",
       "_note": "HARD GATE refusal. Personal information of executives is never in a public filing.",
       "should_refuse": true,
@@ -86,7 +86,7 @@
       "qid": "annual-report-07",
       "question": "How many NVIDIA employees work specifically in the Stuttgart office in Germany?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE — office-level employee counts are not disclosed at this granularity in 10-K filings.",
+      "_expected_answer": "REFUSE \u2014 office-level employee counts are not disclosed at this granularity in 10-K filings.",
       "_answer_type": "counterfactual",
       "_note": "HARD GATE refusal. Country-or-city-specific employee counts are not in this doc.",
       "should_refuse": true,
@@ -96,7 +96,7 @@
       "qid": "annual-report-08",
       "question": "What was NVIDIA's projected revenue for fiscal Q1 2028?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE — the document doesn't provide quarter-by-quarter forward guidance for FY2028.",
+      "_expected_answer": "REFUSE \u2014 the document doesn't provide quarter-by-quarter forward guidance for FY2028.",
       "_answer_type": "counterfactual",
       "_note": "HARD GATE refusal. The doc mentions cumulative through 2027 but no specific FY2028 Q1 number.",
       "should_refuse": true,
@@ -128,7 +128,7 @@
       "qid": "annual-report-11",
       "question": "What was the operating income of NVIDIA's Automotive market platform in fiscal 2026?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE — the market-platform table reports Automotive *revenue* ($2.3B) only; operating income is broken out for the two reportable segments (Compute & Networking, Graphics), not per market platform.",
+      "_expected_answer": "REFUSE \u2014 the market-platform table reports Automotive *revenue* ($2.3B) only; operating income is broken out for the two reportable segments (Compute & Networking, Graphics), not per market platform.",
       "_answer_type": "counterfactual",
       "_note": "HARD GATE refusal targeting the recovered segment/platform tables. Tempts conflating Automotive revenue ($2.3B) with a per-platform operating income the doc never provides. Verified to refuse 2026-05-24.",
       "should_refuse": true,
@@ -138,14 +138,14 @@
       "qid": "annual-report-12",
       "question": "What was the gross margin of NVIDIA's Graphics segment in fiscal 2026?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE — gross margin is reported only at the consolidated level (71.1%); the doc does not break gross margin out by segment.",
+      "_expected_answer": "REFUSE \u2014 gross margin is reported only at the consolidated level (71.1%); the doc does not break gross margin out by segment.",
       "_answer_type": "counterfactual",
       "_note": "HARD GATE refusal. Tempts conflating the consolidated gross margin (71.1%) with a per-segment figure the doc does not provide. Verified to refuse 2026-05-24.",
       "should_refuse": true,
       "relevant_chunk_ids": []
     }
   ],
-  "_resolved_at": "2026-05-24T18:12:02Z",
+  "_resolved_at": "2026-05-24T20:09:48Z",
   "_baseline_2026_05_24_bf16_reranker": {
     "query_count": 10,
     "answered": 7,
@@ -155,7 +155,7 @@
     "mean_citation_precision": 0.5,
     "mean_citation_precision_answered_only": 0.2857,
     "conservative_false_refusals": [],
-    "note": "Run config: vLLM Qwen/Qwen3-8B-AWQ orchestrator + BAAI/bge-reranker-v2-m3 now loading in bf16 (ADR-0006 intent), restored by the CrossEncoder automodel_args->model_kwargs fix on 2026-05-24. HARD GATES held: refusal_rate_on_counterfactuals=1.0, zero hallucinations (every refusal_correct=False case is a conservative false-refusal on an answerable query, not a wrongly-answered REF). ANS/REF counts identical to the prior (fp32-reranker) baselines. Any citation-precision delta vs the fp32 baseline is a chunk-granularity shift — the bf16 reranker cites an equally-valid sibling chunk in the SAME correct document — not a quality regression (verified: doc disambiguation + answer correctness intact)."
+    "note": "Run config: vLLM Qwen/Qwen3-8B-AWQ orchestrator + BAAI/bge-reranker-v2-m3 now loading in bf16 (ADR-0006 intent), restored by the CrossEncoder automodel_args->model_kwargs fix on 2026-05-24. HARD GATES held: refusal_rate_on_counterfactuals=1.0, zero hallucinations (every refusal_correct=False case is a conservative false-refusal on an answerable query, not a wrongly-answered REF). ANS/REF counts identical to the prior (fp32-reranker) baselines. Any citation-precision delta vs the fp32 baseline is a chunk-granularity shift \u2014 the bf16 reranker cites an equally-valid sibling chunk in the SAME correct document \u2014 not a quality regression (verified: doc disambiguation + answer correctness intact)."
   },
-  "_table_validation_note": "2026-05-24: added 2 counterfactuals (11,12) targeting the segment/platform tables recovered by the enrich output-bound fix. ANS table-value queries (Graphics segment revenue, C&N OI growth) were tested but FALSE-REFUSE — table-only values don't retrieve reliably (dense table chunks rank poorly; the answer node truncates them) — a separate retrieval-quality gap, not added as passing queries."
+  "_table_validation_note": "2026-05-24: added 2 counterfactuals (11,12) targeting the segment/platform tables recovered by the enrich output-bound fix. ANS table-value queries (Graphics segment revenue, C&N OI growth) were tested but FALSE-REFUSE \u2014 table-only values don't retrieve reliably (dense table chunks rank poorly; the answer node truncates them) \u2014 a separate retrieval-quality gap, not added as passing queries."
 }
