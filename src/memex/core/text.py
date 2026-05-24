@@ -109,7 +109,17 @@ def is_inside_any_span(offset: int, spans: list[tuple[int, int]]) -> bool:
 # heading text). Same shape as `index.chunker._HEADING_RE`; lifted
 # here so `enrich.citations` can use it for section-anchor discovery
 # without violating the `enrich/ → index/` import direction.
-_MARKDOWN_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
+#
+# Scoped to horizontal whitespace (`[ \t]`) rather than `\s` because
+# the latter matches `\n` too, which would cause an empty heading like
+# `## ` (no text) + blank line + `Prose.` to silently match as `##
+# Prose.` (the regex `\s+(.+?)\s*$` swallows the newline and grabs
+# the next-line's content). Post-P4.1 audit (2026-05-23 webui test
+# pin) confirmed this was an actual hazard. The chunker uses the same
+# regex via `index.chunker._HEADING_RE`; the tightening applies
+# uniformly so empty-text headings no longer steal subsequent
+# paragraphs.
+_MARKDOWN_HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*$", re.MULTILINE)
 
 
 def extract_heading_texts(body: str, *, skip_chart_blocks: bool = True) -> list[str]:

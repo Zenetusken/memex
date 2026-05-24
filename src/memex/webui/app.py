@@ -57,6 +57,7 @@ from memex.vault.store import (
     read_document,
     write_document,
 )
+from memex.webui.rendering import render_body_html
 
 _HERE = Path(__file__).parent
 _TEMPLATES_DIR = _HERE / "templates"
@@ -242,6 +243,7 @@ def create_app() -> FastAPI:
             "document.html",
             {
                 "document": doc,
+                "rendered_body": render_body_html(doc.body),
                 "has_source": has_source,
                 "source_kind": source_kind,
             },
@@ -296,7 +298,11 @@ def create_app() -> FastAPI:
         return templates.TemplateResponse(
             request,
             "_document_body.html",
-            {"document": doc, "just_saved": None},
+            {
+                "document": doc,
+                "rendered_body": render_body_html(doc.body),
+                "just_saved": None,
+            },
         )
 
     @app.post("/documents/{doc_id}/review", response_class=HTMLResponse)
@@ -406,6 +412,7 @@ def create_app() -> FastAPI:
             "_document_body.html",
             {
                 "document": refreshed,
+                "rendered_body": render_body_html(refreshed.body),
                 "just_saved": datetime.now().strftime("%H:%M:%S"),
             },
         )

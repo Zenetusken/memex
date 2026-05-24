@@ -1,7 +1,15 @@
 {# View mode of the markdown body. HTMX target = #md-pane.
    When the context provides `just_saved` (an ISO timestamp string),
-   includes a fading "saved" indicator that auto-dismisses after ~3.4s. #}
+   includes a fading "saved" indicator that auto-dismisses after ~3.4s.
+
+   `rendered_body` is a `markupsafe.Markup` produced by
+   `webui.rendering.render_body_html` — HTML-escaped body with
+   wikilinks (`[[doc#section]]`) converted to clickable anchors and
+   inline `<span id="...">` heading targets so URL fragments scroll
+   the heading into view. Pre-P4.1 callers that pass `document.body`
+   directly still get the raw text (no wikilink rewriting, no scroll
+   anchors), but every route in `app.py` now passes `rendered_body`. #}
 {% if just_saved %}
 <div class="saved-flash">saved {{ just_saved }}</div>
 {% endif %}
-<pre class="whitespace-pre-wrap break-words font-mono text-sm leading-relaxed text-zinc-200">{{ document.body }}</pre>
+<pre class="whitespace-pre-wrap break-words font-mono text-sm leading-relaxed text-zinc-200">{{ rendered_body if rendered_body else document.body }}</pre>

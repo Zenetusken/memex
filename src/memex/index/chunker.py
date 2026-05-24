@@ -27,7 +27,7 @@ from memex.core.types import Chunk
 from memex.vault.store import VaultDocument
 
 # A heading line: 1–6 hashes, a space, then text.
-_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
+_HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*$", re.MULTILINE)
 # Conservative sentence boundary — splits on `.`, `!`, `?` followed by
 # space and an uppercase letter or digit. Multilingual: the character
 # class includes Latin-1 uppercase (À-Ö, Ø-Þ) + Œ + Ÿ so French
