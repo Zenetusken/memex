@@ -4,7 +4,7 @@ tags: []
 title: source
 ---
 
-## **Widget CLI Reference** 
+# **Widget CLI Reference** 
 
 ## **Installation** 
 
@@ -19,7 +19,7 @@ widget --version
 
 The CLI groups its functionality into subcommands. Each subcommand accepts its own flags; global flags are accepted before the subcommand name. 
 
-## **widget build** 
+### **widget build** 
 
 Compile the project into a deployable artifact. The build step reads the manifest in the working directory and writes output to the build folder. 
 
@@ -27,7 +27,7 @@ Compile the project into a deployable artifact. The build step reads the manifes
 widget build --target prod --out ./dist
 ```
 
-## **Build options** 
+#### **Build options** 
 
 The build subcommand accepts a small set of options: 
 
@@ -37,7 +37,7 @@ The build subcommand accepts a small set of options:
 
 - --clean removes prior artifacts before building. 
 
-## **widget deploy** 
+### **widget deploy** 
 
 Push a built artifact to a named environment. Deployment is atomic and rolls back automatically if the health check fails. 
 

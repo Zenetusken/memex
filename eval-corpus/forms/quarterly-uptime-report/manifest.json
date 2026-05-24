@@ -9,7 +9,10 @@
   "attribution": "Synthetic document authored for the Memex eval corpus.",
   "synthetic": true,
   "expected_features": {
-    "headings": {"h1": 1, "h2": 3},
+    "headings": {
+      "h1": 1,
+      "h2": 3
+    },
     "tables": 1,
     "equations": 0,
     "figures": 0,
@@ -18,14 +21,15 @@
   "scoring": {
     "cer_threshold": 0.04,
     "wer_threshold": 0.14,
-    "structural_f1_threshold": 0.70
+    "structural_f1_threshold": 0.95
   },
   "measured_baseline_2026_05_24": {
     "parser": "pymupdf4llm (born-digital route, no OCR)",
     "renderer": "LibreOffice 7.3 (source.fodt -> PDF, writer_pdf_Export)",
-    "cer": 0.0250,
-    "wer": 0.1089,
-    "structural_f1_headings": 0.7500
+    "cer": 0.0237,
+    "wer": 0.099,
+    "structural_f1_headings": 1.0,
+    "note": "Post heading-level-recovery fix (pymupdf_worker re-derives heading levels from font size). structural-F1 jumped from the pre-fix all-## collapse (forms 0.75, technical-docs 0.33, tidewater 0.615) to near-perfect."
   },
-  "notes": "Synthetic FLAT-ODF fixture authored to exercise GFM TABLE fidelity. source.fodt is a native LibreOffice Writer doc (real bordered table), so unlike an HTML table through the writerweb filter (which flattens — see modern-printed/tidewater), the table parses as a proper GFM table. Real findings the parse still surfaces: (1) the table header row splits across lines (each header cell on its own line) — a genuine pymupdf4llm table-fidelity gap; (2) heading levels flatten to H2 (the H1 title becomes ##) + bold-wrap. The ground-truth table uses compact `|a|b|` pipes to match the parser's GFM style so WER measures content/structure, not pipe-spacing. NOTE: proper table scoring needs the structural-F1-for-tables metric (eval-corpus-plan §Scoring), not yet implemented — until then CER/WER on tables carry formatting noise. Thresholds are regression gates calibrated to the measured baseline."
+  "notes": "Synthetic FLAT-ODF fixture authored to exercise GFM TABLE fidelity. source.fodt is a native LibreOffice Writer doc (real bordered table), so unlike an HTML table through the writerweb filter (which flattens \u2014 see modern-printed/tidewater), the table parses as a proper GFM table. Real findings the parse still surfaces: (1) the table header row splits across lines (each header cell on its own line) \u2014 a genuine pymupdf4llm table-fidelity gap; (2) heading levels flatten to H2 (the H1 title becomes ##) + bold-wrap. The ground-truth table uses compact `|a|b|` pipes to match the parser's GFM style so WER measures content/structure, not pipe-spacing. NOTE: proper table scoring needs the structural-F1-for-tables metric (eval-corpus-plan \u00a7Scoring), not yet implemented \u2014 until then CER/WER on tables carry formatting noise. Thresholds are regression gates calibrated to the measured baseline."
 }

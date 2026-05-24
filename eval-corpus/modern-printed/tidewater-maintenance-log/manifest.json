@@ -9,7 +9,11 @@
   "attribution": "Synthetic document authored for the Memex eval corpus.",
   "synthetic": true,
   "expected_features": {
-    "headings": {"h1": 1, "h2": 4, "h3": 1},
+    "headings": {
+      "h1": 1,
+      "h2": 4,
+      "h3": 1
+    },
     "tables": 1,
     "equations": 0,
     "figures": 0,
@@ -18,14 +22,15 @@
   "scoring": {
     "cer_threshold": 0.07,
     "wer_threshold": 0.18,
-    "structural_f1_threshold": 0.58
+    "structural_f1_threshold": 0.88
   },
   "measured_baseline_2026_05_24": {
     "parser": "pymupdf4llm (born-digital route, no OCR)",
     "renderer": "LibreOffice 7.3 (HTML -> ODT -> PDF, writer PDF export)",
-    "cer": 0.0521,
-    "wer": 0.1457,
-    "structural_f1_headings": 0.6154
+    "cer": 0.0508,
+    "wer": 0.1378,
+    "structural_f1_headings": 0.9231,
+    "note": "Post heading-level-recovery fix (pymupdf_worker re-derives heading levels from font size). structural-F1 jumped from the pre-fix all-## collapse (forms 0.75, technical-docs 0.33, tidewater 0.615) to near-perfect."
   },
-  "notes": "Synthetic born-digital fixture rendered via LibreOffice (a producer Memex's classifier recognizes) by generate.py — see CITATION.md for the independence rationale. RENDERER NOTE: an earlier PyMuPDF `Story` render was non-representative (pymupdf4llm dropped the first paragraph after some headings, a Story artifact); the LibreOffice render resolves that — those paragraphs parse correctly, which answered the 'does pymupdf4llm drop post-heading paragraphs on real born-digital PDFs?' question (no, only on Story-rendered ones). Remaining REAL findings the parse surfaces: (1) all heading levels flatten to H2 (the H1 title + the H3 checklist both become `##`) and headings are `**bold**`-wrapped — caps structural-F1; (2) the HTML table flattens (the writerweb HTML->ODT filter loses table borders, so pymupdf4llm reads the header row as a spurious `## Date Visibility Notes` heading + the rows as flat text) — a clean GFM-table fixture needs a word-processor-authored table, a future curator item. Thresholds are REGRESSION gates calibrated to the measured baseline + margin (passes today, alerts on regression). Aspirational modern-print target is CER <= 0.02; the residual here is heading-level flattening + table flattening + bold markers, not text loss."
+  "notes": "Synthetic born-digital fixture rendered via LibreOffice (a producer Memex's classifier recognizes) by generate.py \u2014 see CITATION.md for the independence rationale. RENDERER NOTE: an earlier PyMuPDF `Story` render was non-representative (pymupdf4llm dropped the first paragraph after some headings, a Story artifact); the LibreOffice render resolves that \u2014 those paragraphs parse correctly, which answered the 'does pymupdf4llm drop post-heading paragraphs on real born-digital PDFs?' question (no, only on Story-rendered ones). Remaining REAL findings the parse surfaces: (1) all heading levels flatten to H2 (the H1 title + the H3 checklist both become `##`) and headings are `**bold**`-wrapped \u2014 caps structural-F1; (2) the HTML table flattens (the writerweb HTML->ODT filter loses table borders, so pymupdf4llm reads the header row as a spurious `## Date Visibility Notes` heading + the rows as flat text) \u2014 a clean GFM-table fixture needs a word-processor-authored table, a future curator item. Thresholds are REGRESSION gates calibrated to the measured baseline + margin (passes today, alerts on regression). Aspirational modern-print target is CER <= 0.02; the residual here is heading-level flattening + table flattening + bold markers, not text loss."
 }

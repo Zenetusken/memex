@@ -155,6 +155,88 @@ def _clean_pymupdf_markdown(text: str) -> str:
     return _strip_pymupdf_markers(_normalise_breaks(text))
 
 
+# ----- Heading-level recovery -----
+#
+# pymupdf4llm (1.27.x) correctly DETECTS heading lines but collapses every
+# one to `## ` regardless of source font size — its `IdentifyHeaders` map
+# is right (e.g. {24:'# ', 18:'## ', 14:'### '}) but the markdown emitter
+# ignores per-span sizes. Result: a paper's title, sections, and
+# subsections all become H2, and the vault loses document hierarchy.
+# Confirmed across the eval-corpus fixtures (2026-05-24). We fix the LEVEL
+# here without touching pymupdf4llm's detection of WHICH lines are
+# headings: re-derive each heading's level from its real font size.
+
+_HEADING_LINE_RE = re.compile(r"^(#{1,6})[ \t]+\S")
+_FENCE_RE = re.compile(r"^\s*(```|~~~)")
+_HEADING_EMPHASIS_RE = re.compile(r"[*`]")
+
+
+def _heading_size_to_level(doc: Any) -> dict[int, int]:
+    """Map rounded font size → heading level (1..6) for the whole doc.
+
+    Body size is the most frequent span size; every distinct size larger
+    than body is a heading tier, ranked descending (largest → level 1).
+    Mirrors `pymupdf4llm.IdentifyHeaders` intent but stays inclusive of
+    near-body heading tiers (e.g. an H4 only 2pt above body)."""
+    freq: dict[int, int] = {}
+    for page in doc:
+        for blk in page.get_text("dict").get("blocks", []):
+            for line in blk.get("lines", []):
+                for sp in line.get("spans", []):
+                    if str(sp.get("text", "")).strip():
+                        size = round(float(sp.get("size", 0.0)))
+                        freq[size] = freq.get(size, 0) + 1
+    if not freq:
+        return {}
+    body = max(freq, key=lambda s: freq[s])
+    heading_sizes = sorted((s for s in freq if s > body), reverse=True)
+    return {size: min(i + 1, 6) for i, size in enumerate(heading_sizes)}
+
+
+def _norm_heading(text: str) -> str:
+    """Normalise heading text for matching markdown ↔ PDF spans:
+    drop emphasis/code markers, collapse whitespace, lowercase."""
+    return " ".join(_HEADING_EMPHASIS_RE.sub("", text).split()).lower()
+
+
+def _remap_heading_levels(page_md: str, page: Any, size_to_level: dict[int, int]) -> str:
+    """Rewrite the level of each heading line in `page_md` from the real
+    font size of the matching span on `page`. Only lines pymupdf4llm
+    already marked as headings are touched (we never add/remove
+    headings); lines inside fenced code blocks are skipped; a heading
+    with no size match is left exactly as emitted."""
+    if not size_to_level:
+        return page_md
+
+    text_size: dict[str, int] = {}
+    for blk in page.get_text("dict").get("blocks", []):
+        for line in blk.get("lines", []):
+            spans = [s for s in line.get("spans", []) if str(s.get("text", "")).strip()]
+            if not spans:
+                continue
+            key = _norm_heading("".join(str(s.get("text", "")) for s in spans))
+            if key:
+                size = round(max(float(s.get("size", 0.0)) for s in spans))
+                text_size.setdefault(key, size)
+
+    out: list[str] = []
+    in_fence = False
+    for line in page_md.split("\n"):
+        if _FENCE_RE.match(line):
+            in_fence = not in_fence
+            out.append(line)
+            continue
+        m = _HEADING_LINE_RE.match(line)
+        if m is not None and not in_fence:
+            key = _norm_heading(line[len(m.group(1)) :])
+            level = size_to_level.get(text_size.get(key, -1))
+            if level is not None:
+                out.append("#" * level + line[len(m.group(1)) :])
+                continue
+        out.append(line)
+    return "\n".join(out)
+
+
 def _safe_meta(doc: Any, key: str) -> str | None:
     md = getattr(doc, "metadata", None) or {}
     val = md.get(key)
@@ -365,6 +447,11 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
 
     doc: Any = pymupdf.open(str(source))
     try:
+        # Doc-wide font-size → heading-level map, to repair pymupdf4llm's
+        # level collapse (all headings → `## `). Computed once; applied
+        # per page below. See `_heading_size_to_level`.
+        size_to_level = _heading_size_to_level(doc)
+
         # page_chunks=True returns list[dict] with per-page records.
         # force_text=True ensures we still get text for pages where
         # pymupdf can't classify structure perfectly. write_images +
@@ -415,6 +502,10 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
             page_idx = min(i, max(0, doc_page_count - 1))
             try:
                 page_obj: Any = doc.load_page(page_idx)
+                # Repair pymupdf4llm's heading-level collapse using this
+                # page's real span sizes (only touches detected heading
+                # lines; no-op when no heading tiers exist).
+                page_md = _remap_heading_levels(page_md, page_obj, size_to_level)
                 rect: Any = page_obj.rect
                 aspect = float(rect.width) / max(1.0, float(rect.height))
                 try:

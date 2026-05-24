@@ -4,7 +4,7 @@ tags: []
 title: source
 ---
 
-## **Tidewater Lighthouse Maintenance Log** 
+# **Tidewater Lighthouse Maintenance Log** 
 
 ## **Overview** 
 
@@ -20,7 +20,7 @@ Inspections run on a fixed quarterly cadence. Each visit covers the optic assemb
 
 - Test the backup generator under load for thirty minutes. 
 
-## **Equipment Checklist** 
+### **Equipment Checklist** 
 
 The following items must be confirmed present and serviceable before the inspector signs off: 
 
