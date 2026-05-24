@@ -1,9 +1,9 @@
 {
   "_description": "Hand-labelled eval corpus for NVIDIA's 2026 Annual Review / 10-K. The doc is ~656 KB markdown, 540 chunks via PyMuPDF parse (born-digital fonted PDF). Mostly text + financial tables; only ~5 actual charts (none routed through chart-OCR because PyMuPDF handled the parse cleanly). Tests prose-retrieval, financial-table extraction, and HARD GATES on real corporate content.",
   "_doc_id": "0e725ba0-2026-annual-report-web",
-  "_query_count": 12,
+  "_query_count": 13,
   "_mix": {
-    "ans": 7,
+    "ans": 8,
     "ref": 5,
     "chart_targeted": 2
   },
@@ -143,9 +143,21 @@
       "_note": "HARD GATE refusal. Tempts conflating the consolidated gross margin (71.1%) with a per-segment figure the doc does not provide. Verified to refuse 2026-05-24.",
       "should_refuse": true,
       "relevant_chunk_ids": []
+    },
+    {
+      "qid": "annual-report-13",
+      "question": "What was NVIDIA's Gaming revenue in fiscal 2026?",
+      "_anchor_phrase": "16,042",
+      "_expected_answer": "$16,042 million (\u2248 $16.0 billion) \u2014 a table-only value, now answerable via Phase-1 table linearization ([table-rows] KV block).",
+      "_answer_type": "single_fact",
+      "_note": "Phase-1 table-RAG win: a table-only value (Gaming platform/segment revenue) made answerable by linearization. Verified ANS 2026-05-24.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "0e725ba0-2026-annual-report-web#cb3a075eb3"
+      ]
     }
   ],
-  "_resolved_at": "2026-05-24T21:17:36Z",
+  "_resolved_at": "2026-05-24T22:35:47Z",
   "_baseline_2026_05_24_bf16_reranker": {
     "query_count": 10,
     "answered": 7,
