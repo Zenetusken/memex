@@ -15,11 +15,23 @@ prompt, completion, token counts, and latency attached. See ADR-0004.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 import structlog
-from langfuse.openai import AsyncOpenAI
 from pydantic import BaseModel, ValidationError
+
+# Runtime import goes through Langfuse's instrumented wrapper so every
+# call is captured as a generation span (ADR-0004). `langfuse.openai`
+# re-exports the very same `openai.AsyncOpenAI` class object (it patches
+# the methods rather than subclassing), but the re-export is dynamic so
+# pyright can't see it ("not exported"). For type-checking we therefore
+# reference the canonical `openai.AsyncOpenAI` — identical type, fully
+# stubbed — while keeping the instrumented symbol at runtime.
+if TYPE_CHECKING:
+    from openai import AsyncOpenAI
+    from openai.types.chat import ChatCompletion
+else:
+    from langfuse.openai import AsyncOpenAI
 
 from memex.core.config import InferenceSettings
 from memex.core.errors import ModelCallError
@@ -64,7 +76,9 @@ def _inline_refs(schema: dict[str, Any]) -> dict[str, Any]:
     that specific node rather than the whole schema.
     """
     schema = dict(schema)
-    defs = schema.pop("$defs", {}) or schema.pop("definitions", {}) or {}
+    # `.pop` on a `dict[str, Any]` returns `Any`; pin `defs` to a
+    # concrete mapping type so the recursive resolution below is typed.
+    defs: dict[str, Any] = schema.pop("$defs", {}) or schema.pop("definitions", {}) or {}
     if not defs:
         return schema
 
@@ -72,37 +86,45 @@ def _inline_refs(schema: dict[str, Any]) -> dict[str, Any]:
 
     def _resolve(node: Any) -> Any:
         if isinstance(node, dict):
-            if "$ref" in node:
-                ref = node["$ref"]
+            # `isinstance` narrows to `dict[Unknown, Unknown]`; the JSON
+            # schema is `dict[str, Any]`-shaped, so cast to keep member
+            # access typed.
+            node_dict = cast(dict[str, Any], node)
+            if "$ref" in node_dict:
+                ref: str = node_dict["$ref"]
                 # Only resolve local references under `$defs`/`definitions`;
                 # leave external refs untouched (xgrammar treats those
                 # consistently across backends).
-                local_prefix = None
+                local_prefix: str | None = None
                 for prefix in ("#/$defs/", "#/definitions/"):
                     if ref.startswith(prefix):
                         local_prefix = prefix
                         break
                 if local_prefix is None:
-                    return node
+                    return node_dict
                 name = ref[len(local_prefix) :]
                 if name in in_progress:
-                    return node  # cycle — leave the ref alone
+                    return node_dict  # cycle — leave the ref alone
                 if name not in defs:
-                    return node
+                    return node_dict
                 in_progress.add(name)
                 try:
-                    resolved = _resolve(defs[name])
+                    resolved: Any = _resolve(defs[name])
                 finally:
                     in_progress.discard(name)
                 # If `$ref` is co-located with other keys (the allOf-like
                 # pattern), merge so siblings override the resolved body.
-                siblings = {k: _resolve(v) for k, v in node.items() if k != "$ref"}
+                siblings: dict[str, Any] = {
+                    k: _resolve(v) for k, v in node_dict.items() if k != "$ref"
+                }
                 if isinstance(resolved, dict):
-                    return {**resolved, **siblings}
+                    resolved_dict = cast(dict[str, Any], resolved)
+                    return {**resolved_dict, **siblings}
                 return resolved
-            return {k: _resolve(v) for k, v in node.items()}
+            return {k: _resolve(v) for k, v in node_dict.items()}
         if isinstance(node, list):
-            return [_resolve(item) for item in node]
+            node_list = cast(list[Any], node)
+            return [_resolve(item) for item in node_list]
         return node
 
     return _resolve(schema)
@@ -248,7 +270,12 @@ async def complete_structured(
     span_name = prompt_tag or schema.__name__
 
     try:
-        response = await client.chat.completions.create(
+        # `name=` is a Langfuse-wrapper extension (it sets the generation
+        # span name) that the upstream openai `create` overloads don't
+        # declare, so the call needs `call-overload` suppressed. Cast the
+        # result back to the real `ChatCompletion` return type so the
+        # `.choices` / `.usage` access below stays fully typed.
+        raw_response = await client.chat.completions.create(  # type: ignore[call-overload]  # langfuse `name=` kwarg
             model=model,
             messages=messages,
             temperature=temperature,
@@ -266,6 +293,7 @@ async def complete_structured(
             },
             name=span_name,  # picked up by langfuse.openai as span name
         )
+        response = cast("ChatCompletion", raw_response)
     except asyncio.CancelledError:
         # Don't wrap cancellation as a model error; cooperative shutdown
         # must remain observable to callers (graph timeout, agent abort).

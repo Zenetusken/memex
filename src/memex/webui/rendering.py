@@ -36,11 +36,17 @@ from dataclasses import dataclass
 from markupsafe import Markup, escape
 
 from memex.core.text import (
-    _MARKDOWN_HEADING_RE,
     chart_extracted_spans,
     is_inside_any_span,
 )
 from memex.core.wikilinks import parse_wikilink
+
+# Markdown ATX-heading matcher. Declared locally (not imported from
+# `core/text._MARKDOWN_HEADING_RE`) to avoid reaching into another
+# module's private surface — same pattern shape, kept in lockstep:
+# horizontal-whitespace-only between the `#` run and the text so an
+# empty `## ` line doesn't swallow the following paragraph.
+_MARKDOWN_HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*$", re.MULTILINE)
 
 # Same wikilink regex shape as `core/wikilinks._WIKILINK_RE` but re-
 # declared here against the ESCAPED body (Jinja's escape replaces `<`

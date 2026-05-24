@@ -50,9 +50,7 @@ try:
         processors=[
             structlog.processors.add_log_level,
             structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.KeyValueRenderer(
-                key_order=["timestamp", "level", "event"]
-            ),
+            structlog.processors.KeyValueRenderer(key_order=["timestamp", "level", "event"]),
         ],
         logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),
         cache_logger_on_first_use=True,
@@ -75,9 +73,7 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
         from docling.datamodel.pipeline_options import PdfPipelineOptions
         from docling.document_converter import DocumentConverter, PdfFormatOption
     except ImportError as e:
-        raise SystemExit(
-            json.dumps({"error": "docling_unavailable", "detail": str(e)})
-        ) from e
+        raise SystemExit(json.dumps({"error": "docling_unavailable", "detail": str(e)})) from e
 
     try:
         import docling
@@ -95,9 +91,7 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
     # candidates, an 89% reduction that prevents DePlot's
     # OOD-hallucination cascade on non-chart content. Opt-out via env
     # var if a future Docling-version bug requires it.
-    do_classify = os.environ.get(
-        "MEMEX_PARSE_DOCLING_PICTURE_CLASSIFICATION", "1"
-    ) == "1"
+    do_classify = os.environ.get("MEMEX_PARSE_DOCLING_PICTURE_CLASSIFICATION", "1") == "1"
     pipeline_opts = PdfPipelineOptions()
     pipeline_opts.do_ocr = do_ocr
     pipeline_opts.do_picture_classification = do_classify
@@ -106,22 +100,20 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
         file=sys.stderr,
     )
     converter = DocumentConverter(
-        format_options={
-            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_opts)
-        }
+        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_opts)}
     )
     result = converter.convert(source)
     doc = result.document
     markdown = doc.export_to_markdown()
 
     pages: list[dict[str, Any]] = []
-    page_list = getattr(doc, "pages", None) or []
+    # Docling's `DoclingDocument` ships `py.typed`, but its dynamic surface
+    # (`.pages`, `.pictures`, provenance entries) resolves to Unknown under
+    # strict, and we probe it defensively across docling versions anyway.
+    # Annotate the boundary as `Any` so the `getattr` probing type-checks.
+    page_list: list[Any] = getattr(doc, "pages", None) or []
     for p in page_list:
-        page_no = (
-            getattr(p, "page_no", None)
-            or getattr(p, "number", None)
-            or len(pages) + 1
-        )
+        page_no = getattr(p, "page_no", None) or getattr(p, "number", None) or len(pages) + 1
         page_md = ""
         export = getattr(p, "export_to_markdown", None)
         if callable(export):
@@ -136,9 +128,7 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
         # way, but the JSON has to be RFC-strict for the parent to parse.
         if math.isnan(confidence) or math.isinf(confidence):
             confidence = 0.0
-        pages.append(
-            {"page": page_no, "markdown": page_md, "confidence": confidence}
-        )
+        pages.append({"page": page_no, "markdown": page_md, "confidence": confidence})
     if not pages:
         pages.append({"page": 1, "markdown": markdown, "confidence": 1.0})
 
@@ -150,18 +140,19 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
     # missing metadata just yields an empty `figures` list and the
     # chart-OCR pass skips the doc.
     figures: list[dict[str, Any]] = []
-    for pic in getattr(doc, "pictures", None) or []:
+    pictures: list[Any] = getattr(doc, "pictures", None) or []
+    for pic in pictures:
         # Docling's picture object exposes its position through
         # `.prov[0].bbox` — a `BoundingBox` with `.l / .t / .r / .b`
         # attributes in `CoordOrigin.BOTTOMLEFT` coords (verified on
         # docling 2.x). The picture itself doesn't carry a direct
         # `.bbox` or `.page_no`; both live on the provenance entry.
         # We defensively probe but the common path is `.prov[0]`.
-        bbox_obj = None
-        page_no = None
+        bbox_obj: Any = None
+        page_no: Any = None
         if hasattr(pic, "bbox") and not isinstance(pic.bbox, (list, tuple)):
             bbox_obj = pic.bbox
-        prov_list = getattr(pic, "prov", None) or []
+        prov_list: list[Any] = getattr(pic, "prov", None) or []
         if bbox_obj is None and prov_list:
             bbox_obj = getattr(prov_list[0], "bbox", None)
         if hasattr(pic, "page_no") and pic.page_no is not None:
@@ -175,29 +166,13 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
             # BoundingBox); fall back to `.x0/.y0/.x1/.y1` for older
             # versions or alternate types.
             x0_attr = getattr(bbox_obj, "l", None)
-            x0 = float(
-                x0_attr
-                if x0_attr is not None
-                else getattr(bbox_obj, "x0", 0.0)
-            )
+            x0 = float(x0_attr if x0_attr is not None else getattr(bbox_obj, "x0", 0.0))
             y_bot_attr = getattr(bbox_obj, "b", None)
-            y_bot = float(
-                y_bot_attr
-                if y_bot_attr is not None
-                else getattr(bbox_obj, "y0", 0.0)
-            )
+            y_bot = float(y_bot_attr if y_bot_attr is not None else getattr(bbox_obj, "y0", 0.0))
             x1_attr = getattr(bbox_obj, "r", None)
-            x1 = float(
-                x1_attr
-                if x1_attr is not None
-                else getattr(bbox_obj, "x1", 0.0)
-            )
+            x1 = float(x1_attr if x1_attr is not None else getattr(bbox_obj, "x1", 0.0))
             y_top_attr = getattr(bbox_obj, "t", None)
-            y_top = float(
-                y_top_attr
-                if y_top_attr is not None
-                else getattr(bbox_obj, "y1", 0.0)
-            )
+            y_top = float(y_top_attr if y_top_attr is not None else getattr(bbox_obj, "y1", 0.0))
         except (TypeError, ValueError):
             continue
         # FigureMetadata.bbox is documented as (x0, y0_bottom, x1,
@@ -222,16 +197,12 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
         if meta is not None:
             cls_field = getattr(meta, "classification", None)
             if cls_field is not None:
-                preds = getattr(cls_field, "predictions", None) or []
+                preds: list[Any] = getattr(cls_field, "predictions", None) or []
                 if preds:
-                    top = preds[0]
-                    classification = str(
-                        getattr(top, "class_name", "") or ""
-                    ) or None
+                    top: Any = preds[0]
+                    classification = str(getattr(top, "class_name", "") or "") or None
                     try:
-                        classification_confidence = float(
-                            getattr(top, "confidence", 0.0)
-                        )
+                        classification_confidence = float(getattr(top, "confidence", 0.0))
                     except (TypeError, ValueError):
                         classification_confidence = 0.0
 

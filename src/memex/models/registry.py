@@ -17,10 +17,10 @@ a per-model `asyncio.Lock`. A CUDA OOM circuit breaker (`name=
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
 
 import structlog
 from pydantic import BaseModel
@@ -36,6 +36,68 @@ if TYPE_CHECKING:
         PreTrainedTokenizerBase,
         ProcessorMixin,
     )
+
+
+def _bf16() -> Any:
+    """Return `torch.bfloat16` (the global dtype across the stack on Ada,
+    per ADR-0006).
+
+    torch re-exports its dtype singletons from the private `_C` extension
+    via a star-import, so pyright's `reportPrivateImportUsage` flags
+    `torch.bfloat16` even though it's documented public API. Funnelling
+    every reference through this one helper keeps the suppression to a
+    single site. The return is `Any` because the dtype only ever flows
+    into transformers' / sentence-transformers' loosely-typed
+    `torch_dtype=` / `model_kwargs=` kwargs.
+    """
+    import torch
+
+    return torch.bfloat16  # type: ignore[reportPrivateImportUsage]  # torch star-exports dtypes from _C; stub omits them from __all__
+
+
+_TPretrained = TypeVar("_TPretrained")
+
+
+def _from_pretrained(
+    auto_cls: type[Any], as_type: type[_TPretrained], /, *args: Any, **kwargs: Any
+) -> _TPretrained:
+    """Call `auto_cls.from_pretrained(...)` and return the result typed as
+    `as_type`.
+
+    transformers' Auto-class `from_pretrained` classmethods are typed
+    with `Unknown` params / return in the shipped stubs, so each direct
+    call trips `reportUnknownMemberType` on the method access. Funnelling
+    every load through this one wrapper keeps that suppression to a single
+    site while preserving precise return types at the call sites (the
+    `as_type` arg flows out as the static result type).
+    """
+    return cast(
+        "_TPretrained",
+        auto_cls.from_pretrained(*args, **kwargs),  # type: ignore[reportUnknownMemberType]  # transformers stubs type Auto.from_pretrained as Unknown
+    )
+
+
+def _default_pad_to_eos(tokenizer: Any) -> None:
+    """Set `pad_token = eos_token` when the tokenizer has no pad token.
+
+    `PreTrainedTokenizerBase.pad_token_id` / `.eos_token` are typed as
+    `str | list[str] | Unknown | None` in transformers' stubs (the
+    `Unknown` arm poisons strict-mode member access), so we operate on
+    the tokenizer through an explicit `Any` — a genuinely-dynamic
+    transformers boundary.
+    """
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+
+def _first_token_id(tokenizer: Any, text: str) -> int:
+    """Return the first token id for `text` (no special tokens).
+
+    `tokenizer(...)` returns a `BatchEncoding` whose `.input_ids` is
+    typed Unknown in transformers' stubs; access it through an explicit
+    `Any` and coerce the leading id to `int`.
+    """
+    return int(tokenizer(text, add_special_tokens=False).input_ids[0])
 
 
 class VLMHandle:
@@ -84,6 +146,7 @@ class Qwen3RerankerHandle:
         self.yes_id = yes_id
         self.no_id = no_id
 
+
 logger = structlog.get_logger(__name__)
 
 
@@ -94,6 +157,7 @@ def _is_oom(exc: BaseException) -> bool:
         return True
     msg = str(exc).lower()
     return "out of memory" in msg or "cuda oom" in msg
+
 
 ModelName = Literal["embedder", "reranker", "vlm", "chart_ocr"]
 
@@ -139,7 +203,7 @@ class ModelRegistry:
         )
 
     @asynccontextmanager
-    async def use(self, name: ModelName) -> AsyncIterator[Any]:
+    async def use(self, name: ModelName) -> AsyncGenerator[Any]:
         """Yield a ready-to-use model handle.
 
         First call loads the model; subsequent calls are no-ops. The
@@ -202,17 +266,13 @@ class ModelRegistry:
                         self._load_reranker, self._settings.reranker
                     )
             elif name == "vlm":
-                self._models[name] = await asyncio.to_thread(
-                    self._load_vlm, self._settings.vlm
-                )
+                self._models[name] = await asyncio.to_thread(self._load_vlm, self._settings.vlm)
             elif name == "chart_ocr":
                 self._models[name] = await asyncio.to_thread(
                     self._load_chart_ocr, self._settings.chart_ocr
                 )
             else:
-                raise ModelNotConfigured(
-                    f"unknown model {name!r}", context={"name": name}
-                )
+                raise ModelNotConfigured(f"unknown model {name!r}", context={"name": name})
 
         try:
             await self._oom_breaker.run(_do_load, is_failure=_is_oom)
@@ -280,13 +340,12 @@ class ModelRegistry:
         Imported lazily so the agent layer can be imported without
         torch installed (`[models]` extra brings it in).
         """
-        import torch
         from sentence_transformers import SentenceTransformer
 
         return SentenceTransformer(
             model_id,
             device="cuda",
-            model_kwargs={"torch_dtype": torch.bfloat16},
+            model_kwargs={"torch_dtype": _bf16()},
         )
 
     @staticmethod
@@ -295,13 +354,17 @@ class ModelRegistry:
 
         ADR-0006: BF16 + explicit `device="cuda"`.
         """
-        import torch
         from sentence_transformers import CrossEncoder
 
         return CrossEncoder(
             model_id,
             device="cuda",
-            automodel_args={"torch_dtype": torch.bfloat16},
+            # dtype passthrough to the underlying AutoModel. The param is
+            # `model_kwargs` in sentence-transformers 5.x (matches
+            # `_load_embedder` above); an earlier `automodel_args` name
+            # would TypeError at load time — a latent bug the 2026-05-23
+            # typing pass surfaced (the reranker is faked in tests).
+            model_kwargs={"torch_dtype": _bf16()},
         )
 
     @staticmethod
@@ -317,15 +380,25 @@ class ModelRegistry:
         `device_map={"": "cuda:0"}` (no `"auto"`; we'd rather OOM cleanly
         than silently CPU-offload).
         """
-        import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from transformers import (
+            AutoModelForCausalLM,
+            AutoTokenizer,
+            PreTrainedModel,
+            PreTrainedTokenizerBase,
+        )
 
-        tokenizer = AutoTokenizer.from_pretrained(model_id, padding_side="left")
-        if tokenizer.pad_token_id is None:
-            tokenizer.pad_token = tokenizer.eos_token
-        model = AutoModelForCausalLM.from_pretrained(
+        # `_from_pretrained` types the loaded objects as the concrete
+        # bases we depend on (transformers' Auto-class stubs return
+        # Unknown), so member access (`.eval()`) type-checks.
+        tokenizer = _from_pretrained(
+            AutoTokenizer, PreTrainedTokenizerBase, model_id, padding_side="left"
+        )
+        _default_pad_to_eos(tokenizer)
+        model = _from_pretrained(
+            AutoModelForCausalLM,
+            PreTrainedModel,
             model_id,
-            torch_dtype=torch.bfloat16,
+            torch_dtype=_bf16(),
             device_map={"": "cuda:0"},
             low_cpu_mem_usage=True,
         )
@@ -333,8 +406,8 @@ class ModelRegistry:
         # The Qwen3-Reranker model card uses "yes" / "no" as the answer
         # tokens. Cache the ids once at load — repeated tokenisation
         # per pair would waste a chunk of the per-rerank latency budget.
-        yes_id = int(tokenizer("yes", add_special_tokens=False).input_ids[0])
-        no_id = int(tokenizer("no", add_special_tokens=False).input_ids[0])
+        yes_id = _first_token_id(tokenizer, "yes")
+        no_id = _first_token_id(tokenizer, "no")
         return Qwen3RerankerHandle(
             tokenizer=tokenizer,
             model=model,
@@ -364,19 +437,27 @@ class ModelRegistry:
         - `trust_remote_code` dropped — Qwen-VL landed in transformers
           proper in 4.49+.
         """
-        import torch
-        from transformers import AutoModelForImageTextToText, AutoProcessor
+        from transformers import (
+            AutoModelForImageTextToText,
+            AutoProcessor,
+            PreTrainedModel,
+            ProcessorMixin,
+        )
 
         min_pixels = 256 * 28 * 28
         max_pixels = 1280 * 28 * 28
-        processor = AutoProcessor.from_pretrained(
+        processor = _from_pretrained(
+            AutoProcessor,
+            ProcessorMixin,
             model_id,
             min_pixels=min_pixels,
             max_pixels=max_pixels,
         )
-        model = AutoModelForImageTextToText.from_pretrained(
+        model = _from_pretrained(
+            AutoModelForImageTextToText,
+            PreTrainedModel,
             model_id,
-            torch_dtype=torch.bfloat16,
+            torch_dtype=_bf16(),
             device_map={"": "cuda:0"},
             attn_implementation="flash_attention_2",
             low_cpu_mem_usage=True,
@@ -425,13 +506,20 @@ class ModelRegistry:
         # assumes a Pix2Struct-style chart specialist.
         lid = model_id.lower()
         is_onechart = "onechart" in lid
-        is_vlm = (
-            "-vl-" in lid
-            or lid.endswith("-vl")
-            or "vision" in lid
-            or "vlm" in lid
+        is_vlm = "-vl-" in lid or lid.endswith("-vl") or "vision" in lid or "vlm" in lid
+        from transformers import (
+            PreTrainedModel,
+            PreTrainedTokenizerBase,
+            ProcessorMixin,
         )
-        import torch
+
+        # Each branch loads via `_from_pretrained`, which types the
+        # results as the concrete bases the `ChartOCRHandle` contract
+        # expects (transformers' Auto-class stubs return Unknown), so
+        # `.eval()` and handle construction type-check. `model`/`processor`
+        # carry the branch-resolved concrete types into the shared tail.
+        model: PreTrainedModel
+        processor: ProcessorMixin
 
         if is_onechart:
             from transformers import AutoModel, AutoTokenizer
@@ -443,13 +531,15 @@ class ModelRegistry:
             # opt-in via env-var; (b) it's 0.3B + Apache 2.0 + human-
             # auditable; (c) the backend gates output on the model's
             # own reliable_check self-consistency token.
-            tokenizer = AutoTokenizer.from_pretrained(
-                model_id, trust_remote_code=True
+            tokenizer = _from_pretrained(
+                AutoTokenizer, ProcessorMixin, model_id, trust_remote_code=True
             )
-            model = AutoModel.from_pretrained(
+            model = _from_pretrained(
+                AutoModel,
+                PreTrainedModel,
                 model_id,
                 trust_remote_code=True,
-                torch_dtype=torch.bfloat16,
+                torch_dtype=_bf16(),
                 device_map={"": "cuda:0"},
                 low_cpu_mem_usage=True,
             )
@@ -467,7 +557,9 @@ class ModelRegistry:
             # the same visual-token budget tuning.
             min_pixels = 256 * 28 * 28
             max_pixels = 1280 * 28 * 28
-            processor = AutoProcessor.from_pretrained(
+            processor = _from_pretrained(
+                AutoProcessor,
+                ProcessorMixin,
                 model_id,
                 min_pixels=min_pixels,
                 max_pixels=max_pixels,
@@ -483,9 +575,11 @@ class ModelRegistry:
                 attn_impl = "flash_attention_2"
             except ImportError:
                 attn_impl = "sdpa"
-            model = AutoModelForImageTextToText.from_pretrained(
+            model = _from_pretrained(
+                AutoModelForImageTextToText,
+                PreTrainedModel,
                 model_id,
-                torch_dtype=torch.bfloat16,
+                torch_dtype=_bf16(),
                 device_map={"": "cuda:0"},
                 attn_implementation=attn_impl,
                 low_cpu_mem_usage=True,
@@ -504,20 +598,22 @@ class ModelRegistry:
                 AutoTokenizer,
             )
 
-            tokenizer = AutoTokenizer.from_pretrained(
-                model_id, trust_remote_code=True
+            tokenizer = _from_pretrained(
+                AutoTokenizer, PreTrainedTokenizerBase, model_id, trust_remote_code=True
             )
-            processor = AutoProcessor.from_pretrained(
-                model_id, trust_remote_code=True
+            processor = _from_pretrained(
+                AutoProcessor, ProcessorMixin, model_id, trust_remote_code=True
             )
             # Store both tokenizer + processor on the handle. Attach
             # the tokenizer as a private attribute on the processor
             # so the backend has a single dispatch point.
-            processor._memex_tokenizer = tokenizer  # type: ignore[attr-defined]
-            model = AutoModel.from_pretrained(
+            processor._memex_tokenizer = tokenizer  # type: ignore[attr-defined]  # private side-channel for the chart-OCR backend
+            model = _from_pretrained(
+                AutoModel,
+                PreTrainedModel,
                 model_id,
                 trust_remote_code=True,
-                torch_dtype=torch.bfloat16,
+                torch_dtype=_bf16(),
                 device_map={"": "cuda:0"},
                 low_cpu_mem_usage=True,
             )
@@ -532,10 +628,12 @@ class ModelRegistry:
             # `trust_remote_code` needed. Uses `DonutProcessor`.
             from transformers import DonutProcessor, VisionEncoderDecoderModel
 
-            processor = DonutProcessor.from_pretrained(model_id)
-            model = VisionEncoderDecoderModel.from_pretrained(
+            processor = _from_pretrained(DonutProcessor, ProcessorMixin, model_id)
+            model = _from_pretrained(
+                VisionEncoderDecoderModel,
+                PreTrainedModel,
                 model_id,
-                torch_dtype=torch.bfloat16,
+                torch_dtype=_bf16(),
                 device_map={"": "cuda:0"},
                 low_cpu_mem_usage=True,
             )
@@ -545,10 +643,12 @@ class ModelRegistry:
                 Pix2StructProcessor,
             )
 
-            processor = Pix2StructProcessor.from_pretrained(model_id)
-            model = Pix2StructForConditionalGeneration.from_pretrained(
+            processor = _from_pretrained(Pix2StructProcessor, ProcessorMixin, model_id)
+            model = _from_pretrained(
+                Pix2StructForConditionalGeneration,
+                PreTrainedModel,
                 model_id,
-                torch_dtype=torch.bfloat16,
+                torch_dtype=_bf16(),
                 device_map={"": "cuda:0"},
                 low_cpu_mem_usage=True,
             )
@@ -563,8 +663,7 @@ def get_registry() -> ModelRegistry:
     """Return the process registry. Configured at startup."""
     if _REGISTRY is None:
         raise ModelNotConfigured(
-            "ModelRegistry not initialised; call set_registry() from the "
-            "entry point.",
+            "ModelRegistry not initialised; call set_registry() from the entry point.",
             context={"fix": "cli.bootstrap.bootstrap() does this for you"},
         )
     return _REGISTRY

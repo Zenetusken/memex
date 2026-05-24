@@ -71,7 +71,7 @@ class EvalReport(BaseModel):
     # the agent actually attempted. NaN when zero queries answered.
     mean_citation_precision_answered_only: float
     refusal_rate_on_counterfactuals: float
-    per_query: list[EvalQueryResult] = Field(default_factory=list)
+    per_query: list[EvalQueryResult] = Field(default_factory=list[EvalQueryResult])
 
 
 def _load_queries(query_set_path: Path) -> list[EvalQuery]:
@@ -140,20 +140,15 @@ async def run_eval(
         answered_count=len(answered_results),
         refused_count=sum(1 for r in results if not r.answered),
         mean_citation_precision=(
-            sum(r.citation_precision for r in results) / len(results)
-            if results
-            else 0.0
+            sum(r.citation_precision for r in results) / len(results) if results else 0.0
         ),
         mean_citation_precision_answered_only=(
-            sum(r.citation_precision for r in answered_results)
-            / len(answered_results)
+            sum(r.citation_precision for r in answered_results) / len(answered_results)
             if answered_results
             else float("nan")
         ),
         refusal_rate_on_counterfactuals=(
-            refusal_correct_count / counterfactual_count
-            if counterfactual_count
-            else 1.0
+            refusal_correct_count / counterfactual_count if counterfactual_count else 1.0
         ),
         per_query=results,
     )

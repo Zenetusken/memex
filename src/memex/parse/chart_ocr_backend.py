@@ -24,16 +24,16 @@ import asyncio
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import structlog
 
 from memex.core.errors import MemexError
-from memex.models.registry import get_registry
+from memex.models.registry import ChartOCRHandle, get_registry
 from memex.parse.docling_backend import FigureMetadata
 
 if TYPE_CHECKING:
-    pass
+    from PIL import Image
 
 logger = structlog.get_logger(__name__)
 
@@ -166,7 +166,7 @@ def _render_figure_to_image(
     page_no: int,
     bbox: tuple[float, float, float, float],
     scale: float = _DEFAULT_RENDER_SCALE,
-):
+) -> Image.Image:
     """Render the bbox region on `page_no` to a PIL Image.
 
     Docling reports bboxes in PDF user-space coords (points; origin
@@ -236,7 +236,7 @@ def _render_figure_to_image(
         doc.close()
 
 
-def _is_vlm_handle(handle) -> bool:
+def _is_vlm_handle(handle: ChartOCRHandle) -> bool:
     """True when the chart-OCR handle wraps a VLM-style model (Qwen-VL,
     LLaVA, etc.) rather than a Pix2Struct-style chart specialist. The
     inference path differs: VLMs use chat templates + messages;
@@ -246,7 +246,7 @@ def _is_vlm_handle(handle) -> bool:
     return any(token in cls for token in ("VL", "Vision", "Llava", "Internvl"))
 
 
-def _is_onechart_handle(handle) -> bool:
+def _is_onechart_handle(handle: ChartOCRHandle) -> bool:
     """True when the chart-OCR handle wraps the OneChart model (P3.3-b).
     OneChart uses a custom Vary-derived architecture with a `.chat()`
     interface instead of `.generate()`, and emits an auxiliary
@@ -259,7 +259,7 @@ def _is_onechart_handle(handle) -> bool:
     return "onechart" in cls
 
 
-def _is_nemotron_parse_handle(handle) -> bool:
+def _is_nemotron_parse_handle(handle: ChartOCRHandle) -> bool:
     """True when the chart-OCR handle wraps the NVIDIA Nemotron-Parse
     model (P3.3-c, Path C). The class name is
     `NemotronParseForConditionalGeneration`."""
@@ -292,7 +292,7 @@ _NEMOTRON_TAG_RE = re.compile(
 )
 
 
-def _is_unichart_handle(handle) -> bool:
+def _is_unichart_handle(handle: ChartOCRHandle) -> bool:
     """True when the chart-OCR handle wraps a UniChart-family
     VisionEncoderDecoder model (P3.3-c, Path A). Detection: model is
     `VisionEncoderDecoderModel` AND has a `donut-swin` encoder. This
@@ -340,7 +340,9 @@ _ONECHART_RELIABLE_RE = re.compile(
 _PROMPT_ONECHART = "Convert the key information of the chart to a python dict:"
 
 
-def _chart_ocr_transcribe_sync(handle, image, prompt: str, max_new_tokens: int) -> str:
+def _chart_ocr_transcribe_sync(
+    handle: ChartOCRHandle, image: Image.Image, prompt: str, max_new_tokens: int
+) -> str:
     """Synchronous transcription; called via asyncio.to_thread.
 
     Three inference paths, dispatched by handle type:
@@ -369,6 +371,14 @@ def _chart_ocr_transcribe_sync(handle, image, prompt: str, max_new_tokens: int) 
 
     is_vlm = _is_vlm_handle(handle)
 
+    # The chart-OCR processor + model are model-specific classes whose
+    # `apply_chat_template` / `__call__` / `batch_decode` / `decode`
+    # kwargs aren't on the base `ProcessorMixin` stub, and transformers'
+    # stub types `PreTrainedModel.generate` as a broken `Tensor | Module`
+    # union. Both are genuinely-dynamic transformers boundaries → `Any`.
+    processor: Any = handle.processor
+    model: Any = handle.model
+
     if is_vlm:
         # VLM path: build a chat message with image + text prompt.
         # Mirrors `vlm_backend.py::_vlm_transcribe_sync` but with the
@@ -383,32 +393,31 @@ def _chart_ocr_transcribe_sync(handle, image, prompt: str, max_new_tokens: int) 
                 ],
             }
         ]
-        text = handle.processor.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
-        )
-        inputs = handle.processor(
+        text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        inputs: Any = processor(
             text=[text],
             images=[image],
             return_tensors="pt",
             padding=True,
-        ).to(handle.model.device)
+        ).to(model.device)
     else:
         # Pix2Struct path: direct text+image processor call.
-        inputs = handle.processor(
+        inputs = processor(
             images=image,
             text=prompt,
             return_tensors="pt",
-        ).to(handle.model.device)
+        ).to(model.device)
 
     # Cast float tensors to the model's dtype (BF16 per ADR-0006).
     # Pix2Struct processor produces FP32 pixel_values; BF16-loaded
     # model expects BF16. Integer tensors stay as-is.
-    model_dtype = next(handle.model.parameters()).dtype
+    model_dtype = next(model.parameters()).dtype
     inputs = {k: v.to(model_dtype) if v.dtype.is_floating_point else v for k, v in inputs.items()}
 
+    outputs: Any = None
     try:
         with torch.inference_mode():
-            outputs = handle.model.generate(
+            outputs = model.generate(
                 **inputs,
                 max_new_tokens=max_new_tokens,
                 do_sample=False,
@@ -418,19 +427,21 @@ def _chart_ocr_transcribe_sync(handle, image, prompt: str, max_new_tokens: int) 
             # prompt portion before decoding so we get just the model's
             # output, mirroring vlm_backend's pattern.
             generated = outputs[:, inputs["input_ids"].shape[1] :]
-            decoded_list = handle.processor.batch_decode(generated, skip_special_tokens=True)
-            return (decoded_list[0] if decoded_list else "").strip()
-        decoded = handle.processor.decode(outputs[0], skip_special_tokens=True)
-        return decoded.strip()
+            decoded_list = processor.batch_decode(generated, skip_special_tokens=True)
+            return cast(str, (decoded_list[0] if decoded_list else "").strip())
+        decoded = processor.decode(outputs[0], skip_special_tokens=True)
+        return cast(str, decoded.strip())
     finally:
         del inputs
-        if "outputs" in dir():
+        if outputs is not None:
             del outputs
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
 
-def _chart_ocr_transcribe_onechart(handle, image, max_new_tokens: int) -> str:
+def _chart_ocr_transcribe_onechart(
+    handle: ChartOCRHandle, image: Image.Image, max_new_tokens: int
+) -> str:
     """OneChart-specific transcription path.
 
     OneChart's HF repo ships a custom `.chat(tokenizer, image_file,
@@ -458,6 +469,11 @@ def _chart_ocr_transcribe_onechart(handle, image, max_new_tokens: int) -> str:
 
     log = logger.bind(handle=type(handle.model).__name__)
 
+    # OneChart exposes a custom Vary-derived `.chat()` method that isn't
+    # on the base `PreTrainedModel` stub — a genuinely-dynamic
+    # transformers boundary, accessed through `Any`.
+    model: Any = handle.model
+
     # OneChart's `.chat(tokenizer, image_file, ...)` requires a
     # FILE PATH (string), not a PIL Image — its internal `load_image`
     # branches on `image_file.startswith('http')`. We render the PIL
@@ -475,7 +491,7 @@ def _chart_ocr_transcribe_onechart(handle, image, max_new_tokens: int) -> str:
                     # built-in self-consistency check; outputs flagged
                     # as unreliable are detected via the
                     # `_ONECHART_RELIABLE_RE` post-pattern.
-                    result = handle.model.chat(
+                    result: Any = model.chat(
                         handle.processor,  # tokenizer in OneChart's API
                         tmp.name,
                         reliable_check=True,
@@ -500,11 +516,12 @@ def _chart_ocr_transcribe_onechart(handle, image, max_new_tokens: int) -> str:
 
     # The chat() result may be a single string, or a tuple of
     # (text, reliable_check) depending on upstream revision.
-    if isinstance(result, tuple) and len(result) >= 2:
-        text = str(result[0])
-        reliable = bool(result[1])
+    if isinstance(result, tuple) and len(cast("tuple[Any, ...]", result)) >= 2:
+        result_tuple = cast("tuple[Any, ...]", result)
+        text = str(result_tuple[0])
+        reliable = bool(result_tuple[1])
     else:
-        text = str(result)
+        text = str(cast("Any", result))
         # Parse the reliable_check from the text itself if the API
         # didn't return it as a separate value.
         match = _ONECHART_RELIABLE_RE.search(text)
@@ -543,7 +560,9 @@ def _chart_ocr_transcribe_onechart(handle, image, max_new_tokens: int) -> str:
         return text
 
 
-def _chart_ocr_transcribe_unichart(handle, image, max_new_tokens: int) -> str:
+def _chart_ocr_transcribe_unichart(
+    handle: ChartOCRHandle, image: Image.Image, max_new_tokens: int
+) -> str:
     """UniChart Donut-style transcription path (Path A, P3.3-c).
 
     Model: `VisionEncoderDecoderModel` with `donut-swin` encoder +
@@ -573,44 +592,52 @@ def _chart_ocr_transcribe_unichart(handle, image, max_new_tokens: int) -> str:
 
     log = logger.bind(handle=type(handle.model).__name__)
 
+    # The DonutProcessor (its `.tokenizer` sub-object) + the
+    # VisionEncoderDecoder model (`.decoder.config`, `.generate`) expose
+    # attributes/kwargs absent from the base `ProcessorMixin` /
+    # `PreTrainedModel` stubs — genuinely-dynamic transformers boundaries
+    # routed through `Any`.
+    processor: Any = handle.processor
+    model: Any = handle.model
+
     try:
         with torch.inference_mode():
-            pixel_values = handle.processor(
+            pixel_values = processor(
                 image.convert("RGB"),
                 random_padding=False,
                 return_tensors="pt",
-            ).pixel_values.to(handle.model.device, dtype=handle.model.dtype)
+            ).pixel_values.to(model.device, dtype=model.dtype)
 
-            decoder_input_ids = handle.processor.tokenizer(
+            decoder_input_ids = processor.tokenizer(
                 _PROMPT_UNICHART,
                 add_special_tokens=False,
                 return_tensors="pt",
                 max_length=510,
-            ).input_ids.to(handle.model.device)
+            ).input_ids.to(model.device)
 
             # Bound generation: never exceed the model's
             # max_position_embeddings AND never exceed the caller's
             # max_new_tokens budget. Whichever is tighter wins.
-            decoder_max = handle.model.decoder.config.max_position_embeddings
+            decoder_max = model.decoder.config.max_position_embeddings
             prompt_len = decoder_input_ids.shape[-1]
             max_length = min(decoder_max, prompt_len + max_new_tokens)
 
-            outputs = handle.model.generate(
+            outputs = model.generate(
                 pixel_values,
                 decoder_input_ids=decoder_input_ids,
                 max_length=max_length,
                 early_stopping=True,
-                pad_token_id=handle.processor.tokenizer.pad_token_id,
-                eos_token_id=handle.processor.tokenizer.eos_token_id,
+                pad_token_id=processor.tokenizer.pad_token_id,
+                eos_token_id=processor.tokenizer.eos_token_id,
                 use_cache=True,
                 num_beams=4,
-                bad_words_ids=[[handle.processor.tokenizer.unk_token_id]],
+                bad_words_ids=[[processor.tokenizer.unk_token_id]],
                 return_dict_in_generate=True,
             )
 
-        sequence = handle.processor.batch_decode(outputs.sequences)[0]
-        sequence = sequence.replace(handle.processor.tokenizer.eos_token, "").replace(
-            handle.processor.tokenizer.pad_token, ""
+        sequence: str = processor.batch_decode(outputs.sequences)[0]
+        sequence = sequence.replace(processor.tokenizer.eos_token, "").replace(
+            processor.tokenizer.pad_token, ""
         )
 
         if "<s_answer>" in sequence:
@@ -843,7 +870,9 @@ def _unichart_table_to_markdown(raw: str) -> str:
     return "\n".join([header, separator, *body_rows])
 
 
-def _chart_ocr_transcribe_nemotron_parse(handle, image, max_new_tokens: int) -> str:
+def _chart_ocr_transcribe_nemotron_parse(
+    handle: ChartOCRHandle, image: Image.Image, max_new_tokens: int
+) -> str:
     """Nemotron-Parse-v1.2 inference path (Path C, P3.3-c).
 
     NVIDIA's 885M document parser. Per the model card recipe:
@@ -869,14 +898,20 @@ def _chart_ocr_transcribe_nemotron_parse(handle, image, max_new_tokens: int) -> 
 
     log = logger.bind(handle=type(handle.model).__name__)
 
+    # Nemotron-Parse's processor `__call__`/`batch_decode` kwargs and the
+    # model's `.generate` / `.config` aren't on the base stubs — dynamic
+    # transformers boundaries routed through `Any`.
+    processor: Any = handle.processor
+    model: Any = handle.model
+
     try:
         with torch.inference_mode():
-            inputs = handle.processor(
+            inputs = processor(
                 images=[image.convert("RGB")],
                 text=_PROMPT_NEMOTRON_PARSE,
                 return_tensors="pt",
                 add_special_tokens=False,
-            ).to(handle.model.device)
+            ).to(model.device)
 
             # Try to load the model's published GenerationConfig
             # (includes carefully-tuned stop tokens + repetition
@@ -886,23 +921,27 @@ def _chart_ocr_transcribe_nemotron_parse(handle, image, max_new_tokens: int) -> 
             try:
                 from transformers import GenerationConfig
 
-                generation_config = GenerationConfig.from_pretrained(
-                    handle.model.config._name_or_path,
+                # `GenerationConfig.from_pretrained` returns Unknown in
+                # transformers' stub; route the classmethod call through
+                # an `Any`-typed alias so the member access is explicit.
+                gen_config_cls: Any = GenerationConfig
+                generation_config: Any = gen_config_cls.from_pretrained(
+                    model.config._name_or_path,
                     trust_remote_code=True,
                 )
                 # Bound emission with the caller's max_new_tokens
                 generation_config.max_new_tokens = max_new_tokens
-                outputs = handle.model.generate(**inputs, generation_config=generation_config)
+                outputs = model.generate(**inputs, generation_config=generation_config)
             except (ImportError, OSError):
                 # Fallback: explicit kwargs
-                outputs = handle.model.generate(
+                outputs = model.generate(
                     **inputs,
                     max_new_tokens=max_new_tokens,
                     do_sample=False,
                     repetition_penalty=1.1,
                 )
 
-        generated_text = handle.processor.batch_decode(outputs, skip_special_tokens=True)[0]
+        generated_text: str = processor.batch_decode(outputs, skip_special_tokens=True)[0]
     except (RuntimeError, ValueError) as e:
         log.warning(
             "chart_ocr.nemotron_parse.inference_failed",
@@ -932,13 +971,17 @@ def _chart_ocr_transcribe_nemotron_parse(handle, image, max_new_tokens: int) -> 
     return "\n".join(lines)
 
 
-def _onechart_dict_to_markdown(d: object) -> str:
+def _onechart_dict_to_markdown(d: Any) -> str:
     """Convert OneChart's `{title, source, values: {label: value}}`
     dict to a markdown table. Handles the common shapes; falls back
     to a key-value table for unexpected structures.
+
+    `d` is the result of `ast.literal_eval` on the model's dict-style
+    output — a genuinely-dynamic structure, hence the explicit `Any`.
     """
     if not isinstance(d, dict):
         return str(d)
+    d = cast("dict[Any, Any]", d)
 
     title = d.get("title", "")
     values = d.get("values", {})
@@ -949,12 +992,13 @@ def _onechart_dict_to_markdown(d: object) -> str:
         return f"| key | value |\n| --- | --- |\n{rows}"
 
     header = f"# {title}\n\n" if title else ""
-    table_rows = "\n".join(f"| {k} | {v} |" for k, v in values.items())
+    values_dict = cast("dict[Any, Any]", values)
+    table_rows = "\n".join(f"| {k} | {v} |" for k, v in values_dict.items())
     return f"{header}| label | value |\n| --- | --- |\n{table_rows}"
 
 
 async def _extract_with_handle(
-    handle: object,
+    handle: ChartOCRHandle,
     source_pdf: Path,
     figure: FigureMetadata,
     max_new_tokens: int,

@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -85,13 +85,9 @@ class EventBus:
                 ")"
             )
             self._db.execute(
-                "CREATE INDEX IF NOT EXISTS events_correlation "
-                "ON events(correlation_id)"
+                "CREATE INDEX IF NOT EXISTS events_correlation ON events(correlation_id)"
             )
-            self._db.execute(
-                "CREATE INDEX IF NOT EXISTS events_timestamp "
-                "ON events(timestamp)"
-            )
+            self._db.execute("CREATE INDEX IF NOT EXISTS events_timestamp ON events(timestamp)")
         return self
 
     def stop(self) -> None:
@@ -154,7 +150,7 @@ class EventBus:
         *,
         stage: EventStage | None = None,
         event_type: str | None = None,
-    ) -> AsyncIterator[asyncio.Queue[MemexEvent]]:
+    ) -> AsyncGenerator[asyncio.Queue[MemexEvent]]:
         """Subscribe to events matching the (optional) filters.
 
         Yields the queue; iterate with `await q.get()` in the caller.
@@ -232,5 +228,3 @@ def set_bus(bus: EventBus | None) -> None:
     """Install the process bus. Pass None to detach (tests)."""
     global _BUS
     _BUS = bus
-
-

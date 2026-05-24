@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import Any
+from typing import Any, Protocol, cast
 
 import structlog
 
@@ -30,14 +30,21 @@ from memex.models.registry import Qwen3RerankerHandle, get_registry
 logger = structlog.get_logger(__name__)
 
 
+class _FloatTensor(Protocol):
+    """Typing-only view of a 1-D float `torch.Tensor`. torch's own stub
+    types `Tensor.tolist()` as a bare `list` (→ list[Unknown] under
+    strict); we know `probs[:, 1]` is 1-D float, so we cast to this
+    Protocol whose `tolist()` returns `list[float]`."""
+
+    def tolist(self) -> list[float]: ...
+
+
 _QWEN3_SYSTEM_PROMPT = (
     "Judge whether the Document meets the requirements based on the "
     "Query and the Instruct provided. Note that the answer can only "
     'be "yes" or "no".'
 )
-_QWEN3_TASK = (
-    "Given a web search query, retrieve relevant passages that answer the query"
-)
+_QWEN3_TASK = "Given a web search query, retrieve relevant passages that answer the query"
 
 
 def _read_batch_size() -> int:
@@ -74,9 +81,7 @@ async def cross_encoder_rerank(
 
     settings = get_settings()
     backend = settings.models.reranker_backend
-    log = logger.bind(
-        candidates=len(candidates), top_k=top_k, backend=backend
-    )
+    log = logger.bind(candidates=len(candidates), top_k=top_k, backend=backend)
     log.info("rerank.start")
 
     batch_size = _read_batch_size()
@@ -85,30 +90,21 @@ async def cross_encoder_rerank(
     async with registry.use("reranker") as reranker:
         pairs = [(query, c.text) for c in candidates]
         if isinstance(reranker, Qwen3RerankerHandle):
-            scores = await asyncio.to_thread(
-                _score_qwen3, reranker, pairs, batch_size
-            )
+            scores = await asyncio.to_thread(_score_qwen3, reranker, pairs, batch_size)
         else:
-            scores = await asyncio.to_thread(
-                _score_cross_encoder, reranker, pairs, batch_size
-            )
+            scores = await asyncio.to_thread(_score_cross_encoder, reranker, pairs, batch_size)
 
     ranked = sorted(
         zip(candidates, (float(s) for s in scores), strict=True),
         key=lambda pair: pair[1],
         reverse=True,
     )
-    out = [
-        c.model_copy(update={"rerank_score": score})
-        for c, score in ranked[:top_k]
-    ]
+    out = [c.model_copy(update={"rerank_score": score}) for c, score in ranked[:top_k]]
     log.info("rerank.done", returned=len(out))
     return out
 
 
-def _score_cross_encoder(
-    reranker: Any, pairs: list[tuple[str, str]], batch_size: int
-) -> Any:
+def _score_cross_encoder(reranker: Any, pairs: list[tuple[str, str]], batch_size: int) -> Any:
     """The CrossEncoder backend — one forward pass per pair via
     `sentence_transformers.CrossEncoder.predict`. Returns a numpy
     array of float logits, one per pair.
@@ -182,10 +178,16 @@ def _score_qwen3(
         last_logits = logits[:, -1, :]
         yes_logits = last_logits[:, handle.yes_id]
         no_logits = last_logits[:, handle.no_id]
-        # softmax over the two-element [no, yes] vector → P(yes)
+        # softmax over the two-element [no, yes] vector → P(yes).
+        # `torch.nn.functional.softmax` is the publicly-exported entry
+        # point (`torch.softmax` re-exports the same op from the private
+        # `_C._VariableFunctions` namespace, which pyright flags).
         pair_logits = torch.stack([no_logits, yes_logits], dim=-1)
-        probs = torch.softmax(pair_logits.float(), dim=-1)
-        yes_probs = probs[:, 1].tolist()
-        scores.extend(float(p) for p in yes_probs)
+        probs = torch.nn.functional.softmax(pair_logits.float(), dim=-1)
+        # `Tensor.tolist()` is typed as a bare `list` in torch's stubs;
+        # `probs[:, 1]` is a 1-D float tensor, so cast the receiver to a
+        # typed alias whose `tolist()` returns list[float].
+        yes_col = cast(_FloatTensor, probs[:, 1])
+        scores.extend(float(p) for p in yes_col.tolist())
 
     return scores

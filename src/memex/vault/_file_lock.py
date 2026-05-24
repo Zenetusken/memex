@@ -24,7 +24,7 @@ import contextlib
 import os
 import sys
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from pathlib import Path
 
 import structlog
@@ -71,7 +71,7 @@ def _release(fd: int) -> None:
 
 
 @contextlib.asynccontextmanager
-async def doc_file_lock(vault_path: Path, doc_id: str) -> AsyncIterator[None]:
+async def doc_file_lock(vault_path: Path, doc_id: str) -> AsyncGenerator[None]:
     """Hold `fcntl.LOCK_EX` on `.memex/locks/{doc_id}.lock` for the body.
 
     On Linux + macOS: blocks until the exclusive lock is acquired,

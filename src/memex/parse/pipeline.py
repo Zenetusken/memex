@@ -22,7 +22,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -766,7 +766,7 @@ async def _vllm_restart(scripts_dir: Path) -> None:
 
 
 @asynccontextmanager
-async def _pause_vllm_for_chart_ocr() -> AsyncIterator[None]:
+async def _pause_vllm_for_chart_ocr() -> AsyncGenerator[None]:
     """Pause-and-restart vLLM around the chart-OCR pass (P3.3).
 
     On the 12 GB reference rig, vLLM's ~8.5 GB resident footprint

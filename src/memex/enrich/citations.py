@@ -71,7 +71,7 @@ class CitationCandidate(BaseModel):
 class CitationList(BaseModel):
     """Top-level output schema for the `extract_citations` prompt."""
 
-    citations: list[CitationCandidate] = Field(default_factory=list)
+    citations: list[CitationCandidate] = Field(default_factory=list[CitationCandidate])
 
 
 class CitationExtractionInput(BaseModel):
@@ -90,9 +90,9 @@ class ResolvedCitation(BaseModel):
     surface_text: str
     target_doc_id: str
     target_title: str
-    confidence: float           # composite of model + resolver
+    confidence: float  # composite of model + resolver
     chunk_id: str
-    via: str                    # what matched ("title", "author_year", "tokens")
+    via: str  # what matched ("title", "author_year", "tokens")
 
 
 @dataclass
@@ -113,16 +113,16 @@ class DocSignature:
     doc_id: str
     title: str
     title_lower: str
-    title_tokens: set[str] = field(default_factory=set)
-    author_year_forms: list[str] = field(default_factory=list)
-    headings: list[str] = field(default_factory=list)
+    title_tokens: set[str] = field(default_factory=set[str])
+    author_year_forms: list[str] = field(default_factory=list[str])
+    headings: list[str] = field(default_factory=list[str])
 
 
 @dataclass
 class CitationIndex:
     """Map of `doc_id → DocSignature`, plus precomputed lookup helpers."""
 
-    by_id: dict[str, DocSignature] = field(default_factory=dict)
+    by_id: dict[str, DocSignature] = field(default_factory=dict[str, DocSignature])
 
     def __len__(self) -> int:
         return len(self.by_id)
@@ -316,9 +316,7 @@ def _pick_section_anchor(
     if not headings:
         return None
     start = max(0, surface_pos - _SECTION_ANCHOR_CONTEXT_WINDOW)
-    end = min(
-        len(body), surface_pos + surface_len + _SECTION_ANCHOR_CONTEXT_WINDOW
-    )
+    end = min(len(body), surface_pos + surface_len + _SECTION_ANCHOR_CONTEXT_WINDOW)
     context_lc = body[start:end].casefold()
     best: str | None = None
     for h in headings:
@@ -391,11 +389,7 @@ def insert_wikilinks(
                 anchor = _pick_section_anchor(
                     new_body, m.start(), m.end() - m.start(), sig.headings
                 )
-        replacement = (
-            f"[[{cit.target_doc_id}#{anchor}]]"
-            if anchor
-            else f"[[{cit.target_doc_id}]]"
-        )
+        replacement = f"[[{cit.target_doc_id}#{anchor}]]" if anchor else f"[[{cit.target_doc_id}]]"
         new_body, n = pattern.subn(replacement, new_body, count=1)
         if n > 0:
             count += n

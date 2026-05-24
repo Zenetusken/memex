@@ -11,6 +11,7 @@ configuration).
 from __future__ import annotations
 
 import os
+from typing import Any, cast
 
 import structlog
 
@@ -62,7 +63,10 @@ def _configure_cuda(settings: MemexSettings) -> None:
 
     torch.set_float32_matmul_precision("high")  # TF32 on Ada matmuls
     torch.backends.cudnn.benchmark = True  # safe for stable batch shapes
-    torch.cuda.set_per_process_memory_fraction(
+    # torch.cuda.set_per_process_memory_fraction has an incomplete stub
+    # in the shipped torch wheel (partially-unknown signature); the arg
+    # is documented as a float fraction.
+    torch.cuda.set_per_process_memory_fraction(  # type: ignore[no-untyped-call]  # torch stub gap
         settings.hardware.gpu_memory_fraction
     )
 
@@ -104,6 +108,26 @@ _VRAM_GB: dict[tuple[str, str | None], float] = {
 _OVERHEAD_GB = 2.5
 
 
+def _device_total_memory_bytes() -> int:
+    """Total VRAM of CUDA device 0, in bytes.
+
+    Isolated so the torch-stub Unknowns (`get_device_properties` has a
+    partially-unknown signature; its `.total_memory` member is typed
+    Unknown in the shipped wheel) don't leak into `_verify_vram_fit`'s
+    arithmetic. `total_memory` is documented as int bytes.
+    """
+    import torch
+
+    # `torch.cuda.get_device_properties` has a partially-unknown
+    # signature in the shipped torch stub. Route the call through an
+    # explicitly-`Any` reference so the Unknown is contained to this
+    # function (explicit `Any` is permitted under strict; inferred
+    # Unknown is not). `total_memory` is documented as int bytes.
+    cuda: Any = torch.cuda
+    props: object = cuda.get_device_properties(0)
+    return cast(int, getattr(props, "total_memory"))  # noqa: B009
+
+
 def _verify_vram_fit(settings: MemexSettings) -> None:
     """Compare the configured model mix against the local GPU's VRAM and
     warn if the budget is tight. ADR-0001 promised this; ADR-0006 wires
@@ -119,10 +143,15 @@ def _verify_vram_fit(settings: MemexSettings) -> None:
     import torch
 
     log = structlog.get_logger(__name__)
-    total_gb = (
-        torch.cuda.get_device_properties(0).total_memory / (1024**3)
-    )
+    # torch.cuda.get_device_properties has a partially-unknown signature
+    # in the shipped torch stub, and its `.total_memory` member is typed
+    # Unknown. It is documented to return int bytes; read it through a
+    # narrow helper so the Unknown is contained and the GB arithmetic
+    # below is fully typed.
+    total_memory_bytes = _device_total_memory_bytes()
+    total_gb = total_memory_bytes / (1024**3)
     budget_gb = total_gb * settings.hardware.gpu_memory_fraction
+    gpu_name = torch.cuda.get_device_name(0)
 
     estimated = (
         _VRAM_GB[("orchestrator", settings.models.orchestrator_quantization)]
@@ -148,7 +177,7 @@ def _verify_vram_fit(settings: MemexSettings) -> None:
             estimated_gb=round(estimated, 1),
             budget_gb=round(budget_gb, 1),
             total_gb=round(total_gb, 1),
-            gpu=torch.cuda.get_device_name(0),
+            gpu=gpu_name,
             vlm_counted=not settings.parse.disable_vlm,
             fix=(
                 "lower hardware.gpu_memory_fraction, switch to a smaller "
@@ -162,7 +191,7 @@ def _verify_vram_fit(settings: MemexSettings) -> None:
             estimated_gb=round(estimated, 1),
             budget_gb=round(budget_gb, 1),
             total_gb=round(total_gb, 1),
-            gpu=torch.cuda.get_device_name(0),
+            gpu=gpu_name,
             vlm_counted=not settings.parse.disable_vlm,
         )
 

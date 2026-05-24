@@ -17,13 +17,10 @@ import asyncio
 import hashlib
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any
 
 import structlog
 from pydantic import BaseModel
-
-if TYPE_CHECKING:
-    pass
 
 logger = structlog.get_logger(__name__)
 
@@ -42,7 +39,7 @@ def _strip_cypher_comments(schema: str) -> str:
     TABLE` statements that reference Document then fail with
     "Binder exception: Table Document does not exist."
     """
-    lines = []
+    lines: list[str] = []
     for line in schema.splitlines():
         stripped = line.lstrip()
         if stripped.startswith("//"):
@@ -72,7 +69,13 @@ class GraphStore:
     """Async wrapper around RyuGraph. Use `await GraphStore.open(vault_path)`."""
 
     def __init__(self, conn: object) -> None:
-        self._conn = conn
+        # ryugraph is an optional dependency imported lazily inside
+        # `open` (the `expand_graph` node falls back gracefully when it
+        # is absent), so its `Connection` has no usable static type
+        # here. Hold it as explicit `Any` so the `.execute(...)` /
+        # result-cursor calls below are a contained dynamic boundary
+        # rather than leaking inferred Unknown under strict.
+        self._conn: Any = conn
 
     @classmethod
     async def open(cls, vault_path: Path) -> GraphStore:
@@ -111,7 +114,7 @@ class GraphStore:
         edges separately."""
 
         def _run() -> None:
-            self._conn.execute(  # type: ignore[attr-defined]
+            self._conn.execute(
                 "MERGE (d:Document {doc_id: $id}) SET d.title = $title;",
                 {"id": doc_id, "title": title},
             )
@@ -124,7 +127,7 @@ class GraphStore:
         eid = entity_id(name, kind)
 
         def _run() -> None:
-            self._conn.execute(  # type: ignore[attr-defined]
+            self._conn.execute(
                 "MERGE (e:Entity {entity_id: $id}) SET e.name = $name, e.kind = $kind;",
                 {"id": eid, "name": name, "kind": kind},
             )
@@ -138,7 +141,7 @@ class GraphStore:
         `(doc_id, entity_id)` pair."""
 
         def _run() -> None:
-            self._conn.execute(  # type: ignore[attr-defined]
+            self._conn.execute(
                 "MATCH (d:Document {doc_id: $doc_id}), "
                 "(e:Entity {entity_id: $entity_id}) "
                 "MERGE (d)-[r:MENTIONS]->(e) SET r.confidence = $confidence;",
@@ -163,7 +166,7 @@ class GraphStore:
         plus the resolver's confidence."""
 
         def _run() -> None:
-            self._conn.execute(  # type: ignore[attr-defined]
+            self._conn.execute(
                 "MATCH (a:Document {doc_id: $from_id}), "
                 "(b:Document {doc_id: $to_id}) "
                 "MERGE (a)-[r:CITES]->(b) "
@@ -188,7 +191,7 @@ class GraphStore:
 
         def _run() -> None:
             # Detach-delete unbinds and deletes the node in one statement.
-            self._conn.execute(  # type: ignore[attr-defined]
+            self._conn.execute(
                 "MATCH (d:Document {doc_id: $id}) DETACH DELETE d;",
                 {"id": doc_id},
             )
@@ -200,7 +203,10 @@ class GraphStore:
         """Documents that share entities with `doc_id` (one-hop)."""
 
         def _run() -> list[GraphNeighbor]:
-            result = self._conn.execute(  # type: ignore[attr-defined]
+            # `self._conn` is the dynamic ryugraph connection (Any); each
+            # result row is a positional tuple matching the RETURN
+            # clause: (doc_id, title, via).
+            result = self._conn.execute(
                 "MATCH (d:Document {doc_id: $id})-[:MENTIONS]->(e:Entity)"
                 "<-[:MENTIONS]-(other:Document) "
                 "WHERE other.doc_id <> $id "
@@ -210,8 +216,8 @@ class GraphStore:
                 {"id": doc_id, "limit": limit},
             )
             out: list[GraphNeighbor] = []
-            while result.has_next():  # type: ignore[attr-defined]
-                row = result.get_next()  # type: ignore[attr-defined]
+            while result.has_next():
+                row = result.get_next()
                 out.append(
                     GraphNeighbor(
                         doc_id=row[0],

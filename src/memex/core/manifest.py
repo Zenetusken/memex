@@ -56,7 +56,7 @@ class ParseStage(BaseModel):
     parser_version: str
     docling_version: str | None = None
     pymupdf_version: str | None = None
-    pages: list[PageDecision] = Field(default_factory=list)
+    pages: list[PageDecision] = Field(default_factory=list[PageDecision])
     figure_count: int = 0
     table_count: int = 0
     equation_count: int = 0

@@ -24,6 +24,7 @@ from mcp.server.fastmcp import FastMCP
 
 from memex.agents.answering import FinalResponse, answer_query
 from memex.core.config import get_settings
+from memex.core.errors import ConfigurationError
 from memex.core.types import Chunk
 from memex.index.graph_store import GraphNeighbor
 from memex.mcp.auth import BearerAuthMiddleware, validate_bind
@@ -118,9 +119,7 @@ async def list_documents_tool() -> list[DocumentRef]:
     return refs
 
 
-async def get_graph_neighbors(
-    doc_id: str, limit: int = 50
-) -> list[GraphNeighbor]:
+async def get_graph_neighbors(doc_id: str, limit: int = 50) -> list[GraphNeighbor]:
     """Documents one hop away in the entity graph.
 
     Surfaces documents that share entities with `doc_id` via the
@@ -208,10 +207,20 @@ async def serve_http(host: str = "127.0.0.1", port: int = 7424) -> None:
     # call; we split that here so the middleware can layer on between.
     import uvicorn
 
+    auth_token = settings.mcp.auth_token
+    if auth_token is None:
+        # Unreachable: the `not has_token` branch above returns first. This
+        # guard narrows `auth_token` for the type checker without a bare
+        # `assert` (which `-O` strips) and stays within the typed-error rule.
+        raise ConfigurationError(
+            "authenticated serve_http reached with no auth token",
+            context={"host": host, "port": port},
+        )
+
     app = server.streamable_http_app()
     app.add_middleware(
         BearerAuthMiddleware,
-        expected_token=settings.mcp.auth_token.get_secret_value(),
+        expected_token=auth_token.get_secret_value(),
     )
     logger.info("mcp.serve.http.start", host=host, port=port, auth=True)
     config = uvicorn.Config(app, host=host, port=port, log_level="info")

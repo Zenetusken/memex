@@ -15,16 +15,16 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import structlog
 
 from memex.core.errors import MemexError
-from memex.models.registry import get_registry
+from memex.models.registry import VLMHandle, get_registry
 from memex.parse.docling_backend import DoclingPageOutput
 
 if TYPE_CHECKING:
-    pass
+    from PIL import Image
 
 logger = structlog.get_logger(__name__)
 
@@ -53,7 +53,7 @@ class PDFRenderError(MemexError):
     """The page could not be rasterised to an image."""
 
 
-def _render_page_to_image(pdf_path: Path, page_number: int):
+def _render_page_to_image(pdf_path: Path, page_number: int) -> Image.Image:
     """Render a single 1-indexed page to a PIL Image at ~144 DPI.
 
     Qwen-VL processors use `max_pixels = 1280 * 28 * 28 ≈ 1.0 M` and
@@ -95,9 +95,21 @@ def _render_page_to_image(pdf_path: Path, page_number: int):
         doc.close()
 
 
-def _vlm_transcribe_sync(handle, image, prompt: str, max_new_tokens: int) -> str:
+def _vlm_transcribe_sync(
+    handle: VLMHandle, image: Image.Image, prompt: str, max_new_tokens: int
+) -> str:
     """Synchronous transcription; called via asyncio.to_thread."""
     import torch
+
+    # A VLM processor is a model-specific class returned by
+    # `AutoProcessor` (e.g. `Qwen2VLProcessor`); its `apply_chat_template`
+    # / `__call__` / `batch_decode` kwargs aren't on the base
+    # `ProcessorMixin` stub. transformers' stub also types
+    # `PreTrainedModel.generate` as a broken `Tensor | Module` union
+    # (not callable). Both are genuinely-dynamic transformers boundaries,
+    # so we route them through explicit `Any`.
+    processor: Any = handle.processor
+    model: Any = handle.model
 
     messages = [
         {
@@ -108,33 +120,34 @@ def _vlm_transcribe_sync(handle, image, prompt: str, max_new_tokens: int) -> str
             ],
         }
     ]
-    text = handle.processor.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True
-    )
-    inputs = handle.processor(
+    text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    inputs = processor(
         text=[text],
         images=[image],
         return_tensors="pt",
         padding=True,
-    ).to(handle.model.device)
+    ).to(model.device)
 
     with torch.inference_mode():
-        outputs = handle.model.generate(
-            **inputs,
-            max_new_tokens=max_new_tokens,
-            do_sample=False,
+        # With the default `return_dict_in_generate=False`, `generate`
+        # returns a token-id tensor; cast for the slice + decode below.
+        outputs = cast(
+            "torch.Tensor",
+            model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+            ),
         )
 
     # Strip the prompt prefix from the decode.
     generated = outputs[:, inputs["input_ids"].shape[1] :]
-    decoded = handle.processor.batch_decode(
-        generated, skip_special_tokens=True
-    )
+    decoded: list[str] = processor.batch_decode(generated, skip_special_tokens=True)
     return (decoded[0] if decoded else "").strip()
 
 
 async def _convert_with_handle(
-    handle: object,
+    handle: VLMHandle,
     source_pdf: Path,
     page_number: int,
     max_new_tokens: int,
@@ -143,17 +156,11 @@ async def _convert_with_handle(
     log = logger.bind(page=page_number, source=str(source_pdf))
     log.info("vlm.start")
 
-    image = await asyncio.to_thread(
-        _render_page_to_image, source_pdf, page_number
-    )
-    markdown = await asyncio.to_thread(
-        _vlm_transcribe_sync, handle, image, _PROMPT, max_new_tokens
-    )
+    image = await asyncio.to_thread(_render_page_to_image, source_pdf, page_number)
+    markdown = await asyncio.to_thread(_vlm_transcribe_sync, handle, image, _PROMPT, max_new_tokens)
 
     log.info("vlm.done", chars=len(markdown))
-    return DoclingPageOutput(
-        page=page_number, markdown=markdown, confidence=1.0
-    )
+    return DoclingPageOutput(page=page_number, markdown=markdown, confidence=1.0)
 
 
 async def convert_pages(

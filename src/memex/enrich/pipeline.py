@@ -75,8 +75,8 @@ class EnrichResult(BaseModel):
 
     doc_id: str
     correlation_id: str
-    entities: list[Entity] = Field(default_factory=list)
-    citations: list[ResolvedCitation] = Field(default_factory=list)
+    entities: list[Entity] = Field(default_factory=list[Entity])
+    citations: list[ResolvedCitation] = Field(default_factory=list[ResolvedCitation])
     wikilinks_inserted: int = 0
     chunk_count: int = 0
     duration_ms: int = 0
@@ -119,15 +119,16 @@ async def _extract_chunk(chunk: Chunk, title: str) -> tuple[list[Entity], list[C
         prompt_tag=f"{_CITATION_PROMPT_NAME}@{_CITATION_PROMPT_VERSION}",
     )
     (entity_raw, _), (citation_raw, _) = await asyncio.gather(entity_task, citation_task)
-    if not isinstance(entity_raw, EntityList):
-        # `complete_structured` is typed to return the schema instance,
-        # so this can only fire if a test fake or vendored plugin breaks
-        # the contract — surface explicitly rather than crash under `-O`.
+    # `complete_structured` is typed to return the schema instance, so this
+    # can only fire if a test fake or vendored plugin breaks the contract —
+    # surface explicitly rather than crash. pyright sees the static type as
+    # always-EntityList; the check is a deliberate runtime guard.
+    if not isinstance(entity_raw, EntityList):  # type: ignore[reportUnnecessaryIsInstance]  # runtime contract guard
         raise ModelCallError(
             "Entity extraction returned unexpected payload type",
             context={"got": type(entity_raw).__name__, "expected": "EntityList"},
         )
-    if not isinstance(citation_raw, CitationList):
+    if not isinstance(citation_raw, CitationList):  # type: ignore[reportUnnecessaryIsInstance]  # runtime contract guard
         raise ModelCallError(
             "Citation extraction returned unexpected payload type",
             context={"got": type(citation_raw).__name__, "expected": "CitationList"},

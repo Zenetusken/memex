@@ -259,8 +259,12 @@ async def read_document(vault_path: Path, doc_id: str) -> VaultDocument:
     post = frontmatter.loads(text)
 
     canonical_keys = {"title", "authors", "date", "source_url", "license", "tags"}
-    canonical = {k: post.metadata[k] for k in canonical_keys if k in post.metadata}
-    custom = {k: v for k, v in post.metadata.items() if k not in canonical_keys}
+    # `post.metadata` values are typed `object` by python-frontmatter;
+    # pydantic validates/coerces each field at construction, so annotate
+    # `Any` to let the typed `Frontmatter.__init__` accept the unpacking.
+    metadata: dict[str, Any] = post.metadata
+    canonical: dict[str, Any] = {k: metadata[k] for k in canonical_keys if k in metadata}
+    custom: dict[str, Any] = {k: v for k, v in metadata.items() if k not in canonical_keys}
     fm = Frontmatter(**canonical, custom=custom)
 
     return VaultDocument(

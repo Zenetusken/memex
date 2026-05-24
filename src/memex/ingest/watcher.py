@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -57,7 +58,9 @@ class _Handler(FileSystemEventHandler):
     def _enqueue(self, event: FileSystemEvent) -> None:
         if event.is_directory:
             return
-        path = Path(event.src_path)
+        # `event.src_path` is typed `bytes | str` by watchdog; `os.fsdecode`
+        # normalises both to `str` (str passes through unchanged).
+        path = Path(os.fsdecode(event.src_path))
         if path.suffix.lower() != ".md":
             return
         # Only documents *directly* under `vault/documents/` count;

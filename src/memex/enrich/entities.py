@@ -15,9 +15,7 @@ from pydantic import BaseModel, Field
 
 from memex.core.types import Chunk
 
-EntityKind = Literal[
-    "person", "org", "place", "concept", "method", "tool", "other"
-]
+EntityKind = Literal["person", "org", "place", "concept", "method", "tool", "other"]
 EntityConfidence = Literal["high", "medium", "low"]
 
 
@@ -45,7 +43,7 @@ class ExtractedEntity(BaseModel):
 class EntityList(BaseModel):
     """Top-level output schema for the extract_entities prompt."""
 
-    entities: list[ExtractedEntity] = Field(default_factory=list)
+    entities: list[ExtractedEntity] = Field(default_factory=list[ExtractedEntity])
 
 
 class EntityExtractionInput(BaseModel):
@@ -69,9 +67,7 @@ def _key(name: str, kind: EntityKind) -> tuple[str, EntityKind]:
     return (name.strip().lower(), kind)
 
 
-def merge_entities(
-    chunk: Chunk, raw: EntityList
-) -> list[Entity]:
+def merge_entities(chunk: Chunk, raw: EntityList) -> list[Entity]:
     """Per-chunk: convert ExtractedEntity → Entity, locating spans within
     the chunk text.
     """

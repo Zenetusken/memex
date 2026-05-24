@@ -121,7 +121,10 @@ def load_prompt_spec(name: str) -> PromptSpec:
         selected = versions[-1][1]
 
     post = frontmatter.loads(selected.read_text(encoding="utf-8"))
-    meta = dict(post.metadata)
+    # `post.metadata` values are typed `object` by python-frontmatter;
+    # pydantic validates each field, so annotate `Any` to let the typed
+    # `PromptSpec.__init__` accept the `**meta` unpacking.
+    meta: dict[str, Any] = dict(post.metadata)
     meta.setdefault("name", name)
     meta.setdefault("version", selected.stem)
     return PromptSpec(template=post.content, **meta)

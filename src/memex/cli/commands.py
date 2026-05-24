@@ -19,7 +19,9 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 import typer
 from rich.console import Console
@@ -41,6 +43,14 @@ from memex.ingest.pipeline import (
 from memex.ingest.watcher import default_reaction, run_watcher
 from memex.parse.pipeline import derive_title, parse_document
 
+# `typer.Option` / `typer.Argument` are typed as overloads whose signatures
+# embed `click.ParamType[Unknown]`, so a bare member access trips pyright's
+# `reportUnknownMemberType` under strict. They return `Any` at runtime (the
+# value is a typer parameter sentinel slotted into the annotated default), so
+# we re-expose them through `Any`-typed aliases. Behaviour is identical.
+_Option: Callable[..., Any] = typer.Option  # type: ignore[reportUnknownMemberType]  # typer stub leaks click.ParamType[Unknown]
+_Argument: Callable[..., Any] = typer.Argument  # type: ignore[reportUnknownMemberType]  # typer stub leaks click.ParamType[Unknown]
+
 console = Console(stderr=False)  # stdout is the data channel
 err = Console(stderr=True)
 
@@ -53,8 +63,9 @@ def _print(payload: object) -> None:
     """JSON on a pipe, rich on a TTY (GUIDELINES.md Part V)."""
     if sys.stdout.isatty():
         if isinstance(payload, dict):
+            mapping = cast("dict[object, object]", payload)
             table = Table(show_header=False)
-            for k, v in payload.items():
+            for k, v in mapping.items():
                 table.add_row(str(k), str(v))
             console.print(table)
         else:
@@ -149,21 +160,21 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     def ingest(
-        paths: list[Path] = typer.Argument(  # noqa: B008
+        paths: list[Path] = _Argument(  # noqa: B008
             ..., exists=True, readable=True, help="Files or directories to ingest."
         ),
-        ingest_only: bool = typer.Option(
+        ingest_only: bool = _Option(
             False,
             "--ingest-only",
             help="Stop after validation + copy + manifest. Don't parse or index.",
         ),
-        skip_parse: bool = typer.Option(
+        skip_parse: bool = _Option(
             False,
             "--skip-parse",
             help="For markdown sources, write straight to the vault without parsing.",
         ),
-        no_index: bool = typer.Option(False, "--no-index", help="Parse but don't index."),
-        force_docling: bool = typer.Option(
+        no_index: bool = _Option(False, "--no-index", help="Parse but don't index."),
+        force_docling: bool = _Option(
             False,
             "--force-docling",
             help=(
@@ -197,7 +208,7 @@ def register(app: typer.Typer) -> None:
     @app.command(name="parse")
     def parse_cmd(
         doc_id: str,
-        force_docling: bool = typer.Option(
+        force_docling: bool = _Option(
             False,
             "--force-docling",
             help=(
@@ -228,12 +239,12 @@ def register(app: typer.Typer) -> None:
     @app.command(name="retitle")
     def retitle_cmd(
         doc_id: str,
-        title: str = typer.Argument(
+        title: str = _Argument(
             "",
             help="The new title. Omit and pass --derive to pull it from "
             "the original source filename instead.",
         ),
-        derive: bool = typer.Option(
+        derive: bool = _Option(
             False,
             "--derive",
             help="Derive the title from the manifest's source filename "
@@ -260,7 +271,7 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     def reindex(
-        force: bool = typer.Option(
+        force: bool = _Option(
             False, "--force", help="Delete .memex/{embeddings,search,graph} first."
         ),
     ) -> None:
@@ -274,8 +285,8 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     def ask(
-        query: str = typer.Argument(..., help="The question to answer."),
-        token_budget: int = typer.Option(8000, help="Max tokens across the agent loop."),
+        query: str = _Argument(..., help="The question to answer."),
+        token_budget: int = _Option(8000, help="Max tokens across the agent loop."),
     ) -> None:
         """Run the answering agent over the vault."""
 
@@ -297,8 +308,8 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     def graph(
-        document: str = typer.Option(..., "--document", "-d", help="doc_id."),
-        limit: int = typer.Option(50, help="Max neighbors to print."),
+        document: str = _Option(..., "--document", "-d", help="doc_id."),
+        limit: int = _Option(50, help="Max neighbors to print."),
     ) -> None:
         """Print one-hop graph neighbors (shared entities) for a document."""
 
@@ -328,8 +339,8 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     def search(
-        query: str = typer.Argument(..., help="The search query."),
-        k: int = typer.Option(10, help="Number of top chunks to return."),
+        query: str = _Argument(..., help="The search query."),
+        k: int = _Option(10, help="Number of top chunks to return."),
     ) -> None:
         """Hybrid search over the vault — BM25 ⊕ dense → RRF → rerank."""
 
@@ -364,10 +375,10 @@ def register(app: typer.Typer) -> None:
 
     @app.command(name="eval")
     def eval_cmd(
-        query_set: Path = typer.Argument(  # noqa: B008
+        query_set: Path = _Argument(  # noqa: B008
             ..., help="Path to a JSON query set (see docs/eval-corpus-plan.md)."
         ),
-        quick: bool = typer.Option(False, "--quick", help="Sample ~20% of queries."),
+        quick: bool = _Option(False, "--quick", help="Sample ~20% of queries."),
     ) -> None:
         """Run the eval harness against a query set."""
 
@@ -379,17 +390,17 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     def upgrade(
-        no_restart: bool = typer.Option(
+        no_restart: bool = _Option(
             False,
             "--no-restart",
             help="Skip the systemd restart step (Pattern B / Pattern C boxes).",
         ),
-        skip_sync: bool = typer.Option(
+        skip_sync: bool = _Option(
             False,
             "--skip-sync",
             help="Skip `uv sync` (git pull + restart only).",
         ),
-        dry_run: bool = typer.Option(
+        dry_run: bool = _Option(
             False,
             "--dry-run",
             help="Print steps without running them.",
@@ -558,7 +569,7 @@ def _upgrade_step(
 
 @mcp_app.command("generate-token")
 def mcp_generate_token(
-    length: int = typer.Option(
+    length: int = _Option(
         32,
         "--length",
         min=16,
@@ -583,14 +594,14 @@ def mcp_generate_token(
 
 @serve_app.command("mcp")
 def serve_mcp(
-    transport: str = typer.Option(
+    transport: str = _Option(
         "stdio",
         "--transport",
         help="`stdio` for desktop clients (Claude Code, Cursor) or "
         "`http` for network-local agents (binds 127.0.0.1 by default).",
     ),
-    host: str = typer.Option("127.0.0.1", help="Bind host (http transport only)."),
-    port: int = typer.Option(7424, help="Bind port (http transport only)."),
+    host: str = _Option("127.0.0.1", help="Bind host (http transport only)."),
+    port: int = _Option(7424, help="Bind port (http transport only)."),
 ) -> None:
     """Run the Memex MCP server."""
     from memex.cli.bootstrap import bootstrap as _boot
@@ -617,8 +628,8 @@ def serve_mcp(
 
 @serve_app.command("web")
 def serve_web(
-    host: str = typer.Option("127.0.0.1", help="Bind host."),
-    port: int = typer.Option(7423, help="Bind port."),
+    host: str = _Option("127.0.0.1", help="Bind host."),
+    port: int = _Option(7423, help="Bind port."),
 ) -> None:
     """Run the local FastAPI + HTMX web UI."""
     import uvicorn

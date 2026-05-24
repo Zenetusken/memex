@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import structlog
 from lancedb.pydantic import LanceModel, Vector
@@ -109,7 +109,16 @@ class VectorStore:
         # `lancedb.connect_async(...).list_tables()` returning
         # `ListTablesResponse(tables=['chunks'], page_token=None)`.
         response = await db.list_tables()
-        names = response.tables if hasattr(response, "tables") else list(response)
+        # The stub types `list_tables()` as returning `ListTablesResponse`
+        # (the current shape). The `hasattr` fallback below stays for
+        # runtime safety against older lancedb that returned a plain
+        # `list[str]`; cast through `Any` so that defensive branch still
+        # type-checks despite being unreachable under the current stub.
+        names: list[str]
+        if hasattr(response, "tables"):
+            names = response.tables
+        else:
+            names = list(cast(Any, response))
         if _TABLE not in names:
             await db.create_table(_TABLE, schema=_ChunkRow)
         return cls(db)
