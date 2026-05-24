@@ -246,6 +246,11 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
         from docling.datamodel.pipeline_options import PdfPipelineOptions
         from docling.document_converter import DocumentConverter, PdfFormatOption
         from docling_core.types.doc.document import TextItem
+
+        from memex.parse.docling_tables import (
+            export_markdown_header_aware,
+            reattach_detached_table_headers,
+        )
     except ImportError as e:
         raise SystemExit(json.dumps({"error": "docling_unavailable", "detail": str(e)})) from e
 
@@ -288,7 +293,15 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
     reclassified = _demote_misdetected_headers(doc, text_item_cls=TextItem)
     if reclassified:
         print(f"docling: reclassified {reclassified} prose headings as text", file=sys.stderr)
-    markdown = doc.export_to_markdown()
+    # Class B (mis-structured tables): re-attach detached column labels onto
+    # transposed tables, gated to exact label/value-column count matches so no
+    # table is ever made worse. Runs after the heading passes, before export.
+    reattached = reattach_detached_table_headers(doc)
+    if reattached:
+        print(f"docling.table_header_reattached count={reattached}", file=sys.stderr)
+    # Header-aware export: byte-identical to doc.export_to_markdown() except for
+    # Class-A multi-header tables (merged GFM header) + the re-attached tables.
+    markdown = export_markdown_header_aware(doc)
     # Fallback: catch any prose heading that slipped past the structured pass
     # (e.g. a refused __class__ swap) at the markdown level.
     markdown, demoted = _demote_prose_headings(markdown)
