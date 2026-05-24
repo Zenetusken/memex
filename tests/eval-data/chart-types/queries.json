@@ -1,5 +1,5 @@
 {
-  "_description": "Hand-labelled eval corpus for the Tableau 'Which Chart or Graph Is Right For You?' tutorial PDF. 18-page Adobe-InDesign-produced doc that routed via PyMuPDF (Tier 1.A high confidence, born-digital) \u2014 chart-OCR was NOT applied. Tests prose-retrieval on a chart-knowledge-tutorial domain.",
+  "_description": "Hand-labelled eval corpus for the Tableau 'Which Chart or Graph Is Right For You?' tutorial PDF. 18-page Adobe-InDesign-produced doc that routed via PyMuPDF (Tier 1.A high confidence, born-digital) — chart-OCR was NOT applied. Tests prose-retrieval on a chart-knowledge-tutorial domain.",
   "_doc_id": "1797d794-which-chart-or-graph-is-right-for-you",
   "_query_count": 9,
   "_mix": {
@@ -30,7 +30,7 @@
       "_anchor_phrase": "Compare data across categories",
       "_expected_answer": "To compare data across categories (best suited for data that can be split into several groups, e.g., volume of shirts in different sizes, website traffic by referrer).",
       "_answer_type": "concept",
-      "_note": "Concept question \u2014 tests prose retrieval on a bullet-list usage section.",
+      "_note": "Concept question — tests prose retrieval on a bullet-list usage section.",
       "should_refuse": false,
       "relevant_chunk_ids": [
         "1797d794-which-chart-or-graph-is-right-for-you#0439c746b7"
@@ -52,7 +52,7 @@
       "qid": "chart-types-04",
       "question": "What is a Pareto chart?",
       "_anchor_phrase": "Pareto chart showing the accumulation of multiple categories",
-      "_expected_answer": "A chart showing the accumulation of multiple categories \u2014 created by combining bar charts with table calculations.",
+      "_expected_answer": "A chart showing the accumulation of multiple categories — created by combining bar charts with table calculations.",
       "_answer_type": "concept",
       "_note": "Tests a specific chart-type concept; should pull from the bar-chart tips section.",
       "should_refuse": false,
@@ -76,7 +76,7 @@
       "qid": "chart-types-06",
       "question": "What was Tableau's revenue in 2026?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE \u2014 this paper is about chart selection, not Tableau's financials.",
+      "_expected_answer": "REFUSE — this paper is about chart selection, not Tableau's financials.",
       "_answer_type": "counterfactual",
       "_note": "HARD GATE refusal. The doc is a how-to guide, not a financial report.",
       "should_refuse": true,
@@ -86,7 +86,7 @@
       "qid": "chart-types-07",
       "question": "What's the difference between a Sankey diagram and a Sunburst chart according to this paper?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE \u2014 this paper doesn't cover Sankey diagrams or Sunburst charts; it focuses on bar charts, line charts, pie charts, scatter plots, etc.",
+      "_expected_answer": "REFUSE — this paper doesn't cover Sankey diagrams or Sunburst charts; it focuses on bar charts, line charts, pie charts, scatter plots, etc.",
       "_answer_type": "counterfactual",
       "_note": "HARD GATE refusal. Out-of-scope chart types. Tests the agent's not-in-corpus discipline.",
       "should_refuse": true,
@@ -113,5 +113,19 @@
       "relevant_chunk_ids": []
     }
   ],
-  "_resolved_at": "2026-05-23T22:44:33Z"
+  "_resolved_at": "2026-05-23T22:44:33Z",
+  "_baseline_2026_05_24_bf16_reranker": {
+    "query_count": 9,
+    "answered": 5,
+    "refused": 4,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "hallucinations": 0,
+    "mean_citation_precision": 0.7778,
+    "mean_citation_precision_answered_only": 0.6,
+    "conservative_false_refusals": [
+      "chart-types-01",
+      "chart-types-04"
+    ],
+    "note": "Run config: vLLM Qwen/Qwen3-8B-AWQ orchestrator + BAAI/bge-reranker-v2-m3 now loading in bf16 (ADR-0006 intent), restored by the CrossEncoder automodel_args->model_kwargs fix on 2026-05-24. HARD GATES held: refusal_rate_on_counterfactuals=1.0, zero hallucinations (every refusal_correct=False case is a conservative false-refusal on an answerable query, not a wrongly-answered REF). ANS/REF counts identical to the prior (fp32-reranker) baselines. Any citation-precision delta vs the fp32 baseline is a chunk-granularity shift — the bf16 reranker cites an equally-valid sibling chunk in the SAME correct document — not a quality regression (verified: doc disambiguation + answer correctness intact)."
+  }
 }

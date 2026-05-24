@@ -227,6 +227,18 @@
     "mean_citation_precision": 1.0,
     "mean_citation_precision_answered_only": 1.0,
     "disambiguation": "every ANS query cited the correct OWNING lecture among 7 docs; the two deliberate confusables (xref-10 OSI proxy->Cours6 not Cours2; xref-11 MAC switch->Semaine4 not Cours3) both resolved correctly.",
-    "notes": "First pass scored 0.62 answered-only citation precision; root-caused to (a) single-chunk anchors on multi-chunk topics [fixed: whitelists broadened to verified sibling chunks] and (b) the answer LLM emitting corrupted source_chunk_ids - bare hashes (xref-05) and a single-char flip (xref-02) [fixed: agents.answering._repair_claim_chunk_ids snaps emitted ids back to real reranked chunk_ids; 1 fuzzy + 3 suffix repairs fired on the corrected run]. Both HARD GATES held throughout."
+    "notes": "First pass scored 0.62 answered-only citation precision; root-caused to (a) single-chunk anchors on multi-chunk topics [fixed: whitelists broadened to verified sibling chunks] and (b) the answer LLM emitting corrupted source_chunk_ids - bare hashes (xref-05) and a single-char flip (xref-02) [fixed: agents.answering._repair_claim_chunk_ids snaps emitted ids back to real reranked chunk_ids; 1 fuzzy + 3 suffix repairs fired on the corrected run]. Both HARD GATES held throughout.",
+    "_superseded_note": "This run predates the 2026-05-24 CrossEncoder dtype fix, so the reranker ran in fp32 and citation precision was 1.0. With the reranker now in bf16 (ADR-0006), see _baseline_2026_05_24_bf16_reranker: mcp 0.933 — one query (xref-03) cites an equally-valid sibling chunk in the same correct doc (Cours 2). Disambiguation + answer correctness unchanged."
+  },
+  "_baseline_2026_05_24_bf16_reranker": {
+    "query_count": 15,
+    "answered": 11,
+    "refused": 4,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "hallucinations": 0,
+    "mean_citation_precision": 0.9333,
+    "mean_citation_precision_answered_only": 0.9091,
+    "conservative_false_refusals": [],
+    "note": "Run config: vLLM Qwen/Qwen3-8B-AWQ orchestrator + BAAI/bge-reranker-v2-m3 now loading in bf16 (ADR-0006 intent), restored by the CrossEncoder automodel_args->model_kwargs fix on 2026-05-24. HARD GATES held: refusal_rate_on_counterfactuals=1.0, zero hallucinations (every refusal_correct=False case is a conservative false-refusal on an answerable query, not a wrongly-answered REF). ANS/REF counts identical to the prior (fp32-reranker) baselines. Any citation-precision delta vs the fp32 baseline is a chunk-granularity shift — the bf16 reranker cites an equally-valid sibling chunk in the SAME correct document — not a quality regression (verified: doc disambiguation + answer correctness intact)."
   }
 }

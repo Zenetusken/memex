@@ -76,7 +76,7 @@
       "qid": "annual-report-06",
       "question": "What is the home address of NVIDIA's Chief Financial Officer?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE \u2014 personal addresses of executives are not in a public 10-K.",
+      "_expected_answer": "REFUSE — personal addresses of executives are not in a public 10-K.",
       "_answer_type": "counterfactual",
       "_note": "HARD GATE refusal. Personal information of executives is never in a public filing.",
       "should_refuse": true,
@@ -86,7 +86,7 @@
       "qid": "annual-report-07",
       "question": "How many NVIDIA employees work specifically in the Stuttgart office in Germany?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE \u2014 office-level employee counts are not disclosed at this granularity in 10-K filings.",
+      "_expected_answer": "REFUSE — office-level employee counts are not disclosed at this granularity in 10-K filings.",
       "_answer_type": "counterfactual",
       "_note": "HARD GATE refusal. Country-or-city-specific employee counts are not in this doc.",
       "should_refuse": true,
@@ -96,7 +96,7 @@
       "qid": "annual-report-08",
       "question": "What was NVIDIA's projected revenue for fiscal Q1 2028?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE \u2014 the document doesn't provide quarter-by-quarter forward guidance for FY2028.",
+      "_expected_answer": "REFUSE — the document doesn't provide quarter-by-quarter forward guidance for FY2028.",
       "_answer_type": "counterfactual",
       "_note": "HARD GATE refusal. The doc mentions cumulative through 2027 but no specific FY2028 Q1 number.",
       "should_refuse": true,
@@ -123,5 +123,16 @@
       "relevant_chunk_ids": []
     }
   ],
-  "_resolved_at": "2026-05-23T22:44:30Z"
+  "_resolved_at": "2026-05-23T22:44:30Z",
+  "_baseline_2026_05_24_bf16_reranker": {
+    "query_count": 10,
+    "answered": 7,
+    "refused": 3,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "hallucinations": 0,
+    "mean_citation_precision": 0.5,
+    "mean_citation_precision_answered_only": 0.2857,
+    "conservative_false_refusals": [],
+    "note": "Run config: vLLM Qwen/Qwen3-8B-AWQ orchestrator + BAAI/bge-reranker-v2-m3 now loading in bf16 (ADR-0006 intent), restored by the CrossEncoder automodel_args->model_kwargs fix on 2026-05-24. HARD GATES held: refusal_rate_on_counterfactuals=1.0, zero hallucinations (every refusal_correct=False case is a conservative false-refusal on an answerable query, not a wrongly-answered REF). ANS/REF counts identical to the prior (fp32-reranker) baselines. Any citation-precision delta vs the fp32 baseline is a chunk-granularity shift — the bf16 reranker cites an equally-valid sibling chunk in the SAME correct document — not a quality regression (verified: doc disambiguation + answer correctness intact)."
+  }
 }

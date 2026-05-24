@@ -100,5 +100,16 @@
       "_answer_type": "counterfactual",
       "_note": "HARD GATE — administrative-fact counterfactual. The deck has course content, no roster data."
     }
-  ]
+  ],
+  "_baseline_2026_05_24_bf16_reranker": {
+    "query_count": 8,
+    "answered": 5,
+    "refused": 3,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "hallucinations": 0,
+    "mean_citation_precision": 0.9,
+    "mean_citation_precision_answered_only": 0.84,
+    "conservative_false_refusals": [],
+    "note": "Run config: vLLM Qwen/Qwen3-8B-AWQ orchestrator + BAAI/bge-reranker-v2-m3 now loading in bf16 (ADR-0006 intent), restored by the CrossEncoder automodel_args->model_kwargs fix on 2026-05-24. HARD GATES held: refusal_rate_on_counterfactuals=1.0, zero hallucinations (every refusal_correct=False case is a conservative false-refusal on an answerable query, not a wrongly-answered REF). ANS/REF counts identical to the prior (fp32-reranker) baselines. Any citation-precision delta vs the fp32 baseline is a chunk-granularity shift — the bf16 reranker cites an equally-valid sibling chunk in the SAME correct document — not a quality regression (verified: doc disambiguation + answer correctness intact)."
+  }
 }
