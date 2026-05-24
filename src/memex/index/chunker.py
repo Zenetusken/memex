@@ -63,6 +63,22 @@ OVERLAP_TOKENS = IndexSettings.model_fields["chunk_overlap_tokens"].default
 # Units above the cap are force-split on line (row) boundaries — see
 # `_force_split_oversized`.
 MAX_CHUNK_MULTIPLIER = 3
+# Hard cap on a single chunk's character length. A markdown table can be
+# char-heavy but word-light (a financial 10-K table is ~21K chars but only
+# ~493 budget-words), so the word-budget cap (`MAX_CHUNK_MULTIPLIER`) never
+# fires and the table stays one oversized chunk. The char cap closes that
+# gap: it matches the answer prompt's `truncate(1800)` so each table chunk is
+# fully answer-visible, and it fits the reranker's attention window. Chart-
+# extracted blocks are exempt (they're intentionally one chunk — see the
+# `"[chart-extracted]" not in u` guard in `_split_section_into_chunks`).
+MAX_CHUNK_CHARS = 1800
+
+# A GFM table header: a pipe row followed by a delimiter row. The delimiter
+# row is all of pipes / dashes / colons / whitespace AND contains at least
+# one dash (so a plain `| a | b |` data row that happens to be all-punctuation
+# doesn't match). Used by `_gfm_header` to repeat the column header onto each
+# row-group when a table is force-split.
+_GFM_DELIM_RE = re.compile(r"^\s*\|?[\s:|-]+\|?\s*$")
 
 
 def _word_count(s: str) -> int:
@@ -181,32 +197,87 @@ def _split_into_sections(
     return sections
 
 
-def _force_split_oversized(unit: str, *, target_tokens: int) -> list[str]:
+def _gfm_header(unit: str) -> str | None:
+    """Return a GFM table's header block (header row + delimiter row) or `None`.
+
+    A GitHub-flavoured-markdown table opens with a pipe row (`| A | B |`)
+    followed by a delimiter row (`|---|---|`). When a table is force-split,
+    every row-group past the first loses its column headers (they were only on
+    the table's first line) — `| 2,345 | 1,890 |` with no idea what the columns
+    mean. `_force_split_oversized` re-prepends this header to each later group
+    so every table chunk is a valid, self-describing standalone GFM table.
+
+    Detection: the unit's first two non-blank lines must be a pipe row (starts
+    and ends with `|` after stripping) followed by a delimiter row (matches
+    `_GFM_DELIM_RE` AND contains a dash). Returns the two lines joined by `\\n`;
+    `None` for anything that isn't a GFM table (a non-pipe list, a one-line
+    table, a chart block) so no synthetic header is prepended there.
+    """
+    non_blank = [ln for ln in unit.split("\n") if ln.strip()]
+    if len(non_blank) < 2:
+        return None
+    first, second = non_blank[0], non_blank[1]
+    fs = first.strip()
+    if not (fs.startswith("|") and fs.endswith("|")):
+        return None
+    if "-" not in second or not _GFM_DELIM_RE.match(second):
+        return None
+    return first + "\n" + second
+
+
+def _force_split_oversized(
+    unit: str,
+    *,
+    target_tokens: int,
+    max_chars: int = MAX_CHUNK_CHARS,
+) -> list[str]:
     """Split a unit too large for the sentence-splitter on line boundaries.
 
     A markdown table is one paragraph with no sentence boundaries, so it
     arrives here whole. Splitting on `\\n` keeps each row (and each list item)
-    intact: consecutive lines are packed greedily into groups whose
-    `_budget_word_count` stays within `target_tokens`. A single line that alone
-    exceeds the budget (a pathological one-line table) is emitted whole rather
-    than cut mid-row. Each returned group is a contiguous substring of `unit`,
-    which keeps the caller's offset bookkeeping exact.
+    intact: consecutive lines are packed greedily into groups, flushing when
+    adding the next line would exceed EITHER `target_tokens` (word budget) OR
+    `max_chars` (character budget — the load-bearing trigger for char-heavy /
+    word-light financial tables). A single line that alone exceeds either
+    budget (a pathological one-line table) is emitted whole rather than cut
+    mid-row.
+
+    GFM-table awareness: if `unit` opens with a GFM header (`_gfm_header`),
+    that header block is prepended to every group AFTER the first (the first
+    group already starts with it), so each row-group is a self-describing
+    standalone table. The returned group text therefore is NOT necessarily a
+    contiguous substring of `unit` — the caller (`_split_section_into_chunks`)
+    handles offsets for the source-row portion explicitly. The group's source
+    rows (group text minus any synthetic header) ARE contiguous in `unit`.
     """
+    header = _gfm_header(unit)
     lines = unit.split("\n")
-    groups: list[str] = []
+    row_groups: list[str] = []  # the source rows for each group (no synthetic header)
     buf: list[str] = []
     buf_tokens = 0
+    buf_chars = 0
     for line in lines:
         lt = _budget_word_count(line)
-        if buf and buf_tokens + lt > target_tokens:
-            groups.append("\n".join(buf))
+        lc = len(line)
+        # +1 for the joining "\n" once the buffer is non-empty.
+        added_chars = lc + (1 if buf else 0)
+        if buf and (buf_tokens + lt > target_tokens or buf_chars + added_chars > max_chars):
+            row_groups.append("\n".join(buf))
             buf = []
             buf_tokens = 0
+            buf_chars = 0
+            added_chars = lc
         buf.append(line)
         buf_tokens += lt
+        buf_chars += added_chars
     if buf:
-        groups.append("\n".join(buf))
-    return groups
+        row_groups.append("\n".join(buf))
+
+    if header is None:
+        return row_groups
+    # Prepend the synthetic header to every group after the first (the first
+    # group's rows already begin with the header lines).
+    return [rows if i == 0 else header + "\n" + rows for i, rows in enumerate(row_groups)]
 
 
 def _split_section_into_chunks(
@@ -235,6 +306,68 @@ def _split_section_into_chunks(
     if max_tokens_per_chunk is None:
         max_tokens_per_chunk = target_tokens * MAX_CHUNK_MULTIPLIER
 
+    def _is_oversized(u: str) -> bool:
+        # Word-budget oversize (a table the sentence-splitter can't break) OR
+        # char-budget oversize (a char-heavy / word-light table that slips
+        # under the word cap — e.g. a 21K-char/493-word 10-K table). The char
+        # trigger never fires on a chart-extracted block: those are
+        # intentionally one chunk, and `_budget_word_count` already zeroes
+        # them so the word trigger can't fire either.
+        if _budget_word_count(u) > max_tokens_per_chunk:
+            return True
+        return len(u) > MAX_CHUNK_CHARS and "[chart-extracted]" not in u
+
+    # The output chunk tuples, built incrementally. Prose windows accumulate in
+    # `windows` and are re-located against `section` (byte-identical to the
+    # pre-table-fix behaviour); when an oversized unit is force-split, the
+    # pending prose windows are flushed first, then the force-split row-groups
+    # are appended as explicit `(cs, ce, text)` tuples (a header-repeated
+    # group's text is NOT a contiguous substring of `section`, so it can't go
+    # through the generic re-locate). The two paths share one `cursor`.
+    chunks: list[tuple[int, int, str]] = []
+    cursor = 0
+
+    def _flush_windows(windows: list[list[str]]) -> None:
+        # Re-locate each pending prose window into the source `section` so its
+        # char_start/char_end refer to the enclosing document. Identical to the
+        # original re-locate loop; only its scope changed (now flushable
+        # mid-stream so force-split chunks can be interleaved in source order).
+        nonlocal cursor
+        for w in windows:
+            joined = "\n\n".join(w)
+            first = w[0]
+            idx = section.find(first, cursor)
+            if idx < 0:
+                idx = cursor
+            char_start = section_offset + idx
+            char_end = char_start + len(joined)
+            cursor = idx + len(first)
+            chunks.append((char_start, char_end, joined))
+
+    def _emit_force_split(unit: str) -> None:
+        # Force-split an oversized unit on line/row boundaries and emit each
+        # group as an explicit chunk tuple. For each group the ROWS (group text
+        # minus any synthetic GFM header) ARE a contiguous substring of the
+        # source, so they locate exactly; the synthetic header (groups >0) is
+        # the only text outside `[char_start, char_end)`. This relaxes the
+        # offset round-trip to the rows portion for header-repeated chunks.
+        nonlocal cursor
+        header = _gfm_header(unit)
+        for i, group in enumerate(_force_split_oversized(unit, target_tokens=target_tokens)):
+            # Group 0's text already begins with the (real, source-contiguous)
+            # header — it is wholly contiguous in `section`. Groups >0 carry a
+            # SYNTHETIC header prefix; strip it to recover the source rows.
+            rows = group
+            if header is not None and i > 0:
+                rows = group[len(header) + 1 :]
+            idx = section.find(rows, cursor)
+            if idx < 0:
+                idx = cursor
+            char_start = section_offset + idx
+            char_end = char_start + len(rows)
+            cursor = idx + len(rows)
+            chunks.append((char_start, char_end, group))
+
     # P3.3 v4: use `_budget_word_count` for all chunk-size decisions
     # (closes early-or-not, paragraph-oversize check). Chart-extracted
     # blocks contribute zero to the budget so chunk boundaries match
@@ -246,23 +379,23 @@ def _split_section_into_chunks(
     cur_tokens = 0
     for p in paragraphs:
         pt = _budget_word_count(p)
-        if pt > target_tokens:
+        if pt > target_tokens or _is_oversized(p):
             # Sentence-split oversized paragraphs.
             sentences = _SENTENCE_RE.split(p)
             for s in sentences:
                 st = _budget_word_count(s)
-                if st > max_tokens_per_chunk:
+                if _is_oversized(s):
                     # A unit the sentence-splitter couldn't break (a table).
-                    # Flush the pending window, then emit each line-split
-                    # row-group as its OWN single-element window: `joined`
-                    # then equals the group verbatim — a contiguous substring
-                    # of `section` — so the re-locate loop's offsets stay exact.
+                    # Flush the pending prose windows + in-progress window
+                    # (preserving source order + the shared cursor), then emit
+                    # the line-split row-groups directly with explicit offsets.
                     if cur:
                         windows.append(cur)
                         cur = []
                         cur_tokens = 0
-                    for group in _force_split_oversized(s, target_tokens=target_tokens):
-                        windows.append([group])
+                    _flush_windows(windows)
+                    windows = []
+                    _emit_force_split(s)
                     continue
                 if cur and cur_tokens + st > target_tokens:
                     windows.append(cur)
@@ -281,22 +414,7 @@ def _split_section_into_chunks(
             cur_tokens += pt
     if cur:
         windows.append(cur)
-
-    # Re-locate each window into the original section text so the
-    # char_start/char_end refer to the source document.
-    chunks: list[tuple[int, int, str]] = []
-    cursor = 0
-    for w in windows:
-        joined = "\n\n".join(w)
-        # Locate the first paragraph of the window in the source from `cursor`.
-        first = w[0]
-        idx = section.find(first, cursor)
-        if idx < 0:
-            idx = cursor
-        char_start = section_offset + idx
-        char_end = char_start + len(joined)
-        cursor = idx + len(first)
-        chunks.append((char_start, char_end, joined))
+    _flush_windows(windows)
     return chunks
 
 

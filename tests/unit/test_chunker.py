@@ -126,6 +126,22 @@ def test_force_split_keeps_table_rows_intact() -> None:
     assert sum(needle in c.text for c in chunks) == 1
 
 
+_GFM_HEADER = "| Line item | FY25 | FY24 |\n|---|---|---|"
+
+
+def _rows_portion(text: str) -> str:
+    """Strip a leading synthetic GFM header from a table chunk's text.
+
+    Header-repeated chunks (every table sub-chunk after the first) carry the
+    synthetic `header + "\\n"` that the chunker prepended — that prefix is NOT
+    in the source, so the offset round-trip is to the ROWS portion only (the
+    chunk text minus any leading repeated header). See the table-chunking spec
+    §4 "Offset handling".
+    """
+    prefix = _GFM_HEADER + "\n"
+    return text[len(prefix) :] if text.startswith(prefix) else text
+
+
 def test_force_split_offsets_roundtrip_exactly() -> None:
     body = f"## Financial Statements\n\n{_big_table(400)}\n"
     doc = _doc(body)
@@ -133,8 +149,13 @@ def test_force_split_offsets_roundtrip_exactly() -> None:
     table_chunks = [c for c in chunks if c.text.lstrip().startswith("|")]
     assert table_chunks
     for c in table_chunks:
-        # Single-element windows round-trip: body slice == chunk text verbatim.
-        assert doc.body[c.char_start : c.char_end] == c.text
+        # Round-trip holds for the ROWS portion. The first table chunk's text
+        # is wholly contiguous (its header is the table's real first line);
+        # later chunks carry a synthetic repeated header that is the only text
+        # not in [char_start, char_end). Accept either: body slice == full text
+        # (group 0) OR == rows-only (header-repeated groups).
+        slice_ = doc.body[c.char_start : c.char_end]
+        assert slice_ == c.text or slice_ == _rows_portion(c.text)
     # Offsets are monotonic non-decreasing across the table.
     starts = [c.char_start for c in table_chunks]
     assert starts == sorted(starts)
@@ -166,3 +187,131 @@ def test_oversized_chart_block_not_force_split() -> None:
     body = f"## Figure\n\n{chart}\n"
     chunks = chunk_document(_doc(body))
     assert sum("[chart-extracted]" in c.text for c in chunks) == 1
+
+
+# ----- Char-aware split + GFM table-header repetition (table-chunking spec) -----
+
+from memex.index.chunker import MAX_CHUNK_CHARS, _force_split_oversized, _gfm_header  # noqa: E402
+
+# The header _big_table emits — reused to detect/strip synthetic headers.
+_TABLE_HEADER = "| Line item | FY25 | FY24 |"
+_TABLE_DELIM = "|---|---|---|"
+
+
+def _char_heavy_table(n_rows: int) -> str:
+    """A char-heavy / word-light GFM table — the exact 10-K failure shape.
+
+    Each row is long in characters (a long no-space identifier + two long
+    no-space numbers → only ~4 whitespace "words") but light in budget-words,
+    so the word cap (`MAX_CHUNK_MULTIPLIER`) never fires; only the char cap
+    does. The whole table is one paragraph (no blank lines), so the sentence-
+    splitter can't break it — it lands in `_force_split_oversized` whole.
+    """
+    header = f"{_TABLE_HEADER}\n{_TABLE_DELIM}"
+    rows = "\n".join(
+        # No internal spaces in the cells → each row is ~4 words but ~70 chars.
+        f"| Segment_line_item_identifier_{i:04d} | {i:08d}00000 | {i:08d}99999 |"
+        for i in range(n_rows)
+    )
+    return header + "\n" + rows
+
+
+def test_char_heavy_word_light_table_splits_and_is_char_bounded() -> None:
+    # ~big table that is well under the word cap but way over the char cap
+    # (the exact 10-K failure: char-heavy, word-light → word cap never fires).
+    table = _char_heavy_table(150)
+    assert _budget_word_count(table) <= _CAP, _budget_word_count(table)  # word cap NOT fired
+    assert len(table) > MAX_CHUNK_CHARS  # but the char cap must
+    body = f"## Financials\n\n{table}\n"
+    chunks = chunk_document(_doc(body))
+    table_chunks = [c for c in chunks if c.text.lstrip().startswith("|")]
+    assert len(table_chunks) > 1, "char-heavy table must split into multiple chunks"
+    # Every chunk is char-bounded (allow one over-long final row of slack) and
+    # word-bounded.
+    longest_row = max(len(ln) for ln in table.split("\n"))
+    for c in table_chunks:
+        assert len(c.text) <= MAX_CHUNK_CHARS + longest_row + len(_TABLE_HEADER) + len(_TABLE_DELIM)
+        assert _budget_word_count(c.text) <= _CAP
+
+
+def test_table_header_repeated_on_every_post_first_chunk() -> None:
+    table = _char_heavy_table(150)
+    body = f"## Financials\n\n{table}\n"
+    chunks = chunk_document(_doc(body))
+    table_chunks = [c for c in chunks if c.text.lstrip().startswith("|")]
+    assert len(table_chunks) > 1
+    header_block = f"{_TABLE_HEADER}\n{_TABLE_DELIM}"
+    # Every chunk after the first starts with the header + delimiter rows.
+    for c in table_chunks[1:]:
+        assert c.text.startswith(header_block), f"chunk missing repeated header: {c.text[:80]!r}"
+    # The first chunk also starts with the header (it's the table's own first line).
+    assert table_chunks[0].text.startswith(header_block)
+
+
+def test_deep_row_is_colocated_with_the_header() -> None:
+    # A row deep in the table must land in a chunk that ALSO carries the header,
+    # so a value in that row is interpretable in isolation.
+    table = _char_heavy_table(150)
+    body = f"## Financials\n\n{table}\n"
+    chunks = chunk_document(_doc(body))
+    deep_row = "| Segment_line_item_identifier_0120 | 0000012000000 | 0000012099999 |"
+    holders = [c for c in chunks if deep_row in c.text]
+    assert len(holders) == 1, "deep row must appear in exactly one chunk"
+    holder = holders[0]
+    assert _TABLE_HEADER in holder.text
+    assert _TABLE_DELIM in holder.text
+
+
+def test_non_gfm_oversized_unit_gets_no_synthetic_header() -> None:
+    # An oversized unit with no GFM header (a long pipe-less list/block) is
+    # still force-split on lines, but NO synthetic header is prepended.
+    lines = "\n".join(
+        f"- Bullet item number {i} with some descriptive text here." for i in range(400)
+    )
+    body = f"## Notes\n\n{lines}\n"
+    chunks = chunk_document(_doc(body))
+    # It split (char + word bounded) ...
+    assert len(chunks) > 1
+    for c in chunks:
+        assert _budget_word_count(c.text) <= _CAP
+        # ... and no chunk grew a fabricated `|---|` delimiter row.
+        assert _TABLE_DELIM not in c.text
+    # _gfm_header returns None for a non-pipe unit.
+    assert _gfm_header(lines) is None
+
+
+def test_gfm_header_detection() -> None:
+    table = "| A | B | C |\n|---|---|---|\n| 1 | 2 | 3 |\n| 4 | 5 | 6 |"
+    assert _gfm_header(table) == "| A | B | C |\n|---|---|---|"
+    # A pipe row with no following delimiter row is not a GFM header.
+    assert _gfm_header("| A | B |\n| 1 | 2 |") is None
+    # Prose is not a GFM table.
+    assert _gfm_header("Just a paragraph.\nAnother line.") is None
+    # A single line can't be a GFM table.
+    assert _gfm_header("| A | B |") is None
+
+
+def test_force_split_single_overlong_line_emitted_whole() -> None:
+    # A pathological one-line "table" longer than max_chars is emitted whole
+    # rather than cut mid-line (degenerate guard).
+    one_line = "| " + " | ".join(str(i) for i in range(2000)) + " |"
+    assert len(one_line) > MAX_CHUNK_CHARS
+    groups = _force_split_oversized(one_line, target_tokens=10)
+    assert groups == [one_line]
+
+
+def test_prose_chunk_ids_identical_across_runs_and_versus_no_table_doc() -> None:
+    # Prose path is byte-identical: a normal multi-paragraph prose doc chunks
+    # deterministically AND identically to a doc with no table at all (the
+    # char/header machinery is a no-op on prose).
+    sentence = (
+        "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do "
+        "eiusmod tempor incididunt ut labore et dolore magna aliqua. "
+    )
+    body = "\n\n".join(f"## Section {i}\n\n" + (sentence * 50) for i in range(3))
+    run_a = chunk_document(_doc(body))
+    run_b = chunk_document(_doc(body))
+    assert [c.chunk_id for c in run_a] == [c.chunk_id for c in run_b]
+    # The prose has no `|---|` rows at all → no chunk should carry a synthetic
+    # delimiter row (proves the table machinery never touched it).
+    assert all(_TABLE_DELIM not in c.text for c in run_a)
