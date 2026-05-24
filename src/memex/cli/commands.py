@@ -30,7 +30,7 @@ from rich.table import Table
 from memex.agents.answering import answer_query
 from memex.cli.bootstrap import bootstrap
 from memex.enrich.pipeline import enrich_document
-from memex.eval.runner import run_eval
+from memex.eval.runner import run_eval, run_parse_eval
 from memex.index.graph_store import GraphStore
 from memex.index.pipeline import index_document, reindex_vault, retitle_document
 from memex.ingest.pipeline import (
@@ -385,6 +385,26 @@ def register(app: typer.Typer) -> None:
         async def _run():
             bootstrap()
             return await run_eval(query_set, quick=quick)
+
+        _print(asyncio.run(_run()))
+
+    @app.command(name="eval-parse")
+    def eval_parse_cmd(
+        corpus_dir: Path = _Argument(  # noqa: B008
+            ...,
+            exists=True,
+            file_okay=False,
+            help="Corpus dir of <doc>/ground-truth.md (+ manifest.json). "
+            "Predicted markdown is read from the vault by doc_id, or a "
+            "predicted.md sibling. See docs/eval-corpus-plan.md.",
+        ),
+    ) -> None:
+        """Score parse fidelity (CER / WER / structural-F1) against
+        hand-curated ground truth."""
+
+        async def _run():
+            bootstrap()
+            return await run_parse_eval(corpus_dir)
 
         _print(asyncio.run(_run()))
 

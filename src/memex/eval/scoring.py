@@ -15,9 +15,12 @@ See docs/eval-corpus-plan.md.
 
 from __future__ import annotations
 
+import re
 import unicodedata
 
 from pydantic import BaseModel
+
+from memex.core.text import chart_extracted_spans, is_inside_any_span
 
 
 def _normalize(text: str) -> str:
@@ -79,9 +82,9 @@ def _levenshtein_seq(a: list[str], b: list[str]) -> int:
             cost = 0 if ta == tb else 1
             cur.append(
                 min(
-                    cur[-1] + 1,           # insertion
-                    prev[j] + 1,           # deletion
-                    prev[j - 1] + cost,    # substitution
+                    cur[-1] + 1,  # insertion
+                    prev[j] + 1,  # deletion
+                    prev[j - 1] + cost,  # substitution
                 )
             )
         prev = cur
@@ -99,6 +102,79 @@ def word_error_rate(predicted: str, reference: str) -> float:
     if not rn:
         return 0.0 if not pn else 1.0
     return _levenshtein_seq(pn, rn) / max(len(rn), 1)
+
+
+_FRONTMATTER_RE = re.compile(r"\A---\r?\n.*?\r?\n---\r?\n", re.DOTALL)
+_ATX_HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
+_FENCE_RE = re.compile(r"^\s*(```|~~~)")
+
+
+def strip_frontmatter(markdown: str) -> str:
+    """Drop a leading YAML frontmatter block (`---\\n…\\n---\\n`).
+
+    `vault.read_document` already splits frontmatter off the body, but a
+    ground-truth `.md` file read from disk still carries it — strip it so
+    CER/WER compare body-to-body (frontmatter is metadata, not prose)."""
+    return _FRONTMATTER_RE.sub("", markdown, count=1)
+
+
+def extract_markdown_headings(markdown: str) -> list[tuple[int, str]]:
+    """Extract `(level, text)` ATX heading tuples for structural F1.
+
+    Skips headings inside fenced code blocks (``` / ~~~) and inside
+    `[chart-extracted]` blocks — the latter carry inert `# H1` chart-
+    figure labels that aren't document structure (same defense the
+    chunker applies via `core.text`). The trailing-`#` ATX closing
+    sequence is stripped from the captured text.
+    """
+    spans = chart_extracted_spans(markdown)
+    out: list[tuple[int, str]] = []
+    in_fence = False
+    offset = 0
+    for line in markdown.splitlines(keepends=True):
+        line_start = offset
+        offset += len(line)
+        stripped = line.rstrip("\n")
+        if _FENCE_RE.match(stripped):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        m = _ATX_HEADING_RE.match(stripped)
+        if m is None or is_inside_any_span(line_start, spans):
+            continue
+        out.append((len(m.group(1)), m.group(2).strip()))
+    return out
+
+
+class ParseQualityScores(BaseModel):
+    """The three parse-fidelity metrics for one document: predicted
+    markdown vs hand-curated ground truth. See `docs/eval-corpus-plan.md`
+    §Scoring."""
+
+    cer: float
+    wer: float
+    structural_f1_headings: float
+
+
+def score_parse_quality(predicted: str, reference: str) -> ParseQualityScores:
+    """Score predicted markdown against a ground-truth reference.
+
+    Both sides have any leading YAML frontmatter stripped first so the
+    text metrics compare body content. Headings feed `structural_f1_
+    headings`. This is the single entry point the eval runner calls per
+    document — it bundles the three primitives so the runner stays thin.
+    """
+    pred = strip_frontmatter(predicted)
+    ref = strip_frontmatter(reference)
+    return ParseQualityScores(
+        cer=character_error_rate(pred, ref),
+        wer=word_error_rate(pred, ref),
+        structural_f1_headings=structural_f1_headings(
+            extract_markdown_headings(pred),
+            extract_markdown_headings(ref),
+        ),
+    )
 
 
 def structural_f1_headings(
@@ -136,7 +212,5 @@ def citation_precision(input_: CitationPrecisionInput) -> float:
     variant for an honest signal."""
     if not input_.cited_chunk_ids:
         return 1.0  # no citations to be wrong about
-    correct = sum(
-        1 for cid in input_.cited_chunk_ids if cid in input_.relevant_chunk_ids
-    )
+    correct = sum(1 for cid in input_.cited_chunk_ids if cid in input_.relevant_chunk_ids)
     return correct / len(input_.cited_chunk_ids)
