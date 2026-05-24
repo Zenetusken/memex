@@ -519,3 +519,23 @@ def test_chart_and_table_strips_compose() -> None:
     assert "|---|" not in stripped
     assert "[table-rows]" in stripped
     assert "Prose lead-in." in stripped
+
+
+def test_misbounded_prose_header_is_skipped() -> None:
+    """The real 10-K failure: Docling MIS-BOUNDED the segment table, pulling the
+    section heading + intro SENTENCE into the header row. The header is text (so
+    the all-value-like gate misses it), but linearizing it maps the wrong label
+    to each value (`Compute & Networking=$22.5B` — actually Graphics). The
+    prose-cell gate must skip it so no WRONG KV rows (hallucination risk) ship."""
+    body = (
+        "## Reportable Segments\n\n"
+        "| Fiscal 2026 Reportable Segments | Our two reportable segments are "
+        "'Compute & Networking' and 'Graphics': | Compute & Networking | Graphics Total |\n"
+        "|---|---|---|---|\n"
+        "| Revenue | $193.5B | $22.5B | $215.9B |\n"
+        "| Operating Income | $130.1B | $9.2B | $139.3B |\n"
+    )
+    out = linearize_gfm_tables(body)
+    assert "[table-rows]" not in out, "mis-bounded prose header must be skipped"
+    # the wrong mapping must NOT appear anywhere
+    assert "Compute & Networking=$22.5B" not in out

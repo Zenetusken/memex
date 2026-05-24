@@ -120,6 +120,34 @@ def _header_all_value_like(header: list[str]) -> bool:
     return all(looks_like_value(cell) for cell in header)
 
 
+# A real GFM column-header cell is a short label. A cell that ends in sentence
+# punctuation, runs many words, or is very long is a pulled-in sentence/heading,
+# not a column label — the tell of a table Docling MIS-BOUNDED (it swallowed the
+# surrounding heading + intro, e.g. the 10-K segment table whose header became
+# `… | Our two reportable segments are '…' and 'Graphics': | Compute & Networking
+# | Graphics Total`). Linearizing such a header emits WRONG KV pairs (mapping the
+# wrong label to a value — a hallucination risk), so skip the table entirely.
+_HEADER_PROSE_TERMINAL = (".", ":", "!", "?")
+_HEADER_MAX_WORDS = 10
+_HEADER_MAX_CHARS = 70
+
+
+def _header_has_prose_cell(header: list[str]) -> bool:
+    """Header-sanity gate (mis-bounding defense): True iff any header cell reads
+    as prose (a pulled-in sentence/heading) rather than a short column label."""
+    for cell in header:
+        c = cell.strip()
+        if not c:
+            continue
+        if (
+            c[-1] in _HEADER_PROSE_TERMINAL
+            or len(c.split()) > _HEADER_MAX_WORDS
+            or len(c) > _HEADER_MAX_CHARS
+        ):
+            return True
+    return False
+
+
 def _linearize_row(
     header: list[str],
     cells: list[str],
@@ -191,7 +219,7 @@ def _linearize_table(markdown: str, match: re.Match[str]) -> str | None:
     if not data_rows:
         return None
 
-    if _header_all_value_like(header):
+    if _header_all_value_like(header) or _header_has_prose_cell(header):
         return None
 
     row_label_column = _is_row_label_column(header, data_rows)
