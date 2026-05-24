@@ -302,21 +302,25 @@ The corpus is itself versioned semantically.
 > **Implementation status (2026-05-24).** The scoring engine is built and
 > wired: `eval/scoring.py` (CER, WER, structural-F1 for headings) +
 > `eval/runner.py::run_parse_eval`, driven by `memex eval-parse
-> <corpus_dir>`. `eval-corpus/` exists with `corpus.toml` and its first
-> document — `modern-printed/tidewater-maintenance-log`, a **synthetic**
-> fixture (authored canonical-first → ground truth independent of the SUT,
-> the safe path; the "don't bootstrap from Memex or a frontier LLM" rules
-> below are why real docs still need a human curator). Rendered via
-> **LibreOffice** (HTML→ODT→PDF), a born-digital producer the classifier
-> recognizes. Measured baseline: CER 0.052 / WER 0.146 / structural-F1
-> 0.615 — surfacing real pymupdf4llm findings (heading levels flatten to
-> H2 + bold-wrap; the table flattens under the writerweb filter). An
-> earlier PyMuPDF `Story` render (CER 0.164) dropped some post-heading
-> paragraphs — a *Story artifact*, not a real-PDF weakness, confirmed by
-> the LibreOffice render parsing them correctly. Still to do: table +
-> equation structural-F1, a word-processor-authored table fixture, the
-> retrieval/answer metric halves, and — the bulk — hand-curated **real**
-> documents per category.
+> <corpus_dir>`. `eval-corpus/` has `corpus.toml` and **3 synthetic
+> fixtures across 3 categories** (each authored canonical-first → ground
+> truth independent of the SUT, the safe path; the "don't bootstrap from
+> Memex or a frontier LLM" rules below are why *real* docs still need a
+> human curator). All rendered via **LibreOffice** (a born-digital
+> producer the classifier recognizes; `generate.py` carries an
+> `LD_LIBRARY_PATH` fix for this host). Fixtures:
+> `modern-printed/tidewater-maintenance-log` (prose + lists + HTML table),
+> `forms/quarterly-uptime-report` (native `.fodt` → its table parses as a
+> proper **GFM table**), `technical-docs/widget-cli-reference` (deep
+> H1–H4 + code blocks). Full-corpus `memex eval-parse`: **3/3 pass, mean
+> CER 0.037 / WER 0.121 / structural-F1 0.566**. Findings: native ODF
+> tables parse as GFM + **code blocks parse with high fidelity**, but
+> **pymupdf4llm collapses all heading levels to `##`** (caps structural-F1
+> — queued as a Tier-1 parser fix in the ROADMAP) and the table header row
+> splits. (An earlier PyMuPDF `Story` render dropped some post-heading
+> paragraphs — a *Story artifact*, not a real-PDF weakness.) Still to do:
+> table + equation structural-F1, the retrieval/answer metric halves, and
+> — the bulk — hand-curated **real** documents per category.
 
 Realistic phasing for going from zero to a working eval suite.
 
