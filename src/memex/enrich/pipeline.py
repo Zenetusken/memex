@@ -67,11 +67,13 @@ _ENTITY_PROMPT_NAME = "extract_entities"
 _ENTITY_PROMPT_VERSION = "v2"
 _CITATION_PROMPT_NAME = "extract_citations"
 _CITATION_PROMPT_VERSION = "v2"
-# Per-call output budget for entity/citation extraction. Above the 1024
-# default so the bounded (max_length=24) lists complete within budget even on
-# dense table passages, well under the 6144 model-len once the truncated
-# prompt (≤6000 chars) is accounted for.
-_ENRICH_MAX_TOKENS = 1536
+# Per-call output budget for entity/citation extraction. The bounded
+# (max_length=24) lists can still want >1536 completion tokens on the densest
+# table chunks (24 entities with long `span_text` quotes). The truncated
+# passage prompt is only ~1100-1800 tokens, so the 6144 model-len leaves ample
+# room: 3072 completion + ~1800 prompt ≈ 4900 < 6144, with margin. Validated to
+# take the 10-K's residual chunk_failures from 7 → ~0.
+_ENRICH_MAX_TOKENS = 3072
 
 _MAX_CONCURRENT = 4  # per-chunk extraction parallelism
 
