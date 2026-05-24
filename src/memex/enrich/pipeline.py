@@ -60,9 +60,13 @@ from memex.vault.store import (
 logger = structlog.get_logger(__name__)
 
 _ENTITY_PROMPT_NAME = "extract_entities"
-_ENTITY_PROMPT_VERSION = "v1"
+# v2 adds `{{ passage | truncate(6000) }}` so an oversized chunk (e.g. a big
+# table that escaped the chunker cap, or an un-migrated vault doc) can't blow
+# the entity-extraction context window and fail the whole chunk. See the
+# chunker `MAX_CHUNK_MULTIPLIER` cap, which is the primary fix.
+_ENTITY_PROMPT_VERSION = "v2"
 _CITATION_PROMPT_NAME = "extract_citations"
-_CITATION_PROMPT_VERSION = "v1"
+_CITATION_PROMPT_VERSION = "v2"
 
 _MAX_CONCURRENT = 4  # per-chunk extraction parallelism
 

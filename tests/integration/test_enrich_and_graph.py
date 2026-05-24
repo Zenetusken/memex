@@ -179,7 +179,7 @@ async def test_enrich_extracts_entities_and_writes_graph(
     # `extract_citations` per chunk; the manifest records both prompt
     # versions. Entity prompt presence + version is what this test cares
     # about; citations have their own dedicated tests below.
-    assert manifest.enrich.prompt_versions.get("extract_entities") == "v1"
+    assert manifest.enrich.prompt_versions.get("extract_entities") == "v2"
     assert "extract_citations" in manifest.enrich.prompt_versions
 
 

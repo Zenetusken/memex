@@ -54,6 +54,15 @@ from memex.core.text import (  # noqa: E402
 # whole settings stack.
 TARGET_TOKENS = IndexSettings.model_fields["chunk_target_tokens"].default
 OVERLAP_TOKENS = IndexSettings.model_fields["chunk_overlap_tokens"].default
+# Hard cap on a single chunk's budget, as a multiple of the target. A markdown
+# table is one "paragraph" with no sentence boundaries, so the sentence-splitter
+# can't break it — without this cap a 175-page 10-K's financial tables become
+# single ~21K-char chunks that (a) blow the entity-extraction context window in
+# enrich (vLLM rejects prompt+output > max-model-len → chunk_failed) and (b)
+# exceed the reranker's attention window + the answer prompt's truncate budget.
+# Units above the cap are force-split on line (row) boundaries — see
+# `_force_split_oversized`.
+MAX_CHUNK_MULTIPLIER = 3
 
 
 def _word_count(s: str) -> int:
@@ -172,12 +181,41 @@ def _split_into_sections(
     return sections
 
 
+def _force_split_oversized(unit: str, *, target_tokens: int) -> list[str]:
+    """Split a unit too large for the sentence-splitter on line boundaries.
+
+    A markdown table is one paragraph with no sentence boundaries, so it
+    arrives here whole. Splitting on `\\n` keeps each row (and each list item)
+    intact: consecutive lines are packed greedily into groups whose
+    `_budget_word_count` stays within `target_tokens`. A single line that alone
+    exceeds the budget (a pathological one-line table) is emitted whole rather
+    than cut mid-row. Each returned group is a contiguous substring of `unit`,
+    which keeps the caller's offset bookkeeping exact.
+    """
+    lines = unit.split("\n")
+    groups: list[str] = []
+    buf: list[str] = []
+    buf_tokens = 0
+    for line in lines:
+        lt = _budget_word_count(line)
+        if buf and buf_tokens + lt > target_tokens:
+            groups.append("\n".join(buf))
+            buf = []
+            buf_tokens = 0
+        buf.append(line)
+        buf_tokens += lt
+    if buf:
+        groups.append("\n".join(buf))
+    return groups
+
+
 def _split_section_into_chunks(
     section: str,
     section_offset: int,
     *,
     target_tokens: int = TARGET_TOKENS,
     overlap_tokens: int = OVERLAP_TOKENS,
+    max_tokens_per_chunk: int | None = None,
 ) -> list[tuple[int, int, str]]:
     """Within a section, split into ~target_tokens windows with overlap.
 
@@ -185,10 +223,17 @@ def _split_section_into_chunks(
     enclosing document. `target_tokens` and `overlap_tokens` default
     to the module-level constants (which mirror `IndexSettings`
     defaults); callers via `chunk_document` thread the live settings.
+
+    A unit whose own budget exceeds `max_tokens_per_chunk` (default
+    `target_tokens * MAX_CHUNK_MULTIPLIER`) — a markdown table, which the
+    sentence-splitter can't break — is force-split on line/row boundaries
+    so no chunk blows the reranker window or the enrich context budget.
     """
     paragraphs = [p.strip() for p in _PARAGRAPH_RE.split(section) if p.strip()]
     if not paragraphs:
         return []
+    if max_tokens_per_chunk is None:
+        max_tokens_per_chunk = target_tokens * MAX_CHUNK_MULTIPLIER
 
     # P3.3 v4: use `_budget_word_count` for all chunk-size decisions
     # (closes early-or-not, paragraph-oversize check). Chart-extracted
@@ -206,6 +251,19 @@ def _split_section_into_chunks(
             sentences = _SENTENCE_RE.split(p)
             for s in sentences:
                 st = _budget_word_count(s)
+                if st > max_tokens_per_chunk:
+                    # A unit the sentence-splitter couldn't break (a table).
+                    # Flush the pending window, then emit each line-split
+                    # row-group as its OWN single-element window: `joined`
+                    # then equals the group verbatim — a contiguous substring
+                    # of `section` — so the re-locate loop's offsets stay exact.
+                    if cur:
+                        windows.append(cur)
+                        cur = []
+                        cur_tokens = 0
+                    for group in _force_split_oversized(s, target_tokens=target_tokens):
+                        windows.append([group])
+                    continue
                 if cur and cur_tokens + st > target_tokens:
                     windows.append(cur)
                     overlap_words = " ".join(cur).split()[-overlap_tokens:]
