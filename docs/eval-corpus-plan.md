@@ -310,7 +310,7 @@ Realistic phasing for going from zero to a working eval suite.
 
 **Week 2 — Parsing evals**
 
-- Implement CER, WER, structural F1 (headings first, then tables, then equations)
+- ✅ **CER, WER, structural-F1 (headings) implemented + wired** (2026-05-24): `eval/scoring.py::score_parse_quality` + `eval/runner.py::run_parse_eval`, exposed as `memex eval-parse <corpus_dir>`. Consumes the `<doc>/ground-truth.md` + `manifest.json` layout above; predicted markdown comes from the vault by doc_id (or a `predicted.md` override). Heading extraction is fence- and chart-block-aware. **Still needs hand-curated `ground-truth.md` docs to run against** — the wiring is done; the curator work isn't. Structural-F1 for tables + equations remains to implement.
 - Curate 10 more `modern-printed` and 5 `scientific` documents
 - First end-to-end eval run; calibrate thresholds against actual measured performance
 - Adjust developer-guidelines thresholds if they prove unrealistic
