@@ -20,6 +20,7 @@ from memex.enrich.citations import (
     make_signature,
     resolve_candidate,
 )
+from memex.enrich.course_refs import extract_course_references
 from memex.enrich.entities import (
     Entity,
     EntityConfidence,
@@ -45,6 +46,7 @@ __all__ = [
     "ResolvedCitation",
     "dedupe",
     "enrich_document",
+    "extract_course_references",
     "insert_wikilinks",
     "make_signature",
     "merge_entities",

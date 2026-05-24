@@ -38,6 +38,7 @@ from memex.enrich.citations import (
     make_signature,
     resolve_candidate,
 )
+from memex.enrich.course_refs import extract_course_references
 from memex.enrich.entities import (
     Entity,
     EntityList,
@@ -81,9 +82,7 @@ class EnrichResult(BaseModel):
     duration_ms: int = 0
 
 
-async def _build_citation_index(
-    vault_path: Path, *, skip_doc_id: str
-) -> CitationIndex:
+async def _build_citation_index(vault_path: Path, *, skip_doc_id: str) -> CitationIndex:
     """Index every other document in the vault for citation matching.
 
     The body is passed to `make_signature` so each `DocSignature` carries
@@ -95,27 +94,19 @@ async def _build_citation_index(
         if ref.doc_id == skip_doc_id:
             continue
         doc = await read_document(vault_path, ref.doc_id)
-        idx.by_id[ref.doc_id] = make_signature(
-            ref.doc_id, doc.frontmatter, doc.body
-        )
+        idx.by_id[ref.doc_id] = make_signature(ref.doc_id, doc.frontmatter, doc.body)
     return idx
 
 
-async def _extract_chunk(
-    chunk: Chunk, title: str
-) -> tuple[list[Entity], list[CitationCandidate]]:
+async def _extract_chunk(chunk: Chunk, title: str) -> tuple[list[Entity], list[CitationCandidate]]:
     """One LLM call for entities, one for citations. Parallel.
 
     Both calls go through `complete_structured` which is generic over
     its `schema` parameter — pyright keeps the chain typed without
     runtime asserts.
     """
-    entity_prompt = render_prompt(
-        _ENTITY_PROMPT_NAME, document_title=title, passage=chunk.text
-    )
-    citation_prompt = render_prompt(
-        _CITATION_PROMPT_NAME, document_title=title, passage=chunk.text
-    )
+    entity_prompt = render_prompt(_ENTITY_PROMPT_NAME, document_title=title, passage=chunk.text)
+    citation_prompt = render_prompt(_CITATION_PROMPT_NAME, document_title=title, passage=chunk.text)
 
     entity_task = complete_structured(
         prompt=entity_prompt,
@@ -127,9 +118,7 @@ async def _extract_chunk(
         schema=CitationList,
         prompt_tag=f"{_CITATION_PROMPT_NAME}@{_CITATION_PROMPT_VERSION}",
     )
-    (entity_raw, _), (citation_raw, _) = await asyncio.gather(
-        entity_task, citation_task
-    )
+    (entity_raw, _), (citation_raw, _) = await asyncio.gather(entity_task, citation_task)
     if not isinstance(entity_raw, EntityList):
         # `complete_structured` is typed to return the schema instance,
         # so this can only fire if a test fake or vendored plugin breaks
@@ -168,9 +157,7 @@ async def enrich_document(doc_id: str) -> EnrichResult:
     title = doc.frontmatter.title or doc_id
 
     # Citation index excludes the current doc (we don't link to ourself).
-    citation_index = await _build_citation_index(
-        settings.vault_path, skip_doc_id=doc_id
-    )
+    citation_index = await _build_citation_index(settings.vault_path, skip_doc_id=doc_id)
 
     semaphore = asyncio.Semaphore(_MAX_CONCURRENT)
 
@@ -184,9 +171,7 @@ async def enrich_document(doc_id: str) -> EnrichResult:
     # the partial result through. Aborting the whole doc would leave
     # the graph in a half-enriched state (some chunks' MENTIONS/CITES
     # written, others not).
-    raw_results = await asyncio.gather(
-        *(_run(c) for c in chunks), return_exceptions=True
-    )
+    raw_results = await asyncio.gather(*(_run(c) for c in chunks), return_exceptions=True)
 
     # Flatten entities + citations, keep chunk attribution on candidates.
     entities_flat: list[Entity] = []
@@ -214,9 +199,7 @@ async def enrich_document(doc_id: str) -> EnrichResult:
     # (they go into structlog at debug level for forensics).
     resolved: list[ResolvedCitation] = []
     for chunk_id, candidate in citation_candidates:
-        match = resolve_candidate(
-            candidate, chunk_id, citation_index, skip_doc_id=doc_id
-        )
+        match = resolve_candidate(candidate, chunk_id, citation_index, skip_doc_id=doc_id)
         if match is not None:
             resolved.append(match)
         else:
@@ -226,13 +209,26 @@ async def enrich_document(doc_id: str) -> EnrichResult:
                 model_confidence=candidate.confidence,
             )
 
+    # Course cross-references: a pure-text pass that resolves "Cours N"
+    # / "Semaine N" mentions to sibling lecture docs in the same course
+    # series (no LLM). These fire on lecture/syllabus content where the
+    # academic-citation resolver emits nothing — the syllabus's course
+    # program is the natural hub linking to each lecture.
+    course_refs = extract_course_references(
+        doc.body,
+        self_doc_id=doc_id,
+        self_title=title,
+        index=citation_index,
+    )
+    if course_refs:
+        log.info("enrich.course_refs", count=len(course_refs))
+        resolved.extend(course_refs)
+
     # Wikilink insertion: rewrites the body atomically.
     # `target_index` enables P4.1 section-anchor emission — when a
     # citation's surrounding context mentions a heading of the target
     # doc, the wikilink becomes `[[doc#heading]]` instead of `[[doc]]`.
-    new_body, wikilinks_inserted = insert_wikilinks(
-        doc.body, resolved, target_index=citation_index
-    )
+    new_body, wikilinks_inserted = insert_wikilinks(doc.body, resolved, target_index=citation_index)
     if new_body != doc.body:
         updated_ref = make_ref(
             settings.vault_path,
@@ -270,9 +266,7 @@ async def enrich_document(doc_id: str) -> EnrichResult:
                 await graph.link_mentions(doc_id, eid, ent.confidence)
             for cit in resolved:
                 # Ensure the target document node exists before linking.
-                await graph.upsert_document(
-                    cit.target_doc_id, cit.target_title
-                )
+                await graph.upsert_document(cit.target_doc_id, cit.target_title)
                 await graph.link_cites(
                     from_doc_id=doc_id,
                     to_doc_id=cit.target_doc_id,
