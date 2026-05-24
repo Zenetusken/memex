@@ -5,11 +5,15 @@
 
 {% if documents %}
 <ul class="space-y-2">
-  {% for ref in documents %}
+  {% for doc in documents %}
   <li class="border border-zinc-800 rounded-md">
-    <a href="/documents/{{ ref.doc_id }}" class="block p-3 hover:bg-zinc-900 transition">
-      <p class="font-mono text-sm">{{ ref.doc_id }}</p>
-      <p class="text-xs text-zinc-500 mt-1">sha256: <code>{{ ref.content_sha256[:16] }}…</code></p>
+    <a href="/documents/{{ doc.doc_id }}" class="block p-3 hover:bg-zinc-900 transition">
+      <p class="text-sm text-zinc-100">{{ doc.title }}</p>
+      <p class="text-xs text-zinc-500 mt-1">
+        <code class="font-mono">{{ doc.doc_id }}</code>
+        <span class="mx-1 text-zinc-700">·</span>
+        sha <code class="font-mono">{{ doc.content_sha256[:12] }}…</code>
+      </p>
     </a>
   </li>
   {% endfor %}

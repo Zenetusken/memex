@@ -55,6 +55,7 @@ from memex.vault.store import (
     list_documents,
     make_ref,
     read_document,
+    read_document_title,
     write_document,
 )
 from memex.webui.rendering import extract_toc, render_body_html
@@ -211,13 +212,25 @@ def create_app() -> FastAPI:
 
     @app.get("/documents", response_class=HTMLResponse)
     async def documents(request: Request) -> HTMLResponse:
-        """List every document in the vault (markdown filenames + refs)."""
+        """List every document in the vault. Each row shows the
+        frontmatter title (read cheaply via `read_document_title` —
+        frontmatter block only, not the full body) with the doc_id +
+        sha as the monospace secondary line."""
         settings = get_settings()
-        refs: list[Any] = []
+        docs: list[dict[str, str]] = []
         async for ref in list_documents(settings.vault_path):
-            refs.append(ref)
+            title = await read_document_title(settings.vault_path, ref.doc_id)
+            docs.append(
+                {
+                    "doc_id": ref.doc_id,
+                    "title": title,
+                    "content_sha256": ref.content_sha256,
+                }
+            )
+        # Sort by title for a stable, human-scannable listing.
+        docs.sort(key=lambda d: d["title"].casefold())
         return templates.TemplateResponse(
-            request, "documents.html", {"documents": refs}
+            request, "documents.html", {"documents": docs}
         )
 
     @app.get("/documents/{doc_id}", response_class=HTMLResponse)

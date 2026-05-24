@@ -273,6 +273,42 @@ async def read_document(vault_path: Path, doc_id: str) -> VaultDocument:
     )
 
 
+async def read_document_title(vault_path: Path, doc_id: str) -> str:
+    """Return a document's frontmatter title without loading the full
+    body. Reads only the leading `---...---` frontmatter block, so a
+    listing view can show titles for many docs cheaply (the annual-
+    report body alone is 650 KB — reading every body just for titles
+    would be wasteful).
+
+    Falls back to `doc_id` when the file is missing, has no frontmatter,
+    or has no title key.
+    """
+    path = _markdown_path(vault_path, doc_id)
+    if not path.exists():
+        return doc_id
+
+    def _read_head() -> str:
+        # Frontmatter is a leading `---\n ... \n---`; read a bounded
+        # head (8 KB is far more than any frontmatter block) instead of
+        # the whole file.
+        with path.open("r", encoding="utf-8") as fh:
+            return fh.read(8192)
+
+    head = await asyncio.to_thread(_read_head)
+    if not head.startswith("---"):
+        return doc_id
+    end = head.find("\n---", 3)
+    if end == -1:
+        return doc_id
+    block = head[: end + 4]
+    try:
+        meta = frontmatter.loads(block).metadata
+    except Exception:
+        return doc_id
+    title = meta.get("title")
+    return title if isinstance(title, str) and title.strip() else doc_id
+
+
 async def list_documents(vault_path: Path) -> AsyncIterator[DocumentRef]:
     """Yield refs for every `.md` file directly under `vault/documents/`."""
     root = _docs_root(vault_path)
