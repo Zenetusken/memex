@@ -196,7 +196,7 @@ async def remove_document(doc_id: str) -> None: ...
 async def reindex_vault(*, force: bool = False) -> ReindexReport: ...
 ```
 
-**Chunking.** Header-aware: split on markdown headings first (`##`, `###`), then on paragraph boundaries, then by sentence to a target window of 600 tokens with 100-token overlap. Each chunk inherits a stable `chunk_id = f"{doc_id}#{sha1(text)[:10]}"` so re-indexing the same content gives the same id.
+**Chunking.** Header-aware: split on markdown headings first (`##`, `###`), then on paragraph boundaries, then by sentence to a target window (`IndexSettings.chunk_target_tokens`, default 400 word-budget ≈ 520 transformer tokens) with overlap. A unit the sentence-splitter cannot break — a GFM table is one paragraph with no sentence boundaries — that exceeds `target * MAX_CHUNK_MULTIPLIER` is **force-split on line/row boundaries** (`_force_split_oversized`) so no chunk becomes an unbounded 21K-char monolith (which would exceed the reranker window + the answer prompt's truncate budget). Budget decisions use `_budget_word_count`, which zeroes `[chart-extracted]` blocks. Each chunk inherits a stable `chunk_id = f"{doc_id}#{sha1(text)[:10]}"` so re-indexing the same content gives the same id. *(Note: making table CONTENT answerable — not just bounded — is open work: char-aware splitting + GFM table-header repetition on splits; see ROADMAP Tier 1.)*
 
 **Schemas.** Defined as `pydantic` models *and* SQL/Cypher DDL files in `index/schemas/` so they version together. The LanceDB schema lives in `index/vector_store.py` as an Arrow schema. The graph store's schema is `index/schemas/graph.cypher`, applied idempotently on connection.
 
