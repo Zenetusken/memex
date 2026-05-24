@@ -1,0 +1,14 @@
+{# P4.1 polish — sticky right-rail table of contents for the document
+   view. Renders only when the doc has ≥ 3 navigable headings; shorter
+   docs don't benefit from the navigation overhead. Entries are
+   indented by heading depth via the `.toc-hN` classes in style.css. #}
+{% if toc and toc|length >= 3 %}
+<aside class="toc-sidebar" aria-label="Table of contents">
+  <div class="toc-sidebar-title">On this page</div>
+  <nav>
+    {% for entry in toc %}
+    <a href="#{{ entry.slug }}" class="toc-h{{ entry.level }}">{{ entry.text }}</a>
+    {% endfor %}
+  </nav>
+</aside>
+{% endif %}

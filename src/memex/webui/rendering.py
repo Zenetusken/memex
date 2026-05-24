@@ -1,17 +1,23 @@
 """Server-side render helpers for the document view (P4.1 wikilink
-section-anchor rendering).
+section-anchor rendering + TOC generation).
 
 The view-mode template (`templates/_document_body.html`) renders the
 canonical markdown body inside a `<pre>` for visual fidelity. P4.1
-extends that rendering with two server-side transformations:
+extends that rendering with three server-side transformations:
 
 1. **Wikilink → anchor tags.** `[[doc_id]]` and `[[doc_id#section]]`
    become real `<a>` tags pointing at the target document (and
    optionally the section fragment within it).
 
-2. **Heading IDs.** Each Markdown heading (`# H1`, `## H2`, ...) gets
-   an `id="..."` attribute on a pre-emitted `<span>` so the browser
-   can scroll the wikilink's URL fragment into view.
+2. **Heading IDs + permalink icon.** Each Markdown heading
+   (`# H1`, `## H2`, ...) gets an `id="..."` attribute on a
+   pre-emitted `<span>` so the browser can scroll the wikilink's
+   URL fragment into view; a `<a class="heading-link">#</a>` is
+   appended for in-page permalink (GitHub-style, hover-revealed).
+
+3. **Table of contents.** `extract_toc(body)` builds an ordered
+   list of `TocEntry(level, text, slug)` from the doc's headings,
+   feeding the sticky right-rail navigation in `document.html`.
 
 Output is `markupsafe.Markup` (won't be re-escaped by Jinja). The
 input is escaped first to prevent XSS from user-edited markdown that
@@ -25,10 +31,15 @@ P4.1 anchors would need different rendering.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 from markupsafe import Markup, escape
 
-from memex.core.text import _MARKDOWN_HEADING_RE, chart_extracted_spans
+from memex.core.text import (
+    _MARKDOWN_HEADING_RE,
+    chart_extracted_spans,
+    is_inside_any_span,
+)
 from memex.core.wikilinks import parse_wikilink
 
 # Same wikilink regex shape as `core/wikilinks._WIKILINK_RE` but re-
@@ -113,7 +124,8 @@ def _insert_heading_anchor_targets(
     original_body: str, escaped_body: str
 ) -> str:
     """Prepend `<span id="slug" class="anchor-target"></span>` to each
-    Markdown heading in the ESCAPED body.
+    Markdown heading in the ESCAPED body, and append a
+    `<a class="heading-link" href="#slug">#</a>` permalink icon.
 
     The chart-block defense is keyed off the ORIGINAL (unescaped) body
     because `chart_extracted_spans` matches `[chart-extracted]` /
@@ -137,6 +149,63 @@ def _insert_heading_anchor_targets(
         return (
             f'<span id="{escape(slug)}" class="anchor-target"></span>'
             f"{m.group(0)}"
+            f'<a class="heading-link" href="#{escape(slug)}" '
+            f'aria-label="Permalink to this section">#</a>'
         )
 
     return _MARKDOWN_HEADING_RE.sub(_sub, escaped_body)
+
+
+# ----------------------------------------------------------------------
+# Table of contents
+# ----------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TocEntry:
+    """One entry in the document's table of contents.
+
+    `level` is the ATX heading depth (1 for `#`, 2 for `##`, etc.) —
+    used by the template to indent the entry visually.
+
+    `text` is the heading's text in its original casing, for display.
+
+    `slug` is the URL fragment that matches the in-document anchor
+    target — clicking the TOC entry navigates to `#{slug}`, scrolling
+    the corresponding `<span id="slug">` into view.
+    """
+
+    level: int
+    text: str
+    slug: str
+
+
+def extract_toc(body: str) -> list[TocEntry]:
+    """Build a flat list of TOC entries from `body`'s Markdown
+    headings, in document order. Chart-block-aware (same defense as
+    `extract_heading_texts` — inert `# H1` labels inside
+    `[chart-extracted]` blocks don't pollute the TOC).
+
+    Returns `[]` when the body has no headings outside chart blocks.
+    Callers (`document.html`) typically hide the TOC sidebar when the
+    list is shorter than ~3 entries — not enough to navigate.
+
+    Skips headings whose slug would be empty (whitespace-only or
+    symbol-only headings) — these can't be link targets, so they
+    can't be TOC entries either.
+    """
+    chart_spans = chart_extracted_spans(body)
+    entries: list[TocEntry] = []
+    for m in _MARKDOWN_HEADING_RE.finditer(body):
+        if is_inside_any_span(m.start(), chart_spans):
+            continue
+        text = m.group(2).strip()
+        if not text:
+            continue
+        slug = slugify_heading(text)
+        if not slug:
+            continue
+        entries.append(
+            TocEntry(level=len(m.group(1)), text=text, slug=slug)
+        )
+    return entries

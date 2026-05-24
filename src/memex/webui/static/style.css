@@ -202,3 +202,117 @@ summary:focus-visible {
   display: inline-block;
   scroll-margin-top: 4rem;
 }
+
+/* ----------------------------------------------------------------------
+   P4.1 polish — TOC sidebar + heading permalinks + in-page navigation
+   (2026-05-23 frontend-design skill). Aesthetic stays "desk lamp not an
+   AI app": no flashy animations, no purple gradients; just refined
+   density + observability. Same zinc + blue accent palette as everything
+   else.
+   ---------------------------------------------------------------------- */
+
+/* Smooth in-page scroll for fragment navigation. Browser-native; one
+   line, big polish. */
+html { scroll-behavior: smooth; }
+
+/* Brief blue pulse when an anchor target is navigated to. Pure CSS via
+   the :target pseudo on the inert span we inject before each heading.
+   Pulse fades to transparent in 1.6s — long enough to be noticed,
+   short enough to not linger. */
+.anchor-target { scroll-margin-top: 4rem; }
+.anchor-target:target {
+  animation: anchor-target-pulse 1.6s ease-out;
+  background-color: rgba(59, 130, 246, 0.20);
+  border-radius: 2px;
+  padding: 0 4px;
+  margin: 0 -4px;
+}
+@keyframes anchor-target-pulse {
+  0%   { background-color: rgba(59, 130, 246, 0.30); }
+  100% { background-color: rgba(59, 130, 246, 0.00); }
+}
+
+/* GitHub-style hover-revealed permalink icon next to each heading.
+   Invisible until the body <pre> is hovered, then 40% opacity zinc;
+   100% blue-300 on direct hover. */
+.heading-link {
+  margin-left: 0.6em;
+  color: rgb(82 82 91);              /* zinc-600 */
+  text-decoration: none;
+  font-weight: 400;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+pre:hover .heading-link { opacity: 0.4; }
+.heading-link:hover {
+  opacity: 1 !important;
+  color: rgb(147 197 253);           /* blue-300 */
+}
+
+/* Layout: when a document has a TOC, split into 2-col grid — body on
+   the left, sticky sidebar on the right. Falls back gracefully on
+   narrow viewports (<1100 px) to single-column with the TOC stacked
+   above. */
+.doc-with-toc {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px;
+  gap: 1.5rem;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .doc-with-toc {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .doc-with-toc .toc-sidebar {
+    position: static;
+    max-height: none;
+    border-left: none;
+    border-top: 1px solid rgb(39 39 42);
+    padding-top: 1rem;
+  }
+}
+
+/* TOC sidebar — sticky, subdued, monospace nav. Per-level indentation
+   gives visual hierarchy without bullet characters or boxes. */
+.toc-sidebar {
+  position: sticky;
+  top: 4rem;
+  max-height: calc(100vh - 6rem);
+  overflow-y: auto;
+  padding: 0.75rem 0;
+  padding-left: 1rem;
+  border-left: 1px solid rgb(39 39 42);    /* zinc-800 */
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+.toc-sidebar-title {
+  font-size: 0.625rem;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: rgb(113 113 122);                 /* zinc-500 */
+  margin-bottom: 0.6rem;
+}
+.toc-sidebar nav a {
+  display: block;
+  color: rgb(161 161 170);                 /* zinc-400 */
+  border-left: 2px solid transparent;
+  margin-left: -1rem;                      /* align border-left to outer rail */
+  padding-left: calc(1rem - 2px);
+  padding-top: 0.18rem;
+  padding-bottom: 0.18rem;
+  transition: color 100ms, border-color 100ms;
+}
+.toc-sidebar nav a:hover {
+  color: rgb(228 228 231);                 /* zinc-200 */
+  border-left-color: rgb(82 82 91);        /* zinc-600 */
+}
+.toc-sidebar nav a:target {
+  color: rgb(147 197 253);                 /* blue-300 — matches anchor pulse */
+  border-left-color: rgb(59 130 246);      /* blue-500 */
+}
+.toc-h1 { padding-left: calc(1rem - 2px); font-weight: 500; color: rgb(212 212 216); }
+.toc-h2 { padding-left: calc(1rem - 2px); }
+.toc-h3 { padding-left: calc(1.75rem - 2px); }
+.toc-h4 { padding-left: calc(2.5rem - 2px); }
+.toc-h5 { padding-left: calc(3.25rem - 2px); }
+.toc-h6 { padding-left: calc(4rem - 2px); }

@@ -79,14 +79,24 @@
   </div>
 </div>
 {% else %}
-<div class="pane-solo">
-  <div class="pane-header">
-    <span>{% if has_source %}source · {{ source_kind }}{% else %}extracted markdown{% endif %}</span>
-    <span class="tabular">{{ document.body.split('\n')|length }} lines</span>
+{# When the TOC is non-trivial (≥ 3 headings, gated in _document_toc.html),
+   split the markdown-only layout into a 2-column grid: doc body on the
+   left, sticky TOC sidebar on the right. Otherwise fall back to the
+   solo-pane single-column layout. #}
+{% set has_toc = toc and toc|length >= 3 %}
+<div class="{{ 'doc-with-toc' if has_toc else 'pane-solo' }}">
+  <div class="pane-solo">
+    <div class="pane-header">
+      <span>{% if has_source %}source · {{ source_kind }}{% else %}extracted markdown{% endif %}</span>
+      <span class="tabular">{{ document.body.split('\n')|length }} lines</span>
+    </div>
+    <div id="md-pane" class="px-5 py-4">
+      {% include "_document_body.html" %}
+    </div>
   </div>
-  <div id="md-pane" class="px-5 py-4">
-    {% include "_document_body.html" %}
-  </div>
+  {% if has_toc %}
+    {% include "_document_toc.html" %}
+  {% endif %}
 </div>
 {% if has_source and source_kind != 'pdf' %}
 <p class="text-xs text-zinc-500 mt-2">

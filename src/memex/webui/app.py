@@ -57,7 +57,7 @@ from memex.vault.store import (
     read_document,
     write_document,
 )
-from memex.webui.rendering import render_body_html
+from memex.webui.rendering import extract_toc, render_body_html
 
 _HERE = Path(__file__).parent
 _TEMPLATES_DIR = _HERE / "templates"
@@ -244,6 +244,7 @@ def create_app() -> FastAPI:
             {
                 "document": doc,
                 "rendered_body": render_body_html(doc.body),
+                "toc": extract_toc(doc.body),
                 "has_source": has_source,
                 "source_kind": source_kind,
             },

@@ -11,6 +11,8 @@ from __future__ import annotations
 import re
 
 from memex.webui.rendering import (
+    TocEntry,
+    extract_toc,
     render_body_html,
     slugify_heading,
 )
@@ -194,3 +196,110 @@ def test_render_output_is_markup_object() -> None:
 
     out = render_body_html("## H\n\n[[doc]]")
     assert isinstance(out, Markup)
+
+
+# ----------------------------------------------------------------------
+# Heading permalink (`#` link icon) emission — P4.1 polish (2026-05-23)
+# ----------------------------------------------------------------------
+
+
+def test_render_heading_emits_permalink_link() -> None:
+    """Each heading also gets a `<a class="heading-link" href="#slug">#</a>`
+    appended for in-page permalink (GitHub-style, hover-revealed via CSS)."""
+    body = "## BUSINESS OVERVIEW\n\nProse."
+    out = str(render_body_html(body))
+    assert '<a class="heading-link" href="#business-overview"' in out
+    assert ">#</a>" in out
+
+
+def test_render_permalink_skipped_inside_chart_block() -> None:
+    """Inert chart-block H1 labels get neither anchor target NOR
+    permalink link — they aren't real document sections."""
+    body = (
+        "## Real Heading\n\n"
+        "[chart-extracted]\n"
+        "# Inert Label\n"
+        "[/chart-extracted]\n"
+    )
+    out = str(render_body_html(body))
+    # Real heading has permalink
+    assert 'href="#real-heading"' in out
+    # Inert chart label does not
+    assert 'href="#inert-label"' not in out
+
+
+# ----------------------------------------------------------------------
+# extract_toc — TOC generation for the sidebar
+# ----------------------------------------------------------------------
+
+
+def test_extract_toc_returns_entries_in_document_order() -> None:
+    """Headings appear in the TOC in the order they appear in the body."""
+    body = (
+        "# Top\n\n"
+        "## Methods\n\n"
+        "### Subsection\n\n"
+        "## Results\n"
+    )
+    toc = extract_toc(body)
+    assert [e.text for e in toc] == ["Top", "Methods", "Subsection", "Results"]
+
+
+def test_extract_toc_records_heading_level() -> None:
+    """The TOC entry's `level` matches the ATX depth (`#` = 1, `##` = 2)."""
+    body = "# H1\n\n## H2\n\n### H3\n\n#### H4\n\n##### H5\n\n###### H6\n"
+    toc = extract_toc(body)
+    assert [e.level for e in toc] == [1, 2, 3, 4, 5, 6]
+
+
+def test_extract_toc_slugifies_each_entry() -> None:
+    """Each TOC entry's slug matches the document's heading anchor
+    slug — so clicking the entry navigates to the right section."""
+    body = "## BUSINESS OVERVIEW\n\n## Methods: Data Movement\n"
+    toc = extract_toc(body)
+    assert toc[0].slug == "business-overview"
+    assert toc[1].slug == "methods-data-movement"
+
+
+def test_extract_toc_skips_chart_block_h1s() -> None:
+    """Same defense as `extract_heading_texts` and the chunker —
+    inert chart-figure H1 labels don't appear in the TOC."""
+    body = (
+        "## Real One\n\n"
+        "[chart-extracted]\n"
+        "# Chart Label\n"
+        "[/chart-extracted]\n\n"
+        "## Real Two\n"
+    )
+    toc = extract_toc(body)
+    assert [e.text for e in toc] == ["Real One", "Real Two"]
+
+
+def test_extract_toc_empty_body_returns_empty() -> None:
+    """Body without headings returns an empty list. Template hides
+    the TOC sidebar when len(toc) < 3 anyway."""
+    assert extract_toc("just prose, no headings here") == []
+    assert extract_toc("") == []
+
+
+def test_extract_toc_skips_empty_headings_and_symbol_only() -> None:
+    """Headings whose slug would be empty (whitespace-only,
+    symbol-only) are skipped — can't be link targets either."""
+    body = "## Real Heading\n\n## ###\n\n## Another Real\n"
+    toc = extract_toc(body)
+    # The "###" heading has no alphanumerics → empty slug → skipped
+    # (Also: with the tightened heading regex, `## ###` may or may not
+    # match — but even if it does, slug ends up empty.)
+    assert all(e.text != "###" or e.slug for e in toc)
+    real = [e for e in toc if e.text in ("Real Heading", "Another Real")]
+    assert len(real) == 2
+
+
+def test_toc_entry_is_frozen_dataclass() -> None:
+    """`TocEntry` is a frozen dataclass — immutable + hashable, so
+    template caching and equality checks behave sanely."""
+    a = TocEntry(level=2, text="Methods", slug="methods")
+    b = TocEntry(level=2, text="Methods", slug="methods")
+    assert a == b
+    # Hashability
+    assert {a, b} == {a}
