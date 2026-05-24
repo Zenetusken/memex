@@ -1,8 +1,30 @@
-{# P4.1 polish — sticky right-rail table of contents for the document
-   view. Renders only when the doc has ≥ 3 navigable headings; shorter
-   docs don't benefit from the navigation overhead. Entries are
-   indented by heading depth via the `.toc-hN` classes in style.css. #}
-{% if toc and toc|length >= 3 %}
+{# P4.1 polish — table of contents for the document view.
+
+   Renders in TWO shapes via the `variant` context var:
+     - "sidebar" (default): always-visible sticky right rail. Used in
+       the markdown-only (no-PDF) layout where there's horizontal room.
+     - "drawer": a collapsed-by-default <details> element. Used in the
+       PDF-split layout where a third always-on column would crowd the
+       PDF + markdown panes.
+
+   Gated to a sane heading band: a doc needs ≥ 3 headings to be worth
+   navigating, and we suppress the TOC past `toc_max` because PDF
+   parsing can emit hundreds of `##`-headings (the NVIDIA 10-K markdown
+   has 501 H2s — a flat TOC of those is parse-noise, not navigation).
+   Tune `toc_max` if a real doc legitimately needs more sections. #}
+{% set toc_min = 3 %}
+{% set toc_max = 50 %}
+{% if toc and toc|length >= toc_min and toc|length <= toc_max %}
+{% if variant == 'drawer' %}
+<details class="toc-drawer">
+  <summary>On this page · <span class="tabular">{{ toc|length }}</span> sections</summary>
+  <nav>
+    {% for entry in toc %}
+    <a href="#{{ entry.slug }}" class="toc-h{{ entry.level }}">{{ entry.text }}</a>
+    {% endfor %}
+  </nav>
+</details>
+{% else %}
 <aside class="toc-sidebar" aria-label="Table of contents">
   <div class="toc-sidebar-title">On this page</div>
   <nav>
@@ -11,4 +33,5 @@
     {% endfor %}
   </nav>
 </aside>
+{% endif %}
 {% endif %}

@@ -316,3 +316,51 @@ pre:hover .heading-link { opacity: 0.4; }
 .toc-h4 { padding-left: calc(2.5rem - 2px); }
 .toc-h5 { padding-left: calc(3.25rem - 2px); }
 .toc-h6 { padding-left: calc(4rem - 2px); }
+
+/* TOC drawer — collapsed-by-default variant used in the PDF-split
+   layout (where a third always-on sidebar column would crowd the
+   PDF + markdown panes). Same palette + indentation as the sidebar;
+   just wrapped in a <details> that tucks away until clicked. */
+.toc-drawer {
+  margin-bottom: 1.25rem;
+  border: 1px solid rgb(39 39 42);         /* zinc-800 */
+  border-radius: 4px;
+  background: rgb(24 24 27);               /* zinc-900 */
+}
+.toc-drawer > summary {
+  cursor: pointer;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.625rem;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: rgb(113 113 122);                 /* zinc-500 */
+  user-select: none;
+  list-style-position: inside;
+}
+.toc-drawer > summary:hover { color: rgb(161 161 170); }   /* zinc-400 */
+.toc-drawer[open] > summary {
+  border-bottom: 1px solid rgb(39 39 42);
+  color: rgb(161 161 170);
+}
+.toc-drawer nav {
+  max-height: 18rem;
+  overflow-y: auto;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+.toc-drawer nav a {
+  display: block;
+  color: rgb(161 161 170);                 /* zinc-400 */
+  border-left: 2px solid transparent;
+  padding: 0.15rem 0 0.15rem 0.5rem;
+  transition: color 100ms, border-color 100ms;
+}
+.toc-drawer nav a:hover {
+  color: rgb(228 228 231);                 /* zinc-200 */
+  border-left-color: rgb(82 82 91);        /* zinc-600 */
+}
+.toc-drawer nav a:target {
+  color: rgb(147 197 253);                 /* blue-300 */
+  border-left-color: rgb(59 130 246);      /* blue-500 */
+}
