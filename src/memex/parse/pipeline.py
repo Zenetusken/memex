@@ -38,6 +38,7 @@ from memex.core.manifest import (
     PageDecision,
     ParseStage,
     now_utc,
+    read_manifest,
     update_manifest,
 )
 from memex.parse.docling_backend import (
@@ -584,7 +585,11 @@ async def _passthrough_markdown(vault_path: Path, doc_id: str, source: Path) -> 
     canonical = await read_document(vault_path, doc_id) if (
         vault_path / "documents" / f"{doc_id}.md"
     ).exists() else None
-    fm = canonical.frontmatter if canonical else Frontmatter(title=doc_id)
+    fm = (
+        canonical.frontmatter
+        if canonical
+        else Frontmatter(title=await _derive_title(vault_path, doc_id))
+    )
     doc = VaultDocument(
         ref=canonical.ref if canonical else _bootstrap_ref(vault_path, doc_id, body),
         frontmatter=fm,
@@ -640,6 +645,31 @@ def _bootstrap_ref(vault_path: Path, doc_id: str, body: str) -> DocumentRef:
         doc_id,
         content_sha256=hash_bytes(body.encode("utf-8")),
     )
+
+
+async def _derive_title(vault_path: Path, doc_id: str) -> str:
+    """Derive a human-readable frontmatter title for a freshly-parsed
+    doc from its original source filename, recorded in the manifest's
+    ingest stage.
+
+    `PDF CR350 - Cours 2.pdf` ingested → manifest `ingest.source_path`
+    is the original path → stem `"CR350 - Cours 2"` becomes the title.
+    Falls back to `doc_id` when there's no manifest or ingest stage
+    (e.g. a doc created out-of-band, or a test fixture). The ingest
+    stage always runs before parse in the normal pipeline, so the
+    source_path is available by the time any parse function calls this.
+
+    A meaningful title (not the doc-id slug) is what lets the citation
+    resolver match cross-document references — `enrich.citations`
+    scores candidates against other docs' titles/author-year/tokens,
+    and a slug like `5795b16a-pdf-cr350-cours-1` matches nothing.
+    """
+    manifest = await read_manifest(vault_path, doc_id)
+    if manifest and manifest.ingest and manifest.ingest.source_path:
+        stem = Path(manifest.ingest.source_path).stem.strip()
+        if stem and not stem.startswith("<inline:"):
+            return stem
+    return doc_id
 
 
 _IMAGE_PLACEHOLDER_RE: Final[re.Pattern[str]] = re.compile(
@@ -993,7 +1023,11 @@ async def _parse_with_docling(
     existing = await read_document(vault_path, doc_id) if (
         vault_path / "documents" / f"{doc_id}.md"
     ).exists() else None
-    fm = existing.frontmatter if existing else Frontmatter(title=doc_id)
+    fm = (
+        existing.frontmatter
+        if existing
+        else Frontmatter(title=await _derive_title(vault_path, doc_id))
+    )
     doc = VaultDocument(
         ref=_bootstrap_ref(vault_path, doc_id, conversion.markdown),
         frontmatter=fm,
@@ -1156,8 +1190,6 @@ async def _record_crash(
     initial creation, so we pass it iff the manifest doesn't exist.
     The source file is the authoritative bytes at this point.
     """
-    from memex.core.manifest import read_manifest
-
     parse_stage = ParseStage(
         correlation_id=correlation_id,
         parsed_at=now_utc(),
@@ -1270,7 +1302,11 @@ async def _parse_with_pymupdf(
         if (vault_path / "documents" / f"{doc_id}.md").exists()
         else None
     )
-    fm = existing.frontmatter if existing else Frontmatter(title=doc_id)
+    fm = (
+        existing.frontmatter
+        if existing
+        else Frontmatter(title=await _derive_title(vault_path, doc_id))
+    )
     doc = VaultDocument(
         ref=_bootstrap_ref(vault_path, doc_id, conversion.markdown),
         frontmatter=fm,
