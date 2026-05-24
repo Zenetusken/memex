@@ -40,6 +40,18 @@ def test_extract_headings_skips_code_fences() -> None:
     assert extract_markdown_headings(md) == [(1, "Real"), (2, "Also real")]
 
 
+def test_extract_headings_strips_inline_markdown() -> None:
+    # pymupdf4llm wraps headings in **bold**; structural F1 compares the
+    # heading text, so the markers must be stripped (the `## **Overview**`
+    # case from the tidewater synthetic doc).
+    md = "## **Overview**\n\n### `code` ref\n\n## [Tips](http://x)\n"
+    assert extract_markdown_headings(md) == [
+        (2, "Overview"),
+        (3, "code ref"),
+        (2, "Tips"),
+    ]
+
+
 def test_extract_headings_skips_chart_extracted_blocks() -> None:
     md = (
         "# Real Heading\n\n"

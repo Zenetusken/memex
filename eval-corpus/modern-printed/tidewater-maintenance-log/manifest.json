@@ -1,0 +1,30 @@
+{
+  "doc_id": "tidewater-maintenance-log",
+  "category": "modern-printed",
+  "language": "en",
+  "page_count": 2,
+  "source_url": null,
+  "license": "Apache-2.0",
+  "license_url": "https://www.apache.org/licenses/LICENSE-2.0",
+  "attribution": "Synthetic document authored for the Memex eval corpus.",
+  "synthetic": true,
+  "expected_features": {
+    "headings": {"h1": 1, "h2": 4, "h3": 1},
+    "tables": 1,
+    "equations": 0,
+    "figures": 0,
+    "code_blocks": 0
+  },
+  "scoring": {
+    "cer_threshold": 0.18,
+    "wer_threshold": 0.34,
+    "structural_f1_threshold": 0.65
+  },
+  "measured_baseline_2026_05_24": {
+    "parser": "pymupdf4llm (born-digital route, no OCR)",
+    "cer": 0.1642,
+    "wer": 0.315,
+    "structural_f1_headings": 0.6667
+  },
+  "notes": "PIPELINE-VALIDATION FIXTURE, not a representative modern-print quality bar. Born-digital PDF rendered via PyMuPDF `Story` (the only renderer available here; LibreOffice is broken on this host). pymupdf4llm on Story-rendered PDFs exhibits two real but synthetic-triggered fidelity gaps it likely wouldn't on InDesign/LaTeX/Word output: (1) it drops the first paragraph after some headings (drives WER), (2) it flattens the H1/H3 to H2 and wraps headings in `**bold**` (caps structural-F1 at 4/6 exact matches). Thresholds are REGRESSION gates calibrated to the measured baseline + margin, so the fixture passes today and alerts if the parser regresses. The aspirational modern-print target from docs/eval-corpus-plan.md is CER <= 0.02 — a human-curated real PDF is needed to measure against that fairly. Exercises heading hierarchy, bulleted + numbered lists, and a 3-column GFM table (the table parsed cleanly)."
+}

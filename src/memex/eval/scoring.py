@@ -108,6 +108,28 @@ _FRONTMATTER_RE = re.compile(r"\A---\r?\n.*?\r?\n---\r?\n", re.DOTALL)
 _ATX_HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
 _FENCE_RE = re.compile(r"^\s*(```|~~~)")
 
+# Inline-markdown patterns stripped from heading TEXT before structural
+# F1 (links, bold, italic, code). A parser that emits `## **Overview**`
+# represents the same heading as a clean `## Overview` — the `**` is
+# styling, not structure. (CER/WER stay raw — markup noise is a
+# legitimate character-fidelity signal there; only the structural
+# heading comparison normalizes it.)
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]*\)")
+_MD_EMPHASIS_RE = re.compile(r"(\*{1,3}|_{1,3})(.+?)\1")
+_MD_CODE_RE = re.compile(r"`([^`]+)`")
+
+
+def _clean_heading_text(text: str) -> str:
+    text = _MD_LINK_RE.sub(r"\1", text)
+    text = _MD_CODE_RE.sub(r"\1", text)
+    # Repeat emphasis stripping so `***bold-italic***` fully unwraps.
+    for _ in range(3):
+        new = _MD_EMPHASIS_RE.sub(r"\2", text)
+        if new == text:
+            break
+        text = new
+    return text.strip()
+
 
 def strip_frontmatter(markdown: str) -> str:
     """Drop a leading YAML frontmatter block (`---\\n…\\n---\\n`).
@@ -143,7 +165,7 @@ def extract_markdown_headings(markdown: str) -> list[tuple[int, str]]:
         m = _ATX_HEADING_RE.match(stripped)
         if m is None or is_inside_any_span(line_start, spans):
             continue
-        out.append((len(m.group(1)), m.group(2).strip()))
+        out.append((len(m.group(1)), _clean_heading_text(m.group(2))))
     return out
 
 

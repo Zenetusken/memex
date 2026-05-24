@@ -1,0 +1,24 @@
+# Memex parse-eval corpus — manifest + summary.
+#
+# Layout (per docs/eval-corpus-plan.md):
+#   <category>/<doc_id>/{ground-truth.md, manifest.json, CITATION.md, source.pdf}
+# Score with:  uv run memex eval-parse eval-corpus/
+#
+# The predicted markdown comes from the vault by doc_id, or a committed
+# `predicted.md` snapshot of the current parser's output (regenerate it
+# when the parser changes, then refresh the per-doc thresholds).
+#
+# Ground truth is INDEPENDENT of the system under test: real documents
+# are hand-transcribed by a human; synthetic documents (below) are
+# authored canonical-first and rendered to source — never derived from
+# Memex's own output or LLM-transcribed from a source.
+
+version = "0.1.0"
+
+[summary]
+documents = 1
+synthetic = 1
+hand_curated_real = 0
+
+[categories]
+modern-printed = 1

@@ -1,0 +1,55 @@
+---
+authors: []
+tags: []
+title: source
+---
+
+## **Tidewater Lighthouse Maintenance Log** 
+
+## **Overview** 
+
+This log records the quarterly inspection of the Tidewater lighthouse and its supporting equipment. The structure has operated continuously since its last refit and remains within expected tolerances. Routine maintenance keeps the optic, the rotation drive, and the backup power chain in service. 
+
+## **Inspection Schedule** 
+
+envelope, and the electrical systems in that order. 
+
+- Clean the optic and verify the lamp changer rotates freely. 
+
+- Check the gallery railing and the access ladder for corrosion. 
+
+- Test the backup generator under load for thirty minutes. 
+
+## **Equipment Checklist** 
+
+- Spare lamp set, sealed and dated. 
+
+- Hand winch with an intact safety pawl. 
+
+- First aid kit within its expiry window. 
+
+## **Observed Conditions** 
+
+Visibility readings were taken at dawn from the gallery deck. 
+
+|**Date**|**Visibility**|**Notes**|
+|---|---|---|
+|2026-04-10|Good|Light haze ofshore, cleared by midday.|
+|2026-04-11|Poor|Dense fog; foghorn engaged for six
+
+hours.|
+|2026-04-12|Good|Clear horizon, calm sea state.|
+
+
+
+## **Recommendations** 
+
+The inspector recommends the following actions before the next quarter: 
+
+1. Replace the gallery railing fasteners showing surface rust. 
+
+
+
+2. Schedule a load test of the secondary battery bank. 
+
+3. Restock the spare lamp set to the full complement of four.
