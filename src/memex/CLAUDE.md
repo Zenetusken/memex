@@ -25,6 +25,8 @@ The single deliberate exception is `webui/app.py` re-exporting `GraphStore` from
 
 ## Type discipline
 
+- **`src/memex` is pyright `--strict` clean (0 errors, 0 warnings).** Keep it that way — `uv run pyright` is a gate.
+- **Untyped third-party libs get local stubs, not silence.** Libraries that ship no usable types (langgraph, lancedb, pypdfium2, pyseccomp, …) have minimal `.pyi` stubs under `stubs/` (wired via `stubPath`), covering only the surface Memex uses — see `stubs/README.md`. For libs that ship a partial `py.typed` (torch, transformers, openai, typer), don't shadow them with a competing stub; fix at the call site with precise annotations / `cast()` / a single typed wrapper (e.g. `registry._from_pretrained`, `registry._bf16`). `# type: ignore[rule]` is a last resort and always carries a trailing `# reason`. A dynamic `pydantic.create_model(...)` should pass `__base__=TheStaticModel` so pyright keeps the field types.
 - **No untyped `Any`.** If you need it, add a one-line comment explaining why.
 - **Pydantic models cross module boundaries.** Dicts and tuples are module-internal only. Shared types live in `core/types.py`.
 - **Node returns use `TypedDict`.** See `agents/answering.py:AnswerStateUpdate` — `total=False` catches state-key typos at type-check time.
