@@ -25,6 +25,7 @@ shipped for Filler N1.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable
 from pathlib import Path
 
 import pytest
@@ -80,12 +81,8 @@ async def test_concurrent_upsert_burst_is_consistent(tmp_path: Path) -> None:
     # Verify both tables have the expected row count AND match each
     # other. The atomicity invariant: |chunks_fts| == |chunks_meta|.
     def _counts() -> tuple[int, int]:
-        fts_count = store._db.execute(
-            "SELECT count(*) FROM chunks_fts"
-        ).fetchone()[0]
-        meta_count = store._db.execute(
-            "SELECT count(*) FROM chunks_meta"
-        ).fetchone()[0]
+        fts_count = store._db.execute("SELECT count(*) FROM chunks_fts").fetchone()[0]
+        meta_count = store._db.execute("SELECT count(*) FROM chunks_meta").fetchone()[0]
         return fts_count, meta_count
 
     fts_count, meta_count = await asyncio.to_thread(_counts)
@@ -139,8 +136,7 @@ async def test_sequential_reads_after_concurrent_writes_are_consistent(
 
     # Concurrent write burst.
     write_batches = [
-        [_chunk(f"w{i}-{j}", f"doc-w{i}", f"writeburst {i}-{j} payload")
-         for j in range(3)]
+        [_chunk(f"w{i}-{j}", f"doc-w{i}", f"writeburst {i}-{j} payload") for j in range(3)]
         for i in range(5)
     ]
     await asyncio.gather(*(store.upsert(b) for b in write_batches))
@@ -172,9 +168,7 @@ async def test_concurrent_upsert_and_delete_interleaved(tmp_path: Path) -> None:
     # Seed five documents, each with five chunks.
     for doc_idx in range(5):
         chunks = [
-            _chunk(
-                f"d{doc_idx}-c{i}", f"doc-{doc_idx}", f"doc {doc_idx} chunk {i}"
-            )
+            _chunk(f"d{doc_idx}-c{i}", f"doc-{doc_idx}", f"doc {doc_idx} chunk {i}")
             for i in range(5)
         ]
         await store.upsert(chunks)
@@ -192,9 +186,7 @@ async def test_concurrent_upsert_and_delete_interleaved(tmp_path: Path) -> None:
         ]
         for doc_idx in (0, 1, 2)
     ]
-    tasks: list[object] = [
-        store.upsert(b) for b in re_upserts
-    ]
+    tasks: list[Awaitable[object]] = [store.upsert(b) for b in re_upserts]
     tasks.append(store.delete_document("doc-3"))
     tasks.append(store.delete_chunks(["d4-c0", "d4-c1"]))
 
@@ -206,12 +198,8 @@ async def test_concurrent_upsert_and_delete_interleaved(tmp_path: Path) -> None:
     # - doc-4: 5 - 2 deleted = 3 chunks
     # Total: 15 + 3 = 18
     def _counts() -> tuple[int, int]:
-        fts_count = store._db.execute(
-            "SELECT count(*) FROM chunks_fts"
-        ).fetchone()[0]
-        meta_count = store._db.execute(
-            "SELECT count(*) FROM chunks_meta"
-        ).fetchone()[0]
+        fts_count = store._db.execute("SELECT count(*) FROM chunks_fts").fetchone()[0]
+        meta_count = store._db.execute("SELECT count(*) FROM chunks_meta").fetchone()[0]
         return fts_count, meta_count
 
     fts_count, meta_count = await asyncio.to_thread(_counts)

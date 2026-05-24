@@ -13,7 +13,7 @@ verification lives on the rig, not in pytest.
 from __future__ import annotations
 
 import types
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -76,7 +76,7 @@ class _FakeCrossEncoder:
 
 
 @asynccontextmanager
-async def _registry_with(model: Any) -> Any:
+async def _registry_with(model: Any) -> AsyncIterator[Any]:
     """Mock `registry.use("reranker")` to yield `model` directly."""
     yield model
 
@@ -143,7 +143,7 @@ class _FakeQwen3Model:
         # softmax matches the configured score for the doc the row
         # corresponds to. We retrieve the doc text from the side-
         # channel `self._last_batch_texts` (set by the fake tokenizer).
-        logits = torch.full((batch_size, 1, self.vocab_size), -10.0, dtype=torch.float32)
+        logits = torch.full((batch_size, 1, self.vocab_size), -10.0, dtype=torch.float32)  # type: ignore[reportPrivateImportUsage]  # torch omits factory/dtype names from __all__
         for i in range(batch_size):
             doc = self._last_batch_texts[i]
             score = self._scores.get(doc, 0.5)
@@ -158,14 +158,14 @@ class _FakeQwen3Model:
             logits[i, 0, self.no_id] = 0.0
             logits[i, 0, self.yes_id] = log_odds
 
-        return types.SimpleNamespace(logits=logits.to(torch.bfloat16))
+        return types.SimpleNamespace(logits=logits.to(torch.bfloat16))  # type: ignore[reportPrivateImportUsage]  # torch omits dtype names from __all__
 
     def parameters(self) -> Any:  # pragma: no cover — duck-typing
         import torch
 
         # Single fake parameter so `next(model.parameters()).device`
         # works. Stays on CPU; the inputs.to(device) call no-ops.
-        yield torch.zeros(1)
+        yield torch.zeros(1)  # type: ignore[reportPrivateImportUsage]  # torch omits factory names from __all__
 
 
 class _FakeQwen3Tokenizer:
@@ -199,8 +199,8 @@ class _FakeQwen3Tokenizer:
         self._fake_model._last_batch_texts = docs
 
         # Three dummy ids per row — the model only looks at logits[:, -1, :].
-        ids = torch.tensor([[1, 2, 3]] * len(prompts), dtype=torch.long)
-        mask = torch.ones_like(ids)
+        ids = torch.tensor([[1, 2, 3]] * len(prompts), dtype=torch.long)  # type: ignore[reportPrivateImportUsage]  # torch omits factory/dtype names from __all__
+        mask = torch.ones_like(ids)  # type: ignore[reportPrivateImportUsage]  # torch omits factory names from __all__
         return _MoveableTensorDict(input_ids=ids, attention_mask=mask)
 
 

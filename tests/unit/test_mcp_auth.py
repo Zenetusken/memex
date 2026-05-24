@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterator
+from typing import cast
 
 import pytest
 from starlette.applications import Starlette
@@ -57,7 +58,7 @@ def test_validate_bind_refuses_non_loopback_without_token() -> None:
         with pytest.raises(ConfigurationError) as exc:
             validate_bind(host, has_token=False)
         assert host in str(exc.value.context["host"])
-        assert "MEMEX_MCP__AUTH_TOKEN" in exc.value.context["fix"]
+        assert "MEMEX_MCP__AUTH_TOKEN" in cast("str", exc.value.context["fix"])
 
 
 def test_validate_bind_allows_any_host_with_token() -> None:

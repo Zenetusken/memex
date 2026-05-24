@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -221,7 +221,7 @@ async def test_serve_http_refuses_non_loopback_without_token(
     with pytest.raises(ConfigurationError) as exc:
         await serve_http(host="0.0.0.0", port=7424)
     assert exc.value.context["host"] == "0.0.0.0"
-    assert "MEMEX_MCP__AUTH_TOKEN" in exc.value.context["fix"]
+    assert "MEMEX_MCP__AUTH_TOKEN" in cast("str", exc.value.context["fix"])
 
 
 @pytest.mark.asyncio

@@ -15,10 +15,11 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
+from memex.models.registry import ChartOCRHandle
 from memex.parse import chart_ocr_backend
 from memex.parse.chart_ocr_backend import (
     ChartOCROutput,
@@ -421,12 +422,12 @@ def test_is_onechart_handle_detects_class_name() -> None:
     from memex.parse.chart_ocr_backend import _is_onechart_handle
 
     handle = _FakeOneChartHandle(chat_return="x")
-    assert _is_onechart_handle(handle) is True
+    assert _is_onechart_handle(cast(ChartOCRHandle, handle)) is True
 
     # Negative: a DePlot/Pix2Struct-style handle must NOT be detected
     # as OneChart.
     deplot_handle = _FakeChartOCRHandle()
-    assert _is_onechart_handle(deplot_handle) is False
+    assert _is_onechart_handle(cast(ChartOCRHandle, deplot_handle)) is False
 
 
 @pytest.mark.asyncio
@@ -731,15 +732,15 @@ class _FakeUniChartModel:
         # the helper makes on the processor's pixel_values.
         import torch
 
-        self.device = torch.device("cpu")
-        self.dtype = torch.float32
+        self.device = torch.device("cpu")  # type: ignore[reportPrivateImportUsage]  # torch omits factory/dtype names from __all__
+        self.dtype = torch.float32  # type: ignore[reportPrivateImportUsage]  # torch omits factory/dtype names from __all__
 
     def generate(self, *args, **kwargs):
         import torch
 
         # Return a namespace whose `.sequences` attribute is what the
         # processor.batch_decode() call will consume.
-        return type("Out", (), {"sequences": torch.zeros(1, 10, dtype=torch.long)})()
+        return type("Out", (), {"sequences": torch.zeros(1, 10, dtype=torch.long)})()  # type: ignore[reportPrivateImportUsage]  # torch omits factory/dtype names from __all__
 
 
 _FakeUniChartModel.__name__ = "VisionEncoderDecoderModel"
@@ -761,17 +762,17 @@ class _FakeUniChartProcessor:
             pad_token = "<pad>"
             eos_token = "</s>"
 
-            def __call__(self_inner, text, **kw):
+            def __call__(self, text, **kw):
                 import torch
 
-                return type("T", (), {"input_ids": torch.zeros(1, 3, dtype=torch.long)})()
+                return type("T", (), {"input_ids": torch.zeros(1, 3, dtype=torch.long)})()  # type: ignore[reportPrivateImportUsage]  # torch omits factory/dtype names from __all__
 
         self.tokenizer = _Tok()
 
     def __call__(self, image, **kw):
         import torch
 
-        return type("P", (), {"pixel_values": torch.zeros(1, 3, 32, 32)})()
+        return type("P", (), {"pixel_values": torch.zeros(1, 3, 32, 32)})()  # type: ignore[reportPrivateImportUsage]  # torch omits factory/dtype names from __all__
 
     def batch_decode(self, sequences, **kw):
         return [self._decoded]
@@ -797,11 +798,11 @@ def test_is_unichart_handle_detects_class_name() -> None:
     from memex.parse.chart_ocr_backend import _is_unichart_handle
 
     handle = _FakeUniChartHandle(decoded="")
-    assert _is_unichart_handle(handle) is True
+    assert _is_unichart_handle(cast(ChartOCRHandle, handle)) is True
 
     # Negative: a Pix2Struct-style handle must NOT be detected as UniChart.
     deplot_handle = _FakeChartOCRHandle()
-    assert _is_unichart_handle(deplot_handle) is False
+    assert _is_unichart_handle(cast(ChartOCRHandle, deplot_handle)) is False
 
 
 @pytest.mark.asyncio

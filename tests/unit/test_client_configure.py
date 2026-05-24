@@ -18,6 +18,7 @@ These tests verify both code paths.
 from __future__ import annotations
 
 import asyncio
+from typing import cast
 
 import pytest
 
@@ -29,7 +30,7 @@ def _settings(base_url: str = "http://test:8000/v1") -> InferenceSettings:
     return InferenceSettings(
         base_url=base_url,
         api_key="test-key",
-        request_timeout_s=30.0,
+        request_timeout_s=30,
     )
 
 
@@ -60,7 +61,7 @@ async def test_configure_client_schedules_close_when_loop_running(
 
     # First call — no prior client to close, just sets the singleton.
     client_module.configure_client(_settings())
-    first = client_module._client
+    first = cast(_FakeClient, client_module._client)
     assert first is not None
     assert close_calls == []  # nothing to close yet
 
@@ -76,7 +77,7 @@ async def test_configure_client_schedules_close_when_loop_running(
     assert first.closed is True
 
     # Subsequent reconfigure should close the second client too.
-    second = client_module._client
+    second = cast(_FakeClient, client_module._client)
     client_module.configure_client(_settings("http://test:8002/v1"))
     await asyncio.sleep(0)
     await asyncio.sleep(0)

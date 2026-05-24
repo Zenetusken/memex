@@ -83,11 +83,13 @@ def fake_pdf(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def patch_docling(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[object]]:
+def patch_docling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, list[dict[str, object]]]:
     """Fake Docling and also record every call so tests can assert it
     was (or wasn't) invoked and inspect the `force_ocr` kwarg.
     """
-    calls: list[object] = []
+    calls: list[dict[str, object]] = []
 
     async def _fake_convert(
         source: Path,
@@ -489,7 +491,7 @@ async def test_markdown_passthrough_skips_docling(settings: MemexSettings, tmp_p
 async def test_pymupdf_routes_powerpoint_to_pymupdf(
     settings: MemexSettings,
     fake_pdf: Path,
-    patch_docling: dict[str, list[object]],
+    patch_docling: dict[str, list[dict[str, object]]],
     patch_pymupdf_born_digital: None,
 ) -> None:
     """PowerPoint producer + 200 chars/page → Tier 1.A → use PyMuPDF.
@@ -512,7 +514,7 @@ async def test_pymupdf_routes_powerpoint_to_pymupdf(
 async def test_pymupdf_scanner_producer_falls_through_with_force_ocr(
     settings: MemexSettings,
     fake_pdf: Path,
-    patch_docling: dict[str, list[object]],
+    patch_docling: dict[str, list[dict[str, object]]],
     patch_pymupdf_scan_producer: None,
 ) -> None:
     """ABBYY producer → Tier 1.B scan → fall through to Docling with
@@ -533,7 +535,7 @@ async def test_pymupdf_scanner_producer_falls_through_with_force_ocr(
 async def test_pymupdf_mixed_content_routes_to_docling_with_ocr(
     settings: MemexSettings,
     fake_pdf: Path,
-    patch_docling: dict[str, list[object]],
+    patch_docling: dict[str, list[dict[str, object]]],
     patch_pymupdf_mixed_content: None,
 ) -> None:
     """Born-digital PowerPoint with substantial image area (charts,
@@ -557,7 +559,7 @@ async def test_pymupdf_mixed_content_routes_to_docling_with_ocr(
 async def test_pymupdf_mojibake_falls_through_without_forced_ocr(
     settings: MemexSettings,
     fake_pdf: Path,
-    patch_docling: dict[str, list[object]],
+    patch_docling: dict[str, list[dict[str, object]]],
     patch_pymupdf_mojibake: None,
 ) -> None:
     """Broken encoding (20% U+FFFD) → Tier 3 mojibake → fall through.
@@ -576,7 +578,7 @@ async def test_pymupdf_mojibake_falls_through_without_forced_ocr(
 async def test_pymupdf_unavailable_falls_through_silently(
     settings: MemexSettings,
     fake_pdf: Path,
-    patch_docling: dict[str, list[object]],
+    patch_docling: dict[str, list[dict[str, object]]],
     patch_pymupdf_unavailable: None,
 ) -> None:
     """PyMuPDF not installed → fall through to Docling, no crash record."""
@@ -596,7 +598,7 @@ async def test_pymupdf_unavailable_falls_through_silently(
 async def test_pymupdf_crash_falls_through_no_manifest_record(
     settings: MemexSettings,
     fake_pdf: Path,
-    patch_docling: dict[str, list[object]],
+    patch_docling: dict[str, list[dict[str, object]]],
     patch_pymupdf_crashes: None,
 ) -> None:
     """PyMuPDF subprocess crashes → fall through to Docling. Only

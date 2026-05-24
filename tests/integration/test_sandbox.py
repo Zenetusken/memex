@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -75,10 +76,16 @@ def test_enable_network_block_skipped_without_pyseccomp(
 
     real_import = builtins.__import__
 
-    def _no_pyseccomp(name: str, *args: object, **kwargs: object):
+    def _no_pyseccomp(
+        name: str,
+        globals: Mapping[str, object] | None = None,
+        locals: Mapping[str, object] | None = None,
+        fromlist: Sequence[str] = (),
+        level: int = 0,
+    ) -> object:
         if name == "pyseccomp":
             raise ImportError("pyseccomp pretend-missing for test")
-        return real_import(name, *args, **kwargs)
+        return real_import(name, globals, locals, fromlist, level)
 
     monkeypatch.setattr(builtins, "__import__", _no_pyseccomp)
 
@@ -268,7 +275,7 @@ async def test_convert_passes_sandbox_env_var(
             )
 
     async def _fake_spawn(*args: object, **kwargs: object) -> _FakeProc:
-        captured_env.update(kwargs.get("env") or {})
+        captured_env.update(cast("Mapping[str, str]", kwargs.get("env") or {}))
         return _FakeProc()
 
     monkeypatch.setattr(backend.asyncio, "create_subprocess_exec", _fake_spawn)
@@ -312,4 +319,4 @@ async def test_convert_surfaces_sandbox_load_failure_distinctly(
 
     with pytest.raises(SandboxLoadFailed) as excinfo:
         await backend.convert(source, timeout_s=10)
-    assert "pretend reason" in excinfo.value.context["stderr"]
+    assert "pretend reason" in cast("str", excinfo.value.context["stderr"])
