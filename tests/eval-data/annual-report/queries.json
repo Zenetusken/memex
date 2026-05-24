@@ -125,7 +125,7 @@
       "_unresolved": true
     }
   ],
-  "_resolved_at": "2026-05-24T17:29:49Z",
+  "_resolved_at": "2026-05-24T18:12:02Z",
   "_baseline_2026_05_24_bf16_reranker": {
     "query_count": 10,
     "answered": 7,
