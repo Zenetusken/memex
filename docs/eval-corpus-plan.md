@@ -306,13 +306,17 @@ The corpus is itself versioned semantically.
 > document — `modern-printed/tidewater-maintenance-log`, a **synthetic**
 > fixture (authored canonical-first → ground truth independent of the SUT,
 > the safe path; the "don't bootstrap from Memex or a frontier LLM" rules
-> below are why real docs still need a human curator). First measured
-> baseline: CER 0.164 / WER 0.315 / structural-F1 0.667 — which surfaced
-> real pymupdf4llm gaps (drops some post-heading paragraphs; flattens
-> H1/H3→H2; ff-ligature `offshore`→`ofshore`, the ligature failure mode
-> row 1 of the category table predicted). Still to do: table + equation
-> structural-F1, the retrieval/answer metric halves, and — the bulk —
-> hand-curated **real** documents per category.
+> below are why real docs still need a human curator). Rendered via
+> **LibreOffice** (HTML→ODT→PDF), a born-digital producer the classifier
+> recognizes. Measured baseline: CER 0.052 / WER 0.146 / structural-F1
+> 0.615 — surfacing real pymupdf4llm findings (heading levels flatten to
+> H2 + bold-wrap; the table flattens under the writerweb filter). An
+> earlier PyMuPDF `Story` render (CER 0.164) dropped some post-heading
+> paragraphs — a *Story artifact*, not a real-PDF weakness, confirmed by
+> the LibreOffice render parsing them correctly. Still to do: table +
+> equation structural-F1, a word-processor-authored table fixture, the
+> retrieval/answer metric halves, and — the bulk — hand-curated **real**
+> documents per category.
 
 Realistic phasing for going from zero to a working eval suite.
 
