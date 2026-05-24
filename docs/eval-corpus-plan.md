@@ -299,6 +299,21 @@ The corpus is itself versioned semantically.
 
 ## Bootstrap plan: the first 30 days
 
+> **Implementation status (2026-05-24).** The scoring engine is built and
+> wired: `eval/scoring.py` (CER, WER, structural-F1 for headings) +
+> `eval/runner.py::run_parse_eval`, driven by `memex eval-parse
+> <corpus_dir>`. `eval-corpus/` exists with `corpus.toml` and its first
+> document — `modern-printed/tidewater-maintenance-log`, a **synthetic**
+> fixture (authored canonical-first → ground truth independent of the SUT,
+> the safe path; the "don't bootstrap from Memex or a frontier LLM" rules
+> below are why real docs still need a human curator). First measured
+> baseline: CER 0.164 / WER 0.315 / structural-F1 0.667 — which surfaced
+> real pymupdf4llm gaps (drops some post-heading paragraphs; flattens
+> H1/H3→H2; ff-ligature `offshore`→`ofshore`, the ligature failure mode
+> row 1 of the category table predicted). Still to do: table + equation
+> structural-F1, the retrieval/answer metric halves, and — the bulk —
+> hand-curated **real** documents per category.
+
 Realistic phasing for going from zero to a working eval suite.
 
 **Week 1 — Foundations**
