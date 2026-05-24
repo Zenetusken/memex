@@ -167,26 +167,50 @@ class FTSStore:
 
         async with self._lock:
             await asyncio.to_thread(_write)
-        logger.info(
-            "fts.upsert", count=len(deduped), deduped=duplicates
-        )
+        logger.info("fts.upsert", count=len(deduped), deduped=duplicates)
+
+    async def update_document_title(self, doc_id: str, title: str) -> int:
+        """Rewrite `document_title` for every chunk of `doc_id` — a
+        metadata-only update, no re-chunk or re-embed.
+
+        `search` reads the title from `chunks_fts` (not `chunks_meta`),
+        so both copies are updated to stay consistent. Returns the
+        number of metadata rows touched. Used by the retitle path
+        (`index.pipeline.retitle_document`), which keeps the frontmatter
+        title (source of truth) and the denormalized copies in sync
+        without the cost — or the delete-before-write risk — of a full
+        force-reindex.
+        """
+
+        def _update() -> int:
+            self._db.execute(
+                "UPDATE chunks_fts SET document_title = ? WHERE document_id = ?",
+                (title, doc_id),
+            )
+            cur = self._db.execute(
+                "UPDATE chunks_meta SET document_title = ? WHERE document_id = ?",
+                (title, doc_id),
+            )
+            return cur.rowcount
+
+        async with self._lock:
+            updated = await asyncio.to_thread(_update)
+        logger.info("fts.update_title", doc_id=doc_id, rows=updated)
+        return updated
 
     async def delete_document(self, doc_id: str) -> int:
         """Drop every chunk belonging to `doc_id` from both the FTS and
         metadata tables. Returns the count of rows removed.
         """
+
         def _delete() -> int:
             cur = self._db.execute(
                 "SELECT count(*) FROM chunks_meta WHERE document_id = ?",
                 (doc_id,),
             )
             count = cur.fetchone()[0]
-            self._db.execute(
-                "DELETE FROM chunks_fts WHERE document_id = ?", (doc_id,)
-            )
-            self._db.execute(
-                "DELETE FROM chunks_meta WHERE document_id = ?", (doc_id,)
-            )
+            self._db.execute("DELETE FROM chunks_fts WHERE document_id = ?", (doc_id,))
+            self._db.execute("DELETE FROM chunks_meta WHERE document_id = ?", (doc_id,))
             return count
 
         async with self._lock:
@@ -225,6 +249,7 @@ class FTSStore:
         Used by `index.pipeline.index_document` to compute the
         re-indexing diff without re-reading any chunk bodies.
         """
+
         def _read() -> set[str]:
             rows = self._db.execute(
                 "SELECT chunk_id FROM chunks_meta WHERE document_id = ?",
@@ -353,7 +378,5 @@ def _normalize_fts_query(query: str) -> str:
     if not query:
         return ""
     # Drop ASCII control chars and Unicode line/paragraph separators.
-    stripped = "".join(
-        ch for ch in query if ord(ch) >= 0x20 and ch not in ("\x7f",)
-    )
+    stripped = "".join(ch for ch in query if ord(ch) >= 0x20 and ch not in ("\x7f",))
     return stripped.strip()

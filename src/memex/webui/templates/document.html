@@ -21,9 +21,7 @@
 
 <header class="flex items-end justify-between gap-6 mb-5">
   <div class="min-w-0">
-    <h1 class="text-xl font-semibold truncate">
-      {{ document.frontmatter.title or document.ref.doc_id }}
-    </h1>
+    <div id="doc-title">{% include "_document_title.html" %}</div>
     <p class="text-xs text-zinc-500 tabular mt-1.5">
       {%- if document.frontmatter.authors -%}
         {{ document.frontmatter.authors|join(', ') }}

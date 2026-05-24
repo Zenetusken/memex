@@ -19,6 +19,7 @@ from memex.parse.docling_backend import (
 )
 from memex.parse.pipeline import (
     ParseResult,
+    derive_title,
     parse_document,
     reset_docling_breaker,
     reset_pymupdf_breaker,
@@ -53,6 +54,7 @@ __all__ = [
     "SandboxLoadFailed",
     "SandboxStatus",
     "VLMUnavailable",
+    "derive_title",
     "enable_network_block",
     "parse_document",
     "reset_docling_breaker",

@@ -109,16 +109,12 @@ class VectorStore:
         # `lancedb.connect_async(...).list_tables()` returning
         # `ListTablesResponse(tables=['chunks'], page_token=None)`.
         response = await db.list_tables()
-        names = (
-            response.tables if hasattr(response, "tables") else list(response)
-        )
+        names = response.tables if hasattr(response, "tables") else list(response)
         if _TABLE not in names:
             await db.create_table(_TABLE, schema=_ChunkRow)
         return cls(db)
 
-    async def upsert(
-        self, chunks: list[Chunk], embeddings: list[list[float]]
-    ) -> None:
+    async def upsert(self, chunks: list[Chunk], embeddings: list[list[float]]) -> None:
         """Insert chunks + their parallel dense vectors. Duplicate
         `chunk_id` rows are deleted first, then the new rows are
         added (LanceDB's supported idempotency pattern). Raises
@@ -127,8 +123,7 @@ class VectorStore:
             return
         if len(chunks) != len(embeddings):
             raise ValueError(
-                f"chunks ({len(chunks)}) and embeddings ({len(embeddings)}) "
-                "must be the same length"
+                f"chunks ({len(chunks)}) and embeddings ({len(embeddings)}) must be the same length"
             )
         # Dedupe by chunk_id — same rationale as FTSStore.upsert (see
         # that docstring). Pair the *first* occurrence with its
@@ -145,8 +140,7 @@ class VectorStore:
         duplicates = len(chunks) - len(deduped_chunks)
 
         rows = [
-            _row_from_chunk(c, e)
-            for c, e in zip(deduped_chunks, deduped_embeddings, strict=True)
+            _row_from_chunk(c, e) for c, e in zip(deduped_chunks, deduped_embeddings, strict=True)
         ]
         table = await self._db.open_table(_TABLE)
         # LanceDB upsert: delete by chunk_id then add. Deleting by primary key
@@ -184,9 +178,23 @@ class VectorStore:
         logger.info("vector.delete_chunks", count=len(chunk_ids), deleted=before)
         return before
 
-    async def search(
-        self, query_embedding: list[float], *, k: int
-    ) -> list[Chunk]:
+    async def update_document_title(self, doc_id: str, title: str) -> int:
+        """Rewrite `document_title` for every row of `doc_id` — a
+        column update that leaves the stored vectors untouched.
+
+        The embedding is a function of `chunk.text` (the body) only, so
+        a title change never invalidates a vector. This is the vector
+        half of the retitle fan-out (`index.pipeline.retitle_document`):
+        cheap, no GPU, no re-embed. Returns the number of rows updated.
+        """
+        table = await self._db.open_table(_TABLE)
+        where = f"document_id = {_sql_quote(doc_id)}"
+        before = await table.count_rows(where)
+        await table.update(updates={"document_title": title}, where=where)
+        logger.info("vector.update_title", doc_id=doc_id, rows=before)
+        return before
+
+    async def search(self, query_embedding: list[float], *, k: int) -> list[Chunk]:
         """Dense L2 search; returns top `k` chunks ordered by ascending
         distance. The returned `Chunk.score` is a synthetic
         rank-descending float so the downstream RRF fusion (which only
@@ -201,10 +209,7 @@ class VectorStore:
         results = await query.limit(k).to_pydantic(_ChunkRow)
         # to_pydantic drops `_distance`; we lose the per-row score but the
         # downstream RRF only needs rank order. Return rank as a descending score.
-        return [
-            _chunk_from_row(r, score=float(k - i) / max(k, 1))
-            for i, r in enumerate(results)
-        ]
+        return [_chunk_from_row(r, score=float(k - i) / max(k, 1)) for i, r in enumerate(results)]
 
     async def search_in_docs(
         self,
@@ -230,10 +235,7 @@ class VectorStore:
         where = f"document_id IN ({ids_sql})"
         query = await table.search(query_embedding)
         results = await query.where(where).limit(k).to_pydantic(_ChunkRow)
-        return [
-            _chunk_from_row(r, score=float(k - i) / max(k, 1))
-            for i, r in enumerate(results)
-        ]
+        return [_chunk_from_row(r, score=float(k - i) / max(k, 1)) for i, r in enumerate(results)]
 
     async def close(self) -> None:
         """No-op today — LanceDB's `AsyncConnection` releases via GC.

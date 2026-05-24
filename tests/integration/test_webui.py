@@ -31,9 +31,7 @@ def tmp_vault(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def settings(
-    tmp_vault: Path, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[MemexSettings]:
+def settings(tmp_vault: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[MemexSettings]:
     monkeypatch.setenv("MEMEX_VAULT_PATH", str(tmp_vault))
     monkeypatch.setenv("MEMEX_OBSERVABILITY__LANGFUSE_ENABLED", "false")
     s = MemexSettings()  # type: ignore[call-arg]
@@ -102,9 +100,7 @@ def test_index_renders_ask_form(client: TestClient) -> None:
     assert 'hx-post="/ask"' in r.text
 
 
-def test_healthz_reports_vault_path(
-    settings: MemexSettings, client: TestClient
-) -> None:
+def test_healthz_reports_vault_path(settings: MemexSettings, client: TestClient) -> None:
     r = client.get("/healthz")
     assert r.status_code == 200
     payload = r.json()
@@ -112,9 +108,7 @@ def test_healthz_reports_vault_path(
     assert payload["vault_path"] == str(settings.vault_path)
 
 
-def test_ask_returns_answer_fragment(
-    client: TestClient, fake_answered: None
-) -> None:
+def test_ask_returns_answer_fragment(client: TestClient, fake_answered: None) -> None:
     r = client.post("/ask", data={"question": "What does Smith argue?"})
     assert r.status_code == 200
     # Fragment, not full document — no <html> tag.
@@ -124,27 +118,21 @@ def test_ask_returns_answer_fragment(
     assert "01HZTESTWEBUI" in r.text  # correlation id printed
 
 
-def test_ask_renders_refusal(
-    client: TestClient, fake_refused: None
-) -> None:
+def test_ask_renders_refusal(client: TestClient, fake_refused: None) -> None:
     r = client.post("/ask", data={"question": "What is the etymology?"})
     assert r.status_code == 200
     assert "Refused" in r.text
     assert "vault doesn&#39;t contain" in r.text or "vault doesn't contain" in r.text
 
 
-def test_ask_rejects_empty_question(
-    client: TestClient, fake_answered: None
-) -> None:
+def test_ask_rejects_empty_question(client: TestClient, fake_answered: None) -> None:
     r = client.post("/ask", data={"question": "   "})
     assert r.status_code == 400
     assert "Question is empty" in r.text
 
 
 @pytest.mark.asyncio
-async def test_documents_list_renders_each_doc(
-    settings: MemexSettings, client: TestClient
-) -> None:
+async def test_documents_list_renders_each_doc(settings: MemexSettings, client: TestClient) -> None:
     a = await ingest_markdown_passthrough("# A\n\nFirst.\n", source_stem="alpha")
     b = await ingest_markdown_passthrough("# B\n\nSecond.\n", source_stem="beta")
 
@@ -155,9 +143,7 @@ async def test_documents_list_renders_each_doc(
 
 
 @pytest.mark.asyncio
-async def test_document_detail_renders_body(
-    settings: MemexSettings, client: TestClient
-) -> None:
+async def test_document_detail_renders_body(settings: MemexSettings, client: TestClient) -> None:
     ref = await ingest_markdown_passthrough(
         "# Reflexivity\n\nSome paragraph about it.\n",
         source_stem="reflexivity",
@@ -179,9 +165,7 @@ def test_document_detail_404s_on_unknown_doc(client: TestClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_document_source_serves_pdf(
-    settings: MemexSettings, client: TestClient
-) -> None:
+async def test_document_source_serves_pdf(settings: MemexSettings, client: TestClient) -> None:
     ref = await ingest_markdown_passthrough(
         "# Reflexivity\n\nBody.\n", source_stem="reflexivity_src"
     )
@@ -195,17 +179,13 @@ async def test_document_source_serves_pdf(
     assert r.content.startswith(b"%PDF-")
 
 
-def test_document_source_404s_without_source(
-    settings: MemexSettings, client: TestClient
-) -> None:
+def test_document_source_404s_without_source(settings: MemexSettings, client: TestClient) -> None:
     """Markdown-passthrough docs have no source file copied — the route
     must 404 cleanly rather than serve the markdown."""
     import asyncio
 
     async def _make():
-        return await ingest_markdown_passthrough(
-            "# Solo md\n\n.\n", source_stem="solo_md"
-        )
+        return await ingest_markdown_passthrough("# Solo md\n\n.\n", source_stem="solo_md")
 
     ref = asyncio.run(_make())
     r = client.get(f"/documents/{ref.doc_id}/source")
@@ -235,9 +215,7 @@ def test_document_view_renders_solo_when_no_source(
     import asyncio
 
     async def _make():
-        return await ingest_markdown_passthrough(
-            "# No source\n\nBody.\n", source_stem="no_src"
-        )
+        return await ingest_markdown_passthrough("# No source\n\nBody.\n", source_stem="no_src")
 
     ref = asyncio.run(_make())
     r = client.get(f"/documents/{ref.doc_id}")
@@ -250,9 +228,7 @@ def test_document_view_renders_solo_when_no_source(
 async def test_document_edit_returns_textarea_partial(
     settings: MemexSettings, client: TestClient
 ) -> None:
-    ref = await ingest_markdown_passthrough(
-        "# Edit me\n\nOriginal body.\n", source_stem="edit_me"
-    )
+    ref = await ingest_markdown_passthrough("# Edit me\n\nOriginal body.\n", source_stem="edit_me")
     r = client.get(f"/documents/{ref.doc_id}/edit")
     assert r.status_code == 200
     assert "<html" not in r.text  # fragment, not full document
@@ -265,9 +241,7 @@ async def test_document_edit_returns_textarea_partial(
 async def test_document_body_returns_view_partial(
     settings: MemexSettings, client: TestClient
 ) -> None:
-    ref = await ingest_markdown_passthrough(
-        "# View\n\nBody.\n", source_stem="view_me"
-    )
+    ref = await ingest_markdown_passthrough("# View\n\nBody.\n", source_stem="view_me")
     r = client.get(f"/documents/{ref.doc_id}/body")
     assert r.status_code == 200
     assert "<html" not in r.text
@@ -282,9 +256,7 @@ async def test_document_review_writes_and_returns_saved_partial(
 ) -> None:
     from memex.vault.store import read_document
 
-    ref = await ingest_markdown_passthrough(
-        "# Original\n\nFirst draft.\n", source_stem="review_me"
-    )
+    ref = await ingest_markdown_passthrough("# Original\n\nFirst draft.\n", source_stem="review_me")
 
     new_body = "# Updated\n\nSecond draft, hand-corrected.\n"
     r = client.post(
@@ -312,9 +284,7 @@ async def test_document_review_updates_manifest_to_avoid_watcher_race(
     from memex.core.manifest import read_manifest
     from memex.vault.store import read_document
 
-    ref = await ingest_markdown_passthrough(
-        "# Watch race\n\nA.\n", source_stem="watch_race"
-    )
+    ref = await ingest_markdown_passthrough("# Watch race\n\nA.\n", source_stem="watch_race")
     new_body = "# Watch race\n\nA.\n\nAppended by the UI.\n"
 
     r = client.post(
@@ -411,9 +381,7 @@ async def test_document_edit_form_includes_hidden_expected_sha(
     """The GET /documents/{id}/edit partial must include the hidden
     `expected_sha` input so the form submission can carry it back.
     """
-    ref = await ingest_markdown_passthrough(
-        "# Hidden\n\nbody.\n", source_stem="hidden_sha_input"
-    )
+    ref = await ingest_markdown_passthrough("# Hidden\n\nbody.\n", source_stem="hidden_sha_input")
     r = client.get(f"/documents/{ref.doc_id}/edit")
     assert r.status_code == 200
     assert 'name="expected_sha"' in r.text
@@ -432,9 +400,7 @@ async def test_graph_renders_with_inline_data(
     `<script id="graph-data">` tag for Cytoscape to pick up."""
     from memex.index.graph_store import GraphNeighbor
 
-    ref = await ingest_markdown_passthrough(
-        "# Center\n\nThe centerpiece.\n", source_stem="center"
-    )
+    ref = await ingest_markdown_passthrough("# Center\n\nThe centerpiece.\n", source_stem="center")
 
     class _FakeStore:
         @classmethod
@@ -506,4 +472,54 @@ async def test_graph_shows_unavailable_when_graph_store_missing(
 
 def test_graph_404s_on_unknown_doc(client: TestClient) -> None:
     r = client.get("/graph/nonexistent-doc")
+    assert r.status_code == 404
+
+
+# ----- Inline title rename (metadata-only retitle) -----
+
+
+@pytest.mark.asyncio
+async def test_title_edit_renders_form_with_current_title(
+    settings: MemexSettings, client: TestClient
+) -> None:
+    ref = await ingest_markdown_passthrough("# Doc\n\nBody.\n", source_stem="rename_me")
+    r = client.get(f"/documents/{ref.doc_id}/title/edit")
+    assert r.status_code == 200
+    # The form carries the current title and posts back to .../title.
+    assert 'name="title"' in r.text
+    assert f"/documents/{ref.doc_id}/title" in r.text
+
+
+@pytest.mark.asyncio
+async def test_title_save_renames_and_persists(settings: MemexSettings, client: TestClient) -> None:
+    from memex.vault.store import read_document
+
+    ref = await ingest_markdown_passthrough("# Doc\n\nBody.\n", source_stem="rename_me")
+    r = client.post(
+        f"/documents/{ref.doc_id}/title",
+        data={"title": "A Clean Human Title"},
+    )
+    assert r.status_code == 200
+    # The returned view partial shows the new title + a rename trigger.
+    assert "A Clean Human Title" in r.text
+    assert "rename" in r.text
+    # Frontmatter on disk reflects the new title.
+    refreshed = await read_document(settings.vault_path, ref.doc_id)
+    assert refreshed.frontmatter.title == "A Clean Human Title"
+
+
+@pytest.mark.asyncio
+async def test_title_save_blank_is_noop(settings: MemexSettings, client: TestClient) -> None:
+    from memex.vault.store import read_document
+
+    ref = await ingest_markdown_passthrough("# Doc\n\nBody.\n", source_stem="keep_title")
+    before = (await read_document(settings.vault_path, ref.doc_id)).frontmatter.title
+    r = client.post(f"/documents/{ref.doc_id}/title", data={"title": "   "})
+    assert r.status_code == 200
+    after = (await read_document(settings.vault_path, ref.doc_id)).frontmatter.title
+    assert after == before
+
+
+def test_title_save_404s_on_unknown_doc(client: TestClient) -> None:
+    r = client.post("/documents/nonexistent-doc/title", data={"title": "X"})
     assert r.status_code == 404

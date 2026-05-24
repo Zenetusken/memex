@@ -49,6 +49,7 @@ from memex.core.config import get_settings
 from memex.core.errors import StaleDocumentError, VaultIntegrityError
 from memex.core.manifest import update_manifest
 from memex.index.graph_store import GraphStore
+from memex.index.pipeline import retitle_document
 from memex.vault.store import (
     VaultDocument,
     hash_bytes,
@@ -77,6 +78,7 @@ _DOC_ID_RE = re.compile(r"^[0-9a-f]{8}(-[a-z0-9-]+)?$")
 # misbehaving client). Both are checked at request time.
 _QUESTION_MAX_BYTES = 4_096
 _BODY_MAX_BYTES = 16 * 1024 * 1024
+_TITLE_MAX_LEN = 300
 
 
 def _validate_doc_id(doc_id: str) -> str:
@@ -90,6 +92,7 @@ def _validate_doc_id(doc_id: str) -> str:
     if not _DOC_ID_RE.match(doc_id):
         raise HTTPException(status_code=404, detail="document not found")
     return doc_id
+
 
 # Map a `source.<ext>` filename to the source-kind label rendered in the
 # pane header and to the HTTP media-type. Anything not in this map is
@@ -195,10 +198,7 @@ def create_app() -> FastAPI:
                 "_answer.html",
                 {
                     "response": None,
-                    "error": (
-                        f"Couldn't answer: {type(e).__name__}. "
-                        f"{str(e)[:160]}"
-                    ),
+                    "error": (f"Couldn't answer: {type(e).__name__}. {str(e)[:160]}"),
                 },
                 status_code=503,
             )
@@ -229,9 +229,7 @@ def create_app() -> FastAPI:
             )
         # Sort by title for a stable, human-scannable listing.
         docs.sort(key=lambda d: d["title"].casefold())
-        return templates.TemplateResponse(
-            request, "documents.html", {"documents": docs}
-        )
+        return templates.TemplateResponse(request, "documents.html", {"documents": docs})
 
     @app.get("/documents/{doc_id}", response_class=HTMLResponse)
     async def document(request: Request, doc_id: str) -> HTMLResponse:
@@ -369,9 +367,7 @@ def create_app() -> FastAPI:
             content_sha256=anticipated,
         )
         try:
-            new_ref = await write_document(
-                settings.vault_path, new_doc, expected_sha=expected_sha
-            )
+            new_ref = await write_document(settings.vault_path, new_doc, expected_sha=expected_sha)
         except StaleDocumentError as e:
             # Roll back the optimistic manifest update — the file
             # didn't change, so the manifest must match the current
@@ -431,6 +427,59 @@ def create_app() -> FastAPI:
             },
         )
 
+    # ----- Title rename (inline, metadata-only) -----
+    # These call `index.retitle_document` directly. The webui's normal
+    # boundary is agents/vault/core, but a rename must fan the new title
+    # out to the FTS/vector/graph copies *without* a re-embed — the
+    # watcher's partial reindex can't, since the body (and thus every
+    # chunk) is unchanged. `retitle_document` is the sanctioned write
+    # path for that, the same way `vault.write_document` is for body edits.
+
+    @app.get("/documents/{doc_id}/title", response_class=HTMLResponse)
+    async def document_title(request: Request, doc_id: str) -> HTMLResponse:
+        """View-mode title partial — what `cancel` swaps back to."""
+        doc_id = _validate_doc_id(doc_id)
+        settings = get_settings()
+        try:
+            doc = await read_document(settings.vault_path, doc_id)
+        except VaultIntegrityError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+        return templates.TemplateResponse(request, "_document_title.html", {"document": doc})
+
+    @app.get("/documents/{doc_id}/title/edit", response_class=HTMLResponse)
+    async def document_title_edit(request: Request, doc_id: str) -> HTMLResponse:
+        """Render the inline title-rename form."""
+        doc_id = _validate_doc_id(doc_id)
+        settings = get_settings()
+        try:
+            doc = await read_document(settings.vault_path, doc_id)
+        except VaultIntegrityError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+        return templates.TemplateResponse(request, "_document_title_edit.html", {"document": doc})
+
+    @app.post("/documents/{doc_id}/title", response_class=HTMLResponse)
+    async def document_title_save(
+        request: Request,
+        doc_id: str,
+        title: str = Form(..., max_length=_TITLE_MAX_LEN),
+    ) -> HTMLResponse:
+        """Apply a rename: fan the new title out to every store via
+        `retitle_document` (no re-embed), then return the view partial."""
+        doc_id = _validate_doc_id(doc_id)
+        settings = get_settings()
+        cleaned = title.strip()
+        if not cleaned:
+            # Empty title → no-op; re-render the current view partial.
+            doc = await read_document(settings.vault_path, doc_id)
+            return templates.TemplateResponse(request, "_document_title.html", {"document": doc})
+        try:
+            await retitle_document(doc_id, cleaned)
+        except VaultIntegrityError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+        refreshed = await read_document(settings.vault_path, doc_id)
+        logger.info("webui.document_retitled", doc_id=doc_id, new_title=cleaned)
+        return templates.TemplateResponse(request, "_document_title.html", {"document": refreshed})
+
     # ----- Graph -----
 
     @app.get("/graph/{doc_id}", response_class=HTMLResponse)
@@ -474,9 +523,7 @@ def create_app() -> FastAPI:
                 await store.close()
 
         title = doc.frontmatter.title or doc_id
-        nodes: list[dict[str, Any]] = [
-            {"id": doc_id, "title": title, "kind": "center"}
-        ]
+        nodes: list[dict[str, Any]] = [{"id": doc_id, "title": title, "kind": "center"}]
         edges: list[dict[str, Any]] = []
         seen_neighbor_ids: set[str] = {doc_id}
         for n in neighbors:

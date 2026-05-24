@@ -1,0 +1,16 @@
+{# View mode of the document title. HTMX target = #doc-title.
+   The "rename" button swaps in _document_title_edit.html. Mirrors the
+   body edit/view toggle but scoped to the <h1> rather than #md-pane. #}
+<div class="flex items-center gap-2 min-w-0">
+  <h1 class="text-xl font-semibold truncate">
+    {{ document.frontmatter.title or document.ref.doc_id }}
+  </h1>
+  <button type="button"
+          class="btn-quiet text-xs shrink-0"
+          hx-get="/documents/{{ document.ref.doc_id }}/title/edit"
+          hx-target="#doc-title"
+          hx-swap="innerHTML"
+          aria-label="Rename document">
+    rename
+  </button>
+</div>

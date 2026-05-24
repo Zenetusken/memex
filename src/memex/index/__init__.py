@@ -14,9 +14,11 @@ from memex.index.graph_store import GraphNeighbor, GraphStore
 from memex.index.pipeline import (
     IndexResult,
     ReindexReport,
+    RetitleResult,
     index_document,
     reindex_vault,
     remove_document,
+    retitle_document,
 )
 from memex.index.vector_store import EMBEDDING_DIM, VectorStore
 
@@ -27,9 +29,11 @@ __all__ = [
     "GraphStore",
     "IndexResult",
     "ReindexReport",
+    "RetitleResult",
     "VectorStore",
     "chunk_document",
     "index_document",
     "reindex_vault",
     "remove_document",
+    "retitle_document",
 ]

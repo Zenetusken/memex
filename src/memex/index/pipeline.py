@@ -33,6 +33,7 @@ import ulid
 from pydantic import BaseModel, Field
 
 from memex.core.config import get_settings
+from memex.core.errors import ConfigurationError
 from memex.core.manifest import (
     IndexStage,
     now_utc,
@@ -45,7 +46,13 @@ from memex.index.fts_store import FTSStore
 from memex.index.graph_store import GraphStore
 from memex.index.vector_store import EMBEDDING_DIM, VectorStore
 from memex.models.registry import get_registry
-from memex.vault.store import list_documents, read_document
+from memex.vault.store import (
+    VaultDocument,
+    list_documents,
+    make_ref,
+    read_document,
+    write_document,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -57,12 +64,12 @@ class IndexResult(BaseModel):
     meaningful progress line."""
 
     doc_id: str
-    chunk_count: int                # total chunks now in the index for this doc
-    embedded: bool                  # True if at least one chunk was embedded
-    chunks_added: int = 0           # new chunks vs. prior state
-    chunks_deleted: int = 0         # chunks that disappeared
-    chunks_unchanged: int = 0       # chunks whose chunk_id (and thus text) survived
-    partial: bool = False           # whether this was a diff-based re-index
+    chunk_count: int  # total chunks now in the index for this doc
+    embedded: bool  # True if at least one chunk was embedded
+    chunks_added: int = 0  # new chunks vs. prior state
+    chunks_deleted: int = 0  # chunks that disappeared
+    chunks_unchanged: int = 0  # chunks whose chunk_id (and thus text) survived
+    partial: bool = False  # whether this was a diff-based re-index
 
 
 class FailureItem(BaseModel):
@@ -215,9 +222,7 @@ async def index_document(doc_id: str, *, force: bool = False) -> IndexResult:
         # index call so the graph stays in sync with the markdown
         # vault even when no chunks changed.
         if gstore is not None:
-            await gstore.upsert_document(
-                doc_id, doc.frontmatter.title or doc_id
-            )
+            await gstore.upsert_document(doc_id, doc.frontmatter.title or doc_id)
 
     duration_ms = int((time.monotonic() - start) * 1000)
     chunks_added = len(chunks_to_add)
@@ -258,6 +263,109 @@ async def index_document(doc_id: str, *, force: bool = False) -> IndexResult:
         chunks_deleted=chunks_deleted,
         chunks_unchanged=unchanged_count,
         partial=partial,
+    )
+
+
+class RetitleResult(BaseModel):
+    """Return value of `retitle_document` — the new title plus the
+    per-store fan-out counts, so the caller can confirm every
+    denormalized copy was updated."""
+
+    doc_id: str
+    old_title: str | None
+    new_title: str
+    frontmatter_changed: bool  # False when the title was already current
+    fts_rows: int  # chunks_meta rows retitled
+    vector_rows: int  # vector rows retitled
+    graph_updated: bool  # graph node title set (False if no graph store)
+
+
+async def retitle_document(doc_id: str, new_title: str) -> RetitleResult:
+    """Change a document's title everywhere it is denormalized — the
+    frontmatter (source of truth) plus the FTS, vector, and graph
+    copies — *without* re-chunking or re-embedding.
+
+    The title is pure metadata: `chunk.text` (the embedded input) and
+    `chunk_id` (`hash(doc_id, text)`) are both functions of the body
+    only, so a title change never invalidates a vector or a chunk id.
+    That is what makes this cheap and safe — unlike a force-reindex,
+    which deletes-then-re-embeds every chunk (wasteful, and a
+    delete-before-write window if the re-embed fails).
+
+    The frontmatter write is skipped when the title is already current,
+    but the derived stores are still refreshed — so this doubles as a
+    "repair a stale denormalized title" operation. Each store update is
+    idempotent; on a partial failure the frontmatter remains the source
+    of truth and a later `index --force` (or re-running this) reconciles.
+    """
+    settings = get_settings()
+    correlation_id = str(ulid.ULID())
+    log = logger.bind(doc_id=doc_id, correlation_id=correlation_id)
+
+    new_title = new_title.strip()
+    if not new_title:
+        raise ConfigurationError(
+            "retitle requires a non-empty title",
+            context={"doc_id": doc_id},
+        )
+
+    doc = await read_document(settings.vault_path, doc_id)
+    old_title = doc.frontmatter.title
+    log.info("retitle.start", old_title=old_title, new_title=new_title)
+
+    # 1. Frontmatter (source of truth) — only rewrite if it actually
+    #    changed, to keep the content sha stable on a no-op / repair run.
+    frontmatter_changed = old_title != new_title
+    if frontmatter_changed:
+        updated = VaultDocument(
+            ref=make_ref(
+                settings.vault_path,
+                doc_id,
+                content_sha256=doc.ref.content_sha256,  # write recomputes
+                source_path=doc.ref.source_path,
+            ),
+            frontmatter=doc.frontmatter.model_copy(update={"title": new_title}),
+            body=doc.body,
+            mtime_ns=doc.mtime_ns,
+        )
+        written = await write_document(settings.vault_path, updated)
+        await update_manifest(
+            settings.vault_path,
+            doc_id,
+            content_sha256=written.content_sha256,
+            correlation_id=correlation_id,
+        )
+
+    # 2. Derived stores — metadata-only column updates, no re-embed.
+    async with AsyncExitStack() as stack:
+        vstore = await VectorStore.open(settings.vault_path)
+        stack.push_async_callback(vstore.close)
+        fstore = await FTSStore.open(settings.vault_path)
+        stack.push_async_callback(fstore.close)
+        gstore = await _open_graph(settings.vault_path)
+        if gstore is not None:
+            stack.push_async_callback(gstore.close)
+
+        fts_rows = await fstore.update_document_title(doc_id, new_title)
+        vector_rows = await vstore.update_document_title(doc_id, new_title)
+        if gstore is not None:
+            await gstore.upsert_document(doc_id, new_title)
+
+    log.info(
+        "retitle.done",
+        frontmatter_changed=frontmatter_changed,
+        fts_rows=fts_rows,
+        vector_rows=vector_rows,
+        graph_updated=gstore is not None,
+    )
+    return RetitleResult(
+        doc_id=doc_id,
+        old_title=old_title,
+        new_title=new_title,
+        frontmatter_changed=frontmatter_changed,
+        fts_rows=fts_rows,
+        vector_rows=vector_rows,
+        graph_updated=gstore is not None,
     )
 
 

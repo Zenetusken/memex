@@ -30,7 +30,7 @@ from memex.cli.bootstrap import bootstrap
 from memex.enrich.pipeline import enrich_document
 from memex.eval.runner import run_eval
 from memex.index.graph_store import GraphStore
-from memex.index.pipeline import index_document, reindex_vault
+from memex.index.pipeline import index_document, reindex_vault, retitle_document
 from memex.ingest.pipeline import (
     IngestRequest,
     IngestResult,
@@ -39,7 +39,7 @@ from memex.ingest.pipeline import (
     ingest_markdown_passthrough,
 )
 from memex.ingest.watcher import default_reaction, run_watcher
-from memex.parse.pipeline import parse_document
+from memex.parse.pipeline import derive_title, parse_document
 
 console = Console(stderr=False)  # stdout is the data channel
 err = Console(stderr=True)
@@ -162,9 +162,7 @@ def register(app: typer.Typer) -> None:
             "--skip-parse",
             help="For markdown sources, write straight to the vault without parsing.",
         ),
-        no_index: bool = typer.Option(
-            False, "--no-index", help="Parse but don't index."
-        ),
+        no_index: bool = typer.Option(False, "--no-index", help="Parse but don't index."),
         force_docling: bool = typer.Option(
             False,
             "--force-docling",
@@ -210,6 +208,7 @@ def register(app: typer.Typer) -> None:
         ),
     ) -> None:
         """Re-parse a document already in the vault."""
+
         async def _run():
             bootstrap()
             return await parse_document(doc_id, force_docling=force_docling)
@@ -219,9 +218,43 @@ def register(app: typer.Typer) -> None:
     @app.command(name="index")
     def index_cmd(doc_id: str) -> None:
         """Chunk, embed, and write derived state for one document."""
+
         async def _run():
             bootstrap()
             return await index_document(doc_id)
+
+        _print(asyncio.run(_run()))
+
+    @app.command(name="retitle")
+    def retitle_cmd(
+        doc_id: str,
+        title: str = typer.Argument(
+            "",
+            help="The new title. Omit and pass --derive to pull it from "
+            "the original source filename instead.",
+        ),
+        derive: bool = typer.Option(
+            False,
+            "--derive",
+            help="Derive the title from the manifest's source filename "
+            "(for docs ingested before the title-derivation fix).",
+        ),
+    ) -> None:
+        """Rename a document's title everywhere it's stored.
+
+        A title is pure metadata — it isn't part of the embedded text or
+        the chunk id — so this updates the frontmatter plus the FTS,
+        vector, and graph copies without re-chunking or re-embedding.
+        """
+        if derive == bool(title):
+            raise typer.BadParameter("pass exactly one of TITLE or --derive")
+
+        async def _run():
+            bootstrap()
+            from memex.core.config import get_settings
+
+            new_title = await derive_title(get_settings().vault_path, doc_id) if derive else title
+            return await retitle_document(doc_id, new_title)
 
         _print(asyncio.run(_run()))
 
@@ -232,6 +265,7 @@ def register(app: typer.Typer) -> None:
         ),
     ) -> None:
         """Rebuild derived state from the canonical Markdown vault."""
+
         async def _run():
             bootstrap()
             return await reindex_vault(force=force)
@@ -244,6 +278,7 @@ def register(app: typer.Typer) -> None:
         token_budget: int = typer.Option(8000, help="Max tokens across the agent loop."),
     ) -> None:
         """Run the answering agent over the vault."""
+
         async def _run():
             bootstrap()
             return await answer_query(query, token_budget=token_budget)
@@ -253,6 +288,7 @@ def register(app: typer.Typer) -> None:
     @app.command(name="enrich")
     def enrich_cmd(doc_id: str) -> None:
         """Run entity extraction + graph linking for one document."""
+
         async def _run():
             bootstrap()
             return await enrich_document(doc_id)
@@ -265,6 +301,7 @@ def register(app: typer.Typer) -> None:
         limit: int = typer.Option(50, help="Max neighbors to print."),
     ) -> None:
         """Print one-hop graph neighbors (shared entities) for a document."""
+
         async def _run():
             from memex.core.config import get_settings
 
@@ -282,6 +319,7 @@ def register(app: typer.Typer) -> None:
     @app.command()
     def doctor() -> None:
         """Health check: vault integrity, daemon reachability, breaker state."""
+
         async def _run() -> dict[str, object]:
             bootstrap()
             return await _doctor_report()
@@ -294,6 +332,7 @@ def register(app: typer.Typer) -> None:
         k: int = typer.Option(10, help="Number of top chunks to return."),
     ) -> None:
         """Hybrid search over the vault — BM25 ⊕ dense → RRF → rerank."""
+
         async def _run():
             from memex.retrieve import cross_encoder_rerank, hybrid_search
 
@@ -308,6 +347,7 @@ def register(app: typer.Typer) -> None:
     @app.command()
     def watch() -> None:
         """Watch the vault for markdown edits and re-enrich + re-index live."""
+
         async def _run():
             from memex.core.config import get_settings
 
@@ -330,6 +370,7 @@ def register(app: typer.Typer) -> None:
         quick: bool = typer.Option(False, "--quick", help="Sample ~20% of queries."),
     ) -> None:
         """Run the eval harness against a query set."""
+
         async def _run():
             bootstrap()
             return await run_eval(query_set, quick=quick)
@@ -384,10 +425,14 @@ def register(app: typer.Typer) -> None:
             _upgrade_step(
                 "uv sync --extra models --extra parse --extra serve",
                 [
-                    "uv", "sync",
-                    "--extra", "models",
-                    "--extra", "parse",
-                    "--extra", "serve",
+                    "uv",
+                    "sync",
+                    "--extra",
+                    "models",
+                    "--extra",
+                    "parse",
+                    "--extra",
+                    "serve",
                 ],
                 dry_run=dry_run,
                 cwd=repo_root,
@@ -459,10 +504,17 @@ def _installed_memex_units() -> list[str]:
     try:
         result = subprocess.run(
             [
-                "systemctl", "--user", "list-unit-files", "memex-*.service",
-                "--no-legend", "--no-pager",
+                "systemctl",
+                "--user",
+                "list-unit-files",
+                "memex-*.service",
+                "--no-legend",
+                "--no-pager",
             ],
-            capture_output=True, text=True, timeout=5, check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return []
@@ -498,9 +550,7 @@ def _upgrade_step(
         return
     completed = subprocess.run(argv, cwd=cwd, check=False)
     if completed.returncode != 0:
-        err.print(
-            f"[red]✗ {label} failed (exit {completed.returncode})[/red]"
-        )
+        err.print(f"[red]✗ {label} failed (exit {completed.returncode})[/red]")
         raise typer.Exit(code=completed.returncode)
 
 
@@ -511,8 +561,7 @@ def mcp_generate_token(
         "--length",
         min=16,
         max=128,
-        help="Token length in bytes (urlsafe-encoded; the printed string "
-        "is ~33% longer).",
+        help="Token length in bytes (urlsafe-encoded; the printed string is ~33% longer).",
     ),
 ) -> None:
     """Print a fresh urlsafe bearer token to stdout.
@@ -550,8 +599,7 @@ def serve_mcp(
         # Don't print to stdout on stdio transport — that channel IS the
         # MCP protocol. stderr is fine.
         err.print(
-            "[green]Memex MCP server ready[/green] [dim](stdio transport, "
-            "Ctrl-C to stop)[/dim]"
+            "[green]Memex MCP server ready[/green] [dim](stdio transport, Ctrl-C to stop)[/dim]"
         )
         asyncio.run(serve_stdio())
     elif transport == "http":
@@ -561,9 +609,7 @@ def serve_mcp(
         )
         asyncio.run(serve_http(host=host, port=port))
     else:
-        err.print(
-            f"[red]unknown transport {transport!r}; expected stdio or http[/red]"
-        )
+        err.print(f"[red]unknown transport {transport!r}; expected stdio or http[/red]")
         raise typer.Exit(code=2)
 
 
@@ -616,9 +662,7 @@ async def _doctor_report() -> dict[str, object]:
             continue
         actual = hash_bytes(ref.markdown_path.read_bytes())
         if manifest.content_sha256 != actual:
-            issues.append(
-                f"{ref.doc_id}: content_sha256 drifted (user edit?)"
-            )
+            issues.append(f"{ref.doc_id}: content_sha256 drifted (user edit?)")
             stale_index += 1
         if manifest.index is None:
             stale_index += 1
@@ -658,9 +702,7 @@ async def _doctor_report() -> dict[str, object]:
     # Prompt versions — surfaces what's actually loaded so an
     # operator can confirm e.g. `answer/v2.md` is the active answer
     # template (vs an accidental rollback to v1).
-    prompts = [
-        {"name": p.name, "version": p.version} for p in list_prompts()
-    ]
+    prompts = [{"name": p.name, "version": p.version} for p in list_prompts()]
 
     return {
         "vault_path": str(settings.vault_path),
@@ -693,9 +735,7 @@ def daemon_start() -> None:
         raise typer.Exit(code=1) from e
     except DaemonStartTimeout as e:
         err.print(f"[red]{e}[/red]")
-        err.print(
-            f"[red]see log: {e.context.get('log_file')}[/red]"
-        )
+        err.print(f"[red]see log: {e.context.get('log_file')}[/red]")
         raise typer.Exit(code=1) from e
     _print(status)
 

@@ -588,7 +588,7 @@ async def _passthrough_markdown(vault_path: Path, doc_id: str, source: Path) -> 
     fm = (
         canonical.frontmatter
         if canonical
-        else Frontmatter(title=await _derive_title(vault_path, doc_id))
+        else Frontmatter(title=await derive_title(vault_path, doc_id))
     )
     doc = VaultDocument(
         ref=canonical.ref if canonical else _bootstrap_ref(vault_path, doc_id, body),
@@ -647,7 +647,7 @@ def _bootstrap_ref(vault_path: Path, doc_id: str, body: str) -> DocumentRef:
     )
 
 
-async def _derive_title(vault_path: Path, doc_id: str) -> str:
+async def derive_title(vault_path: Path, doc_id: str) -> str:
     """Derive a human-readable frontmatter title for a freshly-parsed
     doc from its original source filename, recorded in the manifest's
     ingest stage.
@@ -1026,7 +1026,7 @@ async def _parse_with_docling(
     fm = (
         existing.frontmatter
         if existing
-        else Frontmatter(title=await _derive_title(vault_path, doc_id))
+        else Frontmatter(title=await derive_title(vault_path, doc_id))
     )
     doc = VaultDocument(
         ref=_bootstrap_ref(vault_path, doc_id, conversion.markdown),
@@ -1305,7 +1305,7 @@ async def _parse_with_pymupdf(
     fm = (
         existing.frontmatter
         if existing
-        else Frontmatter(title=await _derive_title(vault_path, doc_id))
+        else Frontmatter(title=await derive_title(vault_path, doc_id))
     )
     doc = VaultDocument(
         ref=_bootstrap_ref(vault_path, doc_id, conversion.markdown),
