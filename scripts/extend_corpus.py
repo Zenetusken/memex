@@ -262,9 +262,13 @@ async def cmd_resolve(args: argparse.Namespace) -> int:
 
     data = json.loads(queries_path.read_text())
     queries = data.get("queries", [])
-    doc_id = data.get("_doc_id", "")
+    corpus_doc_id = data.get("_doc_id", "")
+    multi_doc = bool(data.get("_multi_doc"))
 
-    if not doc_id or doc_id.startswith("<"):
+    # Single-doc corpora must declare a usable corpus-level `_doc_id`.
+    # Multi-doc corpora (`_multi_doc: true`) carry a per-query `_doc_id`
+    # instead, so the corpus-level one is allowed to be a placeholder.
+    if not multi_doc and (not corpus_doc_id or corpus_doc_id.startswith("<")):
         print(f"  ✗ _doc_id not set in {queries_path}; fill it in first")
         return 1
 
@@ -288,12 +292,20 @@ async def cmd_resolve(args: argparse.Namespace) -> int:
                 unresolved.append(qid)
                 continue
 
+            # Per-query `_doc_id` (multi-doc corpora) overrides the
+            # corpus-level one; fall back to the corpus value otherwise.
+            target_doc = (q.get("_doc_id") or corpus_doc_id or "").strip()
+            if not target_doc or target_doc.startswith("<"):
+                print(f"  ⚠ {qid}: no _doc_id (query or corpus), skipping")
+                unresolved.append(qid)
+                continue
+
             # FTS5 phrase search restricted to this doc
             chunks = await fts.search(anchor, k=5)
-            chunks = [c for c in chunks if c.document_id == doc_id]
+            chunks = [c for c in chunks if c.document_id == target_doc]
 
             if not chunks:
-                print(f"  ✗ {qid}: anchor {anchor!r} matched nothing in {doc_id}")
+                print(f"  ✗ {qid}: anchor {anchor!r} matched nothing in {target_doc}")
                 unresolved.append(qid)
                 q["_unresolved"] = True
                 continue
