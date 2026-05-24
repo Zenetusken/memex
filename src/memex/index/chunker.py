@@ -35,9 +35,7 @@ _HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*$", re.MULTILINE)
 # Único), Italian, and Portuguese sentence starts are recognised.
 # ASCII A-Z + digit are first in the class for fast-path matching.
 # Markdown's "paragraph" is two newlines.
-_SENTENCE_RE = re.compile(
-    r"(?<=[.!?])\s+(?=[A-Z0-9ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞŒŸ])"
-)
+_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞŒŸ])")
 _PARAGRAPH_RE = re.compile(r"\n\s*\n")
 
 # Re-exported from core/text.py so existing callers keep working
@@ -129,7 +127,9 @@ def _heading_path_at(
 
 
 def _stable_chunk_id(doc_id: str, text: str) -> str:
-    digest = hashlib.sha1(text.encode("utf-8")).hexdigest()[:10]
+    # Content-addressing, not security — sha1 is fine and fast. The flag
+    # tells hashlib (and bandit) this isn't a cryptographic use.
+    digest = hashlib.sha1(text.encode("utf-8"), usedforsecurity=False).hexdigest()[:10]
     return f"{doc_id}#{digest}"
 
 
@@ -158,8 +158,7 @@ def _split_into_sections(
     if chart_spans is None:
         chart_spans = chart_extracted_spans(body)
     headings = [
-        m for m in _HEADING_RE.finditer(body)
-        if not is_inside_any_span(m.start(), chart_spans)
+        m for m in _HEADING_RE.finditer(body) if not is_inside_any_span(m.start(), chart_spans)
     ]
     if not headings:
         return [(0, body)]
@@ -187,9 +186,7 @@ def _split_section_into_chunks(
     to the module-level constants (which mirror `IndexSettings`
     defaults); callers via `chunk_document` thread the live settings.
     """
-    paragraphs = [
-        p.strip() for p in _PARAGRAPH_RE.split(section) if p.strip()
-    ]
+    paragraphs = [p.strip() for p in _PARAGRAPH_RE.split(section) if p.strip()]
     if not paragraphs:
         return []
 
@@ -274,9 +271,7 @@ def chunk_document(doc: VaultDocument) -> list[Chunk]:
     # chunk size, that's ~50-150× over-scan saved per document parse.
     chart_spans = chart_extracted_spans(doc.body)
     out: list[Chunk] = []
-    for section_offset, section_text in _split_into_sections(
-        doc.body, chart_spans=chart_spans
-    ):
+    for section_offset, section_text in _split_into_sections(doc.body, chart_spans=chart_spans):
         for cs, ce, text in _split_section_into_chunks(
             section_text,
             section_offset,

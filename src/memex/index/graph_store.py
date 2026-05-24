@@ -63,7 +63,9 @@ class GraphNeighbor(BaseModel):
 def entity_id(name: str, kind: str) -> str:
     """Stable, content-derived entity id. Same (name, kind) ⇒ same id."""
     norm = f"{kind}::{name.strip().lower()}"
-    return "ent_" + hashlib.sha1(norm.encode("utf-8")).hexdigest()[:16]
+    # Content-addressing, not security (see chunker._stable_chunk_id).
+    digest = hashlib.sha1(norm.encode("utf-8"), usedforsecurity=False)
+    return "ent_" + digest.hexdigest()[:16]
 
 
 class GraphStore:
@@ -89,9 +91,7 @@ class GraphStore:
 
             db = ryugraph.Database(str(path))
             conn = ryugraph.Connection(db)
-            schema = _strip_cypher_comments(
-                _SCHEMA_PATH.read_text(encoding="utf-8")
-            )
+            schema = _strip_cypher_comments(_SCHEMA_PATH.read_text(encoding="utf-8"))
             for stmt in _STMT_SPLIT.split(schema):
                 # If the file doesn't end with a newline after the final
                 # `;`, the last split chunk retains its trailing `;` —
@@ -109,6 +109,7 @@ class GraphStore:
         """Insert or update the Document node. Called once per
         `index_document` run; the enrich stage adds MENTIONS / CITES
         edges separately."""
+
         def _run() -> None:
             self._conn.execute(  # type: ignore[attr-defined]
                 "MERGE (d:Document {doc_id: $id}) SET d.title = $title;",
@@ -124,20 +125,18 @@ class GraphStore:
 
         def _run() -> None:
             self._conn.execute(  # type: ignore[attr-defined]
-                "MERGE (e:Entity {entity_id: $id}) "
-                "SET e.name = $name, e.kind = $kind;",
+                "MERGE (e:Entity {entity_id: $id}) SET e.name = $name, e.kind = $kind;",
                 {"id": eid, "name": name, "kind": kind},
             )
 
         await asyncio.to_thread(_run)
         return eid
 
-    async def link_mentions(
-        self, doc_id: str, entity_id_: str, confidence: float
-    ) -> None:
+    async def link_mentions(self, doc_id: str, entity_id_: str, confidence: float) -> None:
         """Insert or update a `(Document)-[MENTIONS]->(Entity)` edge
         with the extractor's confidence score. Idempotent on the
         `(doc_id, entity_id)` pair."""
+
         def _run() -> None:
             self._conn.execute(  # type: ignore[attr-defined]
                 "MATCH (d:Document {doc_id: $doc_id}), "
@@ -162,6 +161,7 @@ class GraphStore:
         """Insert or update a `(Document)-[CITES]->(Document)` edge
         carrying the resolved surface text (e.g., the wikilink target)
         plus the resolver's confidence."""
+
         def _run() -> None:
             self._conn.execute(  # type: ignore[attr-defined]
                 "MATCH (a:Document {doc_id: $from_id}), "

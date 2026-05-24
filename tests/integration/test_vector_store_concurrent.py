@@ -35,7 +35,7 @@ from memex.core.types import Chunk
 
 # Skip the whole module if lancedb isn't installed. The test only
 # makes sense against the real LanceDB surface.
-lancedb = pytest.importorskip("lancedb")  # noqa: F841
+lancedb = pytest.importorskip("lancedb")
 
 from memex.index.vector_store import VectorStore  # noqa: E402
 
@@ -74,10 +74,7 @@ async def test_concurrent_search_burst_returns_consistent_results(
     # for [0, 1.0, 0, ...] matches chunk 1, etc.
     dim = 768  # EmbeddingGemma-300m output dim (the production embedder)
     n = 12
-    chunks = [
-        _chunk(f"chunk-{i:03d}", f"doc-{i:03d}", f"text body {i}")
-        for i in range(n)
-    ]
+    chunks = [_chunk(f"chunk-{i:03d}", f"doc-{i:03d}", f"text body {i}") for i in range(n)]
     embeddings = []
     for i in range(n):
         emb = [0.0] * dim
@@ -109,9 +106,7 @@ async def test_concurrent_search_burst_returns_consistent_results(
     # Every call returned exactly 3 chunks; no None / empty list.
     assert len(results) == burst_size
     for i, r in enumerate(results):
-        assert len(r) == 3, (
-            f"query {i} returned {len(r)} results, expected 3"
-        )
+        assert len(r) == 3, f"query {i} returned {len(r)} results, expected 3"
 
     # Each query's top-1 should match the deterministic expectation.
     # (LanceDB's L2 distance ordering: the query vector has exactly
@@ -244,8 +239,7 @@ async def test_concurrent_searches_across_multiple_stores_are_independent(
         prefix = "A" if i % 2 == 0 else "B"
         for chunk in r:
             assert chunk.chunk_id.startswith(prefix), (
-                f"Result {i} (store_{prefix}) returned cross-store chunk "
-                f"{chunk.chunk_id}"
+                f"Result {i} (store_{prefix}) returned cross-store chunk {chunk.chunk_id}"
             )
 
     await store_a.close()

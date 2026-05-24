@@ -8,10 +8,10 @@ from pathlib import Path
 import pytest
 
 from memex.vault.store import (
+    Frontmatter,
     create_document,
     read_document_title,
 )
-from memex.vault.store import Frontmatter
 
 
 @pytest.mark.asyncio

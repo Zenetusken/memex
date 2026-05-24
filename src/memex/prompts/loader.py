@@ -49,7 +49,7 @@ _USER_MARKER = "<!-- ===USER=== -->"
 
 _jinja = Environment(
     undefined=StrictUndefined,
-    autoescape=False,  # prompts are not HTML
+    autoescape=False,  # noqa: S701  # prompts are plain text for the LLM, not HTML — escaping would corrupt them
     trim_blocks=True,
     lstrip_blocks=True,
     keep_trailing_newline=True,

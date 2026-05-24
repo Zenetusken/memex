@@ -16,8 +16,6 @@ Three concerns, two of them platform-independent:
 
 from __future__ import annotations
 
-import asyncio
-import errno
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -26,7 +24,6 @@ from pathlib import Path
 import pytest
 
 from memex.core.config import MemexSettings, set_settings
-
 
 # ----- Fixtures -----
 
@@ -38,9 +35,7 @@ def tmp_vault(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def settings(
-    tmp_vault: Path, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[MemexSettings]:
+def settings(tmp_vault: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[MemexSettings]:
     monkeypatch.setenv("MEMEX_VAULT_PATH", str(tmp_vault))
     monkeypatch.setenv("MEMEX_OBSERVABILITY__LANGFUSE_ENABLED", "false")
     s = MemexSettings()  # type: ignore[call-arg]
@@ -98,11 +93,7 @@ def test_enable_network_block_skipped_without_pyseccomp(
 def _worker_script(body: str) -> str:
     """Build a tiny Python script that exercises the sandbox module
     and reports back via stderr + exit code."""
-    return (
-        "import sys, os\n"
-        "sys.path.insert(0, 'src')\n"
-        f"{body}\n"
-    )
+    return f"import sys, os\nsys.path.insert(0, 'src')\n{body}\n"
 
 
 def test_worker_skips_sandbox_when_disabled_via_env(
@@ -280,9 +271,7 @@ async def test_convert_passes_sandbox_env_var(
         captured_env.update(kwargs.get("env") or {})
         return _FakeProc()
 
-    monkeypatch.setattr(
-        backend.asyncio, "create_subprocess_exec", _fake_spawn
-    )
+    monkeypatch.setattr(backend.asyncio, "create_subprocess_exec", _fake_spawn)
 
     source = tmp_path / "src.pdf"
     source.write_bytes(b"%PDF-1.7\n%%EOF\n")
@@ -316,9 +305,7 @@ async def test_convert_surfaces_sandbox_load_failure_distinctly(
     async def _fake_spawn(*args: object, **kwargs: object) -> _FakeProc:
         return _FakeProc()
 
-    monkeypatch.setattr(
-        backend.asyncio, "create_subprocess_exec", _fake_spawn
-    )
+    monkeypatch.setattr(backend.asyncio, "create_subprocess_exec", _fake_spawn)
 
     source = tmp_path / "src.pdf"
     source.write_bytes(b"%PDF-1.7\n%%EOF\n")

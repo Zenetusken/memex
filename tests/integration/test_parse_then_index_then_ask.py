@@ -10,14 +10,13 @@ This is the Phase-1 regression net IMPLEMENTATION-PLAN §3 calls for.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from memex.agents.answering import (
-    AnswerState,
     Chunk,
     CitedClaim,
     DraftAnswer,
@@ -26,11 +25,9 @@ from memex.agents.answering import (
     answer_query,
     reset_compiled_graph,
 )
-from memex.core import config as config_mod
 from memex.core.config import MemexSettings, set_settings
 from memex.core.manifest import read_manifest
 from memex.ingest.pipeline import IngestRequest, ingest_file
-from memex.parse import pipeline as parse_pipeline
 from memex.parse.docling_backend import DoclingConversion, DoclingPageOutput
 from memex.parse.pipeline import (
     parse_document,
@@ -55,9 +52,7 @@ def tmp_vault(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def settings(
-    tmp_vault: Path, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[MemexSettings]:
+def settings(tmp_vault: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[MemexSettings]:
     monkeypatch.setenv("MEMEX_VAULT_PATH", str(tmp_vault))
     monkeypatch.setenv("MEMEX_OBSERVABILITY__LANGFUSE_ENABLED", "false")
     s = MemexSettings()  # type: ignore[call-arg]
@@ -358,9 +353,7 @@ def patch_agent(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda name, **_kw: f"[fake {name} prompt]",
     )
 
-    async def _structured(
-        *, prompt: str, schema: type, **_kw: object
-    ) -> tuple[Any, int]:
+    async def _structured(*, prompt: str, schema: type, **_kw: object) -> tuple[Any, int]:
         if schema is SufficiencyAssessment:
             return SufficiencyAssessment(sufficient=True, reason="ok"), 5
         if schema is DraftAnswer:
@@ -449,9 +442,7 @@ async def test_full_chain_ingest_parse_index_ask(
 
 
 @pytest.mark.asyncio
-async def test_validation_rejects_unknown_format(
-    settings: MemexSettings, tmp_path: Path
-) -> None:
+async def test_validation_rejects_unknown_format(settings: MemexSettings, tmp_path: Path) -> None:
     bogus = tmp_path / "weird.xyz"
     bogus.write_bytes(b"\x00\x01\x02 nothing recognisable here")
     result = await ingest_file(IngestRequest(source_path=bogus))
@@ -479,9 +470,7 @@ async def test_validation_rejects_oversize(
 
 
 @pytest.mark.asyncio
-async def test_markdown_passthrough_skips_docling(
-    settings: MemexSettings, tmp_path: Path
-) -> None:
+async def test_markdown_passthrough_skips_docling(settings: MemexSettings, tmp_path: Path) -> None:
     src = tmp_path / "notes.md"
     src.write_text("# Notes\n\nSome content.\n", encoding="utf-8")
     ingest_result = await ingest_file(IngestRequest(source_path=src))
@@ -626,9 +615,7 @@ async def test_pymupdf_crash_falls_through_no_manifest_record(
 
 
 @pytest.mark.asyncio
-async def test_macros_rejected_unless_allowed(
-    settings: MemexSettings, tmp_path: Path
-) -> None:
+async def test_macros_rejected_unless_allowed(settings: MemexSettings, tmp_path: Path) -> None:
     """A ZIP with a Word-shaped layout + vbaProject.bin is rejected."""
     import zipfile
 

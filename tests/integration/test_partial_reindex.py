@@ -26,7 +26,6 @@ from memex.core.manifest import read_manifest
 from memex.core.types import Chunk
 from memex.ingest.pipeline import ingest_markdown_passthrough
 
-
 # ----- Shared fixtures -----
 
 
@@ -37,9 +36,7 @@ def tmp_vault(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def settings(
-    tmp_vault: Path, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[MemexSettings]:
+def settings(tmp_vault: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[MemexSettings]:
     monkeypatch.setenv("MEMEX_VAULT_PATH", str(tmp_vault))
     monkeypatch.setenv("MEMEX_OBSERVABILITY__LANGFUSE_ENABLED", "false")
     s = MemexSettings()  # type: ignore[call-arg]
@@ -80,16 +77,12 @@ class _FakeFTSStore:
         return _open, instance
 
     async def chunk_ids_for_document(self, doc_id: str) -> set[str]:
-        return {
-            cid for cid, c in self.chunks.items() if c.document_id == doc_id
-        }
+        return {cid for cid, c in self.chunks.items() if c.document_id == doc_id}
 
     async def delete_document(self, doc_id: str) -> int:
         self.delete_doc_calls.append(doc_id)
         before = len(self.chunks)
-        self.chunks = {
-            cid: c for cid, c in self.chunks.items() if c.document_id != doc_id
-        }
+        self.chunks = {cid: c for cid, c in self.chunks.items() if c.document_id != doc_id}
         return before - len(self.chunks)
 
     async def delete_chunks(self, chunk_ids: list[str]) -> int:
@@ -133,13 +126,9 @@ class _FakeVectorStore:
     async def delete_document(self, doc_id: str) -> int:
         self.delete_doc_calls.append(doc_id)
         before = len(self.chunks)
-        survivors = [
-            cid for cid, c in self.chunks.items() if c.document_id != doc_id
-        ]
+        survivors = [cid for cid, c in self.chunks.items() if c.document_id != doc_id]
         self.chunks = {cid: self.chunks[cid] for cid in survivors}
-        self.embeddings = {
-            cid: self.embeddings[cid] for cid in survivors if cid in self.embeddings
-        }
+        self.embeddings = {cid: self.embeddings[cid] for cid in survivors if cid in self.embeddings}
         return before - len(self.chunks)
 
     async def delete_chunks(self, chunk_ids: list[str]) -> int:
@@ -170,12 +159,8 @@ def fake_stores(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """
     fts_open, fts = _FakeFTSStore.make_opener()
     vec_open, vec = _FakeVectorStore.make_opener()
-    monkeypatch.setattr(
-        "memex.index.pipeline.FTSStore.open", fts_open
-    )
-    monkeypatch.setattr(
-        "memex.index.pipeline.VectorStore.open", vec_open
-    )
+    monkeypatch.setattr("memex.index.pipeline.FTSStore.open", fts_open)
+    monkeypatch.setattr("memex.index.pipeline.VectorStore.open", vec_open)
 
     embed_calls: list[list[str]] = []
 
@@ -184,18 +169,14 @@ def fake_stores(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         # Deterministic per-chunk vector so tests can introspect if needed.
         return [[float(i)] * 768 for i in range(len(chunks))]
 
-    monkeypatch.setattr(
-        "memex.index.pipeline._embed_chunks", _fake_embed
-    )
+    monkeypatch.setattr("memex.index.pipeline._embed_chunks", _fake_embed)
 
     # Graph store: pretend ryugraph is missing — same path tests exercise
     # in CI. _open_graph returns None and the pipeline degrades.
     async def _no_graph(_vault_path: Any) -> None:
         raise ImportError("ryugraph not installed (test stub)")
 
-    monkeypatch.setattr(
-        "memex.index.pipeline.GraphStore.open", _no_graph
-    )
+    monkeypatch.setattr("memex.index.pipeline.GraphStore.open", _no_graph)
 
     return {
         "fts": fts,
@@ -218,9 +199,7 @@ def _read_doc_via_vault(vault_path: Path, doc_id: str) -> str:
     return md_path.read_text(encoding="utf-8")
 
 
-async def _write_doc_via_vault(
-    vault_path: Path, doc_id: str, body: str
-) -> None:
+async def _write_doc_via_vault(vault_path: Path, doc_id: str, body: str) -> None:
     """Write a new body to the vault for `doc_id`, preserving frontmatter."""
     from memex.vault.store import VaultDocument, read_document, write_document
 
@@ -306,9 +285,7 @@ async def test_reindex_with_added_paragraph_only_embeds_new(
     from memex.index.pipeline import index_document
 
     body_v1 = (
-        "# Doc\n\n"
-        "## Section A\n\nOriginal paragraph A.\n\n"
-        "## Section B\n\nOriginal paragraph B.\n"
+        "# Doc\n\n## Section A\n\nOriginal paragraph A.\n\n## Section B\n\nOriginal paragraph B.\n"
     )
     doc_id = await _seed_doc(body_v1, source_stem="appended")
     v1 = await index_document(doc_id)
@@ -319,10 +296,10 @@ async def test_reindex_with_added_paragraph_only_embeds_new(
     await _write_doc_via_vault(settings.vault_path, doc_id, body_v2)
 
     v2 = await index_document(doc_id)
-    assert v2.chunk_count > v1.chunk_count          # new chunks added
-    assert v2.chunks_added >= 1                      # at least the new section
-    assert v2.chunks_deleted == 0                    # nothing removed
-    assert v2.chunks_unchanged >= 1                  # originals kept
+    assert v2.chunk_count > v1.chunk_count  # new chunks added
+    assert v2.chunks_added >= 1  # at least the new section
+    assert v2.chunks_deleted == 0  # nothing removed
+    assert v2.chunks_unchanged >= 1  # originals kept
     # Embedder saw only the new chunks.
     total_embedded = sum(len(b) for b in fake_stores["embed_calls"])
     assert total_embedded == v2.chunks_added
@@ -378,7 +355,7 @@ async def test_reindex_with_modified_paragraph_swaps_one_chunk(
         "## C\n\nOriginal C content.\n"
     )
     doc_id = await _seed_doc(body_v1, source_stem="modified")
-    v1 = await index_document(doc_id)
+    await index_document(doc_id)  # seed; metrics asserted on the re-index below
     fake_stores["embed_calls"].clear()
 
     body_v2 = (
@@ -411,7 +388,7 @@ async def test_force_reindex_re_embeds_everything(
         "# Forced\n\nParagraph one.\n\nParagraph two.\n",
         source_stem="forced",
     )
-    v1 = await index_document(doc_id)
+    await index_document(doc_id)  # seed; metrics asserted on the re-index below
     fake_stores["embed_calls"].clear()
 
     v2 = await index_document(doc_id, force=True)
@@ -471,8 +448,7 @@ async def test_manifest_records_diff_metrics(
     big_para = " ".join(["lorem ipsum dolor sit amet"] * 80)
     other_para = " ".join(["sed do eiusmod tempor incididunt"] * 80)
     body_v1 = (
-        f"# Doc\n\n## A\n\n{big_para}\n\n## B\n\n{other_para}\n\n"
-        f"## C\n\nSome additional content.\n"
+        f"# Doc\n\n## A\n\n{big_para}\n\n## B\n\n{other_para}\n\n## C\n\nSome additional content.\n"
     )
     doc_id = await _seed_doc(body_v1, source_stem="manifest_metrics")
     first = await index_document(doc_id)
@@ -505,23 +481,17 @@ async def test_existing_chunks_preserved_across_partial_reindex(
     from memex.index.pipeline import index_document
 
     body_v1 = (
-        "# Doc\n\n"
-        "## Stays\n\nThis paragraph never changes.\n\n"
-        "## Changes\n\nVersion 1 content.\n"
+        "# Doc\n\n## Stays\n\nThis paragraph never changes.\n\n## Changes\n\nVersion 1 content.\n"
     )
     doc_id = await _seed_doc(body_v1, source_stem="preserve")
     await index_document(doc_id)
 
     # Snapshot the embeddings of the chunks that should survive.
     stays_chunk_ids = {
-        cid for cid, c in fake_stores["fts"].chunks.items()
-        if "never changes" in c.text
+        cid for cid, c in fake_stores["fts"].chunks.items() if "never changes" in c.text
     }
     assert stays_chunk_ids, "expected at least one 'stays' chunk"
-    pre_embeddings = {
-        cid: list(fake_stores["vec"].embeddings[cid])
-        for cid in stays_chunk_ids
-    }
+    pre_embeddings = {cid: list(fake_stores["vec"].embeddings[cid]) for cid in stays_chunk_ids}
 
     body_v2 = body_v1.replace("Version 1 content.", "Version 2 different.")
     await _write_doc_via_vault(settings.vault_path, doc_id, body_v2)
@@ -529,9 +499,7 @@ async def test_existing_chunks_preserved_across_partial_reindex(
 
     # The 'stays' chunks have the same chunk_ids AND the same embeddings.
     for cid, original_vec in pre_embeddings.items():
-        assert cid in fake_stores["vec"].chunks, (
-            f"chunk {cid} was deleted across re-index"
-        )
+        assert cid in fake_stores["vec"].chunks, f"chunk {cid} was deleted across re-index"
         assert fake_stores["vec"].embeddings[cid] == original_vec, (
             f"chunk {cid} was re-embedded across re-index"
         )

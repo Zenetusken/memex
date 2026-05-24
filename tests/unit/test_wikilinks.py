@@ -9,19 +9,15 @@ use case lands).
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 from pydantic import ValidationError
 
 from memex.core.types import Chunk
 from memex.core.wikilinks import (
-    WikilinkTarget,
     extract_wikilinks,
     parse_wikilink,
     resolve_wikilink_section,
 )
-
 
 # ----------------------------------------------------------------------
 # parse_wikilink

@@ -17,8 +17,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from memex.index.chunker import chunk_document
 from memex.vault.store import DocumentRef, Frontmatter, VaultDocument
 
@@ -53,8 +51,7 @@ def test_chart_block_does_not_shift_chunk_boundaries() -> None:
     # A chart-extracted block with ~600 "words" — enough to bump the
     # budget past chunk_target_tokens (default 350) on its own.
     chart_rows = "\n".join(
-        f"row{i:03d} | label{i:03d} | value{i:03d} | unit{i:03d} | extra{i:03d}"
-        for i in range(120)
+        f"row{i:03d} | label{i:03d} | value{i:03d} | unit{i:03d} | extra{i:03d}" for i in range(120)
     )
     chart_block = f"[chart-extracted]\n{chart_rows}\n[/chart-extracted]"
 
@@ -65,9 +62,7 @@ def test_chart_block_does_not_shift_chunk_boundaries() -> None:
     chunks_with = chunk_document(_doc(body_with_chart, doc_id="aaa00002-with"))
 
     # Without the chart, both paragraphs are in one chunk.
-    assert len(chunks_without) == 1, (
-        f"baseline expected 1 chunk; got {len(chunks_without)}"
-    )
+    assert len(chunks_without) == 1, f"baseline expected 1 chunk; got {len(chunks_without)}"
 
     # With the v4 fix, the chart-bearing body STILL produces one
     # chunk — the boundary doesn't shift.
@@ -114,12 +109,8 @@ def test_v4_preserves_existing_chunker_behavior_on_no_chart_docs() -> None:
     presence; no-chart-OCR vaults must be unaffected.
     """
     # A body that exercises both the paragraph-fit and overlap paths.
-    sentence = (
-        "Lorem ipsum dolor sit amet, consectetur adipiscing elit. "
-    )
-    body = "\n\n".join(
-        f"## Section {i}\n\n" + (sentence * 30) for i in range(3)
-    )
+    sentence = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. "
+    body = "\n\n".join(f"## Section {i}\n\n" + (sentence * 30) for i in range(3))
     chunks = chunk_document(_doc(body))
 
     # Smoke test: produces multiple chunks; chunks are non-empty; chunk_ids
@@ -142,9 +133,7 @@ def test_chart_block_words_count_zero_toward_budget() -> None:
     # Prose is ~10 words; chart is ~1000 words. Without the fix:
     # _word_count(p) > target, oversize path fires, sentence-split runs.
     # With the fix: _budget_word_count(p) ≈ 10, normal path.
-    paragraph = (
-        f"Small intro about a chart.\n\n[chart-extracted]\n{big_chart}\n[/chart-extracted]"
-    )
+    paragraph = f"Small intro about a chart.\n\n[chart-extracted]\n{big_chart}\n[/chart-extracted]"
     body = paragraph
 
     chunks = chunk_document(_doc(body))

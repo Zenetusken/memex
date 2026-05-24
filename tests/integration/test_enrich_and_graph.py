@@ -10,7 +10,6 @@ graph store so the enrich pipeline exercises its full call sequence.
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -22,9 +21,9 @@ from memex.core.manifest import read_manifest
 from memex.enrich import entities as entities_mod
 from memex.enrich.entities import EntityList, ExtractedEntity
 from memex.enrich.pipeline import enrich_document
+from memex.index.graph_store import entity_id
 from memex.ingest.pipeline import ingest_markdown_passthrough
 from memex.ingest.watcher import EditNotice, _confirm_user_edit
-from memex.index.graph_store import entity_id
 
 
 @pytest.fixture
@@ -34,9 +33,7 @@ def tmp_vault(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def settings(
-    tmp_vault: Path, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[MemexSettings]:
+def settings(tmp_vault: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[MemexSettings]:
     monkeypatch.setenv("MEMEX_VAULT_PATH", str(tmp_vault))
     monkeypatch.setenv("MEMEX_OBSERVABILITY__LANGFUSE_ENABLED", "false")
     s = MemexSettings()  # type: ignore[call-arg]
@@ -68,9 +65,7 @@ class _FakeGraphStore:
         self.entities[eid] = (name, kind)
         return eid
 
-    async def link_mentions(
-        self, doc_id: str, entity_id_: str, confidence: float
-    ) -> None:
+    async def link_mentions(self, doc_id: str, entity_id_: str, confidence: float) -> None:
         self.mentions.append((doc_id, entity_id_, confidence))
 
     async def link_cites(
@@ -96,9 +91,7 @@ def fake_graph(monkeypatch: pytest.MonkeyPatch) -> _FakeGraphStore:
     async def _open(vault_path: Path) -> _FakeGraphStore:
         return instance
 
-    monkeypatch.setattr(
-        "memex.enrich.pipeline.GraphStore.open", staticmethod(_open)
-    )
+    monkeypatch.setattr("memex.enrich.pipeline.GraphStore.open", staticmethod(_open))
     return instance
 
 
@@ -110,7 +103,7 @@ def fake_llm(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     citations), so the fake routes by schema. Tests that only care
     about entities still see the original entity output.
     """
-    from memex.enrich.citations import CitationCandidate, CitationList
+    from memex.enrich.citations import CitationList
 
     call_log: list[type] = []
 
@@ -193,15 +186,21 @@ async def test_enrich_extracts_entities_and_writes_graph(
 def test_entity_dedupe_merges_by_lowered_name_and_kind() -> None:
     raw = [
         entities_mod.Entity(
-            name="Reflexivity", kind="concept", confidence=0.95,
+            name="Reflexivity",
+            kind="concept",
+            confidence=0.95,
             chunk_ids=["c1"],
         ),
         entities_mod.Entity(
-            name="reflexivity", kind="concept", confidence=0.70,
+            name="reflexivity",
+            kind="concept",
+            confidence=0.70,
             chunk_ids=["c2"],
         ),
         entities_mod.Entity(
-            name="Reflexivity", kind="other", confidence=0.45,
+            name="Reflexivity",
+            kind="other",
+            confidence=0.45,
             chunk_ids=["c3"],
         ),
     ]
@@ -225,9 +224,7 @@ async def test_watcher_confirm_returns_none_when_hash_matches(
 ) -> None:
     """Memex's own write produces a hash that matches the manifest;
     the watcher correctly swallows the event."""
-    ref = await ingest_markdown_passthrough(
-        "# Hello\n\nbody\n", source_stem="hello"
-    )
+    ref = await ingest_markdown_passthrough("# Hello\n\nbody\n", source_stem="hello")
     md = settings.vault_path / "documents" / f"{ref.doc_id}.md"
     notice = await _confirm_user_edit(settings.vault_path, md)
     assert notice is None
@@ -237,9 +234,7 @@ async def test_watcher_confirm_returns_none_when_hash_matches(
 async def test_watcher_confirm_detects_real_edit(
     settings: MemexSettings,
 ) -> None:
-    ref = await ingest_markdown_passthrough(
-        "# Hello\n\nbody\n", source_stem="hello"
-    )
+    ref = await ingest_markdown_passthrough("# Hello\n\nbody\n", source_stem="hello")
     md = settings.vault_path / "documents" / f"{ref.doc_id}.md"
     # Simulate a user-side edit by appending to the file directly.
     with md.open("a", encoding="utf-8") as f:
@@ -308,12 +303,8 @@ def test_scoring_cer_and_wer() -> None:
 
     assert character_error_rate("hello", "hello") == 0.0
     assert character_error_rate("hello", "world") > 0.5
-    assert word_error_rate(
-        "the quick brown fox", "the quick brown fox"
-    ) == 0.0
-    assert word_error_rate(
-        "the quick brown fox", "the slow brown fox"
-    ) == 0.25
+    assert word_error_rate("the quick brown fox", "the quick brown fox") == 0.0
+    assert word_error_rate("the quick brown fox", "the slow brown fox") == 0.25
 
 
 # ----- v1.x: citation resolution + wikilink insertion -----
@@ -394,9 +385,7 @@ def test_citation_resolver_returns_none_below_threshold() -> None:
         ),
     )
     # Surface that shouldn't match anything in the index.
-    cand = CitationCandidate(
-        surface_text="some unrelated reference", confidence="low"
-    )
+    cand = CitationCandidate(surface_text="some unrelated reference", confidence="low")
     assert resolve_candidate(cand, chunk_id="c0", index=idx) is None
 
 
@@ -412,7 +401,7 @@ def test_insert_wikilinks_respects_confidence_threshold() -> None:
             surface_text="Smith 2024",
             target_doc_id="abc-smith-reflex",
             target_title="Smith 2024",
-            confidence=0.95,        # high — should rewrite
+            confidence=0.95,  # high — should rewrite
             chunk_id="c0",
             via="author_year",
         ),
@@ -420,7 +409,7 @@ def test_insert_wikilinks_respects_confidence_threshold() -> None:
             surface_text="Jones 2019",
             target_doc_id="def-jones",
             target_title="Jones 2019",
-            confidence=0.70,        # below high-confidence threshold
+            confidence=0.70,  # below high-confidence threshold
             chunk_id="c0",
             via="tokens",
         ),
@@ -469,7 +458,6 @@ async def test_enrich_resolves_citations_against_vault_docs(
     cites 'Smith 2024', the citation should resolve into a CITES edge
     and an inline [[doc_id]] wikilink."""
     from datetime import date
-    from typing import Any
 
     from memex.enrich.citations import CitationCandidate, CitationList
     from memex.enrich.entities import EntityList
@@ -504,11 +492,7 @@ async def test_enrich_resolves_citations_against_vault_docs(
         if schema is CitationList:
             return (
                 CitationList(
-                    citations=[
-                        CitationCandidate(
-                            surface_text="Smith 2024", confidence="high"
-                        )
-                    ]
+                    citations=[CitationCandidate(surface_text="Smith 2024", confidence="high")]
                 ),
                 6,
             )

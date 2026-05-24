@@ -22,10 +22,9 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from pathlib import Path
 
 import pytest
-
-from pathlib import Path
 
 from memex.index.chunker import _SENTENCE_RE, chunk_document
 from memex.vault.store import DocumentRef, Frontmatter, VaultDocument
@@ -131,12 +130,9 @@ def fts_db() -> sqlite3.Connection:
     return db
 
 
-def _insert(
-    db: sqlite3.Connection, chunk_id: str, text: str, doc: str = "d1"
-) -> None:
+def _insert(db: sqlite3.Connection, chunk_id: str, text: str, doc: str = "d1") -> None:
     db.execute(
-        "INSERT INTO chunks_fts (chunk_id, document_id, document_title, text) "
-        "VALUES (?, ?, ?, ?)",
+        "INSERT INTO chunks_fts (chunk_id, document_id, document_title, text) VALUES (?, ?, ?, ?)",
         (chunk_id, doc, "title", text),
     )
 

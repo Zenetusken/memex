@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import os
 import re
 import tempfile
@@ -21,8 +22,6 @@ from typing import Any
 
 import frontmatter
 from pydantic import BaseModel, Field
-
-import hmac
 
 from memex.core.errors import StaleDocumentError, VaultIntegrityError
 from memex.vault._file_lock import cleanup_lock_file, doc_file_lock
@@ -46,6 +45,7 @@ def _lock_for(doc_id: str) -> asyncio.Lock:
         lock = asyncio.Lock()
         _DOC_LOCKS[doc_id] = lock
     return lock
+
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 _ID_PREFIX_LEN = 8
@@ -191,9 +191,7 @@ async def write_document(
     default) preserves the pre-P1.4 last-write-wins behaviour for
     callers that don't care (ingest, parse, MCP write tools).
     """
-    async with _lock_for(doc.ref.doc_id), doc_file_lock(
-        vault_path, doc.ref.doc_id
-    ):
+    async with _lock_for(doc.ref.doc_id), doc_file_lock(vault_path, doc.ref.doc_id):
         if expected_sha is not None:
             current = _current_sha_and_body(vault_path, doc.ref.doc_id)
             if current is None:

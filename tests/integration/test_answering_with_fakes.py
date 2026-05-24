@@ -27,7 +27,6 @@ from memex.agents.answering import (
     reset_compiled_graph,
 )
 
-
 # ----- Fixtures: fake retrieve + fake model + reset graph cache -----
 
 
@@ -55,8 +54,7 @@ def fake_chunks() -> list[Chunk]:
             chunk_id="c2",
             document_id="d1",
             document_title="Smith 2024",
-            text="Smith argues that reflexivity is constitutive rather "
-            "than corrective.",
+            text="Smith argues that reflexivity is constitutive rather than corrective.",
             page=4,
             score=0.85,
         ),
@@ -64,15 +62,11 @@ def fake_chunks() -> list[Chunk]:
 
 
 @pytest.fixture
-def patch_retrieve(
-    monkeypatch: pytest.MonkeyPatch, fake_chunks: list[Chunk]
-) -> None:
+def patch_retrieve(monkeypatch: pytest.MonkeyPatch, fake_chunks: list[Chunk]) -> None:
     async def _hybrid(query: str, k: int = 50) -> list[Chunk]:
         return list(fake_chunks)
 
-    async def _rerank(
-        query: str, candidates: list[Chunk], top_k: int = 10
-    ) -> list[Chunk]:
+    async def _rerank(query: str, candidates: list[Chunk], top_k: int = 10) -> list[Chunk]:
         return list(candidates[:top_k])
 
     monkeypatch.setattr("memex.agents.answering.hybrid_search", _hybrid)
@@ -114,11 +108,7 @@ class FakeLLM:
         # `render_messages` for the system/user split). Concatenate
         # the message contents for fragment matching so a single
         # `respond(...)` call works against either shape.
-        prompt_text = (
-            prompt
-            if isinstance(prompt, str)
-            else "\n".join(m["content"] for m in prompt)
-        )
+        prompt_text = prompt if isinstance(prompt, str) else "\n".join(m["content"] for m in prompt)
         self.calls.append((prompt_text, schema))
         for (frag, sch), value in self._responses.items():
             # Match by class identity OR by class name. The latter lets a
@@ -129,17 +119,13 @@ class FakeLLM:
             # bounded variant retains `__name__ == "VerificationResult"`.
             if (sch is schema or sch.__name__ == schema.__name__) and frag in prompt_text:
                 return value, 10
-        raise AssertionError(
-            f"no canned response for ({prompt_text!r}, {schema.__name__})"
-        )
+        raise AssertionError(f"no canned response for ({prompt_text!r}, {schema.__name__})")
 
 
 @pytest.fixture
 def fake_llm(monkeypatch: pytest.MonkeyPatch) -> FakeLLM:
     llm = FakeLLM()
-    monkeypatch.setattr(
-        "memex.agents.answering.complete_structured", llm
-    )
+    monkeypatch.setattr("memex.agents.answering.complete_structured", llm)
     return llm
 
 
@@ -307,9 +293,7 @@ async def test_ungrounded_triggers_regeneration_then_succeeds(
         ]
     )
 
-    async def fake_call(
-        *, prompt: str, schema: type, **_kw: object
-    ) -> tuple[Any, int]:
+    async def fake_call(*, prompt: str, schema: type, **_kw: object) -> tuple[Any, int]:
         fake_llm.calls.append((prompt, schema))
         if schema is SufficiencyAssessment:
             return fake_llm._responses[("assess_sufficiency", schema)], 8
@@ -322,9 +306,7 @@ async def test_ungrounded_triggers_regeneration_then_succeeds(
     # Use monkeypatch so the patch is restored at test teardown — direct
     # module-attribute assignment used to leak into later tests in the
     # same session.
-    monkeypatch.setattr(
-        "memex.agents.answering.complete_structured", fake_call
-    )
+    monkeypatch.setattr("memex.agents.answering.complete_structured", fake_call)
 
     response = await answer_query("What does Smith say about reflexivity?")
 
@@ -410,9 +392,7 @@ async def test_verify_filters_phantom_indices(fake_llm: FakeLLM) -> None:
         VerificationResult(
             grounded=[0],
             ungrounded=[1],
-            ungrounded_reasons=[
-                "Claim 1 refers to a Pareto chart not in cited chunk."
-            ],
+            ungrounded_reasons=["Claim 1 refers to a Pareto chart not in cited chunk."],
         ),
     )
 

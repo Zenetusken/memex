@@ -15,7 +15,6 @@ from memex.core.text import (
     strip_chart_extracted_for_index,
 )
 
-
 # ----------------------------------------------------------------------
 # chart_extracted_spans — happy path
 # ----------------------------------------------------------------------
@@ -61,7 +60,7 @@ def test_chart_extracted_spans_orphan_opener() -> None:
     assert len(spans) == 1
     start, end = spans[0]
     # Span starts at the opener and extends to end-of-text
-    assert text[start:start + len("[chart-extracted]")] == "[chart-extracted]"
+    assert text[start : start + len("[chart-extracted]")] == "[chart-extracted]"
     assert end == len(text)
 
 
@@ -74,20 +73,17 @@ def test_chart_extracted_spans_orphan_closer() -> None:
     assert len(spans) == 1
     start, end = spans[0]
     assert start == 0
-    assert text[end - len("[/chart-extracted]"):end] == "[/chart-extracted]"
+    assert text[end - len("[/chart-extracted]") : end] == "[/chart-extracted]"
 
 
 def test_chart_extracted_spans_mixed_balanced_and_orphan() -> None:
     """One balanced block + one orphan opener → 2 spans (both H1-filter-
     protected). Order-stable."""
-    text = (
-        "[chart-extracted]ok[/chart-extracted] middle"
-        " [chart-extracted]orphan with # inside"
-    )
+    text = "[chart-extracted]ok[/chart-extracted] middle [chart-extracted]orphan with # inside"
     spans = chart_extracted_spans(text)
     assert len(spans) == 2
     # First span is the balanced one
-    assert text[spans[0][0]:spans[0][1]] == "[chart-extracted]ok[/chart-extracted]"
+    assert text[spans[0][0] : spans[0][1]] == "[chart-extracted]ok[/chart-extracted]"
     # Second span is the orphan — extends to end-of-text
     assert spans[1][1] == len(text)
 

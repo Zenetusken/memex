@@ -18,10 +18,7 @@ import pytest
 from memex.agents.answering import (
     Chunk,
     CitedClaim,
-    DraftAnswer,
     FinalResponse,
-    SufficiencyAssessment,
-    VerificationResult,
     reset_compiled_graph,
 )
 from memex.core.config import MemexSettings, set_settings
@@ -41,9 +38,7 @@ def tmp_vault(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def settings(
-    tmp_vault: Path, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[MemexSettings]:
+def settings(tmp_vault: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[MemexSettings]:
     monkeypatch.setenv("MEMEX_VAULT_PATH", str(tmp_vault))
     monkeypatch.setenv("MEMEX_OBSERVABILITY__LANGFUSE_ENABLED", "false")
     s = MemexSettings()  # type: ignore[call-arg]
@@ -83,15 +78,11 @@ def fake_chunks() -> list[Chunk]:
 
 
 @pytest.fixture
-def patch_retrieve(
-    monkeypatch: pytest.MonkeyPatch, fake_chunks: list[Chunk]
-) -> None:
+def patch_retrieve(monkeypatch: pytest.MonkeyPatch, fake_chunks: list[Chunk]) -> None:
     async def _hybrid(query: str, k: int = 50) -> list[Chunk]:
         return list(fake_chunks)
 
-    async def _rerank(
-        query: str, candidates: list[Chunk], top_k: int = 10
-    ) -> list[Chunk]:
+    async def _rerank(query: str, candidates: list[Chunk], top_k: int = 10) -> list[Chunk]:
         # Return rerank scores so the MCP tool's payload includes them.
         return [
             c.model_copy(update={"rerank_score": 0.95 - 0.1 * i})
@@ -128,9 +119,7 @@ def patch_agent(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_search_returns_typed_chunks(
-    settings: MemexSettings, patch_retrieve: None
-) -> None:
+async def test_search_returns_typed_chunks(settings: MemexSettings, patch_retrieve: None) -> None:
     result = await search("reflexivity", k=2)
     assert isinstance(result, list)
     assert len(result) == 2
@@ -145,9 +134,7 @@ async def test_search_returns_typed_chunks(
 
 
 @pytest.mark.asyncio
-async def test_ask_returns_grounded_response(
-    settings: MemexSettings, patch_agent: None
-) -> None:
+async def test_ask_returns_grounded_response(settings: MemexSettings, patch_agent: None) -> None:
     result = await ask("What does Smith say about reflexivity?")
     assert isinstance(result, FinalResponse)
     assert result.answered is True

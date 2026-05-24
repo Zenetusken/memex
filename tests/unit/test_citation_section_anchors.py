@@ -12,8 +12,6 @@ from __future__ import annotations
 
 from datetime import date
 
-import pytest
-
 from memex.enrich.citations import (
     CitationIndex,
     ResolvedCitation,
@@ -143,9 +141,7 @@ def test_insert_wikilinks_prefers_longest_matching_heading() -> None:
     the longer anchor."""
     body = "Smith 2024's Methods: Data Movement section is foundational."
     resolved = [_resolved("Smith 2024", "smith-2024")]
-    idx = _index_with_headings(
-        "smith-2024", ["Methods", "Methods: Data Movement", "Results"]
-    )
+    idx = _index_with_headings("smith-2024", ["Methods", "Methods: Data Movement", "Results"])
     new_body, count = insert_wikilinks(body, resolved, target_index=idx)
     assert count == 1
     assert "[[smith-2024#Methods: Data Movement]]" in new_body

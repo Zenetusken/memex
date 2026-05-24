@@ -8,15 +8,12 @@ the webui-specific slug / anchor / `<a>` emission contract.
 
 from __future__ import annotations
 
-import re
-
 from memex.webui.rendering import (
     TocEntry,
     extract_toc,
     render_body_html,
     slugify_heading,
 )
-
 
 # ----------------------------------------------------------------------
 # slugify_heading
@@ -223,12 +220,7 @@ def test_render_emits_no_visible_permalink_glyph() -> None:
 def test_render_anchor_span_skipped_inside_chart_block() -> None:
     """Inert chart-block H1 labels get no anchor target — they aren't
     real document sections."""
-    body = (
-        "## Real Heading\n\n"
-        "[chart-extracted]\n"
-        "# Inert Label\n"
-        "[/chart-extracted]\n"
-    )
+    body = "## Real Heading\n\n[chart-extracted]\n# Inert Label\n[/chart-extracted]\n"
     out = str(render_body_html(body))
     assert 'id="real-heading"' in out
     assert 'id="inert-label"' not in out
@@ -241,12 +233,7 @@ def test_render_anchor_span_skipped_inside_chart_block() -> None:
 
 def test_extract_toc_returns_entries_in_document_order() -> None:
     """Headings appear in the TOC in the order they appear in the body."""
-    body = (
-        "# Top\n\n"
-        "## Methods\n\n"
-        "### Subsection\n\n"
-        "## Results\n"
-    )
+    body = "# Top\n\n## Methods\n\n### Subsection\n\n## Results\n"
     toc = extract_toc(body)
     assert [e.text for e in toc] == ["Top", "Methods", "Subsection", "Results"]
 
@@ -270,13 +257,7 @@ def test_extract_toc_slugifies_each_entry() -> None:
 def test_extract_toc_skips_chart_block_h1s() -> None:
     """Same defense as `extract_heading_texts` and the chunker —
     inert chart-figure H1 labels don't appear in the TOC."""
-    body = (
-        "## Real One\n\n"
-        "[chart-extracted]\n"
-        "# Chart Label\n"
-        "[/chart-extracted]\n\n"
-        "## Real Two\n"
-    )
+    body = "## Real One\n\n[chart-extracted]\n# Chart Label\n[/chart-extracted]\n\n## Real Two\n"
     toc = extract_toc(body)
     assert [e.text for e in toc] == ["Real One", "Real Two"]
 
@@ -349,10 +330,7 @@ def test_toc_and_render_slugs_stay_in_lockstep() -> None:
     """Every TOC fragment must match exactly one anchor-target span id
     in the rendered body — the shared `_walk_headings` guarantees it
     even with duplicates."""
-    body = (
-        "## Intro\n\n## Methods\n\n## Methods\n\n"
-        "## Results\n\n## Methods\n"
-    )
+    body = "## Intro\n\n## Methods\n\n## Methods\n\n## Results\n\n## Methods\n"
     toc = extract_toc(body)
     out = str(render_body_html(body))
     for entry in toc:
@@ -369,11 +347,7 @@ def test_heading_with_ampersand_offset_stable() -> None:
     rendering fixes it."""
     # `<!-- image -->` contains `<` which escapes to &lt; (+3 chars).
     # A heading AFTER it must still be anchored correctly.
-    body = (
-        "<!-- image -->\n\n"
-        "AT&T earnings & growth\n\n"
-        "## Revenue Section\n\nprose\n"
-    )
+    body = "<!-- image -->\n\nAT&T earnings & growth\n\n## Revenue Section\n\nprose\n"
     out = str(render_body_html(body))
     # The < and & are escaped (XSS safety)
     assert "&lt;!-- image --&gt;" in out
@@ -432,12 +406,14 @@ def test_render_wikilink_and_heading_on_same_line_not_confused() -> None:
 
 def test_clean_heading_text_strips_markdown_link() -> None:
     from memex.webui.rendering import clean_heading_text
+
     assert clean_heading_text("[Tips:](https://www.tableau.com/x)") == "Tips:"
     assert clean_heading_text("[Highlight table](https://x.com/y)") == "Highlight table"
 
 
 def test_clean_heading_text_strips_bold_italic_code() -> None:
     from memex.webui.rendering import clean_heading_text
+
     assert clean_heading_text("**Bold Heading**") == "Bold Heading"
     assert clean_heading_text("*Italic*") == "Italic"
     assert clean_heading_text("`code` ref") == "code ref"
@@ -445,6 +421,7 @@ def test_clean_heading_text_strips_bold_italic_code() -> None:
 
 def test_clean_heading_text_plain_passes_through() -> None:
     from memex.webui.rendering import clean_heading_text
+
     assert clean_heading_text("Bar chart") == "Bar chart"
     assert clean_heading_text("BUSINESS OVERVIEW") == "BUSINESS OVERVIEW"
 
@@ -465,9 +442,7 @@ def test_markdown_link_heading_dedups_against_plain() -> None:
     """A `## [Tips:](url)` heading and a plain `## Tips:` heading both
     clean to "Tips:" → they dedup together (tips, tips-1)."""
     body = (
-        "## Tips:\n\na\n\n"
-        "## [Tips:](https://x.com/y)\n\nb\n\n"
-        "## More content here so TOC shows\n"
+        "## Tips:\n\na\n\n## [Tips:](https://x.com/y)\n\nb\n\n## More content here so TOC shows\n"
     )
     toc = extract_toc(body)
     tips = [e for e in toc if e.text == "Tips:"]

@@ -32,6 +32,7 @@ Exit codes (mirror docling_worker):
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import math
@@ -56,9 +57,7 @@ try:
         processors=[
             structlog.processors.add_log_level,
             structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.KeyValueRenderer(
-                key_order=["timestamp", "level", "event"]
-            ),
+            structlog.processors.KeyValueRenderer(key_order=["timestamp", "level", "event"]),
         ],
         logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),
         cache_logger_on_first_use=True,
@@ -148,9 +147,7 @@ def _compact_picture_text_marker(match: re.Match[str]) -> str:
     14 chars (`[chart-text]` or `[/chart-text]`). Preserves the
     semantic signal while shedding ~3 KB on a marker-heavy deck.
     """
-    return (
-        "[chart-text]" if "Start" in match.group(0) else "[/chart-text]"
-    )
+    return "[chart-text]" if "Start" in match.group(0) else "[/chart-text]"
 
 
 def _clean_pymupdf_markdown(text: str) -> str:
@@ -176,14 +173,12 @@ def _detect_tagged(doc: Any) -> bool:
     for attr in ("is_pdf_tagged", "is_tagged", "has_marked"):
         v = getattr(doc, attr, None)
         if callable(v):
-            try:
+            with contextlib.suppress(Exception):
                 return bool(v())
-            except Exception:
-                pass
         elif isinstance(v, bool):
             return v
 
-    try:
+    with contextlib.suppress(Exception):
         cat = doc.pdf_catalog()
         mark_info = doc.xref_get_key(cat, "MarkInfo")
         if isinstance(mark_info, tuple) and len(mark_info) >= 2 and mark_info[0] == "xref":
@@ -192,21 +187,17 @@ def _detect_tagged(doc: Any) -> bool:
             marked = doc.xref_get_key(xref, "Marked")
             if isinstance(marked, tuple) and len(marked) >= 2:
                 return str(marked[1]).lower() == "true"
-    except Exception:
-        pass
 
     return False
 
 
 def _detect_layers(doc: Any) -> bool:
     """Best-effort /OCProperties presence check."""
-    try:
+    with contextlib.suppress(Exception):
         cat = doc.pdf_catalog()
         oc = doc.xref_get_key(cat, "OCProperties")
         if isinstance(oc, tuple) and len(oc) >= 2:
             return oc[0] != "null"
-    except Exception:
-        pass
     return False
 
 
@@ -299,9 +290,7 @@ def _collect_signals(doc: Any, joined_markdown: str) -> dict[str, Any]:
     empty_pages = sum(1 for c in char_counts if c < 5)
 
     aspect_avg = float(statistics.mean(aspect_ratios)) if aspect_ratios else 1.0
-    aspect_stdev = (
-        float(statistics.pstdev(aspect_ratios)) if len(aspect_ratios) > 1 else 0.0
-    )
+    aspect_stdev = float(statistics.pstdev(aspect_ratios)) if len(aspect_ratios) > 1 else 0.0
 
     image_area_avg = float(statistics.mean(image_areas)) if image_areas else 0.0
 
@@ -331,9 +320,7 @@ def _collect_signals(doc: Any, joined_markdown: str) -> dict[str, Any]:
         "aspect_ratio_consistent": aspect_stdev < 0.1,
         "embedded_font_count": len(embedded_fonts),
         "image_count_total": sum(image_counts),
-        "image_heavy_page_fraction": (
-            image_heavy_pages / page_count if page_count > 0 else 0.0
-        ),
+        "image_heavy_page_fraction": (image_heavy_pages / page_count if page_count > 0 else 0.0),
         "image_area_fraction": image_area_avg,
         "total_chars": total_chars,
         "chars_per_page_avg": chars_avg,
@@ -341,14 +328,10 @@ def _collect_signals(doc: Any, joined_markdown: str) -> dict[str, Any]:
         "chars_per_page_p10": chars_p10,
         "chars_per_page_p90": chars_p90,
         "empty_page_fraction": empty_pages / page_count if page_count > 0 else 0.0,
-        "replacement_char_fraction": (
-            replacement_chars / total_chars if total_chars > 0 else 0.0
-        ),
+        "replacement_char_fraction": (replacement_chars / total_chars if total_chars > 0 else 0.0),
         "word_like_token_fraction": word_like_tokens / rough_token_count,
         "unique_char_variety": len(set(raw_text)),
-        "whitespace_fraction": (
-            whitespace_chars / total_chars if total_chars > 0 else 0.0
-        ),
+        "whitespace_fraction": (whitespace_chars / total_chars if total_chars > 0 else 0.0),
         "has_headings": has_headings,
         "has_tables": has_tables,
         "has_lists": has_lists,
@@ -374,13 +357,10 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
         import pymupdf  # type: ignore[import-untyped]
         import pymupdf4llm  # type: ignore[import-untyped]
     except ImportError as e:
-        raise SystemExit(
-            json.dumps({"error": "pymupdf_unavailable", "detail": str(e)})
-        ) from e
+        raise SystemExit(json.dumps({"error": "pymupdf_unavailable", "detail": str(e)})) from e
 
-    pymupdf_version: str | None = (
-        getattr(pymupdf, "__version__", None)
-        or getattr(pymupdf4llm, "__version__", None)
+    pymupdf_version: str | None = getattr(pymupdf, "__version__", None) or getattr(
+        pymupdf4llm, "__version__", None
     )
 
     doc: Any = pymupdf.open(str(source))
@@ -494,10 +474,8 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
             "equation_count": 0,
         }
     finally:
-        try:
+        with contextlib.suppress(Exception):
             doc.close()
-        except Exception:
-            pass
 
 
 def main(argv: list[str] | None = None) -> int:

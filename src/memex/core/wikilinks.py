@@ -112,8 +112,8 @@ def extract_wikilinks(body: str) -> list[WikilinkTarget]:
 
 def resolve_wikilink_section(
     target: WikilinkTarget,
-    chunks: "list[Chunk]",
-) -> "Chunk | None":
+    chunks: list[Chunk],
+) -> Chunk | None:
     """Find the chunk in `chunks` that contains the wikilink's
     section anchor.
 

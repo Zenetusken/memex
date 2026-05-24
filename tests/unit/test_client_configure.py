@@ -18,7 +18,6 @@ These tests verify both code paths.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -72,8 +71,7 @@ async def test_configure_client_schedules_close_when_loop_running(
     await asyncio.sleep(0)
 
     assert close_calls == [1], (
-        "configure_client must schedule the prior client's .close() "
-        "via the running event loop"
+        "configure_client must schedule the prior client's .close() via the running event loop"
     )
     assert first.closed is True
 
@@ -128,13 +126,9 @@ def test_configure_client_logs_warning_when_no_loop_running(
     client_module.configure_client(_settings("http://test:8001/v1"))
 
     assert close_calls == [], (
-        "without a running loop, close() cannot be scheduled — "
-        "must NOT be called synchronously"
+        "without a running loop, close() cannot be scheduled — must NOT be called synchronously"
     )
-    assert any(
-        w.get("event") == "configure_client.no_loop_for_cleanup"
-        for w in warnings
-    ), (
+    assert any(w.get("event") == "configure_client.no_loop_for_cleanup" for w in warnings), (
         "configure_client must emit a warning when called sync with a "
         f"prior client present; saw events: {[w.get('event') for w in warnings]}"
     )
@@ -166,7 +160,6 @@ def test_configure_client_first_call_does_not_warn(
 
     client_module.configure_client(_settings())
 
-    assert not any(
-        w.get("event") == "configure_client.no_loop_for_cleanup"
-        for w in warnings
-    ), "first call should not warn — there's no prior client to close"
+    assert not any(w.get("event") == "configure_client.no_loop_for_cleanup" for w in warnings), (
+        "first call should not warn — there's no prior client to close"
+    )

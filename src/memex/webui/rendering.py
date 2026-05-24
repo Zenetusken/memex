@@ -61,10 +61,10 @@ _SLUG_DASH_RE = re.compile(r"-+")
 # code syntax — e.g. the Tableau guide has `## [Tips:](https://...)`
 # headings. Without cleaning, those produce ugly slugs
 # (`tips-https-www-tableau-com-...`) and raw `[Tips:](url)` TOC entries.
-_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]*\)")   # [text](url) → text
-_MD_BOLD_RE = re.compile(r"\*\*([^*]+)\*\*")          # **text** → text
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]*\)")  # [text](url) → text
+_MD_BOLD_RE = re.compile(r"\*\*([^*]+)\*\*")  # **text** → text
 _MD_ITALIC_RE = re.compile(r"(?<!\*)\*([^*]+)\*(?!\*)")  # *text* → text
-_MD_CODE_RE = re.compile(r"`([^`]+)`")                # `text` → text
+_MD_CODE_RE = re.compile(r"`([^`]+)`")  # `text` → text
 
 
 def clean_heading_text(text: str) -> str:
@@ -150,12 +150,11 @@ def render_body_html(body: str) -> Markup:
         rendered = _replace_wikilinks_with_anchors(str(escape(content)))
         slug = slug_by_line_start.get(line_start)
         if slug:
-            rendered = (
-                f'<span id="{escape(slug)}" class="anchor-target"></span>'
-                f"{rendered}"
-            )
+            rendered = f'<span id="{escape(slug)}" class="anchor-target"></span>{rendered}'
         parts.append(rendered + newline)
-    return Markup("".join(parts))
+    # Every segment was HTML-escaped per line above (see the offset-stable
+    # escaping note); Markup just stops Jinja re-escaping our own markup.
+    return Markup("".join(parts))  # noqa: S704
 
 
 def _replace_wikilinks_with_anchors(escaped_line: str) -> str:
@@ -169,6 +168,7 @@ def _replace_wikilinks_with_anchors(escaped_line: str) -> str:
     section — which is what the dedup'd anchor IDs assign to the base
     slug. The 2nd+ occurrences get `-1`, `-2` suffixes that no wikilink
     targets (by design)."""
+
     def _sub(m: re.Match[str]) -> str:
         target = parse_wikilink(m.group(1))
         if target.section:
@@ -178,11 +178,7 @@ def _replace_wikilinks_with_anchors(escaped_line: str) -> str:
         else:
             href = f"/documents/{target.doc_id}"
             display = f"[[{target.doc_id}]]"
-        return (
-            f'<a class="wikilink" href="{escape(href)}">'
-            f"{escape(display)}"
-            "</a>"
-        )
+        return f'<a class="wikilink" href="{escape(href)}">{escape(display)}</a>'
 
     return _WIKILINK_RE.sub(_sub, escaped_line)
 
@@ -284,7 +280,4 @@ def extract_toc(body: str) -> list[TocEntry]:
     (`document.html`) hide the TOC when the list is < 3 or > 50 entries
     (too short to navigate / parse-noise).
     """
-    return [
-        TocEntry(level=h.level, text=h.text, slug=h.slug)
-        for h in _walk_headings(body)
-    ]
+    return [TocEntry(level=h.level, text=h.text, slug=h.slug) for h in _walk_headings(body)]

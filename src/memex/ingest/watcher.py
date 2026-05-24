@@ -15,6 +15,7 @@ the re-enrich notices on save and aborts with `vault.edit_conflict`.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -48,9 +49,7 @@ class EditNotice(BaseModel):
 class _Handler(FileSystemEventHandler):
     """Forwards filesystem events into an asyncio queue."""
 
-    def __init__(
-        self, queue: asyncio.Queue[Path], loop: asyncio.AbstractEventLoop
-    ) -> None:
+    def __init__(self, queue: asyncio.Queue[Path], loop: asyncio.AbstractEventLoop) -> None:
         super().__init__()
         self._queue = queue
         self._loop = loop
@@ -119,9 +118,7 @@ async def publish_edit_notice(notice: EditNotice) -> None:
         )
 
 
-async def _confirm_user_edit(
-    vault_path: Path, markdown_path: Path
-) -> EditNotice | None:
+async def _confirm_user_edit(vault_path: Path, markdown_path: Path) -> EditNotice | None:
     """Return an EditNotice iff the on-disk hash differs from the manifest's.
 
     Returns None when the file no longer exists, or when the hash
@@ -180,10 +177,8 @@ async def run_watcher(
     try:
         observer.start()
     except Exception:
-        try:
+        with contextlib.suppress(Exception):
             observer.stop()
-        except Exception:
-            pass
         raise
     log.info("watcher.start")
 

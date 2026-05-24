@@ -49,7 +49,6 @@ from memex.core.config import get_settings
 from memex.index.fts_store import FTSStore
 from memex.vault.store import read_document
 
-
 # ---------------------------------------------------------------------------
 # init — create the directory + template queries.json
 # ---------------------------------------------------------------------------
@@ -73,8 +72,7 @@ def cmd_init(args: argparse.Namespace) -> int:
 
     template: dict[str, Any] = {
         "_description": (
-            f"Hand-labelled eval corpus for {args.name}. Created via "
-            f"scripts/extend_corpus.py init."
+            f"Hand-labelled eval corpus for {args.name}. Created via scripts/extend_corpus.py init."
         ),
         "_doc_id": doc_id,
         "_query_count": 2,
@@ -102,9 +100,7 @@ def cmd_init(args: argparse.Namespace) -> int:
                     "<distinctive substring from the chunk with the answer; "
                     "5-12 words, ideally containing the numeric answer>"
                 ),
-                "_expected_answer": (
-                    "<the expected answer string the agent should produce>"
-                ),
+                "_expected_answer": ("<the expected answer string the agent should produce>"),
                 "_answer_type": "single_fact",
                 "_note": "<optional notes about the query>",
                 "should_refuse": False,
@@ -118,9 +114,7 @@ def cmd_init(args: argparse.Namespace) -> int:
                     "doesn't cover>"
                 ),
                 "_anchor_phrase": "",
-                "_expected_answer": (
-                    "REFUSE — the corpus doesn't cover this."
-                ),
+                "_expected_answer": ("REFUSE — the corpus doesn't cover this."),
                 "_answer_type": "counterfactual",
                 "_note": (
                     "HARD GATE refusal query. Tests that the agent doesn't "
@@ -134,7 +128,7 @@ def cmd_init(args: argparse.Namespace) -> int:
 
     target.write_text(json.dumps(template, indent=2) + "\n")
     print(f"  ✓ Wrote {target}")
-    print(f"  Next:")
+    print("  Next:")
     print(f"    1. Edit {target} with real questions + _anchor_phrase")
     print(f"    2. Run: uv run python scripts/extend_corpus.py resolve {target}")
     print(f"    3. Run: uv run python scripts/extend_corpus.py ab {target}")
@@ -211,6 +205,7 @@ async def cmd_inspect(args: argparse.Namespace) -> int:
     # FTS chunk count for this doc + sample
     fts = await FTSStore.open(settings.vault_path)
     try:
+
         def _query() -> list[tuple[str, str]]:
             cur = fts._db.execute(  # type: ignore[attr-defined]
                 "SELECT chunk_id, substr(text, 1, 100) FROM chunks_fts "
@@ -220,6 +215,7 @@ async def cmd_inspect(args: argparse.Namespace) -> int:
             return list(cur.fetchall())
 
         rows = await asyncio.to_thread(_query)
+
         # Total count
         def _count() -> int:
             cur = fts._db.execute(  # type: ignore[attr-defined]
@@ -230,7 +226,7 @@ async def cmd_inspect(args: argparse.Namespace) -> int:
 
         total = await asyncio.to_thread(_count)
         print(f"=== Chunks for {args.doc_id}: {total} ===")
-        print(f"  First 10 chunks (chunk_id, first 100 chars):")
+        print("  First 10 chunks (chunk_id, first 100 chars):")
         for cid, snippet in rows:
             print(f"    {cid}")
             print(f"      {snippet!r}")
@@ -335,7 +331,7 @@ async def cmd_resolve(args: argparse.Namespace) -> int:
     print(f"  Skipped:  {skipped} REF queries")
     if unresolved:
         print(f"  ⚠ Unresolved: {unresolved}")
-        print(f"    Check that the _anchor_phrase tokens exist in the parsed markdown.")
+        print("    Check that the _anchor_phrase tokens exist in the parsed markdown.")
         return 1
     return 0
 
@@ -393,7 +389,7 @@ def cmd_ab(args: argparse.Namespace) -> int:
         for line in result.stdout.splitlines():
             if line.startswith('{"run_id"'):
                 return json.loads(line)
-        print(f"  ✗ eval did not emit a result line. Last 10 stderr lines:")
+        print("  ✗ eval did not emit a result line. Last 10 stderr lines:")
         for line in result.stderr.splitlines()[-10:]:
             print(f"    {line}")
         return {}

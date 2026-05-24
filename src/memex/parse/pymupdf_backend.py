@@ -26,6 +26,7 @@ never been attempted.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import sys
@@ -176,9 +177,7 @@ async def convert(
     stderr: bytes
     try:
         try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout_s
-            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
         except TimeoutError as e:
             raise PyMuPDFTimeout(
                 f"PyMuPDF worker exceeded {timeout_s}s on {source}",
@@ -198,10 +197,8 @@ async def convert(
                     proc.kill()
                 except ProcessLookupError:
                     pass
-                try:
+                with contextlib.suppress(BaseException):
                     await proc.wait()
-                except BaseException:
-                    pass
         raise
 
     if proc.returncode != 0:
@@ -251,9 +248,7 @@ async def convert(
             "PyMuPDF worker produced unparseable output",
             context={
                 "source": str(source),
-                "stdout_prefix": (stdout or b"")[:500].decode(
-                    "utf-8", errors="replace"
-                ),
+                "stdout_prefix": (stdout or b"")[:500].decode("utf-8", errors="replace"),
             },
         ) from e
 

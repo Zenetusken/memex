@@ -502,8 +502,10 @@ def _installed_memex_units() -> list[str]:
     import subprocess
 
     try:
+        # systemctl is PATH-resolved (its location varies across distros);
+        # argv is a fixed literal list, no shell — S607 is a false positive.
         result = subprocess.run(
-            [
+            [  # noqa: S607
                 "systemctl",
                 "--user",
                 "list-unit-files",
@@ -548,7 +550,7 @@ def _upgrade_step(
     if dry_run:
         err.print(f"  [dim]would run: {' '.join(argv)}[/dim]")
         return
-    completed = subprocess.run(argv, cwd=cwd, check=False)
+    completed = subprocess.run(argv, cwd=cwd, check=False)  # noqa: S603  # caller-supplied literal argv, no shell
     if completed.returncode != 0:
         err.print(f"[red]✗ {label} failed (exit {completed.returncode})[/red]")
         raise typer.Exit(code=completed.returncode)

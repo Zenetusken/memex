@@ -33,7 +33,7 @@ logger = structlog.get_logger(__name__)
 
 _HAS_FCNTL = sys.platform != "win32"
 if _HAS_FCNTL:
-    import fcntl  # noqa: F401 — used inside _acquire_blocking / _release
+    import fcntl
 
 
 def _locks_dir(vault_path: Path) -> Path:
@@ -71,9 +71,7 @@ def _release(fd: int) -> None:
 
 
 @contextlib.asynccontextmanager
-async def doc_file_lock(
-    vault_path: Path, doc_id: str
-) -> AsyncIterator[None]:
+async def doc_file_lock(vault_path: Path, doc_id: str) -> AsyncIterator[None]:
     """Hold `fcntl.LOCK_EX` on `.memex/locks/{doc_id}.lock` for the body.
 
     On Linux + macOS: blocks until the exclusive lock is acquired,

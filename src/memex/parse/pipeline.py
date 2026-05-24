@@ -22,10 +22,11 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import AsyncIterator, Final
+from typing import Final
 
 import structlog
 import ulid
@@ -40,6 +41,11 @@ from memex.core.manifest import (
     now_utc,
     read_manifest,
     update_manifest,
+)
+from memex.parse.chart_ocr_backend import (
+    ChartOCROutput,
+    ChartOCRUnavailable,
+    chart_ocr_extract,
 )
 from memex.parse.docling_backend import (
     DoclingConversion,
@@ -67,11 +73,6 @@ from memex.parse.vlm_backend import (
 )
 from memex.parse.vlm_backend import (
     convert_pages as vlm_convert_pages,
-)
-from memex.parse.chart_ocr_backend import (
-    ChartOCROutput,
-    ChartOCRUnavailable,
-    chart_ocr_extract,
 )
 from memex.vault.store import (
     DocumentRef,
@@ -230,8 +231,7 @@ def _is_mixed_content(s: PdfSignals) -> bool:
     settings = get_settings()
     return (
         s.chars_per_page_avg >= 50.0
-        and s.image_area_fraction
-        >= settings.parse.pymupdf_mixed_content_image_area_threshold
+        and s.image_area_fraction >= settings.parse.pymupdf_mixed_content_image_area_threshold
         and s.image_heavy_page_fraction
         >= settings.parse.pymupdf_mixed_content_min_image_heavy_pages
     )
@@ -255,17 +255,12 @@ def _is_slide_deck(s: PdfSignals) -> bool:
     image-only PDFs fall to Tier 1.C instead.
     """
     settings = get_settings().parse
-    aspect_ok = (
-        s.avg_aspect_ratio >= settings.pymupdf_slide_deck_aspect_threshold
-    )
+    aspect_ok = s.avg_aspect_ratio >= settings.pymupdf_slide_deck_aspect_threshold
     if not aspect_ok or s.chars_per_page_avg < 50.0:
         return False
-    text_thin = s.chars_per_page_avg < float(
-        settings.pymupdf_slide_deck_max_chars_per_page
-    )
+    text_thin = s.chars_per_page_avg < float(settings.pymupdf_slide_deck_max_chars_per_page)
     chart_heavy = (
-        s.image_area_fraction
-        >= settings.pymupdf_slide_deck_chart_heavy_image_area_threshold
+        s.image_area_fraction >= settings.pymupdf_slide_deck_chart_heavy_image_area_threshold
     )
     return text_thin or chart_heavy
 
@@ -285,9 +280,7 @@ def _classify(signals: PdfSignals) -> _Classification:
     s = signals
     producer_text = f"{s.creator or ''} {s.producer or ''}".lower().strip()
 
-    born_digital_hits = sorted(
-        p for p in BORN_DIGITAL_PRODUCERS if p in producer_text
-    )
+    born_digital_hits = sorted(p for p in BORN_DIGITAL_PRODUCERS if p in producer_text)
     scan_hits = sorted(p for p in SCAN_PRODUCERS if p in producer_text)
 
     # Mixed-content check fires at every "would-use-PyMuPDF" point.
@@ -494,9 +487,7 @@ def _classify(signals: PdfSignals) -> _Classification:
                 attribution={**attribution, "tier": "4-mixed"},
                 needs_ocr=True,
             )
-        return _Classification(
-            doc_type="slide", confidence=conf, attribution=attribution
-        )
+        return _Classification(doc_type="slide", confidence=conf, attribution=attribution)
 
     if aspect < 1.0:
         base = min(0.85, avg / 800.0)
@@ -515,9 +506,7 @@ def _classify(signals: PdfSignals) -> _Classification:
                 attribution={**attribution, "tier": "4-mixed"},
                 needs_ocr=True,
             )
-        return _Classification(
-            doc_type="paper", confidence=conf, attribution=attribution
-        )
+        return _Classification(doc_type="paper", confidence=conf, attribution=attribution)
 
     base = min(0.85, avg / 400.0)
     conf = min(1.0, base + structure_bonus)
@@ -535,9 +524,7 @@ def _classify(signals: PdfSignals) -> _Classification:
             attribution={**attribution, "tier": "4-mixed"},
             needs_ocr=True,
         )
-    return _Classification(
-        doc_type="unknown", confidence=conf, attribution=attribution
-    )
+    return _Classification(doc_type="unknown", confidence=conf, attribution=attribution)
 
 
 @dataclass(frozen=True)
@@ -582,9 +569,11 @@ async def _passthrough_markdown(vault_path: Path, doc_id: str, source: Path) -> 
     log.info("parse.passthrough.start")
 
     body = source.read_text(encoding="utf-8")
-    canonical = await read_document(vault_path, doc_id) if (
-        vault_path / "documents" / f"{doc_id}.md"
-    ).exists() else None
+    canonical = (
+        await read_document(vault_path, doc_id)
+        if (vault_path / "documents" / f"{doc_id}.md").exists()
+        else None
+    )
     fm = (
         canonical.frontmatter
         if canonical
@@ -599,9 +588,7 @@ async def _passthrough_markdown(vault_path: Path, doc_id: str, source: Path) -> 
     ref = await write_document(vault_path, doc)
 
     correlation_id = str(ulid.ULID())
-    page = PageDecision(
-        page=1, engine="passthrough", confidence=1.0, rationale="markdown source"
-    )
+    page = PageDecision(page=1, engine="passthrough", confidence=1.0, rationale="markdown source")
     parse_stage = ParseStage(
         correlation_id=correlation_id,
         parsed_at=now_utc(),
@@ -635,7 +622,7 @@ def _strip_frontmatter(text: str) -> str:
     end = text.find("\n---", 3)
     if end < 0:
         return text
-    after = text[end + 4:]
+    after = text[end + 4 :]
     return after.lstrip("\n")
 
 
@@ -672,9 +659,7 @@ async def derive_title(vault_path: Path, doc_id: str) -> str:
     return doc_id
 
 
-_IMAGE_PLACEHOLDER_RE: Final[re.Pattern[str]] = re.compile(
-    r"<!--\s*image\s*-->", re.IGNORECASE
-)
+_IMAGE_PLACEHOLDER_RE: Final[re.Pattern[str]] = re.compile(r"<!--\s*image\s*-->", re.IGNORECASE)
 
 
 async def _vllm_reachable(base_url: str, timeout_s: float = 2.0) -> bool:
@@ -694,7 +679,9 @@ async def _vllm_reachable(base_url: str, timeout_s: float = 2.0) -> bool:
 
         def _check() -> bool:
             try:
-                with urlopen(Request(url), timeout=timeout_s) as resp:
+                # `url` is the operator-configured vLLM base_url (localhost
+                # health probe), not user input — fixed http(s) scheme.
+                with urlopen(Request(url), timeout=timeout_s) as resp:  # noqa: S310
                     return 200 <= resp.status < 300
             except (URLError, TimeoutError):
                 return False
@@ -826,12 +813,19 @@ async def _pause_vllm_for_chart_ocr() -> AsyncIterator[None]:
             # latency on cold start (model materialisation + CUDA-graph
             # compile). Subsequent restarts in the same process should
             # be faster (~40s) but the budget covers worst case.
+            #
+            # NB: `break` on success, never `return` — a `return` in this
+            # `finally` would suppress any exception raised inside the
+            # `async with` body (B012), silently swallowing a parse crash.
+            restarted = False
             for _ in range(120):
                 if await _vllm_reachable(base_url, timeout_s=1.0):
                     log.info("vllm.restarted")
-                    return
+                    restarted = True
+                    break
                 await asyncio.sleep(1.0)
-            log.error("vllm.restart.timeout")
+            if not restarted:
+                log.error("vllm.restart.timeout")
         except Exception as e:
             log.error("vllm.restart.failed", error=str(e))
 
@@ -886,9 +880,7 @@ def _stitch_chart_extractions(
         return conversion
 
     new_markdown = conversion.markdown
-    for placeholder, extraction in reversed(
-        list(zip(placeholders, extractions, strict=True))
-    ):
+    for placeholder, extraction in reversed(list(zip(placeholders, extractions, strict=True))):
         if isinstance(extraction, Exception):
             continue
         text = extraction.markdown.strip()
@@ -985,13 +977,11 @@ async def _parse_with_docling(
 
                 try:
                     await get_registry().unload("chart_ocr")
-                except Exception as ex:  # noqa: BLE001
+                except Exception as ex:
                     log.warning("chart_ocr.unload_failed", error=str(ex))
             conversion = _stitch_chart_extractions(conversion, extractions)
             chart_ocr_count = sum(
-                1
-                for e in extractions
-                if isinstance(e, ChartOCROutput) and e.markdown.strip()
+                1 for e in extractions if isinstance(e, ChartOCROutput) and e.markdown.strip()
             )
             log.info(
                 "chart_ocr.done",
@@ -1020,9 +1010,11 @@ async def _parse_with_docling(
 
     # Write the canonical markdown via the vault. Preserve title from the
     # ingest stage if available; otherwise default to the doc_id.
-    existing = await read_document(vault_path, doc_id) if (
-        vault_path / "documents" / f"{doc_id}.md"
-    ).exists() else None
+    existing = (
+        await read_document(vault_path, doc_id)
+        if (vault_path / "documents" / f"{doc_id}.md").exists()
+        else None
+    )
     fm = (
         existing.frontmatter
         if existing
@@ -1153,9 +1145,7 @@ async def _route_and_escalate(
         conversion = conversion.model_copy(
             update={
                 "pages": stitched_pages,
-                "markdown": "\n\n".join(
-                    sp.markdown for sp in stitched_pages if sp.markdown
-                ),
+                "markdown": "\n\n".join(sp.markdown for sp in stitched_pages if sp.markdown),
             }
         )
 
@@ -1171,9 +1161,7 @@ def _is_docling_failure(exc: BaseException) -> bool:
     return False here without needing an explicit exclusion — both are
     caller-level expected outcomes the breaker should not punish.
     """
-    return isinstance(
-        exc, (DoclingTimeout, DoclingUnavailable, DoclingCrashed)
-    )
+    return isinstance(exc, (DoclingTimeout, DoclingUnavailable, DoclingCrashed))
 
 
 async def _record_crash(
@@ -1218,9 +1206,7 @@ async def _record_crash(
         )
 
 
-async def _parse_with_pymupdf(
-    vault_path: Path, doc_id: str, source: Path
-) -> _PreFilterDecision:
+async def _parse_with_pymupdf(vault_path: Path, doc_id: str, source: Path) -> _PreFilterDecision:
     """Try the PyMuPDF4LLM pre-filter on a PDF.
 
     Returns a `_PreFilterDecision`:
@@ -1234,9 +1220,7 @@ async def _parse_with_pymupdf(
     """
     settings = get_settings()
     correlation_id = str(ulid.ULID())
-    log = logger.bind(
-        doc_id=doc_id, correlation_id=correlation_id, engine="pymupdf"
-    )
+    log = logger.bind(doc_id=doc_id, correlation_id=correlation_id, engine="pymupdf")
 
     if not settings.parse.pymupdf_enabled:
         log.info("parse.pymupdf.disabled")
@@ -1289,9 +1273,7 @@ async def _parse_with_pymupdf(
             threshold=settings.parse.pymupdf_min_confidence,
             force_ocr=classification.needs_ocr,
         )
-        return _PreFilterDecision(
-            result=None, force_ocr_on_fallthrough=classification.needs_ocr
-        )
+        return _PreFilterDecision(result=None, force_ocr_on_fallthrough=classification.needs_ocr)
 
     # PyMuPDF wins. Write the canonical markdown, record the manifest,
     # return the ParseResult.
@@ -1391,9 +1373,7 @@ async def _parse_pdf(
     )
 
 
-async def parse_document(
-    doc_id: str, *, force_docling: bool | None = None
-) -> ParseResult:
+async def parse_document(doc_id: str, *, force_docling: bool | None = None) -> ParseResult:
     """Parse the document with `doc_id`'s source into canonical markdown.
 
     `force_docling` overrides the classifier and routes the source
@@ -1402,11 +1382,7 @@ async def parse_document(
     overrides the setting for this call.
     """
     settings = get_settings()
-    effective_force = (
-        force_docling
-        if force_docling is not None
-        else settings.parse.force_docling
-    )
+    effective_force = force_docling if force_docling is not None else settings.parse.force_docling
     source = _source_file(settings.vault_path, doc_id)
 
     if source.suffix.lower() in {".md", ".markdown"}:

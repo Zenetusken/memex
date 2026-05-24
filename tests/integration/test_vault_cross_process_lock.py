@@ -9,7 +9,6 @@ a mock. Linux + macOS only; the tests `skip` on Windows.
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
 import textwrap
 from pathlib import Path
@@ -29,9 +28,7 @@ from memex.vault.store import (
 
 def _build_doc(vault: Path, doc_id: str, body: str) -> VaultDocument:
     return VaultDocument(
-        ref=make_ref(
-            vault, doc_id, content_sha256=hash_bytes(body.encode("utf-8"))
-        ),
+        ref=make_ref(vault, doc_id, content_sha256=hash_bytes(body.encode("utf-8"))),
         frontmatter=Frontmatter(title=doc_id),
         body=body,
         mtime_ns=0,
@@ -100,9 +97,7 @@ async def test_write_document_blocks_on_cross_process_lock(
     assert ready.strip() == b"locked"
 
     start = asyncio.get_event_loop().time()
-    new_ref = await write_document(
-        vault, _build_doc(vault, doc_id, "after-lock-released")
-    )
+    new_ref = await write_document(vault, _build_doc(vault, doc_id, "after-lock-released"))
     elapsed = asyncio.get_event_loop().time() - start
     # Allow some slop for subprocess teardown + scheduling.
     assert elapsed >= hold_seconds - 0.2, (

@@ -18,6 +18,8 @@ These tests pin:
 
 from __future__ import annotations
 
+from itertools import pairwise
+
 from memex.core.types import Chunk
 from memex.retrieve.fusion import DEFAULT_K, reciprocal_rank_fusion
 
@@ -143,10 +145,8 @@ def test_output_is_descending_score_order() -> None:
     dense.append(_chunk("shared"))
     result = reciprocal_rank_fusion([bm25, dense])
     scores = [c.score for c in result]
-    # Allow equal-score ties; assert non-increasing. zip without
-    # strict because we're comparing adjacent pairs (len-1 pairs from
-    # len-N list).
-    for prev, nxt in zip(scores, scores[1:]):
+    # Allow equal-score ties; assert non-increasing across adjacent pairs.
+    for prev, nxt in pairwise(scores):
         assert prev >= nxt
 
 
@@ -174,10 +174,6 @@ def test_three_way_fusion() -> None:
     result = reciprocal_rank_fusion(rankings)
     by_id = {c.chunk_id: c for c in result}
     # 'a' appears in all three lists at ranks 1, 2, 2
-    expected_a = (
-        1.0 / (DEFAULT_K + 1)
-        + 1.0 / (DEFAULT_K + 2)
-        + 1.0 / (DEFAULT_K + 2)
-    )
+    expected_a = 1.0 / (DEFAULT_K + 1) + 1.0 / (DEFAULT_K + 2) + 1.0 / (DEFAULT_K + 2)
     assert by_id["a"].score == expected_a
     assert result[0].chunk_id == "a"  # highest aggregated score

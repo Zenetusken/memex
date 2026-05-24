@@ -217,9 +217,12 @@ async def start(settings: MemexSettings) -> DaemonStatus:
 
     # Open the log file for the child's stdout/stderr. Append so the
     # log persists across restarts; the user can rotate by hand.
-    log_fp = open(log_file, "ab")
+    # Blocking open() + Popen are deliberate here: the fd is handed to a
+    # DETACHED long-lived child (not loop-managed I/O), so the async
+    # subprocess/aiofiles machinery would be wrong, not just unnecessary.
+    log_fp = open(log_file, "ab")  # noqa: ASYNC230
     try:
-        proc = subprocess.Popen(  # noqa: S603 — script path is from config
+        proc = subprocess.Popen(  # noqa: S603, ASYNC220 — config-sourced script path; detached child
             ["/usr/bin/env", "bash", str(script)],
             stdout=log_fp,
             stderr=subprocess.STDOUT,
@@ -245,8 +248,7 @@ async def start(settings: MemexSettings) -> DaemonStatus:
         if proc.poll() is not None:
             pid_file.unlink(missing_ok=True)
             raise MemexError(
-                f"vllm daemon exited with code {proc.returncode} before "
-                "becoming reachable",
+                f"vllm daemon exited with code {proc.returncode} before becoming reachable",
                 context={
                     "exit_code": proc.returncode,
                     "log_file": str(log_file),

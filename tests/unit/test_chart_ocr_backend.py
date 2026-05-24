@@ -51,7 +51,7 @@ async def _yields(handle: object):
 
 
 class _FakeRegistry:
-    def use(self, name: str) -> Any:  # noqa: ARG002
+    def use(self, name: str) -> Any:
         return _yields(_FakeChartOCRHandle())
 
 
@@ -70,9 +70,7 @@ async def test_empty_figures_list_returns_empty_no_load(
         calls["get_registry"] += 1
         return _FakeRegistry()
 
-    monkeypatch.setattr(
-        "memex.parse.chart_ocr_backend.get_registry", _fake_get_registry
-    )
+    monkeypatch.setattr("memex.parse.chart_ocr_backend.get_registry", _fake_get_registry)
 
     out = await chart_ocr_extract(
         source_pdf=Path("/nonexistent.pdf"),
@@ -92,20 +90,12 @@ async def test_multiple_figures_extract_in_order(
     stub to fire once per figure and the output to thread through.
     """
     figures = [
-        FigureMetadata(
-            page_no=1, bbox=(10.0, 20.0, 200.0, 180.0), caption="Fig 1"
-        ),
-        FigureMetadata(
-            page_no=2, bbox=(50.0, 60.0, 250.0, 230.0), caption=None
-        ),
-        FigureMetadata(
-            page_no=5, bbox=(0.0, 0.0, 500.0, 400.0), caption="Chart"
-        ),
+        FigureMetadata(page_no=1, bbox=(10.0, 20.0, 200.0, 180.0), caption="Fig 1"),
+        FigureMetadata(page_no=2, bbox=(50.0, 60.0, 250.0, 230.0), caption=None),
+        FigureMetadata(page_no=5, bbox=(0.0, 0.0, 500.0, 400.0), caption="Chart"),
     ]
 
-    monkeypatch.setattr(
-        "memex.parse.chart_ocr_backend.get_registry", lambda: _FakeRegistry()
-    )
+    monkeypatch.setattr("memex.parse.chart_ocr_backend.get_registry", lambda: _FakeRegistry())
 
     # Stub the heavy steps. The sentinel passed back is just to confirm
     # the call chain works; the transcribe stub returns per-page text.
@@ -115,12 +105,10 @@ async def test_multiple_figures_extract_in_order(
         lambda pdf, page, bbox, scale=2.5: f"<image page={page}>",
     )
 
-    def _fake_transcribe(handle, image, prompt, max_new_tokens):  # noqa: ARG001
+    def _fake_transcribe(handle, image, prompt, max_new_tokens):
         return f"| col1 | col2 |\n|---|---|\n| a | b |\n# from {image}"
 
-    monkeypatch.setattr(
-        chart_ocr_backend, "_chart_ocr_transcribe_sync", _fake_transcribe
-    )
+    monkeypatch.setattr(chart_ocr_backend, "_chart_ocr_transcribe_sync", _fake_transcribe)
 
     out = await chart_ocr_extract(
         source_pdf=Path("/fake.pdf"),
@@ -179,22 +167,18 @@ async def test_classification_filter_skips_non_chart_classes(
 
     transcribe_calls: list[int] = []
 
-    monkeypatch.setattr(
-        "memex.parse.chart_ocr_backend.get_registry", lambda: _FakeRegistry()
-    )
+    monkeypatch.setattr("memex.parse.chart_ocr_backend.get_registry", lambda: _FakeRegistry())
     monkeypatch.setattr(
         chart_ocr_backend,
         "_render_figure_to_image",
         lambda pdf, page, bbox, scale=2.5: f"<image p={page}>",
     )
 
-    def _fake_transcribe(handle, image, prompt, max_new_tokens):  # noqa: ARG001
+    def _fake_transcribe(handle, image, prompt, max_new_tokens):
         transcribe_calls.append(1)
         return f"| col | val |\n|---|---|\n| a | 1 |\n# {image}"
 
-    monkeypatch.setattr(
-        chart_ocr_backend, "_chart_ocr_transcribe_sync", _fake_transcribe
-    )
+    monkeypatch.setattr(chart_ocr_backend, "_chart_ocr_transcribe_sync", _fake_transcribe)
 
     out = await chart_ocr_extract(
         source_pdf=Path("/fake.pdf"),
@@ -233,22 +217,18 @@ async def test_low_confidence_classification_falls_back_to_extract(
 
     transcribe_calls: list[int] = []
 
-    monkeypatch.setattr(
-        "memex.parse.chart_ocr_backend.get_registry", lambda: _FakeRegistry()
-    )
+    monkeypatch.setattr("memex.parse.chart_ocr_backend.get_registry", lambda: _FakeRegistry())
     monkeypatch.setattr(
         chart_ocr_backend,
         "_render_figure_to_image",
         lambda pdf, page, bbox, scale=2.5: f"<image p={page}>",
     )
 
-    def _fake_transcribe(handle, image, prompt, max_new_tokens):  # noqa: ARG001
+    def _fake_transcribe(handle, image, prompt, max_new_tokens):
         transcribe_calls.append(1)
         return "| col | val |\n|---|---|\n| a | 1 |"
 
-    monkeypatch.setattr(
-        chart_ocr_backend, "_chart_ocr_transcribe_sync", _fake_transcribe
-    )
+    monkeypatch.setattr(chart_ocr_backend, "_chart_ocr_transcribe_sync", _fake_transcribe)
 
     out = await chart_ocr_extract(
         source_pdf=Path("/fake.pdf"),
@@ -278,24 +258,20 @@ async def test_no_classification_falls_back_to_extract(
 
     transcribe_calls: list[int] = []
 
-    monkeypatch.setattr(
-        "memex.parse.chart_ocr_backend.get_registry", lambda: _FakeRegistry()
-    )
+    monkeypatch.setattr("memex.parse.chart_ocr_backend.get_registry", lambda: _FakeRegistry())
     monkeypatch.setattr(
         chart_ocr_backend,
         "_render_figure_to_image",
         lambda pdf, page, bbox, scale=2.5: "<image>",
     )
 
-    def _fake_transcribe(handle, image, prompt, max_new_tokens):  # noqa: ARG001
+    def _fake_transcribe(handle, image, prompt, max_new_tokens):
         transcribe_calls.append(1)
         return "| col | val |\n|---|---|\n| a | 1 |"
 
-    monkeypatch.setattr(
-        chart_ocr_backend, "_chart_ocr_transcribe_sync", _fake_transcribe
-    )
+    monkeypatch.setattr(chart_ocr_backend, "_chart_ocr_transcribe_sync", _fake_transcribe)
 
-    out = await chart_ocr_extract(
+    await chart_ocr_extract(
         source_pdf=Path("/fake.pdf"),
         figures=figures,
     )
@@ -318,11 +294,9 @@ async def test_render_error_returned_per_figure(
         FigureMetadata(page_no=3, bbox=(50.0, 60.0, 250.0, 230.0)),
     ]
 
-    monkeypatch.setattr(
-        "memex.parse.chart_ocr_backend.get_registry", lambda: _FakeRegistry()
-    )
+    monkeypatch.setattr("memex.parse.chart_ocr_backend.get_registry", lambda: _FakeRegistry())
 
-    def _selective_render(pdf, page, bbox, scale=2.5):  # noqa: ARG001
+    def _selective_render(pdf, page, bbox, scale=2.5):
         if page == 2:
             raise PDFFigureRenderError(
                 f"degenerate bbox for figure on page {page}",
@@ -330,9 +304,7 @@ async def test_render_error_returned_per_figure(
             )
         return f"<image page={page}>"
 
-    monkeypatch.setattr(
-        chart_ocr_backend, "_render_figure_to_image", _selective_render
-    )
+    monkeypatch.setattr(chart_ocr_backend, "_render_figure_to_image", _selective_render)
     monkeypatch.setattr(
         chart_ocr_backend,
         "_chart_ocr_transcribe_sync",
@@ -367,13 +339,13 @@ class _FakeImage:
     def __init__(self, page: int) -> None:
         self.page = page
 
-    def save(self, path: object, format: str = "PNG") -> None:  # noqa: A002, ARG002
+    def save(self, path: object, format: str = "PNG") -> None:
         # Write a 1-byte placeholder so the file exists on disk; the
         # OneChart-fake's `.chat()` never actually reads it.
         with open(str(path), "wb") as f:
             f.write(b"\x00")
 
-    def convert(self, mode: str) -> "_FakeImage":  # noqa: ARG002
+    def convert(self, mode: str) -> _FakeImage:
         # The UniChart transcribe path calls `image.convert("RGB")`
         # before passing to the processor. Return self to keep the
         # chain working.
@@ -436,7 +408,7 @@ def _onechart_registry(handle: _FakeOneChartHandle) -> Any:
     """Build a fake registry that yields the provided OneChart handle."""
 
     class _Reg:
-        def use(self, name: str) -> Any:  # noqa: ARG002
+        def use(self, name: str) -> Any:
             return _yields(handle)
 
     return _Reg()
@@ -558,9 +530,7 @@ async def test_onechart_string_only_return_parses_reliable_from_text(
     and gates on it. Tests both True and False from-text variants.
     """
     # Case 1: text contains reliable_check=False → return empty.
-    handle = _FakeOneChartHandle(
-        chat_return="{'a': 1} reliable_check=False"
-    )
+    handle = _FakeOneChartHandle(chat_return="{'a': 1} reliable_check=False")
     monkeypatch.setattr(
         "memex.parse.chart_ocr_backend.get_registry",
         lambda: _onechart_registry(handle),
@@ -671,11 +641,7 @@ def test_latex_tabular_to_markdown_multi_row_header() -> None:
     """Multi-row tabulars: first row → header, subsequent rows → body."""
     from memex.parse.chart_ocr_backend import _latex_tabular_to_markdown
 
-    raw = (
-        "**Assigned** & **Project**\\\\"
-        "Emily & GIF\\\\"
-        "Jan & Presentation\\\\"
-    )
+    raw = "**Assigned** & **Project**\\\\Emily & GIF\\\\Jan & Presentation\\\\"
     md = _latex_tabular_to_markdown(raw)
     assert "| **Assigned** | **Project** |" in md
     assert "| --- | --- |" in md
@@ -688,10 +654,7 @@ def test_latex_tabular_to_markdown_multicolumn_flattens() -> None:
     span; keeps the data."""
     from memex.parse.chart_ocr_backend import _latex_tabular_to_markdown
 
-    raw = (
-        "**Quarter** & **Revenue**\\\\"
-        "\\multicolumn{2}{c}{Apr Jun Sep Dec}\\\\"
-    )
+    raw = "**Quarter** & **Revenue**\\\\\\multicolumn{2}{c}{Apr Jun Sep Dec}\\\\"
     md = _latex_tabular_to_markdown(raw)
     assert "Apr Jun Sep Dec" in md
 
@@ -725,9 +688,7 @@ def test_normalize_latex_tabulars_handles_truncated() -> None:
     from memex.parse.chart_ocr_backend import _normalize_latex_tabulars
 
     text = (
-        "Some intro\n\\begin{tabular}{ccc}\n"
-        "A & B & C\\\\\nD & E & F\\\\\n"
-        "(no closing tag follows)"
+        "Some intro\n\\begin{tabular}{ccc}\nA & B & C\\\\\nD & E & F\\\\\n(no closing tag follows)"
     )
     out = _normalize_latex_tabulars(text)
     assert "| A | B | C |" in out
@@ -763,9 +724,7 @@ class _FakeUniChartModel:
         # Class name must be VisionEncoderDecoderModel so the
         # `_is_unichart_handle` first guard passes.
         self.encoder = _FakeUniChartEncoder()
-        self.decoder = type(
-            "D", (), {"config": type("C", (), {"max_position_embeddings": 1536})}
-        )()
+        self.decoder = type("D", (), {"config": type("C", (), {"max_position_embeddings": 1536})})()
         self._sequences = sequences
         # Stub device/dtype attributes used by the transcribe path.
         # Both must be torch-typed for the `.to(device, dtype=...)` call
@@ -775,8 +734,9 @@ class _FakeUniChartModel:
         self.device = torch.device("cpu")
         self.dtype = torch.float32
 
-    def generate(self, *args, **kwargs):  # noqa: ARG002
+    def generate(self, *args, **kwargs):
         import torch
+
         # Return a namespace whose `.sequences` attribute is what the
         # processor.batch_decode() call will consume.
         return type("Out", (), {"sequences": torch.zeros(1, 10, dtype=torch.long)})()
@@ -801,19 +761,19 @@ class _FakeUniChartProcessor:
             pad_token = "<pad>"
             eos_token = "</s>"
 
-            def __call__(self_inner, text, **kw):  # noqa: ARG002, N805
+            def __call__(self_inner, text, **kw):
                 import torch
 
                 return type("T", (), {"input_ids": torch.zeros(1, 3, dtype=torch.long)})()
 
         self.tokenizer = _Tok()
 
-    def __call__(self, image, **kw):  # noqa: ARG002
+    def __call__(self, image, **kw):
         import torch
 
         return type("P", (), {"pixel_values": torch.zeros(1, 3, 32, 32)})()
 
-    def batch_decode(self, sequences, **kw):  # noqa: ARG002
+    def batch_decode(self, sequences, **kw):
         return [self._decoded]
 
 
@@ -825,7 +785,7 @@ class _FakeUniChartHandle:
 
 def _unichart_registry(handle: _FakeUniChartHandle) -> Any:
     class _Reg:
-        def use(self, name: str) -> Any:  # noqa: ARG002
+        def use(self, name: str) -> Any:
             return _yields(handle)
 
     return _Reg()

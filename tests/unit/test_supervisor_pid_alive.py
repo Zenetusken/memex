@@ -15,7 +15,6 @@ flip the semantics.
 from __future__ import annotations
 
 import errno
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -31,6 +30,7 @@ def test_pid_alive_returns_true_on_eperm(
     vLLM may be running under a different user (container, re-install
     under different account) and refuse to spawn a duplicate.
     """
+
     def _raise_eperm(*_a: object, **_kw: object) -> None:
         e = OSError("operation not permitted")
         e.errno = errno.EPERM
@@ -47,6 +47,7 @@ def test_pid_alive_returns_false_on_esrch(
     `_pid_alive` must report not-alive so the supervisor can spawn a
     fresh daemon.
     """
+
     def _raise_esrch(*_a: object, **_kw: object) -> None:
         e = OSError("no such process")
         e.errno = errno.ESRCH
@@ -62,9 +63,7 @@ def test_pid_alive_returns_true_on_signal_success(
     """The healthy-process case: `os.kill(our_pid, 0)` succeeds (returns
     None). `_pid_alive` reports alive. This is the path 99% of `start()`
     calls hit on a running daemon."""
-    monkeypatch.setattr(
-        supervisor.os, "kill", lambda *_a, **_kw: None
-    )
+    monkeypatch.setattr(supervisor.os, "kill", lambda *_a, **_kw: None)
     assert supervisor._pid_alive(100) is True
 
 
@@ -84,6 +83,7 @@ def test_pid_alive_returns_false_on_unknown_errno(
     container) is treated as not-alive. Prevents the supervisor from
     deadlocking against a phantom PID it can't classify.
     """
+
     def _raise_eio(*_a: object, **_kw: object) -> None:
         e = OSError("io error")
         e.errno = errno.EIO  # never expected from kill(pid, 0)
@@ -98,6 +98,7 @@ def test_pid_alive_eperm_emits_debug_log(
 ) -> None:
     """When EPERM fires, a structured debug event is emitted so an
     operator chasing cross-uid mismatches has a breadcrumb."""
+
     def _raise_eperm(*_a: object, **_kw: object) -> None:
         e = OSError("operation not permitted")
         e.errno = errno.EPERM
@@ -113,7 +114,4 @@ def test_pid_alive_eperm_emits_debug_log(
     monkeypatch.setattr(supervisor.logger, "debug", _capture_debug)
 
     assert supervisor._pid_alive(7777) is True
-    assert any(
-        c.get("event") == "pid_alive.eperm" and c.get("pid") == 7777
-        for c in captured
-    )
+    assert any(c.get("event") == "pid_alive.eperm" and c.get("pid") == 7777 for c in captured)

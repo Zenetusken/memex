@@ -12,7 +12,6 @@ verification lives on the rig, not in pytest.
 
 from __future__ import annotations
 
-import sys
 import types
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
@@ -22,7 +21,8 @@ import pytest
 
 from memex.core.config import MemexSettings, set_settings
 from memex.core.types import Chunk
-from memex.retrieve.rerank import _qwen3_format, cross_encoder_rerank as rerank
+from memex.retrieve.rerank import _qwen3_format
+from memex.retrieve.rerank import cross_encoder_rerank as rerank
 
 
 def _chunk(chunk_id: str, text: str) -> Chunk:
@@ -48,9 +48,7 @@ def settings_cross_encoder(
 
 
 @pytest.fixture
-def settings_qwen3(
-    tmp_path: object, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[MemexSettings]:
+def settings_qwen3(tmp_path: object, monkeypatch: pytest.MonkeyPatch) -> Iterator[MemexSettings]:
     monkeypatch.setenv("MEMEX_VAULT_PATH", str(tmp_path))
     monkeypatch.setenv("MEMEX_OBSERVABILITY__LANGFUSE_ENABLED", "false")
     monkeypatch.setenv("MEMEX_MODELS__RERANKER_BACKEND", "qwen3")
@@ -90,17 +88,13 @@ async def test_rerank_uses_cross_encoder_by_default(
     """Default `reranker_backend=cross_encoder` runs CrossEncoder.predict
     and does not touch the qwen3 path.
     """
-    fake = _FakeCrossEncoder(
-        {"alpha": 0.9, "beta": 0.5, "gamma": 0.1}
-    )
+    fake = _FakeCrossEncoder({"alpha": 0.9, "beta": 0.5, "gamma": 0.1})
 
     class _FakeRegistry:
-        def use(self, name: str) -> Any:  # noqa: ARG002 — match signature
+        def use(self, name: str) -> Any:
             return _registry_with(fake)
 
-    monkeypatch.setattr(
-        "memex.retrieve.rerank.get_registry", lambda: _FakeRegistry()
-    )
+    monkeypatch.setattr("memex.retrieve.rerank.get_registry", lambda: _FakeRegistry())
 
     out = await rerank(
         "q",
@@ -149,18 +143,14 @@ class _FakeQwen3Model:
         # softmax matches the configured score for the doc the row
         # corresponds to. We retrieve the doc text from the side-
         # channel `self._last_batch_texts` (set by the fake tokenizer).
-        logits = torch.full(
-            (batch_size, 1, self.vocab_size), -10.0, dtype=torch.float32
-        )
+        logits = torch.full((batch_size, 1, self.vocab_size), -10.0, dtype=torch.float32)
         for i in range(batch_size):
             doc = self._last_batch_texts[i]
             score = self._scores.get(doc, 0.5)
             # We want softmax([no, yes])[1] == score.
             # → yes - no = log(score / (1-score)).
             if 0.0 < score < 1.0:
-                log_odds = float(
-                    __import__("math").log(score / (1.0 - score))
-                )
+                log_odds = float(__import__("math").log(score / (1.0 - score)))
             elif score >= 1.0:
                 log_odds = 50.0
             else:
@@ -220,7 +210,7 @@ class _MoveableTensorDict(dict):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
-    def to(self, device: Any) -> _MoveableTensorDict:  # noqa: ARG002
+    def to(self, device: Any) -> _MoveableTensorDict:
         return self
 
 
@@ -236,9 +226,7 @@ async def test_rerank_uses_qwen3_when_backend_flagged(
     scores = {"alpha-doc": 0.95, "beta-doc": 0.55, "gamma-doc": 0.05}
     vocab_size = 32
     yes_id, no_id = 10, 11
-    fake_model = _FakeQwen3Model(
-        scores, yes_id=yes_id, no_id=no_id, vocab_size=vocab_size
-    )
+    fake_model = _FakeQwen3Model(scores, yes_id=yes_id, no_id=no_id, vocab_size=vocab_size)
     fake_tokenizer = _FakeQwen3Tokenizer(fake_model)
     handle = Qwen3RerankerHandle(
         tokenizer=fake_tokenizer,  # type: ignore[arg-type]
@@ -248,12 +236,10 @@ async def test_rerank_uses_qwen3_when_backend_flagged(
     )
 
     class _FakeRegistry:
-        def use(self, name: str) -> Any:  # noqa: ARG002
+        def use(self, name: str) -> Any:
             return _registry_with(handle)
 
-    monkeypatch.setattr(
-        "memex.retrieve.rerank.get_registry", lambda: _FakeRegistry()
-    )
+    monkeypatch.setattr("memex.retrieve.rerank.get_registry", lambda: _FakeRegistry())
 
     out = await rerank(
         "q",

@@ -19,7 +19,6 @@ from memex.mcp.auth import (
     validate_bind,
 )
 
-
 # ----- is_loopback -----
 
 

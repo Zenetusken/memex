@@ -54,7 +54,7 @@ sys.path.insert(0, str(_ROOT / "src"))
 class _Result:
     """Lightweight result holder — avoids a pydantic dep at script scope."""
 
-    __slots__ = ("name", "value", "unit", "lower_is_better", "target", "floor", "ok", "metadata")
+    __slots__ = ("floor", "lower_is_better", "metadata", "name", "ok", "target", "unit", "value")
 
     def __init__(
         self,
@@ -181,6 +181,7 @@ def bench_vault_write() -> _Result:
         settings = MemexSettings()  # type: ignore[call-arg]
         set_settings(settings)
         try:
+
             async def _one(i: int):
                 await create_document(
                     settings.vault_path,
@@ -266,7 +267,6 @@ def bench_agent_cycle() -> _Result:
     the orchestration layer.
     """
     import asyncio
-    from typing import Any
 
     from memex.agents.answering import (
         Chunk,
@@ -301,9 +301,7 @@ def bench_agent_cycle() -> _Result:
                 DraftAnswer(
                     summary="ok",
                     claims=[
-                        CitedClaim(
-                            claim="bench claim", source_chunk_id="b#a", confidence="high"
-                        )
+                        CitedClaim(claim="bench claim", source_chunk_id="b#a", confidence="high")
                     ],
                 ),
                 1,
@@ -446,7 +444,9 @@ def _collect(mode: Literal["fake", "real"], real_skipped: list[str]) -> list[_Re
     return results
 
 
-def _report(mode: Literal["fake", "real"], results: list[_Result], skipped: list[str]) -> dict[str, Any]:
+def _report(
+    mode: Literal["fake", "real"], results: list[_Result], skipped: list[str]
+) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "run_id": f"bench-{int(time.time())}",
@@ -464,10 +464,10 @@ def _report(mode: Literal["fake", "real"], results: list[_Result], skipped: list
 def _gate(baseline_path: Path, current: dict[str, Any], threshold: float) -> int:
     """Compare `current` against `baseline_path`. Exit 1 when any of:
 
-      - a current metric regressed > `threshold` from baseline
-      - a baseline metric is missing from the current run (drop signal)
-      - a baseline metric is present in current but `ok=False` (silent
-        infrastructure breakage that hid the measurement)
+    - a current metric regressed > `threshold` from baseline
+    - a baseline metric is missing from the current run (drop signal)
+    - a baseline metric is present in current but `ok=False` (silent
+      infrastructure breakage that hid the measurement)
     """
     if not baseline_path.exists():
         print(
@@ -493,9 +493,7 @@ def _gate(baseline_path: Path, current: dict[str, Any], threshold: float) -> int
             missing.append(name)
             continue
         if not c["ok"]:
-            errored.append(
-                f"{name}: {c.get('metadata', {}).get('error', 'unknown error')}"
-            )
+            errored.append(f"{name}: {c.get('metadata', {}).get('error', 'unknown error')}")
             continue
         if b["value"] <= 0:
             continue
@@ -510,8 +508,7 @@ def _gate(baseline_path: Path, current: dict[str, Any], threshold: float) -> int
             )
         elif delta > 0.05:
             warnings.append(
-                f"{name}: {b['value']:.2f} → {c['value']:.2f} {c['unit']} "
-                f"({delta * 100:+.1f}%)"
+                f"{name}: {b['value']:.2f} → {c['value']:.2f} {c['unit']} ({delta * 100:+.1f}%)"
             )
 
     if warnings:
@@ -537,8 +534,7 @@ def _gate(baseline_path: Path, current: dict[str, Any], threshold: float) -> int
                 print(f"  {e}", file=sys.stderr)
         if missing:
             print(
-                f"benchmark: FAILED — {len(missing)} baseline metric(s) missing "
-                "from current run:",
+                f"benchmark: FAILED — {len(missing)} baseline metric(s) missing from current run:",
                 file=sys.stderr,
             )
             for m in missing:

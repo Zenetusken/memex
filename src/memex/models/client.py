@@ -30,6 +30,11 @@ logger = structlog.get_logger(__name__)
 
 _client: AsyncOpenAI | None = None
 
+# Strong refs to fire-and-forget client-close tasks. Without this the
+# event loop only holds a weak ref and may GC the task before
+# `old.close()` finishes (RUF006). The done-callback drains the set.
+_CLEANUP_TASKS: set[asyncio.Task[None]] = set()
+
 
 class _Unset:
     """Sentinel for kwargs where `None` is a meaningful value distinct
@@ -91,9 +96,7 @@ def _inline_refs(schema: dict[str, Any]) -> dict[str, Any]:
                     in_progress.discard(name)
                 # If `$ref` is co-located with other keys (the allOf-like
                 # pattern), merge so siblings override the resolved body.
-                siblings = {
-                    k: _resolve(v) for k, v in node.items() if k != "$ref"
-                }
+                siblings = {k: _resolve(v) for k, v in node.items() if k != "$ref"}
                 if isinstance(resolved, dict):
                     return {**resolved, **siblings}
                 return resolved
@@ -127,7 +130,9 @@ def configure_client(settings: InferenceSettings) -> None:
         old = _client
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(old.close())
+            task = loop.create_task(old.close())
+            _CLEANUP_TASKS.add(task)
+            task.add_done_callback(_CLEANUP_TASKS.discard)
         except RuntimeError:
             logger.warning(
                 "configure_client.no_loop_for_cleanup",
@@ -222,9 +227,7 @@ async def complete_structured(
     # Coerce single-string `prompt` to the OpenAI message shape; pass
     # multi-message lists through unchanged.
     messages: list[dict[str, str]] = (
-        [{"role": "user", "content": prompt}]
-        if isinstance(prompt, str)
-        else prompt
+        [{"role": "user", "content": prompt}] if isinstance(prompt, str) else prompt
     )
 
     log.info(

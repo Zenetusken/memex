@@ -70,7 +70,7 @@ _PROMPT_VLM = (
 # When the VLM returns this literal token (case-insensitive, ignoring
 # whitespace), the backend treats the extraction as a refusal — the
 # stitch step will leave the `<!-- image -->` placeholder unchanged.
-_UNREADABLE_TOKEN = "UNREADABLE"
+_UNREADABLE_TOKEN = "UNREADABLE"  # noqa: S105  # sentinel marker, not a credential
 
 # DePlot-output post-processing patterns. The model's raw output uses
 # `<0x0A>` (Pix2Struct's newline byte sequence) instead of actual `\n`
@@ -276,8 +276,7 @@ def _is_nemotron_parse_handle(handle) -> bool:
 #       elements (we want the chart-block content, not in-image
 #       text fragments)
 _PROMPT_NEMOTRON_PARSE = (
-    "</s><s><predict_bbox><predict_classes>"
-    "<output_markdown><predict_no_text_in_pic>"
+    "</s><s><predict_bbox><predict_classes><output_markdown><predict_no_text_in_pic>"
 )
 
 
@@ -341,9 +340,7 @@ _ONECHART_RELIABLE_RE = re.compile(
 _PROMPT_ONECHART = "Convert the key information of the chart to a python dict:"
 
 
-def _chart_ocr_transcribe_sync(
-    handle, image, prompt: str, max_new_tokens: int
-) -> str:
+def _chart_ocr_transcribe_sync(handle, image, prompt: str, max_new_tokens: int) -> str:
     """Synchronous transcription; called via asyncio.to_thread.
 
     Three inference paths, dispatched by handle type:
@@ -368,9 +365,7 @@ def _chart_ocr_transcribe_sync(
         return _chart_ocr_transcribe_unichart(handle, image, max_new_tokens)
 
     if _is_nemotron_parse_handle(handle):
-        return _chart_ocr_transcribe_nemotron_parse(
-            handle, image, max_new_tokens
-        )
+        return _chart_ocr_transcribe_nemotron_parse(handle, image, max_new_tokens)
 
     is_vlm = _is_vlm_handle(handle)
 
@@ -409,10 +404,7 @@ def _chart_ocr_transcribe_sync(
     # Pix2Struct processor produces FP32 pixel_values; BF16-loaded
     # model expects BF16. Integer tensors stay as-is.
     model_dtype = next(handle.model.parameters()).dtype
-    inputs = {
-        k: v.to(model_dtype) if v.dtype.is_floating_point else v
-        for k, v in inputs.items()
-    }
+    inputs = {k: v.to(model_dtype) if v.dtype.is_floating_point else v for k, v in inputs.items()}
 
     try:
         with torch.inference_mode():
@@ -426,16 +418,14 @@ def _chart_ocr_transcribe_sync(
             # prompt portion before decoding so we get just the model's
             # output, mirroring vlm_backend's pattern.
             generated = outputs[:, inputs["input_ids"].shape[1] :]
-            decoded_list = handle.processor.batch_decode(
-                generated, skip_special_tokens=True
-            )
+            decoded_list = handle.processor.batch_decode(generated, skip_special_tokens=True)
             return (decoded_list[0] if decoded_list else "").strip()
         decoded = handle.processor.decode(outputs[0], skip_special_tokens=True)
         return decoded.strip()
     finally:
         del inputs
         if "outputs" in dir():
-            del outputs  # noqa: F821
+            del outputs
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
@@ -473,9 +463,7 @@ def _chart_ocr_transcribe_onechart(handle, image, max_new_tokens: int) -> str:
     # branches on `image_file.startswith('http')`. We render the PIL
     # image to a temp PNG and pass the path. Cleaned up on exit.
     try:
-        with tempfile.NamedTemporaryFile(
-            suffix=".png", delete=True
-        ) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=True) as tmp:
             image.save(tmp.name, format="PNG")
             tmp.flush()
             try:
@@ -621,9 +609,9 @@ def _chart_ocr_transcribe_unichart(handle, image, max_new_tokens: int) -> str:
             )
 
         sequence = handle.processor.batch_decode(outputs.sequences)[0]
-        sequence = sequence.replace(
-            handle.processor.tokenizer.eos_token, ""
-        ).replace(handle.processor.tokenizer.pad_token, "")
+        sequence = sequence.replace(handle.processor.tokenizer.eos_token, "").replace(
+            handle.processor.tokenizer.pad_token, ""
+        )
 
         if "<s_answer>" in sequence:
             table_raw = sequence.split("<s_answer>")[1].strip()
@@ -633,9 +621,7 @@ def _chart_ocr_transcribe_unichart(handle, image, max_new_tokens: int) -> str:
         # Defensive: any inference-time failure (CUDA OOM during the
         # beam search, processor input shape mismatch, etc.) becomes
         # an empty extraction rather than crashing the parse pass.
-        log.warning(
-            "chart_ocr.unichart.inference_failed", error=str(e)[:160]
-        )
+        log.warning("chart_ocr.unichart.inference_failed", error=str(e)[:160])
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         return ""
@@ -658,9 +644,7 @@ _LATEX_MULTICOLUMN_RE = re.compile(
 # above regex). The opener-only regex finds where each `\multicolumn`
 # starts; we then hand-balance braces to find the matching close.
 # Established by the post-v7 verification audit (2026-05-23).
-_LATEX_MULTICOLUMN_HEAD_RE = re.compile(
-    r"\\multicolumn\{\d+\}\{[^}]*\}\{"
-)
+_LATEX_MULTICOLUMN_HEAD_RE = re.compile(r"\\multicolumn\{\d+\}\{[^}]*\}\{")
 
 
 def _flatten_multicolumns(content: str) -> str:
@@ -703,6 +687,8 @@ def _flatten_multicolumns(content: str) -> str:
             out.append(content[m.end() :])
             break
     return "".join(out)
+
+
 # Matches `**On Time 22**`, `Late 8`, `Status 12.5%` — a label followed
 # by a trailing number/percentage. Used to split chart-summary single-row
 # tabulars into key-value lines the LLM can parse unambiguously.
@@ -857,9 +843,7 @@ def _unichart_table_to_markdown(raw: str) -> str:
     return "\n".join([header, separator, *body_rows])
 
 
-def _chart_ocr_transcribe_nemotron_parse(
-    handle, image, max_new_tokens: int
-) -> str:
+def _chart_ocr_transcribe_nemotron_parse(handle, image, max_new_tokens: int) -> str:
     """Nemotron-Parse-v1.2 inference path (Path C, P3.3-c).
 
     NVIDIA's 885M document parser. Per the model card recipe:
@@ -908,9 +892,7 @@ def _chart_ocr_transcribe_nemotron_parse(
                 )
                 # Bound emission with the caller's max_new_tokens
                 generation_config.max_new_tokens = max_new_tokens
-                outputs = handle.model.generate(
-                    **inputs, generation_config=generation_config
-                )
+                outputs = handle.model.generate(**inputs, generation_config=generation_config)
             except (ImportError, OSError):
                 # Fallback: explicit kwargs
                 outputs = handle.model.generate(
@@ -920,9 +902,7 @@ def _chart_ocr_transcribe_nemotron_parse(
                     repetition_penalty=1.1,
                 )
 
-        generated_text = handle.processor.batch_decode(
-            outputs, skip_special_tokens=True
-        )[0]
+        generated_text = handle.processor.batch_decode(outputs, skip_special_tokens=True)[0]
     except (RuntimeError, ValueError) as e:
         log.warning(
             "chart_ocr.nemotron_parse.inference_failed",
@@ -1017,11 +997,7 @@ async def _extract_with_handle(
     # ChartOCROutput. The stitch step skips empty results so the
     # `<!-- image -->` placeholder stays unchanged. This is the
     # primary hallucination-prevention signal for the VLM path.
-    if (
-        markdown
-        and _UNREADABLE_TOKEN in markdown.upper()
-        and len(markdown.split()) < 5
-    ):
+    if markdown and _UNREADABLE_TOKEN in markdown.upper() and len(markdown.split()) < 5:
         log.info("chart_ocr.unreadable_refusal")
         markdown = ""
 
@@ -1095,11 +1071,7 @@ async def chart_ocr_extract(
         # the caller's `<!-- image -->` placeholders is preserved.
         # Filtered figures get an empty ChartOCROutput; the stitch
         # step skips empty results so the placeholder stays unchanged.
-        results.append(
-            ChartOCROutput(
-                page_no=figure.page_no, bbox=figure.bbox, markdown=""
-            )
-        )
+        results.append(ChartOCROutput(page_no=figure.page_no, bbox=figure.bbox, markdown=""))
 
         # Filter 1: area. Skip page-number badges, watermarks,
         # decorative elements below ~140×140 pt.
@@ -1118,8 +1090,7 @@ async def chart_ocr_extract(
         # fall back to extract.
         if (
             figure.classification is not None
-            and figure.classification_confidence
-            >= min_classification_confidence
+            and figure.classification_confidence >= min_classification_confidence
             and figure.classification not in chart_class_names
         ):
             continue
@@ -1139,9 +1110,7 @@ async def chart_ocr_extract(
     async with registry.use("chart_ocr") as handle:
         for slot_idx, figure in figures_to_extract:
             try:
-                out = await _extract_with_handle(
-                    handle, source_pdf, figure, max_new_tokens
-                )
+                out = await _extract_with_handle(handle, source_pdf, figure, max_new_tokens)
                 results[slot_idx] = out
             except (ChartOCRUnavailable, PDFFigureRenderError) as e:
                 results[slot_idx] = e
