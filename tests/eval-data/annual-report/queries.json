@@ -69,7 +69,7 @@
       "_note": "Margin metric. Tests precise-number retrieval from a financial summary table.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "0e725ba0-2026-annual-report-web#926420bc1c"
+        "0e725ba0-2026-annual-report-web#b105a2e050"
       ]
     },
     {
@@ -145,7 +145,7 @@
       "relevant_chunk_ids": []
     }
   ],
-  "_resolved_at": "2026-05-24T20:09:48Z",
+  "_resolved_at": "2026-05-24T21:17:36Z",
   "_baseline_2026_05_24_bf16_reranker": {
     "query_count": 10,
     "answered": 7,
