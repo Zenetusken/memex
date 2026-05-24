@@ -13,10 +13,25 @@ from pathlib import Path
 
 import structlog
 
-from memex.core.text import strip_chart_extracted_for_index
+from memex.core.text import strip_chart_extracted_for_index, strip_superseded_gfm_tables
 from memex.core.types import Chunk
 
 logger = structlog.get_logger(__name__)
+
+
+def _strip_for_fts(text: str) -> str:
+    """Compose the index-layer BM25-body strips applied at `upsert`.
+
+    Two inverse strips, both keeping exactly ONE representation per channel in
+    the FTS body (no double-counting of value tokens):
+      - `strip_chart_extracted_for_index`: drop the DERIVED `[chart-extracted]`
+        block, keep the source prose;
+      - `strip_superseded_gfm_tables`: drop the SOURCE GFM table that a
+        `[table-rows]` block supersedes, keep the derived KV rows.
+    The stored chunk `.text` (LanceDB + chunks_meta + vault `.md`) is untouched
+    — only the FTS5 `text` column gets the stripped body.
+    """
+    return strip_superseded_gfm_tables(strip_chart_extracted_for_index(text))
 
 
 _SCHEMA = """
@@ -142,7 +157,7 @@ class FTSStore:
                         c.chunk_id,
                         c.document_id,
                         c.document_title,
-                        strip_chart_extracted_for_index(c.text),
+                        _strip_for_fts(c.text),
                     )
                     for c in deduped
                 ],

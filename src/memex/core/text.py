@@ -105,6 +105,118 @@ def is_inside_any_span(offset: int, spans: list[tuple[int, int]]) -> bool:
     return any(start <= offset < end for start, end in spans)
 
 
+# ----- Table-RAG linearization helpers (Phase 1) -----------------------------
+#
+# A `[table-rows]...[/table-rows]` block is the markdown-KV linearization of a
+# GFM table emitted by `parse/table_linearize.py::linearize_gfm_tables`. The
+# 3-channel contract (see docs/specs/table-rag.md) routes each representation:
+#   - `.md` on disk keeps BOTH the raw GFM table AND the `[table-rows]` block;
+#   - dense chunks see them as SEPARATE chunks (the block is a distinct
+#     paragraph unit);
+#   - the FTS/BM25 body sees ONLY the `[table-rows]` block — the raw GFM table
+#     it supersedes is stripped (`strip_superseded_gfm_tables`), the inverse of
+#     the chart strip, so the KV rows (not the raw table) carry the BM25 signal.
+
+_VALUE_CHARS: tuple[str, ...] = ("$", "%")
+
+
+def looks_like_value(s: str) -> bool:
+    """True if *s* reads as a numeric value (contains a digit or ``$``/``%``).
+
+    Promoted verbatim from `parse/docling_tables._looks_like_value` so the
+    table-linearizer (which lives in `parse/`) and the GFM-table strip (which
+    lives here in `core/`, called from `index/fts_store`) share ONE heuristic
+    without `index/ → parse/` or `core/ → parse/` import edges. The
+    `parse/docling_tables` copy operates on `TableCell` flags and stays put;
+    this one is the pure-text predicate.
+    """
+    if any(ch.isdigit() for ch in s):
+        return True
+    return any(ch in s for ch in _VALUE_CHARS)
+
+
+# Matches a `[table-rows]...[/table-rows]` block (the table-linearization KV
+# payload). Dot-all so the multi-line row body matches.
+_TABLE_ROWS_RE = re.compile(
+    r"\[table-rows\].*?\[/table-rows\]",
+    flags=re.DOTALL,
+)
+_TABLE_ROWS_OPEN_RE = re.compile(r"\[table-rows\]", flags=re.DOTALL)
+_TABLE_ROWS_CLOSE_RE = re.compile(r"\[/table-rows\]", flags=re.DOTALL)
+
+
+def table_rows_spans(text: str) -> list[tuple[int, int]]:
+    """Return `(start, end)` char offsets of each
+    `[table-rows]...[/table-rows]` block in *text*.
+
+    Mirrors `chart_extracted_spans` exactly — including the orphan-opener /
+    orphan-closer truncation tolerance — because the chunker's char-split
+    (`MAX_CHUNK_CHARS`) WILL split an oversized `[table-rows]` block across
+    chunks (unlike chart blocks, which are exempt). A split half therefore
+    carries only an opener (extends to end-of-text) or only a closer (extends
+    from start-of-text), and any consumer that needs to recognise a partial
+    block still gets the span. Order-stable (sorted by start offset).
+    """
+    spans: list[tuple[int, int]] = list((m.start(), m.end()) for m in _TABLE_ROWS_RE.finditer(text))
+    consumed_open: set[int] = {start for start, _ in spans}
+    consumed_close: set[int] = {end for _, end in spans}
+
+    for m in _TABLE_ROWS_OPEN_RE.finditer(text):
+        if m.start() not in consumed_open:
+            spans.append((m.start(), len(text)))
+    for m in _TABLE_ROWS_CLOSE_RE.finditer(text):
+        if m.end() not in consumed_close:
+            spans.append((0, m.end()))
+
+    spans.sort(key=lambda s: s[0])
+    return spans
+
+
+# A GFM table-shape line group: a header pipe-row, a delimiter row, then one or
+# more data pipe-rows. The delimiter row is the disambiguator (a run of
+# pipes / dashes / colons / whitespace with at least one dash), mirroring
+# `index.chunker._GFM_DELIM_RE`. Matched line-anchored + multiline so a table
+# embedded in prose is found at its own line boundaries.
+_GFM_TABLE_RE = re.compile(
+    r"^[ \t]*\|.*\|[ \t]*\n"  # header pipe-row
+    r"[ \t]*\|?[ \t:|-]*-[ \t:|-]*\|?[ \t]*\n"  # delimiter row (>=1 dash)
+    r"(?:[ \t]*\|.*\|[ \t]*\n?)+",  # >=1 data pipe-row
+    flags=re.MULTILINE,
+)
+
+
+def strip_superseded_gfm_tables(text: str) -> str:
+    """Remove a GFM table that is immediately followed by a `[table-rows]`
+    block (the table-linearization payload).
+
+    Used at the **index layer** (`index.fts_store::upsert`) only, composed
+    with `strip_chart_extracted_for_index`: the `[table-rows]` KV rows carry
+    the BM25 signal, so leaving the raw GFM table in the FTS body would
+    double-count every value token (term-frequency inflation — the same class
+    of bug `strip_chart_extracted_for_index` fixes for chart blocks). This is
+    its inverse: chart-strip drops the derived block and keeps the source;
+    table-strip drops the *source* table and keeps the derived `[table-rows]`.
+
+    Only strips a GFM table when a `[table-rows]` block follows it across an
+    optional blank line — an un-linearized table (no following block) is left
+    intact so its raw value tokens still reach BM25. Idempotent: text with no
+    superseded table passes through unchanged.
+    """
+
+    def _replace(m: re.Match[str]) -> str:
+        rest = text[m.end() :]
+        # The linearizer separates the table from its block by a blank line
+        # (`\n\n`); the table regex consumes a trailing newline, so tolerate
+        # any further leading whitespace/newlines before the opener.
+        if _TABLE_ROWS_OPEN_RE.match(rest.lstrip("\n \t") if rest else ""):
+            # Drop the raw table but keep the structural newline so the
+            # `[table-rows]` block stays a distinct paragraph in the body.
+            return ""
+        return m.group(0)
+
+    return _GFM_TABLE_RE.sub(_replace, text)
+
+
 # Matches a Markdown ATX heading line (1-6 `#` followed by space and
 # heading text). Same shape as `index.chunker._HEADING_RE`; lifted
 # here so `enrich.citations` can use it for section-anchor discovery

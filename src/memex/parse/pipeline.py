@@ -68,6 +68,7 @@ from memex.parse.pymupdf_backend import (
 from memex.parse.pymupdf_backend import (
     convert as pymupdf_convert,
 )
+from memex.parse.table_linearize import linearize_gfm_tables
 from memex.parse.vlm_backend import (
     VLMUnavailable,
 )
@@ -899,6 +900,24 @@ def _stitch_chart_extractions(
     return conversion.model_copy(update={"markdown": new_markdown})
 
 
+def _finalize_body(markdown: str) -> str:
+    """Apply the engine-agnostic post-parse markdown transforms.
+
+    Currently just `linearize_gfm_tables` (Table-RAG Phase 1): appends a
+    markdown-KV `[table-rows]` block after every well-formed GFM table so a
+    value cell co-locates with its column label in the retrieval+answer
+    payload. Engine-agnostic — both Docling and PyMuPDF emit GFM the
+    linearizer parses, and it runs on the post-header-recovery markdown so the
+    GFM header it reads is the corrected one.
+
+    The result is the bytes written to disk, so EVERY consumer of the parsed
+    body (the vault `body=`, the `_bootstrap_ref` content hash, and the
+    `markdown_bytes` manifest/log count) must be threaded from this one value
+    — otherwise the content hash + byte count would disagree with the `.md`.
+    """
+    return linearize_gfm_tables(markdown)
+
+
 async def _parse_with_docling(
     vault_path: Path,
     doc_id: str,
@@ -993,6 +1012,12 @@ async def _parse_with_docling(
             # The parse still ships; just without chart-OCR enrichment.
             log.warning("chart_ocr.unavailable", error=str(e))
 
+    # Table-RAG Phase 1: linearize GFM tables AFTER chart-OCR stitching (so the
+    # `[chart-extracted]` blocks are already in place and the GFM tables seen
+    # are the post-header-recovery ones). The finalized body is what gets
+    # written; thread it to body=/_bootstrap_ref/markdown_bytes below.
+    final_body = _finalize_body(conversion.markdown)
+
     duration_ms = int((time.monotonic() - start) * 1000)
 
     confident = [p for p in pages if p.confidence >= settings.parse.vlm_confidence_threshold]
@@ -1021,9 +1046,9 @@ async def _parse_with_docling(
         else Frontmatter(title=await derive_title(vault_path, doc_id))
     )
     doc = VaultDocument(
-        ref=_bootstrap_ref(vault_path, doc_id, conversion.markdown),
+        ref=_bootstrap_ref(vault_path, doc_id, final_body),
         frontmatter=fm,
-        body=conversion.markdown,
+        body=final_body,
         mtime_ns=0,
     )
     ref = await write_document(vault_path, doc)
@@ -1059,7 +1084,7 @@ async def _parse_with_docling(
         correlation_id=correlation_id,
         engine="docling",
         pages=pages,
-        markdown_bytes=len(conversion.markdown.encode("utf-8")),
+        markdown_bytes=len(final_body.encode("utf-8")),
     )
 
 
@@ -1279,6 +1304,10 @@ async def _parse_with_pymupdf(vault_path: Path, doc_id: str, source: Path) -> _P
     # return the ParseResult.
     duration_ms = int((time.monotonic() - start) * 1000)
 
+    # Table-RAG Phase 1: linearize GFM tables on the PyMuPDF markdown too
+    # (engine-agnostic). Thread the finalized body to all consumers below.
+    final_body = _finalize_body(conversion.markdown)
+
     existing = (
         await read_document(vault_path, doc_id)
         if (vault_path / "documents" / f"{doc_id}.md").exists()
@@ -1290,9 +1319,9 @@ async def _parse_with_pymupdf(vault_path: Path, doc_id: str, source: Path) -> _P
         else Frontmatter(title=await derive_title(vault_path, doc_id))
     )
     doc = VaultDocument(
-        ref=_bootstrap_ref(vault_path, doc_id, conversion.markdown),
+        ref=_bootstrap_ref(vault_path, doc_id, final_body),
         frontmatter=fm,
-        body=conversion.markdown,
+        body=final_body,
         mtime_ns=0,
     )
     ref = await write_document(vault_path, doc)
@@ -1329,7 +1358,7 @@ async def _parse_with_pymupdf(vault_path: Path, doc_id: str, source: Path) -> _P
     log.info(
         "parse.pymupdf.done",
         pages=len(pages),
-        markdown_bytes=len(conversion.markdown.encode("utf-8")),
+        markdown_bytes=len(final_body.encode("utf-8")),
         duration_ms=duration_ms,
     )
     return _PreFilterDecision(
@@ -1338,7 +1367,7 @@ async def _parse_with_pymupdf(vault_path: Path, doc_id: str, source: Path) -> _P
             correlation_id=correlation_id,
             engine="pymupdf",
             pages=pages,
-            markdown_bytes=len(conversion.markdown.encode("utf-8")),
+            markdown_bytes=len(final_body.encode("utf-8")),
         )
     )
 
