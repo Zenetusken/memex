@@ -240,5 +240,6 @@
     "mean_citation_precision_answered_only": 0.9091,
     "conservative_false_refusals": [],
     "note": "Run config: vLLM Qwen/Qwen3-8B-AWQ orchestrator + BAAI/bge-reranker-v2-m3 now loading in bf16 (ADR-0006 intent), restored by the CrossEncoder automodel_args->model_kwargs fix on 2026-05-24. HARD GATES held: refusal_rate_on_counterfactuals=1.0, zero hallucinations (every refusal_correct=False case is a conservative false-refusal on an answerable query, not a wrongly-answered REF). ANS/REF counts identical to the prior (fp32-reranker) baselines. Any citation-precision delta vs the fp32 baseline is a chunk-granularity shift — the bf16 reranker cites an equally-valid sibling chunk in the SAME correct document — not a quality regression (verified: doc disambiguation + answer correctness intact)."
-  }
+  },
+  "_p21_reranker_ab_2026_05_24": "Attempted the Qwen3-Reranker-0.6B (backend=qwen3) arm against the cross_encoder bf16 baseline (11/11 ANS, cp 0.933) on 2026-05-24. Result: CUDA OOM during the rerank node — the autoregressive Qwen3-Reranker needs more live VRAM than the ~2.4 GB free under the 8B-AWQ orchestrator on the 12 GB RTX 4070. Confirms the ROADMAP P2.1 'hardware-blocked on 12 GB rig' note: a clean run needs the 4B-orchestrator stack at MEMEX_VLLM_GPU_FRACTION=0.50 (which also swaps the orchestrator, so it's not a reranker-only A/B). The prior verdict (slide-decks, 4B stack) had cross_encoder winning 4-0; extending to multi-doc French remains gated on that stack swap."
 }
