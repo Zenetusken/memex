@@ -162,7 +162,7 @@ class EnrichResult(BaseModel):
 async def enrich_document(doc_id: str, *, threshold: float = 0.8) -> EnrichResult: ...
 ```
 
-**Behavior.** Reads via `vault.read_document`, runs `extract_entities` (one structured model call per chunk), runs `resolve_citations` (graph-aware: candidates are existing vault docs filtered by author+year+title trigram match before the model decides). Wikilink insertion is in-place but always atomic — never write a half-enriched markdown.
+**Behavior.** Reads via `vault.read_document`, runs `extract_entities` (one structured model call per chunk), runs `resolve_citations` (graph-aware: candidates are existing vault docs filtered by author+year+title trigram match before the model decides). Wikilink insertion is in-place but always atomic — never write a half-enriched markdown. As of P4.1 (2026-05-23) `insert_wikilinks` emits `[[doc_id]]` OR `[[doc_id#section]]` per ADR-0003; the section anchor is chosen opportunistically when the citation's ±300-char context references a heading of the target document (heading discovery via `core/text.py::extract_heading_texts`, chart-block-aware). Read-side helpers in `core/wikilinks.py` (`parse_wikilink`, `extract_wikilinks`, `resolve_wikilink_section`) parse and resolve the section-anchored form for downstream consumers.
 
 **Dependencies.** `memex.vault`, `memex.models.client`, `memex.prompts`, `memex.core`, optionally `memex.index` (read-only — to query the citation graph for candidate resolution targets).
 
