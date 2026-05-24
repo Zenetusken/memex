@@ -12,6 +12,12 @@
 # are hand-transcribed by a human; synthetic documents (below) are
 # authored canonical-first and rendered to source — never derived from
 # Memex's own output or LLM-transcribed from a source.
+#
+# Synthetic docs render via LibreOffice (a born-digital producer Memex
+# recognizes — more representative than a low-level PDF writer). Their
+# generate.py sets LD_LIBRARY_PATH=/usr/lib/libreoffice/program for the
+# soffice subprocess (soffice.bin's $ORIGIN RUNPATH isn't honored on
+# this host, so libreglo.so etc. don't resolve otherwise).
 
 version = "0.1.0"
 

@@ -12,7 +12,7 @@ This log records the quarterly inspection of the Tidewater lighthouse and its su
 
 ## **Inspection Schedule** 
 
-envelope, and the electrical systems in that order. 
+Inspections run on a fixed quarterly cadence. Each visit covers the optic assembly, the structural envelope, and the electrical systems in that order. 
 
 - Clean the optic and verify the lamp changer rotates freely. 
 
@@ -21,6 +21,8 @@ envelope, and the electrical systems in that order.
 - Test the backup generator under load for thirty minutes. 
 
 ## **Equipment Checklist** 
+
+The following items must be confirmed present and serviceable before the inspector signs off: 
 
 - Spare lamp set, sealed and dated. 
 
@@ -32,23 +34,17 @@ envelope, and the electrical systems in that order.
 
 Visibility readings were taken at dawn from the gallery deck. 
 
-|**Date**|**Visibility**|**Notes**|
-|---|---|---|
-|2026-04-10|Good|Light haze ofshore, cleared by midday.|
-|2026-04-11|Poor|Dense fog; foghorn engaged for six
+## **Date Visibility Notes** 
 
-hours.|
-|2026-04-12|Good|Clear horizon, calm sea state.|
-
-
+2026-04-10 Good Light haze offshore, cleared by midday. 2026-04-11 Poor Dense fog; foghorn engaged for six hours. 2026-04-12 Good Clear horizon, calm sea state. 
 
 ## **Recommendations** 
 
 The inspector recommends the following actions before the next quarter: 
 
+
+
 1. Replace the gallery railing fasteners showing surface rust. 
-
-
 
 2. Schedule a load test of the secondary battery bank. 
 

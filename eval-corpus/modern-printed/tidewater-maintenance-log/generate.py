@@ -3,23 +3,34 @@
 
 Synthetic, copyright-clean content authored for the Memex eval corpus
 (see CITATION.md). The HTML below mirrors `ground-truth.md`; the CSS
-gives the headings distinct font sizes so a parser can recover the
-H1/H2/H3 hierarchy from a born-digital PDF. Rendered with PyMuPDF's
-`Story` API — no extra dependency.
+gives the headings distinct font sizes. Rendered with **LibreOffice**
+(a born-digital producer Memex's classifier recognizes), so the PDF's
+internal structure resembles real office output far better than a
+low-level PDF writer does — an earlier PyMuPDF `Story` render produced
+a non-representative PDF where pymupdf4llm dropped the first paragraph
+after some headings (a Story artifact, confirmed 2026-05-24: the
+LibreOffice render does not drop them).
 
     uv run python eval-corpus/modern-printed/tidewater-maintenance-log/generate.py
 
+Requires `libreoffice`/`soffice` installed. This script sets
+`LD_LIBRARY_PATH` to LibreOffice's program dir for the soffice
+subprocess — on this host the `$ORIGIN` RUNPATH in `soffice.bin` isn't
+honored, so the libs (e.g. `libreglo.so`) don't resolve without it.
+
 The ground truth is independent of Memex by construction: this script
 defines the canonical document; Memex never touches it. Regenerate
-`source.pdf` after editing the content here, then re-run
-`memex eval-parse` and refresh `predicted.md` + the manifest thresholds.
+`source.pdf` after editing the content, then re-run `memex eval-parse`
+and refresh `predicted.md` + the manifest thresholds.
 """
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
-
-import fitz  # PyMuPDF
 
 HTML = """
 <h1>Tidewater Lighthouse Maintenance Log</h1>
@@ -79,20 +90,46 @@ th, td { border: 1px solid #444; padding: 4px 8px; text-align: left; }
 th { font-weight: bold; }
 """
 
+_LO_PROGRAM_DIR = "/usr/lib/libreoffice/program"
+
+
+def _soffice_env() -> dict[str, str]:
+    env = os.environ.copy()
+    # soffice.bin's RUNPATH is `$ORIGIN`, which isn't honored on this host;
+    # point the loader at the program dir so libreglo.so etc. resolve.
+    existing = env.get("LD_LIBRARY_PATH", "")
+    env["LD_LIBRARY_PATH"] = (
+        f"{_LO_PROGRAM_DIR}:{existing}" if existing else _LO_PROGRAM_DIR
+    )
+    return env
+
+
+def _convert(src: Path, to: str, outdir: Path) -> Path:
+    subprocess.run(  # noqa: S603  # fixed argv, no shell; soffice is the documented tool
+        ["soffice", "--headless", "--convert-to", to, "--outdir", str(outdir), str(src)],  # noqa: S607
+        check=True,
+        env=_soffice_env(),
+        capture_output=True,
+    )
+    return outdir / f"{src.stem}.{to}"
+
 
 def main() -> None:
     out = Path(__file__).with_name("source.pdf")
-    story = fitz.Story(html=HTML, user_css=CSS)
-    writer = fitz.DocumentWriter(str(out))
-    mediabox = fitz.paper_rect("letter")
-    where = mediabox + (54, 54, -54, -54)  # 0.75" margins
-    more = 1
-    while more:
-        dev = writer.begin_page(mediabox)
-        more, _ = story.place(where)
-        story.draw(dev)
-        writer.end_page()
-    writer.close()
+    full_html = (
+        f"<html><head><meta charset='utf-8'><style>{CSS}</style></head>"
+        f"<body>{HTML}</body></html>"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        tmpdir = Path(tmp)
+        html_path = tmpdir / "doc.html"
+        html_path.write_text(full_html, encoding="utf-8")
+        # HTML → ODT → PDF: the two-step uses Writer's PDF export, which
+        # lays out the document closer to real word-processor output than
+        # the one-step writer_web filter (it recovers the H1 title).
+        odt = _convert(html_path, "odt", tmpdir)
+        pdf = _convert(odt, "pdf", tmpdir)
+        shutil.copyfile(pdf, out)
     print(f"wrote {out} ({out.stat().st_size} bytes)")
 
 
