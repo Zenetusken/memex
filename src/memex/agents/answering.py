@@ -79,6 +79,7 @@ class AnswerStateUpdate(TypedDict, total=False):
     """The shape every answering-graph node returns: a partial state
     update. `total=False` means each node only declares the fields it
     actually touches; LangGraph merges them onto the running state."""
+
     candidates: list[Chunk]
     reranked: list[Chunk]
     graph_expanded_doc_ids: list[str]
@@ -343,9 +344,7 @@ async def _expand_graph_impl(state: AnswerState) -> AnswerStateUpdate:
     seen_neighbors: set[str] = set()
     try:
         for doc_id in seen_docs:
-            neighbours = await store.neighbors(
-                doc_id, limit=state.graph_expansion_budget
-            )
+            neighbours = await store.neighbors(doc_id, limit=state.graph_expansion_budget)
             for n in neighbours:
                 if n.doc_id in seen_neighbors:
                     continue
@@ -461,6 +460,112 @@ async def assess(state: AnswerState) -> AnswerStateUpdate:
     }
 
 
+# --- Citation-id repair -------------------------------------------------------
+
+# Max edit distance between an emitted hash and a real chunk-hash for a
+# fuzzy repair to fire. Chunk hashes are 10 random hex chars, so two
+# distinct ones landing within distance 2 is vanishingly unlikely — the
+# uniqueness guard below makes a wrong snap unlikelier still.
+_CHUNK_ID_FUZZY_MAX_DISTANCE = 2
+
+
+def _bounded_levenshtein(a: str, b: str, *, max_d: int) -> int:
+    """Levenshtein edit distance, short-circuiting at `max_d + 1`.
+
+    We only care whether two short chunk-hashes are *near* each other;
+    the early exit keeps this cheap (reranked sets are ≤ ~7 chunks).
+    """
+    if abs(len(a) - len(b)) > max_d:
+        return max_d + 1
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        row_best = i
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+            row_best = min(row_best, cur[-1])
+        if row_best > max_d:
+            return max_d + 1
+        prev = cur
+    return prev[-1]
+
+
+def _repair_claim_chunk_ids(
+    claims: list[CitedClaim], reranked: list[Chunk]
+) -> tuple[list[CitedClaim], dict[str, int]]:
+    """Snap each claim's emitted `source_chunk_id` to a real reranked
+    chunk_id, repairing transcription errors from the answer LLM.
+
+    The answer prompt shows the model the full `docid#hash` chunk id,
+    but on long ids the model occasionally (a) drops the `docid#`
+    prefix and emits the bare hash, or (b) flips a character. Left
+    uncorrected those break the citation audit trail
+    (`compose` matches `source_chunk_id` against reranked chunk_ids to
+    build `FinalResponse.used_chunks`) AND the `verify` chunk lookup
+    (`chunk_by_id[claim.source_chunk_id]`). Surfaced by the CR350
+    multi-doc eval (2026-05-23): xref-05 emitted bare hashes, xref-02
+    emitted a single-char-corrupted hash.
+
+    Repair order, decreasing safety:
+      1. exact   — id already matches a reranked chunk_id: keep.
+      2. suffix  — emitted hash equals the `#<hash>` of exactly one
+                   reranked chunk_id (bare-hash emission): repair.
+      3. fuzzy   — emitted hash is within `_CHUNK_ID_FUZZY_MAX_DISTANCE`
+                   of exactly one reranked hash, with a strictly closer
+                   match than any other (no tie): repair.
+    Anything else is left untouched — a dangling citation the verifier
+    will then mark ungrounded. Repairing here (in `answer`, before
+    `verify`) means the grounding check sees the corrected id too.
+
+    Returns `(repaired_claims, stats)` where stats counts each branch.
+    """
+    valid_ids = [c.chunk_id for c in reranked]
+    valid_set = set(valid_ids)
+    hash_of = {cid: cid.rsplit("#", 1)[-1] for cid in valid_ids}
+
+    stats = {"exact": 0, "suffix": 0, "fuzzy": 0, "unresolved": 0}
+    repaired: list[CitedClaim] = []
+
+    for claim in claims:
+        emitted = claim.source_chunk_id
+        if emitted in valid_set:
+            stats["exact"] += 1
+            repaired.append(claim)
+            continue
+
+        emitted_hash = emitted.rsplit("#", 1)[-1]
+        suffix_matches = [cid for cid in valid_ids if hash_of[cid] == emitted_hash]
+        if len(suffix_matches) == 1:
+            stats["suffix"] += 1
+            repaired.append(claim.model_copy(update={"source_chunk_id": suffix_matches[0]}))
+            continue
+
+        scored = sorted(
+            (
+                _bounded_levenshtein(
+                    emitted_hash,
+                    hash_of[cid],
+                    max_d=_CHUNK_ID_FUZZY_MAX_DISTANCE,
+                ),
+                cid,
+            )
+            for cid in valid_ids
+        )
+        if (
+            scored
+            and scored[0][0] <= _CHUNK_ID_FUZZY_MAX_DISTANCE
+            and (len(scored) == 1 or scored[1][0] > scored[0][0])
+        ):
+            stats["fuzzy"] += 1
+            repaired.append(claim.model_copy(update={"source_chunk_id": scored[0][1]}))
+            continue
+
+        stats["unresolved"] += 1
+        repaired.append(claim)
+
+    return repaired, stats
+
+
 async def answer(state: AnswerState) -> AnswerStateUpdate:
     """Generate a draft answer with explicit citations.
 
@@ -471,11 +576,7 @@ async def answer(state: AnswerState) -> AnswerStateUpdate:
     log.info("start", regenerate_attempt=state.regenerate_attempts)
 
     feedback = ""
-    if (
-        state.draft is not None
-        and state.verification is not None
-        and state.verification.ungrounded
-    ):
+    if state.draft is not None and state.verification is not None and state.verification.ungrounded:
         lines: list[str] = []
         for n, idx in enumerate(state.verification.ungrounded):
             if 0 <= idx < len(state.draft.claims):
@@ -510,6 +611,16 @@ async def answer(state: AnswerState) -> AnswerStateUpdate:
         schema=DraftAnswer,
         prompt_tag="answer@v3",
     )
+
+    # Repair corrupted citation ids before they reach verify/compose.
+    # The answer LLM sometimes mangles the long `docid#hash` ids it's
+    # shown (bare hash, single-char flip); snapping them back to real
+    # reranked chunk_ids keeps the audit trail + grounding check honest.
+    if draft.claims and state.reranked:
+        repaired, repair_stats = _repair_claim_chunk_ids(draft.claims, state.reranked)
+        if repair_stats["suffix"] or repair_stats["fuzzy"] or repair_stats["unresolved"]:
+            log.info("chunk_id_repair", **repair_stats)
+        draft = draft.model_copy(update={"claims": repaired})
 
     return {
         "draft": draft,
@@ -554,9 +665,7 @@ async def verify(state: AnswerState) -> AnswerStateUpdate:
     if not state.draft.claims:
         log.info("empty_draft_shortcircuit")
         return {
-            "verification": VerificationResult(
-                grounded=[], ungrounded=[], ungrounded_reasons=[]
-            ),
+            "verification": VerificationResult(grounded=[], ungrounded=[], ungrounded_reasons=[]),
             "nodes_traversed": state.nodes_traversed + 1,
         }
 
@@ -590,11 +699,15 @@ async def verify(state: AnswerState) -> AnswerStateUpdate:
         "VerificationResult",
         grounded=(
             Annotated[list[int], Field(max_length=n)],
-            Field(description=f"0-indexed positions in draft.claims (0..{n - 1}) whose cited chunk supports the claim."),
+            Field(
+                description=f"0-indexed positions in draft.claims (0..{n - 1}) whose cited chunk supports the claim."
+            ),
         ),
         ungrounded=(
             Annotated[list[int], Field(max_length=n)],
-            Field(description=f"0-indexed positions in draft.claims (0..{n - 1}) whose cited chunk does NOT support the claim."),
+            Field(
+                description=f"0-indexed positions in draft.claims (0..{n - 1}) whose cited chunk does NOT support the claim."
+            ),
         ),
         # Hardening (audit 2026-05-22): bound each reason string's
         # length too, not just the outer list. Same pathology as the
@@ -606,7 +719,10 @@ async def verify(state: AnswerState) -> AnswerStateUpdate:
                 list[Annotated[str, Field(max_length=250)]],
                 Field(max_length=n),
             ],
-            Field(default_factory=list, description="Optional, parallel to `ungrounded`: one short reason per ungrounded claim."),
+            Field(
+                default_factory=list,
+                description="Optional, parallel to `ungrounded`: one short reason per ungrounded claim.",
+            ),
         ),
     )
 
@@ -651,9 +767,7 @@ async def verify(state: AnswerState) -> AnswerStateUpdate:
     if missing:
         log.info("verify.indices_missing", missing=missing, draft_claim_count=n)
         valid_ungrounded.extend(missing)
-        valid_reasons.extend(
-            ["Verifier omitted this claim from its response."] * len(missing)
-        )
+        valid_reasons.extend(["Verifier omitted this claim from its response."] * len(missing))
     phantom_g = [i for i in bounded.grounded if not (0 <= i < n)]
     phantom_u = [i for i in bounded.ungrounded if not (0 <= i < n)]
     if phantom_g or phantom_u:
@@ -756,9 +870,7 @@ async def compose(state: AnswerState) -> AnswerStateUpdate:
 
     grounded_indices = set(state.verification.grounded)
     surviving_claims = [
-        claim
-        for i, claim in enumerate(state.draft.claims)
-        if i in grounded_indices
+        claim for i, claim in enumerate(state.draft.claims) if i in grounded_indices
     ]
 
     new_nodes = state.nodes_traversed + 1
@@ -1001,9 +1113,7 @@ async def answer_query(
             initial,
             config={
                 "callbacks": [callback_handler()],
-                "metadata": run_attributes(
-                    initial.correlation_id, "answer_query"
-                ),
+                "metadata": run_attributes(initial.correlation_id, "answer_query"),
             },
         )
 
