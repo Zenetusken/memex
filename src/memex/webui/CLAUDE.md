@@ -28,12 +28,22 @@ What we **do** want:
 - **Routes return `HTMLResponse` from Jinja templates**, never raw strings, never JSON for UI endpoints. JSON belongs to MCP and to `/healthz`.
 - **Forms use HTMX, not page reloads.** `hx-post` + `hx-target` + `hx-swap`. The submit button gets `hx-disabled-elt="button"`.
 
+## Document-body rendering (`rendering.py`, P4.1)
+
+The document view renders the canonical markdown body inside a `<pre>` for fidelity — **the raw markdown is the content; don't inject glyphs that read as markdown syntax.** `webui/rendering.py::render_body_html` does three server-side transforms, line-by-line over the *original* body so HTML-escaping never drifts the offsets the analysis depends on:
+
+1. `[[doc]]` / `[[doc#section]]` wikilinks → `<a class="wikilink">` (section → `#slug` fragment).
+2. Each real heading gets an **invisible** `<span id="slug" class="anchor-target">` prepended for fragment-scroll. (An earlier version appended a visible `#` permalink — removed 2026-05-23 because in a raw-`<pre>` view a trailing `#` reads as ATX closing-hash and pollutes fidelity.)
+3. `extract_toc` builds the sidebar/drawer TOC.
+
+`_walk_headings` is the single source of truth: chart-block-aware (skips inert `# H1` labels inside `[chart-extracted]`), inline-markdown-cleaned (`## [Tips:](url)` → "Tips:" via `clean_heading_text`), and **slug-deduplicated** (`tips`, `tips-1`, `tips-2` — duplicate `id=` is invalid HTML + breaks fragment nav). Both the anchor-span IDs and the TOC hrefs consume it, so they stay in lockstep. TOC gated to `3 ≤ headings ≤ 50` (below = not worth navigating; above = PDF-parse heading-noise, e.g. the 10-K's 501 H2s). When extending: keep slug logic in `_walk_headings`, never recompute it ad-hoc.
+
 ## Adding a route
 
 1. Define it in `webui/app.py:create_app` (the factory pattern is what `test_webui.py` depends on).
 2. If it returns HTML, render a Jinja template via `templates.TemplateResponse(request, "name.html", ctx)`.
 3. If it's an HTMX target, name the partial `_name.html` and **omit** `{% extends %}`.
-4. Add a test in `tests/integration/test_webui.py` using `TestClient(create_app())`.
+4. Add a test in `tests/integration/test_webui.py` using `TestClient(create_app())`, or unit-test pure render helpers in `tests/unit/test_webui_rendering.py`.
 
 ## When in doubt
 
