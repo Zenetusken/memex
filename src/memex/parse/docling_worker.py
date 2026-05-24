@@ -59,6 +59,66 @@ except ImportError:
     pass
 
 
+# ----- Heading-level recovery -----
+#
+# Docling's PDF reading-order model classifies headings as
+# `SectionHeaderItem` but never assigns a level, so every one defaults to
+# `level=1` and `export_to_markdown` emits them all as `## `
+# (`num_hashes = item.level + 1` in docling_core's markdown serializer).
+# The document loses hierarchy: a paper's sections + subsections, and a
+# 200-page 10-K's 500 headings, all flatten to H2. `SectionHeaderItem.level`
+# is a writable field the serializer respects, so we re-derive it from a
+# font-size proxy BEFORE export. Docling exposes no font size, but each
+# item's provenance carries a bbox whose height tracks size. This is the
+# Docling-path analogue of `pymupdf_worker._heading_size_to_level`.
+
+
+def _recover_heading_levels(doc: Any) -> int:
+    """Re-derive Docling section-header levels from provenance bbox height.
+
+    Ranks the distinct section-header heights **among themselves** (largest
+    → level 1) and writes the level back on each item in place, so the
+    markdown serializer emits the recovered hierarchy. Ranking headers
+    against each other (not against body text) means a slide deck whose
+    titles are all one size stays flat — peers remain peers — rather than
+    mis-promoting a single title slide.
+
+    Returns the number of headers re-levelled. `TitleItem` (no `.level`,
+    always `#`) and headers without provenance are left untouched.
+    """
+    texts: list[Any] = getattr(doc, "texts", None) or []
+    headers: list[tuple[Any, float]] = []
+    for item in texts:
+        raw_label = getattr(item, "label", None)
+        label = getattr(raw_label, "value", raw_label)
+        if label != "section_header" or not hasattr(item, "level"):
+            continue
+        heights: list[float] = []
+        prov_items: Any = getattr(item, "prov", None) or []
+        for p in prov_items:
+            bbox = getattr(p, "bbox", None)
+            h = getattr(bbox, "height", None)
+            if h is not None:
+                heights.append(float(h))
+        if not heights:
+            continue
+        # Bucket to nearest 0.5 pt: absorbs float jitter (11.98 vs 12.03)
+        # without merging genuinely distinct heading tiers. `max` over the
+        # provs resists a short wrapped-line continuation fragment.
+        headers.append((item, round(max(heights) * 2) / 2))
+
+    if not headers:
+        return 0
+
+    # Distinct buckets, largest first → levels 1..5. The serializer emits
+    # `level + 1` hashes, so cap at 5 → `######`, markdown's deepest.
+    tiers = sorted({bucket for _, bucket in headers}, reverse=True)
+    level_of = {bucket: min(i + 1, 5) for i, bucket in enumerate(tiers)}
+    for item, bucket in headers:
+        item.level = level_of[bucket]
+    return len(headers)
+
+
 def _convert_to_payload(source: Path) -> dict[str, Any]:
     """Run Docling, return a JSON-serialisable dict matching the
     `DoclingConversion` pydantic schema in `docling_backend.py`.
@@ -104,6 +164,11 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
     )
     result = converter.convert(source)
     doc = result.document
+    # Repair Docling's heading-level collapse (all `## `) from provenance
+    # bbox heights, before export so the serializer emits real hierarchy.
+    relevelled = _recover_heading_levels(doc)
+    if relevelled:
+        print(f"docling: re-levelled {relevelled} section headers", file=sys.stderr)
     markdown = doc.export_to_markdown()
 
     pages: list[dict[str, Any]] = []
