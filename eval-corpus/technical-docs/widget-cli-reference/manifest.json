@@ -1,0 +1,31 @@
+{
+  "doc_id": "widget-cli-reference",
+  "category": "technical-docs",
+  "language": "en",
+  "page_count": 1,
+  "source_url": null,
+  "license": "Apache-2.0",
+  "license_url": "https://www.apache.org/licenses/LICENSE-2.0",
+  "attribution": "Synthetic document authored for the Memex eval corpus.",
+  "synthetic": true,
+  "expected_features": {
+    "headings": {"h1": 1, "h2": 2, "h3": 2, "h4": 1},
+    "tables": 0,
+    "equations": 0,
+    "figures": 0,
+    "code_blocks": 3
+  },
+  "scoring": {
+    "cer_threshold": 0.05,
+    "wer_threshold": 0.14,
+    "structural_f1_threshold": 0.30
+  },
+  "measured_baseline_2026_05_24": {
+    "parser": "pymupdf4llm (born-digital route, no OCR)",
+    "renderer": "LibreOffice 7.3 (source.fodt -> PDF, writer_pdf_Export)",
+    "cer": 0.0334,
+    "wer": 0.1069,
+    "structural_f1_headings": 0.3333
+  },
+  "notes": "Synthetic FLAT-ODF fixture exercising DEEP HEADINGS (H1-H4) + CODE BLOCKS. Two clear findings: (1) CODE BLOCKS parse with high fidelity — the monospace source.fodt paragraphs become correct ``` fenced blocks (low CER/WER); (2) HEADING LEVELS ALL FLATTEN TO H2 — pymupdf4llm emits `##` for every heading regardless of source size (H1/H3/H4 all become ##), so on this 4-level doc structural-F1 is only 0.33 (just the two genuine H2 sections match level+text). The low structural-F1 is the PARSER'S level-collapse behavior, not a ground-truth problem — it's the headline finding this fixture exists to surface, and a candidate parser-improvement item (preserve heading levels from font-size tiers). Thresholds are regression gates calibrated to the measured baseline."
+}

@@ -98,9 +98,7 @@ def _soffice_env() -> dict[str, str]:
     # soffice.bin's RUNPATH is `$ORIGIN`, which isn't honored on this host;
     # point the loader at the program dir so libreglo.so etc. resolve.
     existing = env.get("LD_LIBRARY_PATH", "")
-    env["LD_LIBRARY_PATH"] = (
-        f"{_LO_PROGRAM_DIR}:{existing}" if existing else _LO_PROGRAM_DIR
-    )
+    env["LD_LIBRARY_PATH"] = f"{_LO_PROGRAM_DIR}:{existing}" if existing else _LO_PROGRAM_DIR
     return env
 
 
@@ -117,8 +115,7 @@ def _convert(src: Path, to: str, outdir: Path) -> Path:
 def main() -> None:
     out = Path(__file__).with_name("source.pdf")
     full_html = (
-        f"<html><head><meta charset='utf-8'><style>{CSS}</style></head>"
-        f"<body>{HTML}</body></html>"
+        f"<html><head><meta charset='utf-8'><style>{CSS}</style></head><body>{HTML}</body></html>"
     )
     with tempfile.TemporaryDirectory() as tmp:
         tmpdir = Path(tmp)

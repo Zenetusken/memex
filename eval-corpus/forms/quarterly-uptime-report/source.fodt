@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<office:document
+ xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+ xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0"
+ xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"
+ office:version="1.3"
+ office:mimetype="application/vnd.oasis.opendocument.text">
+ <office:automatic-styles>
+  <style:style style:name="H1" style:family="paragraph"><style:text-properties fo:font-size="22pt" fo:font-weight="bold"/></style:style>
+  <style:style style:name="H2" style:family="paragraph"><style:text-properties fo:font-size="16pt" fo:font-weight="bold"/></style:style>
+  <style:style style:name="Body" style:family="paragraph"><style:text-properties fo:font-size="11pt"/></style:style>
+  <style:style style:name="Cell" style:family="table-cell"><style:table-cell-properties fo:border="0.5pt solid #000000" fo:padding="0.04in"/></style:style>
+  <style:style style:name="Col" style:family="table-column"><style:table-column-properties style:column-width="1.6in"/></style:style>
+ </office:automatic-styles>
+ <office:body>
+  <office:text>
+   <text:h text:style-name="H1" text:outline-level="1">Quarterly Uptime Report</text:h>
+   <text:h text:style-name="H2" text:outline-level="2">Summary</text:h>
+   <text:p text:style-name="Body">This report summarizes service availability for the first quarter. All tracked services met their availability targets. Two services recorded minor incidents, neither of which breached the service level objective.</text:p>
+   <text:h text:style-name="H2" text:outline-level="2">Service Metrics</text:h>
+   <text:p text:style-name="Body">The table below lists uptime and incident counts for each tracked service over the quarter. Uptime is measured against the published maintenance windows.</text:p>
+   <table:table table:name="Metrics">
+    <table:table-column table:style-name="Col" table:number-columns-repeated="4"/>
+    <table:table-row>
+     <table:table-cell table:style-name="Cell"><text:p>Service</text:p></table:table-cell>
+     <table:table-cell table:style-name="Cell"><text:p>Uptime</text:p></table:table-cell>
+     <table:table-cell table:style-name="Cell"><text:p>Incidents</text:p></table:table-cell>
+     <table:table-cell table:style-name="Cell"><text:p>Notes</text:p></table:table-cell>
+    </table:table-row>
+    <table:table-row>
+     <table:table-cell table:style-name="Cell"><text:p>Gateway</text:p></table:table-cell>
+     <table:table-cell table:style-name="Cell"><text:p>99.95%</text:p></table:table-cell>
+     <table:table-cell table:style-name="Cell"><text:p>1</text:p></table:table-cell>
+     <table:table-cell table:style-name="Cell"><text:p>Brief restart during a deploy.</text:p></table:table-cell>
+    </table:table-row>
+    <table:table-row>
+     <table:table-cell table:style-name="Cell"><text:p>Database</text:p></table:table-cell>
+     <table:table-cell table:style-name="Cell"><text:p>99.99%</text:p></table:table-cell>
+     <table:table-cell table:style-name="Cell"><text:p>0</text:p></table:table-cell>
+     <table:table-cell table:style-name="Cell"><text:p>No incidents this quarter.</text:p></table:table-cell>
+    </table:table-row>
+    <table:table-row>
+     <table:table-cell table:style-name="Cell"><text:p>Cache</text:p></table:table-cell>
+     <table:table-cell table:style-name="Cell"><text:p>99.80%</text:p></table:table-cell>
+     <table:table-cell table:style-name="Cell"><text:p>2</text:p></table:table-cell>
+     <table:table-cell table:style-name="Cell"><text:p>Two evictions under peak load.</text:p></table:table-cell>
+    </table:table-row>
+    <table:table-row>
+     <table:table-cell table:style-name="Cell"><text:p>Search</text:p></table:table-cell>
+     <table:table-cell table:style-name="Cell"><text:p>99.90%</text:p></table:table-cell>
+     <table:table-cell table:style-name="Cell"><text:p>1</text:p></table:table-cell>
+     <table:table-cell table:style-name="Cell"><text:p>One reindex pause overnight.</text:p></table:table-cell>
+    </table:table-row>
+   </table:table>
+   <text:h text:style-name="H2" text:outline-level="2">Notes</text:h>
+   <text:p text:style-name="Body">Incident counts include only events that paged the on-call engineer. Planned maintenance is excluded from the uptime figures.</text:p>
+  </office:text>
+ </office:body>
+</office:document>

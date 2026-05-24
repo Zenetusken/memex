@@ -19,12 +19,14 @@
 # soffice subprocess (soffice.bin's $ORIGIN RUNPATH isn't honored on
 # this host, so libreglo.so etc. don't resolve otherwise).
 
-version = "0.1.0"
+version = "0.2.0"
 
 [summary]
-documents = 1
-synthetic = 1
+documents = 3
+synthetic = 3
 hand_curated_real = 0
 
 [categories]
 modern-printed = 1
+forms = 1
+technical-docs = 1

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<office:document
+ xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+ xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"
+ office:version="1.3"
+ office:mimetype="application/vnd.oasis.opendocument.text">
+ <office:automatic-styles>
+  <style:style style:name="H1" style:family="paragraph"><style:text-properties fo:font-size="24pt" fo:font-weight="bold"/></style:style>
+  <style:style style:name="H2" style:family="paragraph"><style:text-properties fo:font-size="18pt" fo:font-weight="bold"/></style:style>
+  <style:style style:name="H3" style:family="paragraph"><style:text-properties fo:font-size="14pt" fo:font-weight="bold"/></style:style>
+  <style:style style:name="H4" style:family="paragraph"><style:text-properties fo:font-size="12pt" fo:font-weight="bold"/></style:style>
+  <style:style style:name="Body" style:family="paragraph"><style:text-properties fo:font-size="10.5pt"/></style:style>
+  <style:style style:name="Code" style:family="paragraph"><style:text-properties style:font-name="Liberation Mono" fo:font-family="'Liberation Mono'" style:font-family-generic="modern" style:font-pitch="fixed" fo:font-size="10pt"/></style:style>
+  <style:style style:name="ListItem" style:family="paragraph"><style:text-properties fo:font-size="10.5pt"/></style:style>
+ </office:automatic-styles>
+ <office:body>
+  <office:text>
+   <text:h text:style-name="H1" text:outline-level="1">Widget CLI Reference</text:h>
+   <text:h text:style-name="H2" text:outline-level="2">Installation</text:h>
+   <text:p text:style-name="Body">Install the Widget CLI from the package index. The CLI requires a recent runtime and writes its configuration to the user config directory.</text:p>
+   <text:p text:style-name="Code">pip install widget-cli</text:p>
+   <text:p text:style-name="Code">widget --version</text:p>
+   <text:h text:style-name="H2" text:outline-level="2">Commands</text:h>
+   <text:p text:style-name="Body">The CLI groups its functionality into subcommands. Each subcommand accepts its own flags; global flags are accepted before the subcommand name.</text:p>
+   <text:h text:style-name="H3" text:outline-level="3">widget build</text:h>
+   <text:p text:style-name="Body">Compile the project into a deployable artifact. The build step reads the manifest in the working directory and writes output to the build folder.</text:p>
+   <text:p text:style-name="Code">widget build --target prod --out ./dist</text:p>
+   <text:h text:style-name="H4" text:outline-level="4">Build options</text:h>
+   <text:p text:style-name="Body">The build subcommand accepts a small set of options:</text:p>
+   <text:list>
+    <text:list-item><text:p text:style-name="ListItem">--target selects the build profile (dev or prod).</text:p></text:list-item>
+    <text:list-item><text:p text:style-name="ListItem">--out overrides the output directory.</text:p></text:list-item>
+    <text:list-item><text:p text:style-name="ListItem">--clean removes prior artifacts before building.</text:p></text:list-item>
+   </text:list>
+   <text:h text:style-name="H3" text:outline-level="3">widget deploy</text:h>
+   <text:p text:style-name="Body">Push a built artifact to a named environment. Deployment is atomic and rolls back automatically if the health check fails.</text:p>
+   <text:p text:style-name="Code">widget deploy --env staging --artifact ./dist/app.tar</text:p>
+  </office:text>
+ </office:body>
+</office:document>
