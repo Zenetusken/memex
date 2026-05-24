@@ -30,6 +30,7 @@ import json
 import logging
 import math
 import os
+import re
 import sys
 import traceback
 from pathlib import Path
@@ -119,6 +120,118 @@ def _recover_heading_levels(doc: Any) -> int:
     return len(headers)
 
 
+# ----- Prose-heading demotion (mis-DETECTION fix) -----
+#
+# Beyond mis-LEVELLING, Docling's reading-order model also mis-DETECTS body
+# sentences as `SectionHeaderItem`s on dense docs (e.g. NVIDIA's annual review
+# tagged "Data centers are becoming AI factories." and a 304-char paragraph as
+# headings). `_recover_heading_levels` can only rank what Docling labelled; it
+# can't un-label a sentence. A level-fix can't repair a detection error.
+#
+# We fix this at the ROOT — on the structured `DoclingDocument` before export —
+# rather than by regexing the markdown. `SectionHeaderItem` is a subclass of
+# `TextItem`, and the serializer dispatches headings by `isinstance` (not by
+# the `label` field), so reassigning a mis-detected item's `__class__` to
+# `TextItem` makes it serialize as a plain paragraph natively (verified). That
+# keeps the document model itself correct, so export, chunking, and
+# `heading_path` all see a paragraph. `_demote_prose_headings` (the markdown
+# post-process below) is retained only as a defence-in-depth FALLBACK for any
+# heading that slips past the structured pass.
+#
+# The discriminating signal is textual (most small headings ARE legitimate
+# sub-headings; bbox height is too noisy on slide decks — see
+# `_recover_heading_levels`): a real heading is short and title-like; a
+# mis-detected one ends in sentence punctuation or runs long. Measured on the
+# 10-K: real headings ≤12 words and never end with `. ! ?`; the prose
+# mis-detections end with terminal punctuation or run well past any heading.
+# `bbox` height/width is available on each item for richer signal if a future
+# corpus needs it, but the text shape suffices today.
+
+_HEADING_LINE_RE = re.compile(r"^(#{1,6})[ \t]+\S")
+_FENCE_RE = re.compile(r"^\s*(```|~~~)")
+_EMPHASIS_RE = re.compile(r"[*`]")
+_TERMINAL_PUNCT = (".", "!", "?")
+# A heading longer than this many words is prose regardless of punctuation
+# (real headings here top out at ~12 words).
+_MAX_HEADING_WORDS = 15
+# A terminal-punctuation line needs at least this many words to count as prose
+# — guards short labels like "Item 1." / "Note 5." that legitimately end in `.`.
+_MIN_PROSE_WORDS = 4
+
+
+def _looks_like_prose_heading(heading_text: str) -> bool:
+    """True if a heading line's text reads as a body sentence, not a title."""
+    t = _EMPHASIS_RE.sub("", heading_text).strip()
+    if not t:
+        return False
+    words = t.split()
+    if len(words) > _MAX_HEADING_WORDS:
+        return True
+    return len(words) >= _MIN_PROSE_WORDS and t[-1] in _TERMINAL_PUNCT
+
+
+def _demote_misdetected_headers(doc: Any, *, text_item_cls: type) -> int:
+    """Reclassify SectionHeaderItems whose text reads as prose into plain text.
+
+    The root-level mis-detection fix: a body sentence Docling tagged as a
+    `SectionHeaderItem` is reassigned to `text_item_cls` (the real `TextItem`),
+    so `export_to_markdown` — which routes headings by `isinstance` — emits it
+    as a paragraph. The document model is corrected in place, so downstream
+    chunking + `heading_path` see a paragraph too. Returns the count demoted.
+
+    Duck-typed (`label`/`text`/`level`) + `text_item_cls` injected, so it's
+    unit-testable without docling. The `__class__` swap is wrapped defensively:
+    if a future pydantic/docling version rejects it, the item is left as a
+    heading and the markdown-level `_demote_prose_headings` fallback catches it.
+    """
+    texts: list[Any] = getattr(doc, "texts", None) or []
+    demoted = 0
+    for item in texts:
+        raw_label = getattr(item, "label", None)
+        label = getattr(raw_label, "value", raw_label)
+        if label != "section_header" or not hasattr(item, "level"):
+            continue
+        if not _looks_like_prose_heading(getattr(item, "text", "") or ""):
+            continue
+        try:
+            item.__class__ = text_item_cls
+            demoted += 1
+        except (TypeError, AttributeError):
+            # __class__ reassignment refused — leave it; the markdown
+            # fallback will demote it post-export.
+            continue
+    return demoted
+
+
+def _demote_prose_headings(markdown: str) -> tuple[str, int]:
+    """FALLBACK: strip the heading prefix from lines that read as body prose.
+
+    Docling mis-detects body sentences as headings; this turns those lines
+    back into paragraphs so they stop creating spurious section breaks in
+    the chunker and stop polluting `heading_path`. Only the `#` prefix is
+    removed — the text is preserved verbatim. Fenced code is skipped; lines
+    pymupdf-style detected as real headings are left untouched. Returns
+    `(markdown, demoted_count)`.
+    """
+    out: list[str] = []
+    in_fence = False
+    demoted = 0
+    for line in markdown.split("\n"):
+        if _FENCE_RE.match(line):
+            in_fence = not in_fence
+            out.append(line)
+            continue
+        m = _HEADING_LINE_RE.match(line)
+        if m is not None and not in_fence:
+            text = line[len(m.group(1)) :].lstrip()
+            if _looks_like_prose_heading(text):
+                out.append(text)
+                demoted += 1
+                continue
+        out.append(line)
+    return "\n".join(out), demoted
+
+
 def _convert_to_payload(source: Path) -> dict[str, Any]:
     """Run Docling, return a JSON-serialisable dict matching the
     `DoclingConversion` pydantic schema in `docling_backend.py`.
@@ -132,6 +245,7 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
         from docling.datamodel.base_models import InputFormat
         from docling.datamodel.pipeline_options import PdfPipelineOptions
         from docling.document_converter import DocumentConverter, PdfFormatOption
+        from docling_core.types.doc.document import TextItem
     except ImportError as e:
         raise SystemExit(json.dumps({"error": "docling_unavailable", "detail": str(e)})) from e
 
@@ -169,7 +283,17 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
     relevelled = _recover_heading_levels(doc)
     if relevelled:
         print(f"docling: re-levelled {relevelled} section headers", file=sys.stderr)
+    # Root fix: reclassify body sentences Docling mis-detected as headings into
+    # plain text items BEFORE export, so they serialise as paragraphs natively.
+    reclassified = _demote_misdetected_headers(doc, text_item_cls=TextItem)
+    if reclassified:
+        print(f"docling: reclassified {reclassified} prose headings as text", file=sys.stderr)
     markdown = doc.export_to_markdown()
+    # Fallback: catch any prose heading that slipped past the structured pass
+    # (e.g. a refused __class__ swap) at the markdown level.
+    markdown, demoted = _demote_prose_headings(markdown)
+    if demoted:
+        print(f"docling: demoted {demoted} prose headings (fallback)", file=sys.stderr)
 
     pages: list[dict[str, Any]] = []
     # Docling's `DoclingDocument` ships `py.typed`, but its dynamic surface
@@ -183,7 +307,8 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
         export = getattr(p, "export_to_markdown", None)
         if callable(export):
             try:
-                page_md = export()
+                raw_page_md: Any = export()
+                page_md, _ = _demote_prose_headings(raw_page_md)
             except Exception:
                 page_md = ""
         confidence = float(getattr(p, "confidence", 1.0))

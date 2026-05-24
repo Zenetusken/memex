@@ -12,7 +12,12 @@ worker imports docling lazily, inside `_convert_to_payload`).
 
 from __future__ import annotations
 
-from memex.parse.docling_worker import _recover_heading_levels
+from memex.parse.docling_worker import (
+    _demote_misdetected_headers,
+    _demote_prose_headings,
+    _looks_like_prose_heading,
+    _recover_heading_levels,
+)
 
 
 class _FakeBBox:
@@ -26,12 +31,21 @@ class _FakeProv:
 
 
 class _FakeHeader:
-    """A `SectionHeaderItem` stand-in: mutable `.level`, `prov` bboxes."""
+    """A `SectionHeaderItem` stand-in: mutable `.level`, `.text`, `prov` bboxes."""
 
-    def __init__(self, *heights: float, level: int = 1, label: str = "section_header") -> None:
+    def __init__(
+        self, *heights: float, level: int = 1, label: str = "section_header", text: str = ""
+    ) -> None:
         self.label = label
         self.level = level
+        self.text = text
         self.prov = [_FakeProv(h) for h in heights]
+
+
+class _FakeTextItem:
+    """Stand-in for docling's `TextItem` — the reclassification target."""
+
+    label = "text"
 
 
 class _FakeText:
@@ -124,3 +138,109 @@ def test_multiline_over_rank_is_a_known_limitation() -> None:
 def test_empty_doc_is_noop() -> None:
     assert _recover_heading_levels(_FakeDoc([])) == 0
     assert _recover_heading_levels(_FakeDoc([_FakeText()])) == 0
+
+
+# ----- Prose-heading demotion -----
+
+
+def test_looks_like_prose_sentence_with_period() -> None:
+    assert _looks_like_prose_heading("Data centers are becoming AI factories.")
+    assert _looks_like_prose_heading("AI now perceives, reasons, plans, and acts.")
+
+
+def test_looks_like_prose_long_without_punct() -> None:
+    long = "this heading just keeps going on and on well past any real title length you would ever expect"
+    assert _looks_like_prose_heading(long)  # >15 words
+
+
+def test_real_short_headings_are_not_prose() -> None:
+    for h in ("AI Is a Five-Layer Cake", "A Global AI Ecosystem", "Forward-Looking Statements"):
+        assert not _looks_like_prose_heading(h)
+
+
+def test_short_label_with_period_is_not_prose() -> None:
+    # "Item 1." / "Note 5." legitimately end in a period — guarded by min-words.
+    assert not _looks_like_prose_heading("Item 1.")
+    assert not _looks_like_prose_heading("Note 5.")
+
+
+def test_heading_with_colon_or_comma_kept() -> None:
+    assert not _looks_like_prose_heading("Fiscal 2026: A Defining Year")
+    assert not _looks_like_prose_heading("Dear NVIDIANs and Stakeholders,")
+
+
+def test_demote_strips_prefix_from_prose() -> None:
+    md = "## AI Is a Five-Layer Cake\n\n###### Data centers are becoming AI factories.\n"
+    out, n = _demote_prose_headings(md)
+    assert n == 1
+    assert "## AI Is a Five-Layer Cake" in out  # real heading kept
+    assert "Data centers are becoming AI factories." in out
+    assert "###### Data centers" not in out  # prefix gone
+
+
+def test_demote_skips_code_fences() -> None:
+    md = "## Real Heading\n\n```\n# A full sentence inside code that ends.\n```\n"
+    out, n = _demote_prose_headings(md)
+    assert n == 0
+    assert "# A full sentence inside code that ends." in out  # untouched in fence
+
+
+def test_demote_preserves_emphasis_markers_in_output() -> None:
+    md = "###### **The buildout has only just begun in earnest.**\n"
+    out, n = _demote_prose_headings(md)
+    assert n == 1
+    # text (incl. bold markers) preserved; only the `#` prefix removed
+    assert out.strip() == "**The buildout has only just begun in earnest.**"
+
+
+def test_demote_noop_on_clean_headings() -> None:
+    md = "# Title\n\n## Section\n\n### Subsection\n"
+    out, n = _demote_prose_headings(md)
+    assert n == 0
+    assert out == md
+
+
+# ----- Root-level reclassification (mis-detection fix) -----
+
+
+def test_reclassify_demotes_prose_header() -> None:
+    real = _FakeHeader(18.0, text="AI Is a Five-Layer Cake")
+    prose = _FakeHeader(12.0, text="Data centers are becoming AI factories.")
+    n = _demote_misdetected_headers(_FakeDoc([real, prose]), text_item_cls=_FakeTextItem)
+    assert n == 1
+    assert isinstance(prose, _FakeTextItem)  # reclassified → serialises as paragraph
+    assert type(real).__name__ == "_FakeHeader"  # real heading untouched
+
+
+def test_reclassify_keeps_real_headers() -> None:
+    hs = [
+        _FakeHeader(18.0, text=t)
+        for t in ("Bar chart", "A Global AI Ecosystem", "Forward-Looking Statements")
+    ]
+    n = _demote_misdetected_headers(_FakeDoc(list(hs)), text_item_cls=_FakeTextItem)
+    assert n == 0
+    assert all(type(h).__name__ == "_FakeHeader" for h in hs)
+
+
+def test_reclassify_skips_titles_and_non_headers() -> None:
+    title = _FakeTitle(40.0)  # no `.level` → not a section header
+    text = _FakeText()  # label 'text'
+    prose_hdr = _FakeHeader(12.0, text="This sentence was wrongly tagged as a heading.")
+    n = _demote_misdetected_headers(_FakeDoc([title, text, prose_hdr]), text_item_cls=_FakeTextItem)
+    assert n == 1
+    assert isinstance(prose_hdr, _FakeTextItem)
+    assert type(title).__name__ == "_FakeTitle"
+
+
+def test_reclassify_long_prose_without_punct() -> None:
+    long = _FakeHeader(
+        12.0,
+        text="this heading just keeps going on and on well past any real title length you would expect",
+    )
+    n = _demote_misdetected_headers(_FakeDoc([long]), text_item_cls=_FakeTextItem)
+    assert n == 1
+    assert isinstance(long, _FakeTextItem)
+
+
+def test_reclassify_empty_doc() -> None:
+    assert _demote_misdetected_headers(_FakeDoc([]), text_item_cls=_FakeTextItem) == 0
