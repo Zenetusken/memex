@@ -199,22 +199,30 @@ def test_render_output_is_markup_object() -> None:
 
 
 # ----------------------------------------------------------------------
-# Heading permalink (`#` link icon) emission — P4.1 polish (2026-05-23)
+# No visible permalink glyph — raw-markdown fidelity (2026-05-23
+# browser-review fix). The earlier `<a class="heading-link">#</a>`
+# polluted the <pre> with a literal `#` that read as ATX closing-hash
+# syntax. Removed; navigation stays via TOC + invisible anchor spans.
 # ----------------------------------------------------------------------
 
 
-def test_render_heading_emits_permalink_link() -> None:
-    """Each heading also gets a `<a class="heading-link" href="#slug">#</a>`
-    appended for in-page permalink (GitHub-style, hover-revealed via CSS)."""
+def test_render_emits_no_visible_permalink_glyph() -> None:
+    """No `heading-link` anchor / no injected `#` glyph after headings —
+    the raw-markdown view must show ONLY the canonical markdown text
+    (plus invisible anchor-target spans)."""
     body = "## BUSINESS OVERVIEW\n\nProse."
     out = str(render_body_html(body))
-    assert '<a class="heading-link" href="#business-overview"' in out
-    assert ">#</a>" in out
+    assert "heading-link" not in out
+    # The only `#` characters present are the literal `##` heading
+    # prefix from the source — no trailing permalink `#` was injected.
+    assert out.count("#") == out.count("##") * 2  # each `##` = two `#`
+    # The invisible anchor target is still there for navigation.
+    assert 'id="business-overview" class="anchor-target"' in out
 
 
-def test_render_permalink_skipped_inside_chart_block() -> None:
-    """Inert chart-block H1 labels get neither anchor target NOR
-    permalink link — they aren't real document sections."""
+def test_render_anchor_span_skipped_inside_chart_block() -> None:
+    """Inert chart-block H1 labels get no anchor target — they aren't
+    real document sections."""
     body = (
         "## Real Heading\n\n"
         "[chart-extracted]\n"
@@ -222,10 +230,8 @@ def test_render_permalink_skipped_inside_chart_block() -> None:
         "[/chart-extracted]\n"
     )
     out = str(render_body_html(body))
-    # Real heading has permalink
-    assert 'href="#real-heading"' in out
-    # Inert chart label does not
-    assert 'href="#inert-label"' not in out
+    assert 'id="real-heading"' in out
+    assert 'id="inert-label"' not in out
 
 
 # ----------------------------------------------------------------------
@@ -303,3 +309,166 @@ def test_toc_entry_is_frozen_dataclass() -> None:
     assert a == b
     # Hashability
     assert {a, b} == {a}
+
+
+# ----------------------------------------------------------------------
+# Edge cases — duplicate headings, HTML-special chars, offset stability
+# (2026-05-23 browser-review follow-up)
+# ----------------------------------------------------------------------
+
+
+def test_duplicate_headings_get_deduped_slugs_in_toc() -> None:
+    """Three `Tips:` headings → slugs tips, tips-1, tips-2 so each TOC
+    entry scrolls to its OWN section (not all to the first). The
+    chart-types Tableau doc has exactly this pattern."""
+    body = (
+        "## Bar chart\n\n## Tips:\n\nprose\n\n"
+        "## Line chart\n\n## Tips:\n\nprose\n\n"
+        "## Pie chart\n\n## Tips:\n"
+    )
+    toc = extract_toc(body)
+    tips_slugs = [e.slug for e in toc if e.text == "Tips:"]
+    assert tips_slugs == ["tips", "tips-1", "tips-2"]
+
+
+def test_duplicate_headings_get_unique_span_ids() -> None:
+    """The rendered anchor-target spans must use the SAME deduped slugs
+    as the TOC — unique `id=` per heading (duplicate IDs are invalid
+    HTML; browser only scrolls to the first)."""
+    body = "## Tips:\n\na\n\n## Tips:\n\nb\n\n## Tips:\n"
+    out = str(render_body_html(body))
+    assert 'id="tips"' in out
+    assert 'id="tips-1"' in out
+    assert 'id="tips-2"' in out
+    # Exactly one of each — no duplicate id="tips"
+    assert out.count('id="tips"') == 1
+    assert out.count('id="tips-1"') == 1
+
+
+def test_toc_and_render_slugs_stay_in_lockstep() -> None:
+    """Every TOC fragment must match exactly one anchor-target span id
+    in the rendered body — the shared `_walk_headings` guarantees it
+    even with duplicates."""
+    body = (
+        "## Intro\n\n## Methods\n\n## Methods\n\n"
+        "## Results\n\n## Methods\n"
+    )
+    toc = extract_toc(body)
+    out = str(render_body_html(body))
+    for entry in toc:
+        assert f'id="{entry.slug}"' in out, f"TOC slug {entry.slug} has no span"
+    # Methods appears 3x → methods, methods-1, methods-2
+    methods_slugs = [e.slug for e in toc if e.text == "Methods"]
+    assert methods_slugs == ["methods", "methods-1", "methods-2"]
+
+
+def test_heading_with_ampersand_offset_stable() -> None:
+    """A heading after an HTML-special char (`&`, `<`) must still get a
+    correct anchor span. The old whole-body-escape approach drifted
+    offsets here and misfired the chart-block filter. Line-by-line
+    rendering fixes it."""
+    # `<!-- image -->` contains `<` which escapes to &lt; (+3 chars).
+    # A heading AFTER it must still be anchored correctly.
+    body = (
+        "<!-- image -->\n\n"
+        "AT&T earnings & growth\n\n"
+        "## Revenue Section\n\nprose\n"
+    )
+    out = str(render_body_html(body))
+    # The < and & are escaped (XSS safety)
+    assert "&lt;!-- image --&gt;" in out
+    assert "AT&amp;T" in out
+    # The heading still gets its anchor span despite the preceding
+    # special chars shifting escaped-text offsets
+    assert 'id="revenue-section"' in out
+    assert "## Revenue Section" in out
+
+
+def test_heading_inside_chart_block_after_special_chars_still_skipped() -> None:
+    """The chart-block filter must hold even when HTML-special chars
+    precede the chart block (the offset-drift bug's worst case). The
+    `# Inert` heading inside the block gets NO anchor span."""
+    body = (
+        "## Real Before\n\n"
+        "<!-- image with < and & chars -->\n\n"
+        "[chart-extracted]\n# Inert Label\n[/chart-extracted]\n\n"
+        "## Real After\n"
+    )
+    out = str(render_body_html(body))
+    assert 'id="real-before"' in out
+    assert 'id="real-after"' in out
+    assert 'id="inert-label"' not in out
+
+
+def test_unicode_heading_slug_french() -> None:
+    """French headings (accented chars) slugify to lowercase unicode
+    word chars — the CR350 course doc has these. Span id + TOC slug
+    stay consistent."""
+    body = "## Élève et Sécurité\n\nprose\n\n## Défense\n\nprose\n\n## Audit\n"
+    toc = extract_toc(body)
+    out = str(render_body_html(body))
+    for entry in toc:
+        assert f'id="{entry.slug}"' in out
+
+
+def test_render_wikilink_and_heading_on_same_line_not_confused() -> None:
+    """A heading line is never also a wikilink-rewrite target in a way
+    that double-processes; and a wikilink on a prose line still renders
+    while that line gets no anchor span."""
+    body = "## Section\n\nSee [[other-doc#Methods]] here.\n"
+    out = str(render_body_html(body))
+    assert 'id="section"' in out
+    assert 'href="/documents/other-doc#methods"' in out
+    # The prose line with the wikilink is NOT a heading → no span on it
+    # (only one anchor-target span total, for the heading)
+    assert out.count("anchor-target") == 1
+
+
+# ----------------------------------------------------------------------
+# clean_heading_text — inline-markdown stripping for headings
+# (2026-05-23, the chart-types `## [Tips:](url)` edge case)
+# ----------------------------------------------------------------------
+
+
+def test_clean_heading_text_strips_markdown_link() -> None:
+    from memex.webui.rendering import clean_heading_text
+    assert clean_heading_text("[Tips:](https://www.tableau.com/x)") == "Tips:"
+    assert clean_heading_text("[Highlight table](https://x.com/y)") == "Highlight table"
+
+
+def test_clean_heading_text_strips_bold_italic_code() -> None:
+    from memex.webui.rendering import clean_heading_text
+    assert clean_heading_text("**Bold Heading**") == "Bold Heading"
+    assert clean_heading_text("*Italic*") == "Italic"
+    assert clean_heading_text("`code` ref") == "code ref"
+
+
+def test_clean_heading_text_plain_passes_through() -> None:
+    from memex.webui.rendering import clean_heading_text
+    assert clean_heading_text("Bar chart") == "Bar chart"
+    assert clean_heading_text("BUSINESS OVERVIEW") == "BUSINESS OVERVIEW"
+
+
+def test_markdown_link_heading_gets_clean_toc_text_and_slug() -> None:
+    """A `## [Tips:](url)` heading shows "Tips:" in the TOC and slugs to
+    `tips` — NOT the ugly `tips-https-www-...` from the raw link text."""
+    body = "## [Tips:](https://www.tableau.com/resource/dos-and-donts)\n\nprose\n"
+    toc = extract_toc(body)
+    assert len(toc) == 1
+    assert toc[0].text == "Tips:"
+    assert toc[0].slug == "tips"
+    out = str(render_body_html(body))
+    assert 'id="tips"' in out
+
+
+def test_markdown_link_heading_dedups_against_plain() -> None:
+    """A `## [Tips:](url)` heading and a plain `## Tips:` heading both
+    clean to "Tips:" → they dedup together (tips, tips-1)."""
+    body = (
+        "## Tips:\n\na\n\n"
+        "## [Tips:](https://x.com/y)\n\nb\n\n"
+        "## More content here so TOC shows\n"
+    )
+    toc = extract_toc(body)
+    tips = [e for e in toc if e.text == "Tips:"]
+    assert [e.slug for e in tips] == ["tips", "tips-1"]

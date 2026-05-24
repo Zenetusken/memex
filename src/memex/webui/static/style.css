@@ -232,22 +232,10 @@ html { scroll-behavior: smooth; }
   100% { background-color: rgba(59, 130, 246, 0.00); }
 }
 
-/* GitHub-style hover-revealed permalink icon next to each heading.
-   Invisible until the body <pre> is hovered, then 40% opacity zinc;
-   100% blue-300 on direct hover. */
-.heading-link {
-  margin-left: 0.6em;
-  color: rgb(82 82 91);              /* zinc-600 */
-  text-decoration: none;
-  font-weight: 400;
-  opacity: 0;
-  transition: opacity 120ms ease-out;
-}
-pre:hover .heading-link { opacity: 0.4; }
-.heading-link:hover {
-  opacity: 1 !important;
-  color: rgb(147 197 253);           /* blue-300 */
-}
+/* (The hover-revealed `#` permalink icon was removed 2026-05-23: in a
+   raw-markdown <pre> view a literal trailing `#` reads as ATX
+   closing-hash syntax, polluting the canonical-markdown fidelity. The
+   invisible anchor-target spans + TOC provide navigation instead.) */
 
 /* Layout: when a document has a TOC, split into 2-col grid — body on
    the left, sticky sidebar on the right. Falls back gracefully on

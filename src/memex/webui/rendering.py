@@ -56,6 +56,38 @@ _SLUG_WS_RE = re.compile(r"[\s_]+")
 _SLUG_DASH_RE = re.compile(r"-+")
 
 
+# Inline-markdown patterns stripped from heading text before slugging
+# / display. Headings in parsed docs sometimes carry link, bold, or
+# code syntax — e.g. the Tableau guide has `## [Tips:](https://...)`
+# headings. Without cleaning, those produce ugly slugs
+# (`tips-https-www-tableau-com-...`) and raw `[Tips:](url)` TOC entries.
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]*\)")   # [text](url) → text
+_MD_BOLD_RE = re.compile(r"\*\*([^*]+)\*\*")          # **text** → text
+_MD_ITALIC_RE = re.compile(r"(?<!\*)\*([^*]+)\*(?!\*)")  # *text* → text
+_MD_CODE_RE = re.compile(r"`([^`]+)`")                # `text` → text
+
+
+def clean_heading_text(text: str) -> str:
+    """Strip inline-markdown syntax (links, bold, italic, code) from a
+    heading's text, leaving the human-readable label.
+
+    `"[Tips:](https://x.com)"` → `"Tips:"`
+    `"**Bold Heading**"` → `"Bold Heading"`
+    `` "`code` ref" `` → `"code ref"`
+
+    Used by `_walk_headings` so both the TOC display text AND the slug
+    derive from the clean label — a `## [Tips:](url)` heading shows
+    "Tips:" in the TOC and slugs to `tips` (then dedups against other
+    `Tips:` sections). Order matters: links first (their text may
+    contain bold/code), then bold, italic, code.
+    """
+    text = _MD_LINK_RE.sub(r"\1", text)
+    text = _MD_BOLD_RE.sub(r"\1", text)
+    text = _MD_ITALIC_RE.sub(r"\1", text)
+    text = _MD_CODE_RE.sub(r"\1", text)
+    return text.strip()
+
+
 def slugify_heading(text: str) -> str:
     """Convert a heading text to a URL fragment slug.
 
@@ -91,17 +123,52 @@ def render_body_html(body: str) -> Markup:
     `<a>` and `<span>` tags intact. The wrapped `<pre>` still preserves
     the original whitespace for visual fidelity with the canonical
     markdown.
+
+    Implemented line-by-line over the ORIGINAL body so HTML-escaping
+    never drifts the byte offsets the heading / chart-block analysis
+    depends on. (An earlier whole-body `escape()` → regex-substitute
+    approach broke on any doc with a `<` or `&` before a chart block —
+    e.g. the `<!-- image -->` markers everywhere in slide-deck markdown
+    shifted offsets and misfired the chart-block filter. Fixed
+    2026-05-23 alongside the duplicate-heading dedup.)
     """
-    escaped = str(escape(body))
-    escaped = _replace_wikilinks_with_anchors(escaped)
-    escaped = _insert_heading_anchor_targets(body, escaped)
-    return Markup(escaped)
+    # Single source of truth: real headings (chart-block-aware, slugs
+    # deduplicated) keyed by their line-start offset in the ORIGINAL
+    # body. A heading line begins exactly at its `#` (the regex anchors
+    # `^#` with no leading whitespace), so the match start == line start.
+    slug_by_line_start = {h.start: h.slug for h in _walk_headings(body)}
+
+    parts: list[str] = []
+    offset = 0
+    for line in body.splitlines(keepends=True):
+        line_start = offset
+        offset += len(line)
+        if line.endswith("\n"):
+            content, newline = line[:-1], "\n"
+        else:
+            content, newline = line, ""
+        rendered = _replace_wikilinks_with_anchors(str(escape(content)))
+        slug = slug_by_line_start.get(line_start)
+        if slug:
+            rendered = (
+                f'<span id="{escape(slug)}" class="anchor-target"></span>'
+                f"{rendered}"
+            )
+        parts.append(rendered + newline)
+    return Markup("".join(parts))
 
 
-def _replace_wikilinks_with_anchors(escaped_body: str) -> str:
-    """Substitute each `[[doc]]` / `[[doc#section]]` in `escaped_body`
+def _replace_wikilinks_with_anchors(escaped_line: str) -> str:
+    """Substitute each `[[doc]]` / `[[doc#section]]` in `escaped_line`
     with an `<a>` tag. Operates on already-HTML-escaped text — brackets
-    survive the escape, so the regex still finds them."""
+    survive the escape, so the regex still finds them.
+
+    The section anchor always points at the BASE slug (first occurrence
+    of that heading text). Duplicate headings can't be disambiguated by
+    text alone, so a `[[doc#Tips:]]` link resolves to the first "Tips:"
+    section — which is what the dedup'd anchor IDs assign to the base
+    slug. The 2nd+ occurrences get `-1`, `-2` suffixes that no wikilink
+    targets (by design)."""
     def _sub(m: re.Match[str]) -> str:
         target = parse_wikilink(m.group(1))
         if target.section:
@@ -117,47 +184,11 @@ def _replace_wikilinks_with_anchors(escaped_body: str) -> str:
             "</a>"
         )
 
-    return _WIKILINK_RE.sub(_sub, escaped_body)
-
-
-def _insert_heading_anchor_targets(
-    original_body: str, escaped_body: str
-) -> str:
-    """Prepend `<span id="slug" class="anchor-target"></span>` to each
-    Markdown heading in the ESCAPED body, and append a
-    `<a class="heading-link" href="#slug">#</a>` permalink icon.
-
-    The chart-block defense is keyed off the ORIGINAL (unescaped) body
-    because `chart_extracted_spans` matches `[chart-extracted]` /
-    `[/chart-extracted]` literals — escaping doesn't change byte
-    offsets (brackets aren't escaped), so the offsets transfer cleanly.
-    """
-    chart_spans = chart_extracted_spans(original_body)
-
-    def _sub(m: re.Match[str]) -> str:
-        # m.start() is in the escaped body. Brackets aren't HTML-escaped
-        # so offsets match the original body 1:1 for the purpose of
-        # chart-span containment.
-        if any(start <= m.start() < end for start, end in chart_spans):
-            return m.group(0)
-        text = m.group(2).strip()
-        if not text:
-            return m.group(0)
-        slug = slugify_heading(text)
-        if not slug:
-            return m.group(0)
-        return (
-            f'<span id="{escape(slug)}" class="anchor-target"></span>'
-            f"{m.group(0)}"
-            f'<a class="heading-link" href="#{escape(slug)}" '
-            f'aria-label="Permalink to this section">#</a>'
-        )
-
-    return _MARKDOWN_HEADING_RE.sub(_sub, escaped_body)
+    return _WIKILINK_RE.sub(_sub, escaped_line)
 
 
 # ----------------------------------------------------------------------
-# Table of contents
+# Table of contents + heading walk
 # ----------------------------------------------------------------------
 
 
@@ -172,7 +203,9 @@ class TocEntry:
 
     `slug` is the URL fragment that matches the in-document anchor
     target — clicking the TOC entry navigates to `#{slug}`, scrolling
-    the corresponding `<span id="slug">` into view.
+    the corresponding `<span id="slug">` into view. Deduplicated: a
+    document with three `Tips:` headings produces slugs `tips`,
+    `tips-1`, `tips-2` so each TOC entry scrolls to its OWN section.
     """
 
     level: int
@@ -180,32 +213,78 @@ class TocEntry:
     slug: str
 
 
-def extract_toc(body: str) -> list[TocEntry]:
-    """Build a flat list of TOC entries from `body`'s Markdown
-    headings, in document order. Chart-block-aware (same defense as
-    `extract_heading_texts` — inert `# H1` labels inside
-    `[chart-extracted]` blocks don't pollute the TOC).
+@dataclass(frozen=True)
+class _Heading:
+    """Internal: one real heading with its original-body position,
+    level, display text, and deduplicated slug. The single source of
+    truth shared by `render_body_html` (anchor-span IDs) and
+    `extract_toc` (TOC fragment links) so the two stay in lockstep."""
 
-    Returns `[]` when the body has no headings outside chart blocks.
-    Callers (`document.html`) typically hide the TOC sidebar when the
-    list is shorter than ~3 entries — not enough to navigate.
+    start: int
+    level: int
+    text: str
+    slug: str
 
-    Skips headings whose slug would be empty (whitespace-only or
-    symbol-only headings) — these can't be link targets, so they
-    can't be TOC entries either.
+
+def _walk_headings(body: str) -> list[_Heading]:
+    """Walk every real Markdown heading in `body` in document order,
+    returning `_Heading`s with deduplicated slugs.
+
+    "Real" excludes:
+    - headings inside `[chart-extracted]` blocks (inert chart-figure
+      `# H1` labels — same defense as the chunker / `extract_heading_
+      texts`)
+    - headings whose text is empty or slugs to empty (whitespace-only
+      or symbol-only — can't be link targets)
+
+    Slug dedup is GitHub-style: the first `Methods` heading gets
+    `methods`, the second `methods-1`, the third `methods-2`, etc.
+    This guarantees unique `id=` attributes (duplicate IDs are invalid
+    HTML and the browser only scrolls to the first) and lets each TOC
+    entry scroll to its own section.
+
+    All analysis runs on the ORIGINAL (unescaped) body so offsets are
+    stable — callers map `_Heading.start` to original-body line starts.
     """
     chart_spans = chart_extracted_spans(body)
-    entries: list[TocEntry] = []
+    seen: dict[str, int] = {}
+    out: list[_Heading] = []
     for m in _MARKDOWN_HEADING_RE.finditer(body):
         if is_inside_any_span(m.start(), chart_spans):
             continue
-        text = m.group(2).strip()
+        # Strip inline-markdown (links/bold/code) so the TOC label and
+        # slug derive from the clean text — `## [Tips:](url)` → "Tips:".
+        text = clean_heading_text(m.group(2).strip())
         if not text:
             continue
-        slug = slugify_heading(text)
-        if not slug:
+        base = slugify_heading(text)
+        if not base:
             continue
-        entries.append(
-            TocEntry(level=len(m.group(1)), text=text, slug=slug)
+        count = seen.get(base, 0)
+        seen[base] = count + 1
+        slug = base if count == 0 else f"{base}-{count}"
+        out.append(
+            _Heading(
+                start=m.start(),
+                level=len(m.group(1)),
+                text=text,
+                slug=slug,
+            )
         )
-    return entries
+    return out
+
+
+def extract_toc(body: str) -> list[TocEntry]:
+    """Build a flat list of TOC entries from `body`'s Markdown
+    headings, in document order. Chart-block-aware + slug-deduplicated
+    (shares `_walk_headings` with `render_body_html`, so every TOC
+    fragment matches exactly one anchor-target span).
+
+    Returns `[]` when the body has no navigable headings. Callers
+    (`document.html`) hide the TOC when the list is < 3 or > 50 entries
+    (too short to navigate / parse-noise).
+    """
+    return [
+        TocEntry(level=h.level, text=h.text, slug=h.slug)
+        for h in _walk_headings(body)
+    ]
