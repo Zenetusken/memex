@@ -30,6 +30,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from memex.core.text import extract_heading_texts
 from memex.vault.store import Frontmatter
 
 CitationConfidence = Literal["high", "medium", "low"]
@@ -96,13 +97,25 @@ class ResolvedCitation(BaseModel):
 
 @dataclass
 class DocSignature:
-    """Searchable signature derived from a vault document's frontmatter."""
+    """Searchable signature derived from a vault document's frontmatter
+    (and optionally its body, for section-anchor discovery).
+
+    `headings` carries the target doc's Markdown headings in document
+    order (sans `#` prefix, inert chart-block H1 labels filtered out).
+    Populated when `make_signature` is called with the body; the
+    P4.1 wikilink writer (`insert_wikilinks`) uses it to emit
+    `[[doc#section]]` anchors when the citation surface_text's
+    surrounding context references one of the target's headings.
+    Empty list when the body wasn't passed (back-compat: pre-P4.1
+    callers that just want title/author-year matching still work).
+    """
 
     doc_id: str
     title: str
     title_lower: str
     title_tokens: set[str] = field(default_factory=set)
     author_year_forms: list[str] = field(default_factory=list)
+    headings: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -158,15 +171,30 @@ def _title_tokens(title: str) -> set[str]:
     return {t for t in tokens if len(t) >= 3}
 
 
-def make_signature(doc_id: str, frontmatter: Frontmatter) -> DocSignature:
-    """Derive a `DocSignature` from a vault document's frontmatter."""
+def make_signature(
+    doc_id: str,
+    frontmatter: Frontmatter,
+    body: str | None = None,
+) -> DocSignature:
+    """Derive a `DocSignature` from a vault document's frontmatter.
+
+    `body` is optional — when provided, the document's Markdown
+    headings are extracted and stored on `DocSignature.headings`
+    so the P4.1 wikilink writer (`insert_wikilinks`) can emit
+    `[[doc#section]]` anchors. When omitted (legacy callers,
+    tests that don't care about section anchoring), the headings
+    list is empty and `insert_wikilinks` falls through to plain
+    `[[doc]]` links.
+    """
     title = (frontmatter.title or "").strip()
+    headings = extract_heading_texts(body) if body else []
     return DocSignature(
         doc_id=doc_id,
         title=title,
         title_lower=title.lower(),
         title_tokens=_title_tokens(title),
         author_year_forms=_author_year_forms(frontmatter),
+        headings=headings,
     )
 
 
@@ -253,19 +281,79 @@ def resolve_candidate(
 # ----- Wikilink insertion -----
 
 
+_SECTION_ANCHOR_CONTEXT_WINDOW = 300
+_SECTION_ANCHOR_MIN_HEADING_LEN = 4
+
+
+def _pick_section_anchor(
+    body: str,
+    surface_pos: int,
+    surface_len: int,
+    headings: list[str],
+) -> str | None:
+    """Pick the best section-anchor heading for a citation at
+    `surface_pos`, given the target doc's `headings` list.
+
+    Strategy (P4.1 write-side, 2026-05-23):
+    - Look at body content in the window
+      `[surface_pos - W, surface_pos + surface_len + W]` where
+      W = `_SECTION_ANCHOR_CONTEXT_WINDOW` (300 chars). This is
+      typically a paragraph plus a sentence either side — captures
+      the topic context around the citation.
+    - For each heading h in `headings` with len(h) >= 4 (skip
+      generic short labels like "Tips:"): check if `h.casefold()`
+      appears in the context window's casefolded text.
+    - If multiple match, pick the LONGEST (most specific). A doc
+      with both "Methods" and "Methods: Data Movement" headings
+      will prefer the latter when both fit the context.
+    - Returns the matched heading (in its original casing) or
+      `None` if no heading matched / `headings` is empty.
+
+    Section anchors are opportunistic — when none fits, the citation
+    still gets a plain `[[doc]]` link. There's no penalty for
+    missing.
+    """
+    if not headings:
+        return None
+    start = max(0, surface_pos - _SECTION_ANCHOR_CONTEXT_WINDOW)
+    end = min(
+        len(body), surface_pos + surface_len + _SECTION_ANCHOR_CONTEXT_WINDOW
+    )
+    context_lc = body[start:end].casefold()
+    best: str | None = None
+    for h in headings:
+        if len(h) < _SECTION_ANCHOR_MIN_HEADING_LEN:
+            continue
+        if h.casefold() in context_lc:
+            if best is None or len(h) > len(best):
+                best = h
+    return best
+
+
 def insert_wikilinks(
     body: str,
     resolved: list[ResolvedCitation],
     *,
     high_confidence_threshold: float = _HIGH_CONFIDENCE_THRESHOLD,
+    target_index: CitationIndex | None = None,
 ) -> tuple[str, int]:
-    """Replace high-confidence citation surface forms with `[[doc_id]]`.
+    """Replace high-confidence citation surface forms with
+    `[[doc_id]]` or `[[doc_id#section]]` wikilinks.
 
     Only resolutions at or above `high_confidence_threshold` are
     rewritten. The first occurrence per surface form is replaced;
     subsequent occurrences are intentionally left alone so a single
     edit doesn't cascade through the whole document (the user can
     re-run enrich to deepen if desired).
+
+    `target_index` enables P4.1 section-anchor emission. When
+    provided, each citation looks up its target doc's `headings`
+    in the index and uses `_pick_section_anchor` to find the most
+    specific heading mentioned in the citation's surrounding
+    context (~300 chars). When a heading matches, the wikilink
+    becomes `[[doc#heading]]`; otherwise it stays `[[doc]]`. Pass
+    `None` (default) to suppress section-anchor emission entirely
+    — back-compat for callers that haven't been updated yet.
 
     Returns `(new_body, count)` where count is the number of
     substitutions made.
@@ -291,9 +379,24 @@ def insert_wikilinks(
         pattern = re.compile(
             r"(?<![A-Za-z0-9_])" + re.escape(cit.surface_text) + r"(?![A-Za-z0-9_])"
         )
-        new_body, n = pattern.subn(
-            f"[[{cit.target_doc_id}]]", new_body, count=1
+        # Discover where the surface_text appears so we can window
+        # the section-anchor context around it.
+        m = pattern.search(new_body)
+        if m is None:
+            continue
+        anchor: str | None = None
+        if target_index is not None:
+            sig = target_index.by_id.get(cit.target_doc_id)
+            if sig is not None and sig.headings:
+                anchor = _pick_section_anchor(
+                    new_body, m.start(), m.end() - m.start(), sig.headings
+                )
+        replacement = (
+            f"[[{cit.target_doc_id}#{anchor}]]"
+            if anchor
+            else f"[[{cit.target_doc_id}]]"
         )
+        new_body, n = pattern.subn(replacement, new_body, count=1)
         if n > 0:
             count += n
             seen.add(key)

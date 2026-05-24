@@ -84,13 +84,20 @@ class EnrichResult(BaseModel):
 async def _build_citation_index(
     vault_path: Path, *, skip_doc_id: str
 ) -> CitationIndex:
-    """Index every other document in the vault for citation matching."""
+    """Index every other document in the vault for citation matching.
+
+    The body is passed to `make_signature` so each `DocSignature` carries
+    its target's Markdown headings — feeds the P4.1 section-anchor
+    writer in `insert_wikilinks`.
+    """
     idx = CitationIndex()
     async for ref in list_documents(vault_path):
         if ref.doc_id == skip_doc_id:
             continue
         doc = await read_document(vault_path, ref.doc_id)
-        idx.by_id[ref.doc_id] = make_signature(ref.doc_id, doc.frontmatter)
+        idx.by_id[ref.doc_id] = make_signature(
+            ref.doc_id, doc.frontmatter, doc.body
+        )
     return idx
 
 
@@ -220,7 +227,12 @@ async def enrich_document(doc_id: str) -> EnrichResult:
             )
 
     # Wikilink insertion: rewrites the body atomically.
-    new_body, wikilinks_inserted = insert_wikilinks(doc.body, resolved)
+    # `target_index` enables P4.1 section-anchor emission — when a
+    # citation's surrounding context mentions a heading of the target
+    # doc, the wikilink becomes `[[doc#heading]]` instead of `[[doc]]`.
+    new_body, wikilinks_inserted = insert_wikilinks(
+        doc.body, resolved, target_index=citation_index
+    )
     if new_body != doc.body:
         updated_ref = make_ref(
             settings.vault_path,

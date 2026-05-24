@@ -103,3 +103,44 @@ def is_inside_any_span(offset: int, spans: list[tuple[int, int]]) -> bool:
     blocks. O(len(spans)); fine for typical doc sizes (<100 chart
     blocks)."""
     return any(start <= offset < end for start, end in spans)
+
+
+# Matches a Markdown ATX heading line (1-6 `#` followed by space and
+# heading text). Same shape as `index.chunker._HEADING_RE`; lifted
+# here so `enrich.citations` can use it for section-anchor discovery
+# without violating the `enrich/ → index/` import direction.
+_MARKDOWN_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
+
+
+def extract_heading_texts(body: str, *, skip_chart_blocks: bool = True) -> list[str]:
+    """Return the heading text (sans `#` prefix) of every Markdown
+    heading in `body`, in document order.
+
+    Used by the P4.1 wikilink section-anchor writer
+    (`enrich.citations::insert_wikilinks`) to discover which headings
+    the target document has, so the citation-insertion step can emit
+    `[[doc#section]]` when the citation context references a
+    specific section.
+
+    `skip_chart_blocks=True` (default) filters out the inert
+    `# H1` labels Nemotron-Parse emits INSIDE `[chart-extracted]`
+    blocks (same defense as the P3.3 v7 chunker fix — see
+    `chart_extracted_spans` above). Set to `False` only if you
+    explicitly want chart-figure labels in the heading list
+    (almost no caller should).
+
+    Headings are stripped of leading/trailing whitespace. Empty
+    or all-whitespace headings are skipped. Returns headings in
+    document order; duplicates ARE preserved (a doc with two
+    `## Methods` sections returns `["Methods", "Methods"]`) so
+    callers that care about uniqueness can dedupe themselves.
+    """
+    spans = chart_extracted_spans(body) if skip_chart_blocks else []
+    out: list[str] = []
+    for m in _MARKDOWN_HEADING_RE.finditer(body):
+        if is_inside_any_span(m.start(), spans):
+            continue
+        text = m.group(2).strip()
+        if text:
+            out.append(text)
+    return out
