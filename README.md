@@ -316,6 +316,7 @@ Every knob is set via environment variable or `~/.config/memex/config.toml`. Env
 | `MEMEX_INDEX__CHUNK_TARGET_TOKENS` | `400` | Word-count target for chunks. ≈ 520 transformer tokens. Bump to 600 on rigs with `max-model-len >= 8192`. |
 | `MEMEX_INDEX__CHUNK_OVERLAP_TOKENS` | `60` | Word-count overlap between chunks. Scales with target. |
 | `MEMEX_INDEX_EMBED_BATCH` | `32` | Embedder batch size. Push higher on bigger GPUs for throughput. |
+| `MEMEX_EMBED_NATIVE_PROMPTS` | `1` | Use EmbeddingGemma's native `task:`/`title:` prompts (its trained, in-distribution usage). **Changing this REQUIRES a `memex reindex`** — queries are embedded with the live setting while the index stores vectors from whatever setting built it; the index records its recipe (and a reindex auto-re-embeds on mismatch), but querying a stale index in the window before re-embed silently degrades dense retrieval. Set to `0` only to A/B against bare embedding, and reindex after. |
 
 ### Retrieve stage
 
