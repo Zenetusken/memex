@@ -191,9 +191,13 @@ class ParseEvalDoc(BaseModel):
     cer: float
     wer: float
     structural_f1_headings: float
+    structural_f1_tables: float
+    structural_f1_equations: float
     cer_threshold: float | None = None
     wer_threshold: float | None = None
     structural_f1_threshold: float | None = None
+    structural_f1_tables_threshold: float | None = None
+    structural_f1_equations_threshold: float | None = None
     passed: bool
 
 
@@ -210,6 +214,8 @@ class ParseEvalReport(BaseModel):
     mean_cer: float
     mean_wer: float
     mean_structural_f1_headings: float
+    mean_structural_f1_tables: float
+    mean_structural_f1_equations: float
     per_doc: list[ParseEvalDoc] = Field(default_factory=list[ParseEvalDoc])
     errors: list[str] = Field(default_factory=list[str])
 
@@ -237,6 +243,16 @@ def _passes_thresholds(scores: ParseQualityScores, scoring: dict[str, float]) ->
     if (
         "structural_f1_threshold" in scoring
         and scores.structural_f1_headings < scoring["structural_f1_threshold"]
+    ):
+        return False
+    if (
+        "structural_f1_tables_threshold" in scoring
+        and scores.structural_f1_tables < scoring["structural_f1_tables_threshold"]
+    ):
+        return False
+    if (
+        "structural_f1_equations_threshold" in scoring
+        and scores.structural_f1_equations < scoring["structural_f1_equations_threshold"]
     ):
         return False
     return True
@@ -293,9 +309,13 @@ async def run_parse_eval(corpus_dir: Path, *, vault_path: Path | None = None) ->
                 cer=scores.cer,
                 wer=scores.wer,
                 structural_f1_headings=scores.structural_f1_headings,
+                structural_f1_tables=scores.structural_f1_tables,
+                structural_f1_equations=scores.structural_f1_equations,
                 cer_threshold=scoring.get("cer_threshold"),
                 wer_threshold=scoring.get("wer_threshold"),
                 structural_f1_threshold=scoring.get("structural_f1_threshold"),
+                structural_f1_tables_threshold=scoring.get("structural_f1_tables_threshold"),
+                structural_f1_equations_threshold=scoring.get("structural_f1_equations_threshold"),
                 passed=passed,
             )
         )
@@ -319,6 +339,10 @@ async def run_parse_eval(corpus_dir: Path, *, vault_path: Path | None = None) ->
         mean_wer=sum(d.wer for d in per_doc) / n if n else 0.0,
         mean_structural_f1_headings=(
             sum(d.structural_f1_headings for d in per_doc) / n if n else 0.0
+        ),
+        mean_structural_f1_tables=(sum(d.structural_f1_tables for d in per_doc) / n if n else 0.0),
+        mean_structural_f1_equations=(
+            sum(d.structural_f1_equations for d in per_doc) / n if n else 0.0
         ),
         per_doc=per_doc,
         errors=errors,

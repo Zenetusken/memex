@@ -14,9 +14,14 @@ from pathlib import Path
 
 from memex.eval.runner import run_parse_eval
 from memex.eval.scoring import (
+    extract_markdown_equations,
     extract_markdown_headings,
+    extract_markdown_tables,
+    normalize_equation,
     score_parse_quality,
     strip_frontmatter,
+    structural_f1_equations,
+    structural_f1_tables,
 )
 
 
@@ -77,6 +82,88 @@ def test_score_parse_quality_perturbed() -> None:
     assert 0.0 < s.cer < 1.0
     assert 0.0 < s.wer < 1.0
     assert s.structural_f1_headings == 1.0  # headings unchanged
+
+
+# --- Tables ----------------------------------------------------------------
+
+_GFM_TABLE = "| Col A | Col B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n"
+
+
+def test_extract_tables_basic() -> None:
+    tables = extract_markdown_tables(f"# H\n\n{_GFM_TABLE}\ntext after\n")
+    assert tables == [[["Col A", "Col B"], ["1", "2"], ["3", "4"]]]  # delimiter row dropped
+
+
+def test_extract_tables_skips_fences_and_chart_blocks() -> None:
+    md = (
+        f"{_GFM_TABLE}\n"
+        "```\n| fenced | not a table |\n|---|---|\n| x | y |\n```\n"
+        "[chart-extracted]\n| chart | row |\n|---|---|\n| a | b |\n[/chart-extracted]\n"
+    )
+    # Only the real GFM table counts — the fenced + chart-block ones are skipped.
+    assert extract_markdown_tables(md) == [[["Col A", "Col B"], ["1", "2"], ["3", "4"]]]
+
+
+def test_structural_f1_tables_perfect_and_empty() -> None:
+    t = extract_markdown_tables(_GFM_TABLE)
+    assert structural_f1_tables(t, t) == 1.0
+    assert structural_f1_tables([], []) == 1.0  # no tables either side → not penalized
+    assert structural_f1_tables(t, []) == 0.0  # predicted a table that isn't in the truth
+
+
+def test_structural_f1_tables_cell_mismatch_and_shape() -> None:
+    ref = [[["Col A", "Col B"], ["1", "2"], ["3", "4"]]]
+    one_cell_wrong = [[["Col A", "Col B"], ["1", "9"], ["3", "4"]]]  # 5/6 cells match
+    f1 = structural_f1_tables(one_cell_wrong, ref)
+    assert 0.0 < f1 < 1.0
+    # A dropped column lowers recall (ref has cells the prediction lacks).
+    missing_col = [[["Col A"], ["1"], ["3"]]]
+    assert structural_f1_tables(missing_col, ref) < 1.0
+
+
+# --- Equations --------------------------------------------------------------
+
+
+def test_normalize_equation() -> None:
+    assert normalize_equation(r"\dfrac{a}{b}") == r"\frac{a}{b}"
+    assert normalize_equation(r"\tfrac{a}{b}") == r"\frac{a}{b}"
+    assert normalize_equation(r"a  +   b") == "a + b"  # whitespace collapsed
+    assert normalize_equation(r"\left( x \right)") == "( x )"  # \left/\right dropped
+
+
+def test_extract_equations_display_inline_and_fence() -> None:
+    md = (
+        "Inline $E = mc^2$ here.\n\n"
+        "$$\\int_0^1 x\\,dx$$\n\n"
+        "Bracket \\[a^2 + b^2\\] and paren \\(y = x\\).\n\n"
+        "```\necho $PATH  # shell var, not math\n```\n"
+    )
+    eqs = {normalize_equation(e) for e in extract_markdown_equations(md)}
+    assert "E = mc^2" in eqs
+    assert r"\int_0^1 x dx" in eqs  # \, spacing macro dropped
+    assert "a^2 + b^2" in eqs
+    assert "y = x" in eqs
+    assert not any("PATH" in e for e in eqs)  # fenced shell $VAR excluded
+
+
+def test_structural_f1_equations() -> None:
+    ref = [r"E = mc^2", r"\dfrac{a}{b}"]
+    assert structural_f1_equations(ref, ref) == 1.0
+    # \dfrac vs \frac normalize to the same equation → still perfect.
+    assert structural_f1_equations([r"E = mc^2", r"\frac{a}{b}"], ref) == 1.0
+    assert structural_f1_equations([], []) == 1.0  # no math either side
+    assert structural_f1_equations([r"E = mc^2"], ref) < 1.0  # missing one (recall)
+
+
+def test_score_parse_quality_includes_table_and_equation_facets() -> None:
+    doc = f"# H\n\nText with $E=mc^2$.\n\n{_GFM_TABLE}"
+    s = score_parse_quality(doc, doc)
+    assert s.structural_f1_tables == 1.0
+    assert s.structural_f1_equations == 1.0
+    # A doc with no tables/equations is not penalized on those facets.
+    plain = score_parse_quality("# H\n\nJust prose.\n", "# H\n\nJust prose.\n")
+    assert plain.structural_f1_tables == 1.0
+    assert plain.structural_f1_equations == 1.0
 
 
 def _write_doc(
