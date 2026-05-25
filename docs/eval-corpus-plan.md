@@ -324,7 +324,9 @@ The corpus is itself versioned semantically.
 > — forms 0.75→1.0, technical-docs 0.33→1.0, tidewater 0.615→0.923.
 > (An earlier PyMuPDF `Story` render dropped some post-heading
 > paragraphs — a *Story artifact*, not a real-PDF weakness.) Still to do:
-> table + equation structural-F1, the retrieval/answer metric halves, and
+> the retrieval/answer metric halves (the answering half ships separately as
+> the `tests/eval-data/` query sets), and — table + equation structural-F1
+> are now wired (2026-05-25, commit `c047977`) —
 > — the bulk — hand-curated **real** documents per category.
 
 Realistic phasing for going from zero to a working eval suite.
@@ -338,7 +340,7 @@ Realistic phasing for going from zero to a working eval suite.
 
 **Week 2 — Parsing evals**
 
-- ✅ **CER, WER, structural-F1 (headings) implemented + wired** (2026-05-24): `eval/scoring.py::score_parse_quality` + `eval/runner.py::run_parse_eval`, exposed as `memex eval-parse <corpus_dir>`. Consumes the `<doc>/ground-truth.md` + `manifest.json` layout above; predicted markdown comes from the vault by doc_id (or a `predicted.md` override). Heading extraction is fence- and chart-block-aware. **Still needs hand-curated `ground-truth.md` docs to run against** — the wiring is done; the curator work isn't. Structural-F1 for tables + equations remains to implement.
+- ✅ **CER, WER, structural-F1 (headings) implemented + wired** (2026-05-24): `eval/scoring.py::score_parse_quality` + `eval/runner.py::run_parse_eval`, exposed as `memex eval-parse <corpus_dir>`. Consumes the `<doc>/ground-truth.md` + `manifest.json` layout above; predicted markdown comes from the vault by doc_id (or a `predicted.md` override). Heading extraction is fence- and chart-block-aware. **Structural-F1 for tables + equations ✅ also wired** (2026-05-25, commit `c047977`): `structural_f1_tables` (precision/recall of GFM cell content keyed by `(table, row, col)`; fenced-/chart-block-aware) + `structural_f1_equations` (`$$`/`$`/`\[\]`/`\(\)` extraction + `normalize_equation`: `\dfrac`→`\frac`, drop spacing macros + `\left`/`\right`, collapse whitespace). Method adopted from the Intellidoc predecessor's eval framework, reimplemented in-house. **Still needs hand-curated `ground-truth.md` docs to run against at scale** — the wiring (all three structural facets) is done; the curator work isn't.
 - Curate 10 more `modern-printed` and 5 `scientific` documents
 - First end-to-end eval run; calibrate thresholds against actual measured performance
 - Adjust developer-guidelines thresholds if they prove unrealistic
