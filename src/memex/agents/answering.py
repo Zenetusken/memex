@@ -504,28 +504,73 @@ def _build_synthetic_chunk(result: TableQueryResult) -> Chunk:
     lines: list[str] = []
     if result.kind == "aggregate":
         op_col = result.sql
-        # Lead with the validated aggregate framing, then the basis rows.
+        # Lead with the validated aggregate framing, then the basis rows. The
+        # value lives in THIS framing line, so the aggregate path is unaffected
+        # by row-dropping — even if every basis row overflows, the answer (the
+        # scalar) survives.
         agg_val = result.aggregate_value
         val_str = f"{agg_val:g}" if agg_val is not None else "n/a"
         lines.append(f"Aggregate result = {val_str} over {len(result.contributing_rows)} rows:")
         _ = op_col
-    elif result.superlative is not None:
-        # Verified extremum framing — the returned row was independently
-        # confirmed to hold the {highest|lowest} value of this column, so the
-        # agent can attribute the superlative (the framing is grounded, not an
-        # unchecked claim).
-        col_label, direction = result.superlative
-        lines.append(f"Row with the {direction} {col_label} in this table:")
+        for cells in result.contributing_rows:
+            candidate = "\n".join([*lines, _render_kv_row(header, cells)])
+            # Stop adding rows once we'd exceed the evidence budget (leaving
+            # room for the trailing SQL line). Keep at least the framing line.
+            if len(candidate) > _SYNTHETIC_TEXT_MAX:
+                break
+            lines.append(_render_kv_row(header, cells))
+        text = "\n".join(lines)
     else:
-        lines.append("Matching rows:")
-    for cells in result.contributing_rows:
-        candidate = "\n".join([*lines, _render_kv_row(header, cells)])
-        # Stop adding rows once we'd exceed the evidence budget (leaving room
-        # for the trailing SQL line). Keep at least the framing line.
-        if len(candidate) > _SYNTHETIC_TEXT_MAX:
-            break
-        lines.append(_render_kv_row(header, cells))
-    text = "\n".join(lines)
+        # kind="rows": the VALUE is in the row(s), not the framing — so the row
+        # must never be dropped. The superlative framing line (the only claim,
+        # "the highest/lowest X") is emitted ONLY when its row is present;
+        # otherwise we'd ship an unsupported extremum claim with no value.
+        # Always include at least the first contributing row, truncating its KV
+        # text to fit the budget if it's pathologically wide, so the value is
+        # never lost.
+        superlative_framing: str | None = None
+        if result.superlative is not None:
+            # Verified extremum framing — the returned row was independently
+            # confirmed to hold the {highest|lowest} value of this column, so
+            # the agent can attribute the superlative (the framing is grounded,
+            # not an unchecked claim). Held back until we know the row fits.
+            col_label, direction = result.superlative
+            superlative_framing = f"Row with the {direction} {col_label} in this table:"
+
+        # The framing line that WILL be prepended (superlative if verified, else
+        # the neutral "Matching rows:"). Reserve room for it + its newline in
+        # every row-budget check so the assembled `framing\nrows` total can't
+        # exceed _SYNTHETIC_TEXT_MAX. The superlative framing is only used when
+        # at least the first row survives (so an extremum claim always has a
+        # value beneath it).
+        neutral_framing = "Matching rows:"
+        framing_for_budget = superlative_framing if superlative_framing else neutral_framing
+        framing_cost = len(framing_for_budget) + 1  # + the joining newline
+
+        row_lines: list[str] = []
+        for idx, cells in enumerate(result.contributing_rows):
+            kv = _render_kv_row(header, cells)
+            if idx == 0:
+                # First row is mandatory — it carries the answer. Truncate its
+                # KV to whatever the budget allows after reserving the framing.
+                budget = _SYNTHETIC_TEXT_MAX - framing_cost
+                if len(kv) > budget:
+                    kv = kv[: max(0, budget)]
+                row_lines.append(kv)
+                continue
+            candidate = "\n".join([*row_lines, kv])
+            if len(candidate) + framing_cost > _SYNTHETIC_TEXT_MAX:
+                break
+            row_lines.append(kv)
+
+        if row_lines and superlative_framing is not None:
+            lines.append(superlative_framing)
+        else:
+            # No rows survived (defensive) OR no verified superlative → neutral
+            # framing with no unsupported extremum claim.
+            lines.append(neutral_framing)
+        lines.extend(row_lines)
+        text = "\n".join(lines)
     # Append as much of the trailing `[sql]` line as fits within the TOTAL
     # _SYNTHETIC_TEXT_MAX budget — truncate the SQL tail, never the evidence,
     # so the whole chunk stays under the smallest (1200) assess truncate and
@@ -600,8 +645,14 @@ async def query_tables(state: AnswerState) -> AnswerStateUpdate:
     inside `query_doc_tables` is the safety boundary, so a broad attempt that
     can't be verified simply adds nothing and the query proceeds normally.
     """
+    import json
+    import sqlite3
+
+    from pydantic import ValidationError
+
     from memex.agents.table_sql import query_doc_tables
     from memex.core.config import get_settings
+    from memex.core.errors import MemexError
     from memex.index.table_store import TableStore
 
     log = logger.bind(node="query_tables")
@@ -610,55 +661,67 @@ async def query_tables(state: AnswerState) -> AnswerStateUpdate:
         log.info("skip", reason="empty_or_not_table_shaped")
         return {"nodes_traversed": state.nodes_traversed + 1}
 
-    vault_path = get_settings().vault_path
-    store = await TableStore.open(vault_path)
+    # The whole table-query attempt is best-effort: Table-RAG is strictly
+    # additive, so any failure (a `ModelCallError` from `query_doc_tables`'
+    # `complete_structured`, a `sqlite3.Error`/JSON/pydantic error reading the
+    # store) must no-op and let the query proceed on the normal reranked set —
+    # the agent then answers or refuses as usual. We catch the EXPECTED failure
+    # modes (matching `query_doc_tables`'s own safety boundary) and re-raise
+    # cancellation; programming bugs propagate. Mirrors `expand_graph`.
     try:
-        # Gate (a): which reranked docs have stored tables? Iterate reranked
-        # docs in order; the first doc with tables is the query target.
-        seen_docs: list[str] = []
-        for c in state.reranked:
-            if c.document_id not in seen_docs:
-                seen_docs.append(c.document_id)
+        vault_path = get_settings().vault_path
+        store = await TableStore.open(vault_path)
+        try:
+            # Gate (a): which reranked docs have stored tables? Iterate reranked
+            # docs in order; the first doc with tables is the query target.
+            seen_docs: list[str] = []
+            for c in state.reranked:
+                if c.document_id not in seen_docs:
+                    seen_docs.append(c.document_id)
 
-        # Pick the first reranked doc that has stored tables NEAR the retrieved
-        # chunks (proximity-scoped — passing all of a 74-table doc overflows the
-        # SQL-gen prompt). A doc with tables only far from the retrieved region
-        # is skipped, as is one with no stored tables at all.
-        target_tables: list[StoredTable] = []
-        target_title = ""
-        any_doc_has_tables = False
-        for doc_id in seen_docs:
-            tables = await store.tables_for_document(doc_id)
-            if not tables:
-                continue
-            any_doc_has_tables = True
-            near = _relevant_tables(tables, state.reranked, doc_id)
-            if near:
-                target_tables = near
-                target_title = next(
-                    (c.document_title for c in state.reranked if c.document_id == doc_id),
-                    "",
+            # Pick the first reranked doc that has stored tables NEAR the
+            # retrieved chunks (proximity-scoped — passing all of a 74-table doc
+            # overflows the SQL-gen prompt). A doc with tables only far from the
+            # retrieved region is skipped, as is one with no stored tables.
+            target_tables: list[StoredTable] = []
+            target_title = ""
+            any_doc_has_tables = False
+            for doc_id in seen_docs:
+                tables = await store.tables_for_document(doc_id)
+                if not tables:
+                    continue
+                any_doc_has_tables = True
+                near = _relevant_tables(tables, state.reranked, doc_id)
+                if near:
+                    target_tables = near
+                    target_title = next(
+                        (c.document_title for c in state.reranked if c.document_id == doc_id),
+                        "",
+                    )
+                    break
+
+            if not target_tables:
+                log.info(
+                    "skip",
+                    reason="no_relevant_tables" if any_doc_has_tables else "no_stored_tables",
                 )
-                break
+                return {"nodes_traversed": state.nodes_traversed + 1}
 
-        if not target_tables:
-            log.info(
-                "skip",
-                reason="no_relevant_tables" if any_doc_has_tables else "no_stored_tables",
-            )
+            result = await query_doc_tables(state.query, target_tables)
+        finally:
+            await store.close()
+
+        if result is None:
+            log.info("no_table_answer")
             return {"nodes_traversed": state.nodes_traversed + 1}
 
-        result = await query_doc_tables(state.query, target_tables)
-    finally:
-        await store.close()
-
-    if result is None:
-        log.info("no_table_answer")
+        synthetic = _build_synthetic_chunk(
+            result.model_copy(update={"document_title": result.document_title or target_title})
+        )
+    except (MemexError, OSError, sqlite3.Error, json.JSONDecodeError, ValidationError) as exc:
+        log.info("query_tables.skipped", reason=type(exc).__name__, error=str(exc))
         return {"nodes_traversed": state.nodes_traversed + 1}
 
-    synthetic = _build_synthetic_chunk(
-        result.model_copy(update={"document_title": result.document_title or target_title})
-    )
     log.info("injected", kind=result.kind, chunk_id=synthetic.chunk_id)
     # FULL augmented list — `reranked` is a plain field, so this REPLACES it
     # (returning only `[synthetic]` would wipe the real chunks). The spread

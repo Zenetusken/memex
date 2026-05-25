@@ -258,6 +258,44 @@ async def test_aggregate_recompute_disagree_via_stub_returns_none(
 
 
 @pytest.mark.asyncio
+async def test_aggregate_non_finite_value_refused_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """FIX 6: a degenerate huge-digit cell coerces to `inf`; the SUM is `inf` on
+    BOTH the sqlite side and the independent recompute. `abs(inf - inf) = nan`,
+    and `nan > tol` is False → the pre-fix gate would PASS and ship
+    `Aggregate result = inf`. The finite-guard requires both sides finite, so
+    the gate now refuses → None (no injection)."""
+    big = "9" * 400  # float("9"*400) == inf
+    assert float(big) == float("inf")
+    t = StoredTable(
+        doc_id="doc-inf",
+        table_id="finf000000",
+        section="Degenerate",
+        header=["Name", "Value"],
+        rows=[["a", big], ["b", "1"]],
+        char_start=0,
+        char_end=50,
+    )
+    sql_name = table_sql._sanitize_identifier(t.table_id, fallback="t0")
+    _patch_sql(monkeypatch, f'SELECT SUM(value__num) FROM "{sql_name}"', t.table_id)
+
+    # Sanity: both sides really are inf (so the old nan-compare would have
+    # passed) — confirm the recompute itself returns inf.
+    import sqlite3 as _sqlite3
+
+    db = _sqlite3.connect(":memory:")
+    try:
+        loaded = table_sql._load_tables(db, table_sql._compute_schemas([t]))[t.table_id]
+        rc = table_sql._recompute_aggregate(t, loaded, "SUM", "value__num", None)
+    finally:
+        db.close()
+    assert rc == float("inf")
+
+    assert await query_doc_tables("total value?", [t]) is None
+
+
+@pytest.mark.asyncio
 async def test_count_distinct_refused_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
     """`COUNT(DISTINCT col)` is not recomputable (a DISTINCT off-by-one could
     slip the ±1 tolerance against a plain count) → `_recompute_aggregate`
@@ -317,6 +355,47 @@ async def test_computed_scalar_select_returns_none(monkeypatch: pytest.MonkeyPat
         t.table_id,
     )
     assert await query_doc_tables("double the revenue?", [t]) is None
+
+
+# ======================================================================
+# FIX 2 — rows path restricted to SELECT * (non-* projection → None)
+# ======================================================================
+
+
+@pytest.mark.asyncio
+async def test_rows_column_list_projection_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A reordered/subset column-list projection (`SELECT revenue, segment ...`)
+    would be rendered positionally against the FULL stored header → misleading
+    header↔value attribution. The rows path now accepts ONLY `SELECT *`, so a
+    column list → None (no misleading injection)."""
+    t = _segments_table()
+    sql_name = table_sql._sanitize_identifier(t.table_id, fallback="t0")
+    # Reordered projection: revenue first, then segment.
+    _patch_sql(monkeypatch, f'SELECT revenue, segment FROM "{sql_name}"', t.table_id)
+    assert await query_doc_tables("show revenue and segment", [t]) is None
+
+
+@pytest.mark.asyncio
+async def test_rows_select_star_still_returns_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`SELECT *` → rows as before (the projection aligns 1:1 with the header)."""
+    t = _segments_table()
+    sql_name = table_sql._sanitize_identifier(t.table_id, fallback="t0")
+    _patch_sql(monkeypatch, f'SELECT * FROM "{sql_name}"', t.table_id)
+    result = await query_doc_tables("show all rows", [t])
+    assert result is not None
+    assert result.kind == "rows"
+    assert result.rows is not None
+    assert result.rows[0] == ["Compute & Networking", "$116,193"]
+
+
+def test_classify_is_select_star_unit() -> None:
+    """Unit pin for FIX 2: only `SELECT *` passes; column lists / subsets fail."""
+    assert table_sql._classify_is_select_star("SELECT * FROM t")
+    assert table_sql._classify_is_select_star("select  *  from t WHERE a = 1")
+    assert not table_sql._classify_is_select_star("SELECT a, b FROM t")
+    assert not table_sql._classify_is_select_star("SELECT a FROM t")
+    assert not table_sql._classify_is_select_star('SELECT "rev", "co" FROM t')
+    assert not table_sql._classify_is_select_star("not a select")
 
 
 # ======================================================================

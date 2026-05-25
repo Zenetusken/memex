@@ -70,15 +70,27 @@ def extract_tables(doc_id: str, body: str) -> list[StoredTable]:
         header, rows = parsed
         if header_all_value_like(header) or header_has_prose_cell(header):
             continue
+        # An empty header would build `CREATE TABLE "t" ()` downstream
+        # (sqlite OperationalError). Not reachable via the GFM parser's
+        # well-formed path today, but skip defensively so a malformed table
+        # never enters the store.
+        if not header:
+            continue
         # Position-qualify the id with char_start: two tables that share a
         # first row (common in financial filings — repeated "$ in millions"
         # header rows) must not collide on the (doc_id, table_id) primary
         # key. char_start is unique per table in the body and stable across
         # re-extraction of an unchanged body, so the id stays content-and-
         # position-derived (the store is regenerable derived state anyway).
+        #
+        # The parts are joined with a NUL (`\x00`) separator that cannot
+        # appear in markdown source text, so distinct (start, first_row)
+        # pairs can't alias each other (`start=105 + "2024"` vs
+        # `start=1052 + "024"` both concatenated to "1052024" without a
+        # separator → same hash → UNIQUE-constraint collision mid-batch).
         first_row_text = " ".join(rows[0])
         table_id = hashlib.sha1(  # noqa: S324  # non-crypto content id, mirrors chunk_id
-            (doc_id + str(m.start()) + first_row_text).encode("utf-8")
+            f"{doc_id}\x00{m.start()}\x00{first_row_text}".encode()
         ).hexdigest()[:10]
         tables.append(
             StoredTable(
@@ -185,6 +197,11 @@ class TableStore:
             for r in rows:
                 header: list[str] = json.loads(r[3])
                 table_rows: list[list[str]] = json.loads(r[4])
+                # Defensive: a header-less row could never build a valid SQL
+                # table (`CREATE TABLE "t" ()`), so it can't be queried —
+                # skip it rather than hand the SQL helper a degenerate table.
+                if not header:
+                    continue
                 out.append(
                     StoredTable(
                         doc_id=r[0],

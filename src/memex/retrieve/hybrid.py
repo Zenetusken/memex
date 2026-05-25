@@ -9,7 +9,11 @@ import structlog
 
 from memex.core.config import get_settings
 from memex.core.types import Chunk
-from memex.index.embed_prompts import EMBED_QUERY_PROMPT_NAME, native_prompts_enabled
+from memex.index.embed_prompts import (
+    EMBED_QUERY_PROMPT_NAME,
+    EMBED_QUERY_PROMPT_TEXT,
+    native_prompts_enabled,
+)
 from memex.index.fts_store import FTSStore
 from memex.index.vector_store import VectorStore
 from memex.models.registry import get_registry
@@ -27,15 +31,29 @@ async def _embed_query(query: str) -> list[float]:
         # query: `) when enabled (default ON); else bare (the A/B / revert
         # path). This is the SINGLE query-embed entry point — both
         # hybrid_search and hybrid_search_in_docs route through it.
+        #
+        # `prompt_name=` raises ValueError/KeyError if the embedder's ST config
+        # lacks the registered `query` prompt (a future embedder swap). In that
+        # case fall back to MANUALLY prepending the trained query prompt text
+        # (`EMBED_QUERY_PROMPT_TEXT`) so the query side still embeds in the
+        # model's query distribution — query+doc must share one space.
         def _encode() -> Any:
-            if use_prompt:
+            if not use_prompt:
+                return embedder.encode([query], normalize_embeddings=True, convert_to_numpy=True)[0]
+            try:
                 return embedder.encode(
                     [query],
                     prompt_name=EMBED_QUERY_PROMPT_NAME,
                     normalize_embeddings=True,
                     convert_to_numpy=True,
                 )[0]
-            return embedder.encode([query], normalize_embeddings=True, convert_to_numpy=True)[0]
+            except (ValueError, KeyError):
+                logger.info("embed_query.prompt_name_fallback", prompt=EMBED_QUERY_PROMPT_NAME)
+                return embedder.encode(
+                    [EMBED_QUERY_PROMPT_TEXT + query],
+                    normalize_embeddings=True,
+                    convert_to_numpy=True,
+                )[0]
 
         embedding = await asyncio.to_thread(_encode)
     return [float(x) for x in embedding]

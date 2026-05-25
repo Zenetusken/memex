@@ -435,6 +435,47 @@ async def test_embedder_change_triggers_implicit_force(
 
 
 @pytest.mark.asyncio
+async def test_recipe_version_snapshotted_once_per_index_document(
+    settings: MemexSettings, fake_stores: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FIX 9: `_embed_recipe_version()` is snapshotted ONCE at the top of
+    `index_document` and reused for both the force-check and the manifest write.
+
+    Reading it separately (with awaits between) would be a TOCTOU: a recipe
+    change mid-call could record a manifest recipe that doesn't match the
+    embeddings written. We patch the helper to return a DIFFERENT value on each
+    call and assert it's consulted exactly once per index, so the recorded
+    recipe is whatever the snapshot saw."""
+    import memex.index.pipeline as pipeline
+
+    # First index with the real helper to establish a prior manifest.
+    doc_id = await _seed_doc("# Snap\n\nFirst.\n\nSecond.\n", source_stem="recipe_snap")
+    await pipeline.index_document(doc_id)
+
+    # Now make the helper return a fresh value on every call so a second read
+    # within one index_document would diverge from the first.
+    seq = iter(["recipe-A", "recipe-B", "recipe-C", "recipe-D"])
+    calls = {"n": 0}
+
+    def _fake_recipe() -> str:
+        calls["n"] += 1
+        return next(seq)
+
+    monkeypatch.setattr(pipeline, "_embed_recipe_version", _fake_recipe)
+
+    await pipeline.index_document(doc_id)
+
+    # Exactly one consult per index_document → no TOCTOU between the
+    # force-check and the manifest write.
+    assert calls["n"] == 1
+    manifest = await read_manifest(settings.vault_path, doc_id)
+    assert manifest is not None
+    assert manifest.index is not None
+    # The manifest records the single snapshot value.
+    assert manifest.index.embedding_recipe_version == "recipe-A"
+
+
+@pytest.mark.asyncio
 async def test_manifest_records_diff_metrics(
     settings: MemexSettings, fake_stores: dict[str, Any]
 ) -> None:
@@ -640,6 +681,50 @@ async def test_native_prompts_off_keeps_bare(
     assert embedder.calls, "expected a query-embed call"
     _inputs, prompt_name = embedder.calls[-1]
     assert prompt_name is None
+
+
+class _PromptlessEmbedder:
+    """Fake embedder whose `encode(prompt_name=...)` RAISES (no registered
+    `query` prompt — simulates a future embedder swap). Records the inputs of
+    the call that actually succeeded so the test can assert the manual-prefix
+    fallback fired."""
+
+    def __init__(self) -> None:
+        self.fallback_inputs: list[str] | None = None
+
+    def encode(
+        self,
+        inputs: list[str],
+        *,
+        prompt_name: str | None = None,
+        **_kw: object,
+    ) -> list[list[float]]:
+        if prompt_name is not None:
+            raise ValueError(f"Prompt name '{prompt_name}' not found in the configured prompts")
+        self.fallback_inputs = list(inputs)
+        return [[float(i)] * 768 for i in range(len(inputs))]
+
+
+@pytest.mark.asyncio
+async def test_embed_query_falls_back_to_manual_prefix_when_prompt_absent(
+    settings: MemexSettings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """FIX 8: when the embedder lacks the registered `query` prompt,
+    `prompt_name=` raises ValueError → `_embed_query` falls back to manually
+    prepending `EMBED_QUERY_PROMPT_TEXT` so the query still embeds in the
+    trained query distribution (no crash, no off-distribution bare embed)."""
+    from memex.index.embed_prompts import EMBED_QUERY_PROMPT_TEXT
+    from memex.retrieve.hybrid import _embed_query
+
+    monkeypatch.setenv("MEMEX_EMBED_NATIVE_PROMPTS", "1")
+    embedder = _PromptlessEmbedder()
+    registry = _FakeRegistry(embedder)  # type: ignore[arg-type]  # duck-typed encode
+    monkeypatch.setattr("memex.retrieve.hybrid.get_registry", lambda: registry)
+
+    out = await _embed_query("what is the content")
+    assert len(out) == 768  # a vector came back (no exception bubbled out)
+    assert embedder.fallback_inputs == [EMBED_QUERY_PROMPT_TEXT + "what is the content"]
 
 
 @pytest.mark.asyncio

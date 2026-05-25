@@ -183,6 +183,14 @@ async def index_document(doc_id: str, *, force: bool = False) -> IndexResult:
     new_by_id = {c.chunk_id: c for c in new_chunks}
     new_ids = set(new_by_id.keys())
 
+    # Snapshot the embedding-recipe version ONCE for this index call and reuse
+    # it for both the force-detection AND the manifest write below. Reading
+    # `_embed_recipe_version()` separately at each site (with awaits between)
+    # would be a TOCTOU: the env toggle could flip mid-call so the manifest
+    # records a recipe that doesn't match the embeddings actually written. One
+    # snapshot makes the force-check and the recorded recipe consistent.
+    recipe = _embed_recipe_version()
+
     # Embedder-model-change detection. If the configured embedder differs
     # from the one recorded the last time we indexed this doc, the
     # existing vectors are in the wrong space — force a full re-embed.
@@ -199,7 +207,6 @@ async def index_document(doc_id: str, *, force: bool = False) -> IndexResult:
             # Orthogonal to the embedder swap: an embedding-recipe change
             # (e.g. enabling/disabling native prompts) also invalidates the
             # existing vectors — query+doc embeddings must share a space.
-            recipe = _embed_recipe_version()
             if prior.index.embedding_recipe_version != recipe:
                 log.info(
                     "index.recipe_changed",
@@ -282,7 +289,7 @@ async def index_document(doc_id: str, *, force: bool = False) -> IndexResult:
             indexed_at=now_utc(),
             embedding_model=settings.models.embedder,
             embedding_dim=EMBEDDING_DIM,
-            embedding_recipe_version=_embed_recipe_version(),
+            embedding_recipe_version=recipe,
             chunk_count=len(new_chunks),
             chunks_added=chunks_added,
             chunks_deleted=chunks_deleted,

@@ -12,6 +12,7 @@ import pytest
 from memex.core.types import Chunk
 from memex.index.embed_prompts import (
     EMBED_QUERY_PROMPT_NAME,
+    EMBED_QUERY_PROMPT_TEXT,
     chunk_title,
     document_input,
     native_prompts_enabled,
@@ -62,6 +63,70 @@ def test_chunk_title_none_sentinel() -> None:
     # No heading, no doc title → the EmbeddingGemma "none" sentinel.
     chunk = _chunk(heading_path=[], document_title="")
     assert chunk_title(chunk) == "none"
+
+
+# ----------------------------------------------------------------------
+# FIX 5 — non-empty + sanitized title
+# ----------------------------------------------------------------------
+
+
+def test_chunk_title_empty_string_heading_uses_doc_title() -> None:
+    """A malformed `heading_path == [""]` (from a double-space `##  ` heading)
+    must NOT yield an empty title (`title:  | text:`) — it falls back to the
+    document_title."""
+    chunk = _chunk(heading_path=[""], document_title="Fallback Title")
+    assert chunk_title(chunk) == "Fallback Title"
+
+
+def test_chunk_title_whitespace_heading_uses_doc_title() -> None:
+    chunk = _chunk(heading_path=["   "], document_title="Fallback Title")
+    assert chunk_title(chunk) == "Fallback Title"
+
+
+def test_chunk_title_picks_deepest_nonempty_entry() -> None:
+    """The deepest NON-EMPTY entry wins, even when a deeper entry is empty."""
+    chunk = _chunk(heading_path=["Top", "Middle", ""], document_title="Doc")
+    assert chunk_title(chunk) == "Middle"
+
+
+def test_chunk_title_all_empty_path_empty_doc_title_is_none() -> None:
+    chunk = _chunk(heading_path=["", "  "], document_title="")
+    assert chunk_title(chunk) == "none"
+
+
+def test_chunk_title_sanitizes_delimiter() -> None:
+    """A heading containing the `" | "` delimiter would corrupt the title/text
+    split — it's replaced with `" / "`."""
+    chunk = _chunk(heading_path=["Revenue | Costs"], document_title="Doc")
+    title = chunk_title(chunk)
+    assert " | " not in title
+    assert title == "Revenue / Costs"
+    # And the assembled input has exactly one ` | ` (the format delimiter).
+    assert document_input(title, "body").count(" | ") == 1
+
+
+def test_chunk_title_sanitizes_newlines() -> None:
+    chunk = _chunk(heading_path=["Line one\nLine two"], document_title="Doc")
+    title = chunk_title(chunk)
+    assert "\n" not in title
+    assert title == "Line one Line two"
+
+
+def test_chunk_title_clamps_long_heading() -> None:
+    long_heading = "A" * 500
+    chunk = _chunk(heading_path=[long_heading], document_title="Doc")
+    title = chunk_title(chunk)
+    assert len(title) <= 80
+
+
+def test_chunk_title_doc_title_also_sanitized() -> None:
+    """The document_title fallback is sanitized too."""
+    chunk = _chunk(heading_path=[], document_title="Big | Filing")
+    assert chunk_title(chunk) == "Big / Filing"
+
+
+def test_embed_query_prompt_text_constant() -> None:
+    assert EMBED_QUERY_PROMPT_TEXT == "task: search result | query: "
 
 
 def test_native_prompts_enabled_default_on(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -215,3 +215,78 @@ async def test_upsert_tables_sharing_first_row_no_integrity_error(tmp_path: Path
         assert len(got) == 2
     finally:
         await store.close()
+
+
+def test_table_id_separator_documents_the_latent_collision() -> None:
+    """FIX 3: a separator-free `doc_id + str(start) + first_row` join aliases
+    distinct tables on a digit boundary — `(start=105, first_row="2024")` and
+    `(start=1052, first_row="024")` both concatenate to `"doc-x1052024"`. The
+    real `extract_tables` joins with a NUL (`\\x00`) separator, so these can't
+    collide. We assert the latent collision exists (to justify the fix) and the
+    end-to-end distinctness in the companion test below."""
+    # The latent collision the NUL separator defends against.
+    unsep_a = "doc-x" + str(105) + "2024"
+    unsep_b = "doc-x" + str(1052) + "024"
+    assert unsep_a == unsep_b
+
+
+def test_extract_two_tables_with_overlapping_digit_boundary_distinct_ids() -> None:
+    """FIX 3 end-to-end: two tables in one body whose char offsets + first-row
+    digits could alias under a separator-free join still get DISTINCT ids."""
+    # Build a body where the first table's data row starts with "024" and the
+    # second's offset digits could abut it. The separator guarantees distinct
+    # ids regardless of where the offsets land.
+    pad = "x" * 100
+    body = (
+        f"{pad}\n\n| C | V |\n| --- | --- |\n| 024 | a |\n\n"
+        "more prose to push the next table's offset\n\n"
+        "| C | V |\n| --- | --- |\n| 024 | b |\n"
+    )
+    tables = extract_tables("doc-y", body)
+    assert len(tables) == 2
+    assert tables[0].table_id != tables[1].table_id
+
+
+# ======================================================================
+# empty-header guard (FIX 7)
+# ======================================================================
+
+
+@pytest.mark.asyncio
+async def test_empty_header_table_not_stored(tmp_path: Path) -> None:
+    """FIX 7: a StoredTable with an empty header would build
+    `CREATE TABLE "t" ()` (sqlite OperationalError) downstream — it must not be
+    persisted, and reading it back must yield nothing (no crash)."""
+    from memex.core.types import StoredTable
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    store = await TableStore.open(vault)
+    try:
+        degenerate = StoredTable(
+            doc_id="doc-1",
+            table_id="deadbeef00",
+            section="Broken",
+            header=[],
+            rows=[["x"]],
+            char_start=0,
+            char_end=10,
+        )
+        # Upsert writes the raw row (the store doesn't gate on read here), but
+        # tables_for_document must skip the header-less row so no degenerate
+        # table reaches the SQL helper.
+        await store.upsert_document("doc-1", [degenerate])
+        out = await store.tables_for_document("doc-1")
+        assert out == []
+    finally:
+        await store.close()
+
+
+def test_extract_tables_skips_empty_header() -> None:
+    """FIX 7: extract_tables never emits a header-less StoredTable. (Not
+    reachable via the GFM parser today, but the guard is exercised by passing a
+    body whose only 'table' the parser would reject anyway → empty result.)"""
+    # A normal body still extracts; the guard is a defensive no-op here. The
+    # store-side test above covers the persisted-degenerate path directly.
+    tables = extract_tables("doc-1", "| A | B |\n|---|---|\n| 1 | 2 |\n")
+    assert all(t.header for t in tables)

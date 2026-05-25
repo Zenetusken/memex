@@ -28,6 +28,7 @@ or a recomputed-and-agreeing aggregate.
 from __future__ import annotations
 
 import asyncio
+import math
 import re
 import sqlite3
 
@@ -213,6 +214,11 @@ def _compute_schemas(tables: list[StoredTable]) -> list[_LoadedTable]:
     schemas: list[_LoadedTable] = []
     used_table_names: set[str] = set()
     for ti, stored in enumerate(tables):
+        # A header-less table would build `CREATE TABLE "t" ()` (sqlite
+        # OperationalError). Not reachable via the well-formed parse pipeline,
+        # but skip it defensively so a degenerate table never crashes the load.
+        if not stored.header:
+            continue
         sql_name = _sanitize_identifier(stored.table_id, fallback=f"t{ti}")
         while sql_name in used_table_names:
             sql_name = f"{sql_name}_x"
@@ -401,33 +407,22 @@ def _verify_superlative(
     return (label, "highest" if desc else "lowest")
 
 
-def _classify_columns_are_stored(sql: str, loaded: _LoadedTable) -> bool:
-    """Heuristic for `kind="rows"`: every selected column maps to a stored
-    column (no aggregate fn, no computed/aliased scalar).
+def _classify_is_select_star(sql: str) -> bool:
+    """Gate for `kind="rows"`: the projection must be exactly `SELECT *`.
 
-    We accept `SELECT *` and a plain comma-list of bare column names (optionally
-    `tbl.col`), rejecting any `(` (function/expression), arithmetic operators,
-    or `AS` alias — those signal a computed scalar that wouldn't be a verbatim
-    cell.
+    The rows path renders the SQL output positionally against the FULL stored
+    `header`, so ONLY a `SELECT *` projection keeps header↔value attribution
+    honest. A column-list/subset/reordered projection (`SELECT rev, company
+    FROM t`) would mis-align cells under the stored header and ship misleading
+    evidence to the LLM — so it returns False here → the rows branch no-ops.
+    (The `generate_table_sql` prompt already mandates `SELECT *` for row
+    queries; the superlative `SELECT * ... ORDER BY ... LIMIT 1` also uses `*`,
+    so it still passes.)
     """
     m = re.match(r"^\s*select\s+(?P<cols>.+?)\s+from\b", sql, flags=re.IGNORECASE | re.DOTALL)
     if not m:
         return False
-    cols = m.group("cols").strip()
-    if cols == "*":
-        return True
-    # Any expression machinery → not a plain column projection.
-    if any(tok in cols for tok in ("(", ")", "+", "-", "*", "/", "||")) or re.search(
-        r"\bas\b", cols, flags=re.IGNORECASE
-    ):
-        # A bare `*` was handled above; a `*` here means arithmetic → reject.
-        return False
-    valid = set(loaded.columns)
-    for part in cols.split(","):
-        name = _strip_quotes(part.split(".")[-1])
-        if name.lower() not in valid:
-            return False
-    return True
+    return m.group("cols").strip() == "*"
 
 
 def _recompute_aggregate(
@@ -654,8 +649,10 @@ def _classify_and_build(
     is_agg = agg is not None and agg.group("fn").lower() in _AGG_FUNCS
 
     if not is_agg:
-        # kind="rows" — every selected column must map to a stored column.
-        if not _classify_columns_are_stored(sql, loaded):
+        # kind="rows" — the projection must be exactly `SELECT *` so the
+        # positional rows align with the FULL stored header (a reordered/subset
+        # column list would mislead the header↔value attribution).
+        if not _classify_is_select_star(sql):
             return None
         # The result rows are verbatim cells. We return the ORIGINAL stored
         # rows that the SQL selected — for a `SELECT *` they correspond
@@ -725,6 +722,18 @@ def _classify_and_build(
         where.strip() if where else None,
     )
     if recompute is None:
+        return None
+    # Finite-guard: a degenerate huge-digit cell coerces to `inf`, and
+    # `abs(inf - inf) = nan`, which is NOT `> tol` (any comparison with nan is
+    # False) → the agreement check would PASS and ship `Aggregate result = inf`.
+    # Require both sides finite before the tolerance check can accept.
+    if not (math.isfinite(sql_value) and math.isfinite(recompute)):
+        logger.bind(node="query_doc_tables").info(
+            "table_sql.non_finite_aggregate",
+            sql_value=sql_value,
+            recompute=recompute,
+            target=target.table_id,
+        )
         return None
     if abs(sql_value - recompute) > max(1.0, 1e-6 * abs(recompute)):
         logger.bind(node="query_doc_tables").info(

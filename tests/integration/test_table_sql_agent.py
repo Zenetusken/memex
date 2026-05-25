@@ -136,6 +136,95 @@ def test_synthetic_chunk_total_text_bounded_with_long_sql() -> None:
 
 
 # ======================================================================
+# FIX 4 — superlative row never dropped (value preserved, truncated)
+# ======================================================================
+
+
+def test_superlative_oversized_row_keeps_value_and_framing() -> None:
+    """A superlative `kind="rows"` result whose single row's KV rendering
+    exceeds the 900-char budget must STILL surface the row's value (truncated to
+    fit) AND the extremum framing — never a bare framing with no value (which
+    would be an unsupported claim)."""
+    wide_cells = ["Compute & Networking", "$116,193", "x" * 2000]
+    result = TableQueryResult(
+        kind="rows",
+        sql="SELECT * FROM tbl ORDER BY revenue__num DESC LIMIT 1",
+        target_table_id="abc1234567",
+        rows=[wide_cells],
+        aggregate_value=None,
+        contributing_rows=[wide_cells],
+        header=["Segment", "Revenue", "Notes"],
+        char_start=10,
+        char_end=120,
+        doc_id="doc-1",
+        document_title="NVIDIA 10-K",
+        heading_path=["Reportable Segments"],
+        section="Reportable Segments",
+        superlative=("Revenue", "highest"),
+    )
+    chunk = _build_synthetic_chunk(result)
+    # Whole text bounded.
+    assert len(chunk.text) <= 900
+    # The framing is present (only emitted because the row is present).
+    assert "Row with the highest Revenue in this table:" in chunk.text
+    # The row's value survived (the real cell values, even if the wide Notes
+    # cell is truncated).
+    assert "Compute & Networking" in chunk.text
+    assert "$116,193" in chunk.text
+
+
+def test_superlative_normal_row_unaffected() -> None:
+    """A normal-width superlative row renders exactly as before (framing + row)."""
+    result = TableQueryResult(
+        kind="rows",
+        sql="SELECT * FROM tbl ORDER BY total__num ASC LIMIT 1",
+        target_table_id="dircomp01",
+        rows=[["Ochoa", "321,309"]],
+        aggregate_value=None,
+        contributing_rows=[["Ochoa", "321,309"]],
+        header=["Name", "Total ($)"],
+        char_start=0,
+        char_end=50,
+        doc_id="doc-1",
+        document_title="Proxy",
+        heading_path=["Director Compensation"],
+        section="Director Compensation",
+        superlative=("Total ($)", "lowest"),
+    )
+    chunk = _build_synthetic_chunk(result)
+    assert "Row with the lowest Total ($) in this table:" in chunk.text
+    assert "Ochoa" in chunk.text
+    assert "321,309" in chunk.text
+
+
+def test_plain_rows_oversized_first_row_kept_truncated() -> None:
+    """A plain (non-superlative) rows result whose first row is oversized still
+    keeps that row (truncated) — the value is never lost."""
+    wide = ["A", "y" * 2000]
+    result = TableQueryResult(
+        kind="rows",
+        sql="SELECT * FROM tbl",
+        target_table_id="t000000000",
+        rows=[wide],
+        aggregate_value=None,
+        contributing_rows=[wide],
+        header=["Name", "Blob"],
+        char_start=0,
+        char_end=50,
+        doc_id="doc-1",
+        document_title="Doc",
+        heading_path=[],
+        section="",
+        superlative=None,
+    )
+    chunk = _build_synthetic_chunk(result)
+    assert len(chunk.text) <= 900
+    assert "Matching rows:" in chunk.text
+    # The leading value survived.
+    assert chunk.text.count("Name=A") == 1
+
+
+# ======================================================================
 # Gate behaviour (node-level, no full graph)
 # ======================================================================
 
@@ -209,6 +298,125 @@ async def test_node_returns_full_augmented_list(
     # fits — is bounded by _SYNTHETIC_TEXT_MAX (900), so it survives the
     # smallest (1200) assess truncate.
     assert len(synthetic.text) <= 900
+
+
+# ======================================================================
+# FIX 1 — query_tables exception guard (query_doc_tables raises → no-op)
+# ======================================================================
+
+
+@pytest.mark.asyncio
+async def test_query_tables_node_no_ops_when_query_doc_tables_raises(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If `query_doc_tables` raises a `ModelCallError` (the `complete_structured`
+    inside it failed), the `query_tables` node must NOT propagate it — it logs
+    and returns the no-op `nodes_traversed` bump, leaving `reranked` untouched so
+    the agent proceeds on the normal set."""
+    from memex.core.errors import ModelCallError
+
+    await _seed_tables(settings.vault_path, [_segments_table()])
+
+    async def _boom(*_a: object, **_k: object) -> object:
+        raise ModelCallError("vLLM exploded", context={"node": "query_doc_tables"})
+
+    monkeypatch.setattr("memex.agents.table_sql.query_doc_tables", _boom)
+
+    real = _table_chunk()
+    state = AnswerState(query="What is the total revenue across all segments?", reranked=[real])
+    update = await query_tables(state)
+    # No crash; no-op update.
+    assert "reranked" not in update
+    assert update.get("nodes_traversed") == state.nodes_traversed + 1
+
+
+@pytest.mark.asyncio
+async def test_query_tables_node_no_ops_when_store_read_raises(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A `sqlite3.Error` from `tables_for_document` is also caught → no-op."""
+    import sqlite3
+
+    await _seed_tables(settings.vault_path, [_segments_table()])
+
+    async def _bad_read(self: object, doc_id: str) -> object:
+        raise sqlite3.OperationalError("malformed database")
+
+    monkeypatch.setattr("memex.index.table_store.TableStore.tables_for_document", _bad_read)
+
+    state = AnswerState(query="What is the total revenue?", reranked=[_table_chunk()])
+    update = await query_tables(state)
+    assert "reranked" not in update
+    assert update.get("nodes_traversed") == state.nodes_traversed + 1
+
+
+@pytest.mark.asyncio
+async def test_full_graph_query_doc_tables_raises_still_refuses(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end: `query_doc_tables` raising must NOT crash the answer. With no
+    table injection and an insufficient assessment, the graph refuses normally
+    (the table failure is fully swallowed)."""
+    await _seed_tables(settings.vault_path, [_segments_table()])
+    chunk = _table_chunk()
+
+    async def _hybrid(query: str, k: int = 50) -> list[Chunk]:
+        return [chunk]
+
+    async def _rerank(query: str, candidates: list[Chunk], top_k: int = 10) -> list[Chunk]:
+        return list(candidates[:top_k])
+
+    monkeypatch.setattr("memex.agents.answering.hybrid_search", _hybrid)
+    monkeypatch.setattr("memex.agents.answering.cross_encoder_rerank", _rerank)
+    monkeypatch.setattr("memex.agents.answering.render_prompt", lambda name, **_kw: f"[{name}]")
+    monkeypatch.setattr(
+        "memex.agents.answering.render_messages",
+        lambda name, **_kw: [{"role": "user", "content": f"[{name}]"}],
+    )
+
+    from memex.core.errors import ModelCallError
+
+    async def _boom(*_a: object, **_k: object) -> object:
+        raise ModelCallError("vLLM exploded", context={})
+
+    monkeypatch.setattr("memex.agents.table_sql.query_doc_tables", _boom)
+
+    async def _llm(
+        *, prompt: str | list[dict[str, str]], schema: type, **_kw: object
+    ) -> tuple[Any, int]:
+        name = schema.__name__
+        if name == "SufficiencyAssessment":
+            return SufficiencyAssessment(sufficient=False, reason="cannot answer"), 10
+        raise AssertionError(f"unexpected schema {name} on a refusal path")
+
+    monkeypatch.setattr("memex.agents.answering.complete_structured", _llm)
+
+    response = await answer_query(
+        "What was the total revenue across all segments?",
+        graph_expansion_enabled=False,
+    )
+    # No crash; the table failure no-opped and the graph refused on its own.
+    assert response.answered is False
+    assert all(c.chunk_id != "doc-1#sql0001" for c in response.used_chunks)
+
+
+@pytest.mark.asyncio
+async def test_query_tables_node_does_not_swallow_cancellation(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The guard must NOT catch `asyncio.CancelledError` — it propagates."""
+    import asyncio
+
+    await _seed_tables(settings.vault_path, [_segments_table()])
+
+    async def _cancel(*_a: object, **_k: object) -> object:
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr("memex.agents.table_sql.query_doc_tables", _cancel)
+
+    state = AnswerState(query="What is the total revenue?", reranked=[_table_chunk()])
+    with pytest.raises(asyncio.CancelledError):
+        await query_tables(state)
 
 
 # ======================================================================
