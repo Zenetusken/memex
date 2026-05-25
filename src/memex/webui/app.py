@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import mimetypes
 import re
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,7 @@ from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from jinja2 import Environment, FileSystemLoader
 
 from memex.agents.answering import answer_query
 from memex.core.config import get_settings
@@ -59,7 +61,7 @@ from memex.vault.store import (
     read_document_title,
     write_document,
 )
-from memex.webui.rendering import extract_toc, render_body_html
+from memex.webui.rendering import extract_toc, render_body_html, render_wikilink
 
 _HERE = Path(__file__).parent
 _TEMPLATES_DIR = _HERE / "templates"
@@ -142,9 +144,38 @@ def _kind_for(path: Path) -> tuple[str, str]:
     return (ext.lstrip(".") or "unknown", media or "application/octet-stream")
 
 
+def register_template_filter(env: Environment, name: str, func: Callable[..., Any]) -> None:
+    """Register a Jinja2 filter on `env` under `name`.
+
+    Localises the one unavoidable type-ignore: jinja2's
+    `Environment.filters` has no class-level annotation (it's assigned
+    `DEFAULT_FILTERS.copy()` in `__init__`), so pyright reports the
+    member as unknown under --strict. jinja2 ships `py.typed`, so we
+    don't shadow it with a competing stub (per src/memex/CLAUDE.md) —
+    this wrapper keeps the ignore out of the route-heavy factory body.
+    """
+    env.filters[name] = func  # type: ignore[reportUnknownMemberType]  # reason: jinja2 leaves Environment.filters unannotated
+
+
 def create_app() -> FastAPI:
     """Build the FastAPI app. Factory so tests can instantiate freely."""
-    templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+    # Build the jinja env explicitly (typed local) so the wikilink
+    # filter registration is pyright-clean — `Jinja2Templates.env`
+    # resolves to Unknown under --strict (starlette assigns it via an
+    # internal helper). Mirrors starlette's own defaults (FileSystemLoader
+    # + autoescape) and registers the answer "Sources" `render_wikilink`
+    # filter before handing the env to Jinja2Templates.
+    env = Environment(
+        loader=FileSystemLoader(str(_TEMPLATES_DIR)),
+        autoescape=True,
+    )
+    # jinja2's `Environment.filters` carries no class-level annotation
+    # (it's set as `DEFAULT_FILTERS.copy()` in __init__), so pyright sees
+    # the member as unknown under --strict. jinja2 ships `py.typed`, so we
+    # don't shadow it with a competing stub (per src/memex/CLAUDE.md) —
+    # `register_template_filter` localises the one unavoidable ignore.
+    register_template_filter(env, "render_wikilink", render_wikilink)
+    templates = Jinja2Templates(env=env)
     app = FastAPI(title="Memex", docs_url=None, redoc_url=None)
 
     if _STATIC_DIR.exists():

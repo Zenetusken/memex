@@ -65,6 +65,7 @@ def fake_answered(monkeypatch: pytest.MonkeyPatch) -> None:
                     confidence="high",
                 )
             ],
+            wikilinks=["[[d1#Reflexivity]]"],
             correlation_id="01HZTESTWEBUI0000000000000",
             tokens_used=42,
             nodes_traversed=5,
@@ -118,11 +119,25 @@ def test_ask_returns_answer_fragment(client: TestClient, fake_answered: None) ->
     assert "01HZTESTWEBUI" in r.text  # correlation id printed
 
 
+def test_ask_answer_fragment_renders_sources_wikilinks(
+    client: TestClient, fake_answered: None
+) -> None:
+    """P4.1: the answered partial lists each wikilink as an `<a>` to the
+    cited doc/section."""
+    r = client.post("/ask", data={"question": "What does Smith argue?"})
+    assert r.status_code == 200
+    assert "Sources" in r.text
+    assert 'href="/documents/d1#reflexivity"' in r.text
+    assert 'class="wikilink"' in r.text
+
+
 def test_ask_renders_refusal(client: TestClient, fake_refused: None) -> None:
     r = client.post("/ask", data={"question": "What is the etymology?"})
     assert r.status_code == 200
     assert "Refused" in r.text
     assert "vault doesn&#39;t contain" in r.text or "vault doesn't contain" in r.text
+    # P4.1: no Sources section on a refusal (wikilinks default to []).
+    assert "Sources" not in r.text
 
 
 def test_ask_rejects_empty_question(client: TestClient, fake_answered: None) -> None:

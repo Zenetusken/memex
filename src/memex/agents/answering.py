@@ -55,6 +55,7 @@ from pydantic import BaseModel, Field, create_model
 
 from memex.core.errors import AnswerStateInvariantError
 from memex.core.types import Chunk, StoredTable, TableQueryResult
+from memex.core.wikilinks import format_wikilink
 from memex.models.client import complete_structured
 from memex.observability.tracing import (
     bind_run_context,
@@ -238,6 +239,11 @@ class FinalResponse(BaseModel):
     claims: list[CitedClaim] = []
     refusal_reason: str | None = None
     used_chunks: list[Chunk] = []
+    # Deterministic, grounded `[[doc_id#section]]` wikilinks for the
+    # chunks this answer cited — derived in `compose` from the GROUNDED
+    # used_chunks (NOT LLM-emitted). Empty on a refusal (a refusal cited
+    # nothing). Surfaces a navigable "Sources" list to MCP/webui/CLI.
+    wikilinks: list[str] = []
 
     # Observability fields — always populated, useful for trace correlation.
     correlation_id: str
@@ -1216,11 +1222,26 @@ async def compose(state: AnswerState) -> AnswerStateUpdate:
     used_chunk_ids = {c.source_chunk_id for c in surviving_claims}
     used_chunks = [c for c in state.reranked if c.chunk_id in used_chunk_ids]
 
+    # Deterministic, grounded wikilinks: one `[[doc_id#section]]` per
+    # cited chunk (section = deepest heading_path entry, raw text), deduped
+    # preserving first-seen order so a "Sources" list doesn't repeat. Pure
+    # derivation from the already-grounded used_chunks — no model call, no
+    # behaviour change to answered/claims (HARD-gate-neutral).
+    wikilinks: list[str] = []
+    seen_wikilinks: set[str] = set()
+    for chunk in used_chunks:
+        section = chunk.heading_path[-1] if chunk.heading_path else None
+        wikilink = format_wikilink(chunk.document_id, section)
+        if wikilink not in seen_wikilinks:
+            seen_wikilinks.add(wikilink)
+            wikilinks.append(wikilink)
+
     final = FinalResponse(
         answered=True,
         summary=state.draft.summary,
         claims=surviving_claims,
         used_chunks=used_chunks,
+        wikilinks=wikilinks,
         correlation_id=state.correlation_id,
         tokens_used=state.tokens_used,
         nodes_traversed=new_nodes,

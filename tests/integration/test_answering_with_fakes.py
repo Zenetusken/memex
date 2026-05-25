@@ -24,6 +24,8 @@ from memex.agents.answering import (
     SufficiencyAssessment,
     VerificationResult,
     answer_query,
+    compose,
+    refuse,
     reset_compiled_graph,
 )
 
@@ -455,3 +457,142 @@ async def test_verify_missing_index_treated_as_ungrounded(
         "Expected at least 1 regenerate attempt before refusal; "
         f"got regenerate_attempts={response.regenerate_attempts}"
     )
+
+
+# ----- P4.1: compose derives FinalResponse.wikilinks (deterministic) -----
+
+
+def _compose_state(
+    chunks: list[Chunk],
+    claims: list[CitedClaim],
+    *,
+    grounded: list[int],
+) -> AnswerState:
+    """Build a minimal AnswerState ready for the `compose` node — a
+    verified draft (`grounded` indices) over `chunks` already in
+    `reranked`."""
+    return AnswerState(
+        query="q",
+        reranked=list(chunks),
+        draft=DraftAnswer(summary="A summary.", claims=list(claims)),
+        verification=VerificationResult(grounded=list(grounded), ungrounded=[]),
+    )
+
+
+@pytest.mark.asyncio
+async def test_compose_derives_wikilink_with_section() -> None:
+    """A cited chunk with a populated heading_path → `[[doc#deepest]]`
+    (deepest heading, raw text)."""
+    chunk = Chunk(
+        chunk_id="c1",
+        document_id="d1",
+        document_title="Annual Report",
+        text="Director compensation totaled $1.2M.",
+        heading_path=["Governance", "Director Compensation"],
+    )
+    claim = CitedClaim(claim="Director comp was $1.2M.", source_chunk_id="c1", confidence="high")
+    update = await compose(_compose_state([chunk], [claim], grounded=[0]))
+    final = update.get("final")
+    assert final is not None
+    assert final.answered is True
+    assert final.wikilinks == ["[[d1#Director Compensation]]"]
+
+
+@pytest.mark.asyncio
+async def test_compose_derives_bare_wikilink_when_no_heading_path() -> None:
+    """A cited chunk with empty heading_path → bare `[[doc]]`."""
+    chunk = Chunk(
+        chunk_id="c1",
+        document_id="d1",
+        document_title="Smith 2024",
+        text="Reflexivity shapes the data.",
+        heading_path=[],
+    )
+    claim = CitedClaim(claim="Reflexivity shapes data.", source_chunk_id="c1", confidence="high")
+    update = await compose(_compose_state([chunk], [claim], grounded=[0]))
+    final = update.get("final")
+    assert final is not None
+    assert final.wikilinks == ["[[d1]]"]
+
+
+@pytest.mark.asyncio
+async def test_compose_dedups_wikilinks_preserving_order() -> None:
+    """Two cited chunks from the same doc+section → one wikilink; the
+    first-seen order is preserved across distinct targets."""
+    chunks = [
+        Chunk(
+            chunk_id="c1",
+            document_id="d1",
+            document_title="Report",
+            text="first",
+            heading_path=["Methods"],
+        ),
+        Chunk(
+            chunk_id="c2",
+            document_id="d2",
+            document_title="Other",
+            text="second",
+            heading_path=["Results"],
+        ),
+        Chunk(
+            chunk_id="c3",
+            document_id="d1",
+            document_title="Report",
+            text="third",
+            heading_path=["Methods"],
+        ),
+    ]
+    claims = [
+        CitedClaim(claim="A", source_chunk_id="c1", confidence="high"),
+        CitedClaim(claim="B", source_chunk_id="c2", confidence="high"),
+        CitedClaim(claim="C", source_chunk_id="c3", confidence="high"),
+    ]
+    update = await compose(_compose_state(chunks, claims, grounded=[0, 1, 2]))
+    final = update.get("final")
+    assert final is not None
+    # d1#Methods cited twice → deduped to one; order: d1#Methods then d2#Results.
+    assert final.wikilinks == ["[[d1#Methods]]", "[[d2#Results]]"]
+
+
+@pytest.mark.asyncio
+async def test_refuse_node_emits_no_wikilinks() -> None:
+    """The `refuse` node leaves `wikilinks=[]` — a refusal cited nothing,
+    so emitting links would mislead."""
+    chunk = Chunk(
+        chunk_id="c1",
+        document_id="d1",
+        document_title="Report",
+        text="off-topic",
+        heading_path=["Methods"],
+    )
+    state = AnswerState(
+        query="q",
+        reranked=[chunk],
+        sufficiency=SufficiencyAssessment(sufficient=False, reason="not enough"),
+    )
+    update = await refuse(state)
+    final = update.get("final")
+    assert final is not None
+    assert final.answered is False
+    assert final.wikilinks == []
+
+
+@pytest.mark.asyncio
+async def test_compose_no_surviving_claims_refusal_emits_no_wikilinks() -> None:
+    """The in-compose no-surviving-claims refusal (verifier returned no
+    grounded indices) keeps `wikilinks=[]` — it sits BELOW the derivation
+    guard so a degenerate refusal carries no links."""
+    chunk = Chunk(
+        chunk_id="c1",
+        document_id="d1",
+        document_title="Report",
+        text="content",
+        heading_path=["Methods"],
+    )
+    claim = CitedClaim(claim="A", source_chunk_id="c1", confidence="high")
+    # grounded=[] → no surviving claims → in-compose refusal branch.
+    update = await compose(_compose_state([chunk], [claim], grounded=[]))
+    final = update.get("final")
+    assert final is not None
+    assert final.answered is False
+    assert final.wikilinks == []

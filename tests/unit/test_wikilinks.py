@@ -15,9 +15,63 @@ from pydantic import ValidationError
 from memex.core.types import Chunk
 from memex.core.wikilinks import (
     extract_wikilinks,
+    format_wikilink,
     parse_wikilink,
     resolve_wikilink_section,
 )
+
+# ----------------------------------------------------------------------
+# format_wikilink (P4.1 build-side primitive — symmetry with parse)
+# ----------------------------------------------------------------------
+
+
+def test_format_wikilink_doc_and_section() -> None:
+    """doc_id + section → `[[doc#section]]` with RAW heading text."""
+    assert format_wikilink("doc", "Director Compensation") == "[[doc#Director Compensation]]"
+
+
+def test_format_wikilink_no_section() -> None:
+    """No section → bare `[[doc]]`."""
+    assert format_wikilink("doc") == "[[doc]]"
+    assert format_wikilink("doc", None) == "[[doc]]"
+
+
+def test_format_wikilink_empty_section_is_bare() -> None:
+    """Empty / whitespace-only section → bare `[[doc]]`."""
+    assert format_wikilink("doc", "") == "[[doc]]"
+    assert format_wikilink("doc", "   ") == "[[doc]]"
+
+
+def test_format_wikilink_strips_section_whitespace() -> None:
+    """Leading/trailing whitespace in the section is stripped."""
+    assert format_wikilink("doc", "  Methods  ") == "[[doc#Methods]]"
+
+
+def test_format_wikilink_section_with_brackets_falls_back() -> None:
+    """A section containing `[` or `]` would break the read-side regex
+    (it stops at the first `]`), so fall back to bare `[[doc]]`."""
+    assert format_wikilink("doc", "See [ref]") == "[[doc]]"
+    assert format_wikilink("doc", "trailing]") == "[[doc]]"
+    assert format_wikilink("doc", "[leading") == "[[doc]]"
+
+
+def test_format_wikilink_section_with_hash_kept() -> None:
+    """A `#` in the section is SAFE (parse splits on the first `#` only)
+    and is preserved."""
+    assert format_wikilink("doc", "C# Programming Guide") == "[[doc#C# Programming Guide]]"
+
+
+def test_format_wikilink_roundtrips_through_parse() -> None:
+    """`parse_wikilink(format_wikilink(d, s))` recovers d + s for a clean
+    section — the emitted grammar matches the read-side parser."""
+    target = parse_wikilink(format_wikilink("0e725ba0", "Director Compensation")[2:-2])
+    assert target.doc_id == "0e725ba0"
+    assert target.section == "Director Compensation"
+
+    bare = parse_wikilink(format_wikilink("0e725ba0")[2:-2])
+    assert bare.doc_id == "0e725ba0"
+    assert bare.section is None
+
 
 # ----------------------------------------------------------------------
 # parse_wikilink

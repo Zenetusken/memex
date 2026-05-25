@@ -8,10 +8,13 @@ the webui-specific slug / anchor / `<a>` emission contract.
 
 from __future__ import annotations
 
+from markupsafe import Markup
+
 from memex.webui.rendering import (
     TocEntry,
     extract_toc,
     render_body_html,
+    render_wikilink,
     slugify_heading,
 )
 
@@ -447,3 +450,37 @@ def test_markdown_link_heading_dedups_against_plain() -> None:
     toc = extract_toc(body)
     tips = [e for e in toc if e.text == "Tips:"]
     assert [e.slug for e in tips] == ["tips", "tips-1"]
+
+
+# ----------------------------------------------------------------------
+# render_wikilink — the public "Sources" Jinja filter (P4.1 emission)
+# ----------------------------------------------------------------------
+
+
+def test_render_wikilink_section_emits_slug_fragment() -> None:
+    """`[[doc#Sec]]` → an `<a>` to `/documents/doc#sec` (section slugified)."""
+    out = str(render_wikilink("[[doc#Sec]]"))
+    assert 'href="/documents/doc#sec"' in out
+    assert 'class="wikilink"' in out
+    assert "[[doc#Sec]]" in out  # display label keeps raw section text
+
+
+def test_render_wikilink_bare_doc_has_no_fragment() -> None:
+    """A bare `[[doc]]` → `/documents/doc` with NO `#` fragment."""
+    out = str(render_wikilink("[[doc]]"))
+    assert 'href="/documents/doc"' in out
+    assert "#" not in out
+
+
+def test_render_wikilink_unparseable_is_escaped_raw() -> None:
+    """Defensive: an input with no well-formed `[[...]]` is returned as
+    escaped raw text, never raw HTML."""
+    out = str(render_wikilink("not a wikilink <script>"))
+    assert "<a" not in out
+    assert "&lt;script&gt;" in out
+
+
+def test_render_wikilink_returns_markup() -> None:
+    """The filter returns `markupsafe.Markup` so Jinja won't re-escape
+    the emitted `<a>`."""
+    assert isinstance(render_wikilink("[[doc]]"), Markup)

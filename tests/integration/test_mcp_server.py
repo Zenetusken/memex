@@ -106,6 +106,7 @@ def patch_agent(monkeypatch: pytest.MonkeyPatch) -> None:
                     confidence="high",
                 )
             ],
+            wikilinks=["[[d1#Reflexivity]]"],
             correlation_id="01HZTESTASKCORRELATIONID00",
             tokens_used=42,
             nodes_traversed=5,
@@ -141,6 +142,9 @@ async def test_ask_returns_grounded_response(settings: MemexSettings, patch_agen
     assert result.summary
     assert len(result.claims) == 1
     assert result.correlation_id == "01HZTESTASKCORRELATIONID00"
+    # P4.1: wikilinks ride the full FinalResponse over MCP (auto-serialized).
+    assert result.wikilinks == ["[[d1#Reflexivity]]"]
+    assert "wikilinks" in result.model_dump()
 
 
 @pytest.mark.asyncio

@@ -163,30 +163,64 @@ def render_body_html(body: str) -> Markup:
     return Markup("".join(parts))  # noqa: S704
 
 
+def _anchor_for_wikilink(inner: str) -> str:
+    """Build the `<a class="wikilink">` HTML for one wikilink's inner
+    text (the part between `[[` and `]]`, e.g. `doc#Section`).
+
+    The single source of truth for the wikilink → anchor construction,
+    shared by `_replace_wikilinks_with_anchors` (the body rewrite) and
+    the public `render_wikilink` (the "Sources" list filter) so the two
+    never drift. Returns already-HTML-escaped HTML — the `href` and the
+    displayed label are escaped here.
+
+    A `[[doc#section]]` links to `/documents/{doc}#{slug}` (the section
+    slugified); a bare `[[doc]]` links to `/documents/{doc}` with no
+    fragment. The section anchor always points at the BASE slug (first
+    occurrence of that heading text) — duplicate headings can't be
+    disambiguated by text alone, mirroring the dedup'd anchor IDs.
+    """
+    target = parse_wikilink(inner)
+    if target.section:
+        slug = slugify_heading(target.section)
+        href = f"/documents/{target.doc_id}#{slug}"
+        display = f"[[{target.doc_id}#{target.section}]]"
+    else:
+        href = f"/documents/{target.doc_id}"
+        display = f"[[{target.doc_id}]]"
+    return f'<a class="wikilink" href="{escape(href)}">{escape(display)}</a>'
+
+
 def _replace_wikilinks_with_anchors(escaped_line: str) -> str:
     """Substitute each `[[doc]]` / `[[doc#section]]` in `escaped_line`
     with an `<a>` tag. Operates on already-HTML-escaped text — brackets
     survive the escape, so the regex still finds them.
 
-    The section anchor always points at the BASE slug (first occurrence
-    of that heading text). Duplicate headings can't be disambiguated by
-    text alone, so a `[[doc#Tips:]]` link resolves to the first "Tips:"
-    section — which is what the dedup'd anchor IDs assign to the base
-    slug. The 2nd+ occurrences get `-1`, `-2` suffixes that no wikilink
-    targets (by design)."""
+    Delegates the per-match construction to `_anchor_for_wikilink` (the
+    shared helper) so the body rewrite and the `render_wikilink` filter
+    stay in lockstep."""
+    return _WIKILINK_RE.sub(lambda m: _anchor_for_wikilink(m.group(1)), escaped_line)
 
-    def _sub(m: re.Match[str]) -> str:
-        target = parse_wikilink(m.group(1))
-        if target.section:
-            slug = slugify_heading(target.section)
-            href = f"/documents/{target.doc_id}#{slug}"
-            display = f"[[{target.doc_id}#{target.section}]]"
-        else:
-            href = f"/documents/{target.doc_id}"
-            display = f"[[{target.doc_id}]]"
-        return f'<a class="wikilink" href="{escape(href)}">{escape(display)}</a>'
 
-    return _WIKILINK_RE.sub(_sub, escaped_line)
+def render_wikilink(wikilink: str) -> Markup:
+    """Render a single `[[doc]]` / `[[doc#section]]` wikilink string as
+    an `<a class="wikilink">` anchor — the public Jinja filter behind the
+    answer "Sources" list (`templates/_answer.html`).
+
+    Input is the full wikilink (with the surrounding `[[` `]]`). It's
+    HTML-escaped, then the FIRST `[[...]]` match is rewritten via the
+    same `_anchor_for_wikilink` construction the body rewrite uses
+    (`/documents/{doc}#{slug}` with the section slugified; bare `[[doc]]`
+    → no fragment). An unparseable input (no well-formed `[[...]]`) is
+    returned as escaped raw text — defensive, never raw HTML.
+
+    Returns `markupsafe.Markup` so Jinja's auto-escape leaves the
+    emitted `<a>` intact.
+    """
+    escaped = str(escape(wikilink))
+    match = _WIKILINK_RE.search(escaped)
+    if match is None:
+        return Markup(escaped)  # noqa: S704 — already HTML-escaped above
+    return Markup(_anchor_for_wikilink(match.group(1)))  # noqa: S704
 
 
 # ----------------------------------------------------------------------

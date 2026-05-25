@@ -93,6 +93,32 @@ def parse_wikilink(inner: str) -> WikilinkTarget:
     )
 
 
+def format_wikilink(doc_id: str, section: str | None = None) -> str:
+    """Build a wikilink string from a doc_id and optional section.
+
+    `[[doc_id#section]]` (RAW heading text, NOT a slug) when `section`
+    is non-empty after stripping, else `[[doc_id]]`. The emitted
+    grammar round-trips through `parse_wikilink` for a clean section.
+
+    Section is RAW heading text because `resolve_wikilink_section`
+    matches it case-insensitively against `chunk.heading_path`, and
+    `webui/rendering.py::slugify_heading` slugifies on demand for the
+    URL fragment — consumers slugify, emission stays raw (e.g.
+    `[[0e725ba0#Director Compensation]]`).
+
+    Sanitization: if the (stripped) section contains `[` or `]`, fall
+    back to the bare `[[doc_id]]` form. A `]` would terminate the
+    read-side `_WIKILINK_RE` early, breaking the link. A `#` in the
+    section is SAFE (parse splits on the first `#` only; doc_ids carry
+    no `#`) and is preserved.
+    """
+    if section and section.strip():
+        stripped = section.strip()
+        if "[" not in stripped and "]" not in stripped:
+            return f"[[{doc_id}#{stripped}]]"
+    return f"[[{doc_id}]]"
+
+
 def extract_wikilinks(body: str) -> list[WikilinkTarget]:
     """Find all wikilinks in `body`, returning their parsed targets
     in document order (by char_start of each match).

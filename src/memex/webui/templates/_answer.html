@@ -20,6 +20,16 @@
     </li>
     {% endfor %}
   </ul>
+  {% if response.wikilinks %}
+  <div class="mt-4 pt-3 border-t border-zinc-800">
+    <h4 class="text-xs font-semibold uppercase tracking-wide text-zinc-500 mb-2">Sources</h4>
+    <ul class="space-y-1 text-sm">
+      {% for wikilink in response.wikilinks %}
+      <li>{{ wikilink | render_wikilink }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
 </article>
 {% else %}
 <div class="p-4 bg-amber-950/30 border border-amber-800 rounded-md">
