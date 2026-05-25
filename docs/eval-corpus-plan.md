@@ -314,9 +314,9 @@ The corpus is itself versioned semantically.
 > render; tables-F1 1.0),
 > `forms/quarterly-uptime-report` (native `.fodt` → its table parses as a
 > proper **GFM table**), `technical-docs/widget-cli-reference` (deep
-> H1–H4 + code blocks). Full-corpus `memex eval-parse` (post the
-> heading-level-recovery parser fix): **3/3 pass, mean CER 0.036 / WER
-> 0.106 / structural-F1 0.974** (was 0.566 before the fix). Findings:
+> H1–H4 + code blocks). Full-corpus `memex eval-parse` (2026-05-25):
+> **3/3 pass, mean CER 0.023 / WER 0.075 / headings-F1 1.0 / tables-F1
+> 1.0 — every structural facet perfect on all three fixtures.** Findings:
 > native ODF tables parse as GFM + **code blocks parse with high
 > fidelity**; the table header/body `<br>`-shatter the table-F1 metric
 > surfaced is now **FIXED** (commit `0b97775`, table-aware
@@ -325,7 +325,10 @@ The corpus is itself versioned semantically.
 > (commit `bb66c82`): pymupdf4llm 1.27.x emitted every heading as `##`
 > regardless of font size, so `parse/pymupdf_worker.py` re-derives the
 > level from font size (`_heading_size_to_level` + `_remap_heading_levels`)
-> — forms 0.75→1.0, technical-docs 0.33→1.0, tidewater 0.615→0.923.
+> — forms 0.75→1.0, technical-docs 0.33→1.0, tidewater 0.615→0.923→**1.0**
+> (the last step from the misdetected-heading **demote**, commit `6ddeea5`,
+> ported from the Docling worker — body-font prose lines pymupdf4llm
+> over-flagged as headings are reclassified to paragraphs).
 > (An earlier PyMuPDF `Story` render dropped some post-heading
 > paragraphs — a *Story artifact*, not a real-PDF weakness.) Still to do:
 > the retrieval/answer metric halves (the answering half ships separately as
