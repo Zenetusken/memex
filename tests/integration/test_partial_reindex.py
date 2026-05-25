@@ -503,3 +503,235 @@ async def test_existing_chunks_preserved_across_partial_reindex(
         assert fake_stores["vec"].embeddings[cid] == original_vec, (
             f"chunk {cid} was re-embedded across re-index"
         )
+
+
+# ----- Native-prompt embedding (EmbeddingGemma `task:`/`title:`) -----
+#
+# The fixtures above fake `_embed_chunks` wholesale, bypassing
+# `embedder.encode` — so they can't see the prompt wrapping. These tests
+# install a fake embedder at the `encode` LEVEL (via a fake registry
+# monkeypatched into both the index pipeline and the retrieve path) that
+# CAPTURES the input strings + the `prompt_name` kwarg, then assert the
+# native-prompt wrapping is applied (or not) on both sides.
+
+
+class _CapturingEmbedder:
+    """Fake SentenceTransformer: records every `encode` call as an
+    `(inputs, prompt_name)` tuple and returns deterministic vectors.
+    Signature ends in `**_kw: object` so a new upstream kwarg doesn't
+    silently break the capture. Tests inspect `calls` by call origin
+    (index-time = doc batches; `_embed_query` = single-element list)."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[list[str], str | None]] = []
+
+    def encode(
+        self,
+        inputs: list[str],
+        *,
+        prompt_name: str | None = None,
+        **_kw: object,
+    ) -> list[list[float]]:
+        self.calls.append((list(inputs), prompt_name))
+        return [[float(i)] * 768 for i in range(len(inputs))]
+
+
+class _FakeRegistry:
+    """Minimal registry exposing only `use("embedder")` as an async CM."""
+
+    def __init__(self, embedder: _CapturingEmbedder) -> None:
+        self._embedder = embedder
+
+    def use(self, _name: str) -> Any:
+        embedder = self._embedder
+
+        class _CM:
+            async def __aenter__(self) -> _CapturingEmbedder:
+                return embedder
+
+            async def __aexit__(self, *_a: object) -> None:
+                return None
+
+        return _CM()
+
+
+@pytest.fixture
+def encode_level_fakes(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Real `_embed_chunks`/`_embed_query` flow, but the embedder's
+    `encode` is faked at the registry level so we can capture inputs."""
+    fts_open, fts = _FakeFTSStore.make_opener()
+    vec_open, vec = _FakeVectorStore.make_opener()
+    monkeypatch.setattr("memex.index.pipeline.FTSStore.open", fts_open)
+    monkeypatch.setattr("memex.index.pipeline.VectorStore.open", vec_open)
+
+    async def _no_graph(_vault_path: Any) -> None:
+        raise ImportError("ryugraph not installed (test stub)")
+
+    monkeypatch.setattr("memex.index.pipeline.GraphStore.open", _no_graph)
+
+    embedder = _CapturingEmbedder()
+    registry = _FakeRegistry(embedder)
+    monkeypatch.setattr("memex.index.pipeline.get_registry", lambda: registry)
+    monkeypatch.setattr("memex.retrieve.hybrid.get_registry", lambda: registry)
+
+    return {"fts": fts, "vec": vec, "embedder": embedder}
+
+
+@pytest.mark.asyncio
+async def test_native_prompts_on_wraps_doc_and_query(
+    settings: MemexSettings,
+    encode_level_fakes: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prompts ON: captured doc inputs are `title: … | text: …` and the
+    query-embed call passes `prompt_name="query"`."""
+    from memex.index.pipeline import index_document
+    from memex.retrieve.hybrid import _embed_query
+
+    monkeypatch.setenv("MEMEX_EMBED_NATIVE_PROMPTS", "1")
+
+    body = "# Heading\n\n## Sub\n\nA paragraph with content here.\n"
+    doc_id = await _seed_doc(body, source_stem="native_on")
+    await index_document(doc_id)
+
+    embedder: _CapturingEmbedder = encode_level_fakes["embedder"]
+    # Doc-side: every captured encode input is the title|text wrapper.
+    doc_inputs = [s for inputs, _pn in embedder.calls for s in inputs]
+    assert doc_inputs, "expected doc inputs"
+    for s in doc_inputs:
+        assert s.startswith("title: ")
+        assert " | text: " in s
+
+    # Query side (isolate by clearing the capture log first).
+    embedder.calls.clear()
+    await _embed_query("what is the content")
+    assert embedder.calls, "expected a query-embed call"
+    inputs, prompt_name = embedder.calls[-1]
+    assert inputs == ["what is the content"]
+    assert prompt_name == "query"
+
+
+@pytest.mark.asyncio
+async def test_native_prompts_off_keeps_bare(
+    settings: MemexSettings,
+    encode_level_fakes: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prompts OFF: doc inputs are bare `chunk.text`; query encode passes
+    no `prompt_name`."""
+    from memex.index.pipeline import index_document
+    from memex.retrieve.hybrid import _embed_query
+
+    monkeypatch.setenv("MEMEX_EMBED_NATIVE_PROMPTS", "0")
+
+    body = "# Heading\n\n## Sub\n\nA paragraph with content here.\n"
+    doc_id = await _seed_doc(body, source_stem="native_off")
+    await index_document(doc_id)
+
+    embedder: _CapturingEmbedder = encode_level_fakes["embedder"]
+    doc_inputs = [s for inputs, _pn in embedder.calls for s in inputs]
+    assert doc_inputs, "expected doc inputs"
+    for s in doc_inputs:
+        assert not s.startswith("title: ")
+        assert " | text: " not in s
+
+    embedder.calls.clear()
+    await _embed_query("what is the content")
+    assert embedder.calls, "expected a query-embed call"
+    _inputs, prompt_name = embedder.calls[-1]
+    assert prompt_name is None
+
+
+@pytest.mark.asyncio
+async def test_chunk_ids_identical_on_vs_off(
+    settings: MemexSettings,
+    encode_level_fakes: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """chunk_id is byte-identical ON vs OFF — the prompt never feeds the
+    stable chunk-id hash (it wraps only the transient encode input)."""
+    from memex.index.pipeline import index_document
+
+    body = "# Doc\n\n## A\n\nFirst paragraph.\n\n## B\n\nSecond paragraph.\n"
+
+    monkeypatch.setenv("MEMEX_EMBED_NATIVE_PROMPTS", "1")
+    doc_on = await _seed_doc(body, source_stem="ids_on")
+    await index_document(doc_on)
+    ids_on = sorted(
+        cid.split("#", 1)[-1]
+        for cid, c in encode_level_fakes["fts"].chunks.items()
+        if c.document_id == doc_on
+    )
+
+    monkeypatch.setenv("MEMEX_EMBED_NATIVE_PROMPTS", "0")
+    doc_off = await _seed_doc(body, source_stem="ids_off")
+    await index_document(doc_off)
+    ids_off = sorted(
+        cid.split("#", 1)[-1]
+        for cid, c in encode_level_fakes["fts"].chunks.items()
+        if c.document_id == doc_off
+    )
+
+    assert ids_on == ids_off, "chunk-id hashes must not depend on the prompt"
+
+
+@pytest.mark.asyncio
+async def test_stored_chunk_text_is_unprefixed(
+    settings: MemexSettings,
+    encode_level_fakes: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Leak guard: even with prompts ON, the stored Chunk.text is the raw
+    body, never the `title: … | text: …` wrapper."""
+    from memex.index.pipeline import index_document
+
+    monkeypatch.setenv("MEMEX_EMBED_NATIVE_PROMPTS", "1")
+    body = "# Doc\n\n## Sec\n\nUnprefixed body text.\n"
+    doc_id = await _seed_doc(body, source_stem="leak_guard")
+    await index_document(doc_id)
+
+    stored = [c for c in encode_level_fakes["fts"].chunks.values() if c.document_id == doc_id]
+    assert stored
+    for c in stored:
+        assert not c.text.startswith("title: ")
+        assert " | text: " not in c.text
+    # Vector store mirror.
+    for c in encode_level_fakes["vec"].chunks.values():
+        if c.document_id == doc_id:
+            assert not c.text.startswith("title: ")
+
+
+@pytest.mark.asyncio
+async def test_recipe_bump_off_to_on_forces_reembed(
+    settings: MemexSettings,
+    encode_level_fakes: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mirror of `test_embedder_change_triggers_implicit_force`: index once
+    with prompts OFF, flip env ON, index again WITHOUT force → the recipe
+    mismatch forces a full re-embed and the manifest records the new tag."""
+    from memex.index.pipeline import index_document
+
+    monkeypatch.setenv("MEMEX_EMBED_NATIVE_PROMPTS", "0")
+    doc_id = await _seed_doc(
+        "# Recipe\n\n## A\n\nFirst.\n\n## B\n\nSecond.\n",
+        source_stem="recipe_bump",
+    )
+    first = await index_document(doc_id)
+    assert first.chunk_count >= 1
+
+    manifest_off = await read_manifest(settings.vault_path, doc_id)
+    assert manifest_off is not None and manifest_off.index is not None
+    assert manifest_off.index.embedding_recipe_version == "v0"
+
+    # Flip native prompts ON; re-index without force.
+    monkeypatch.setenv("MEMEX_EMBED_NATIVE_PROMPTS", "1")
+    second = await index_document(doc_id)  # NOT passing force=True
+
+    assert second.partial is False
+    assert second.chunks_added == second.chunk_count
+    assert second.chunks_unchanged == 0
+
+    manifest_on = await read_manifest(settings.vault_path, doc_id)
+    assert manifest_on is not None and manifest_on.index is not None
+    assert manifest_on.index.embedding_recipe_version == "v1-gemma-prompts"

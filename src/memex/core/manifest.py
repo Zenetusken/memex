@@ -89,6 +89,10 @@ class IndexStage(BaseModel):
     indexed_at: datetime
     embedding_model: str
     embedding_dim: int
+    # Embedding-recipe tag (e.g. native-prompt toggle). Back-compat default
+    # "v0" matches on-disk manifests; a mismatch vs the current recipe
+    # auto-forces a full re-embed (see pipeline._embed_recipe_version).
+    embedding_recipe_version: str = "v0"
     chunk_count: int
     duration_ms: int = 0
     # Incremental re-indexing breakdown. Defaults to 0 so existing

@@ -42,6 +42,11 @@ from memex.core.manifest import (
 )
 from memex.core.types import Chunk
 from memex.index.chunker import chunk_document
+from memex.index.embed_prompts import (
+    chunk_title,
+    document_input,
+    native_prompts_enabled,
+)
 from memex.index.fts_store import FTSStore
 from memex.index.graph_store import GraphStore
 from memex.index.table_store import TableStore, extract_tables
@@ -119,11 +124,20 @@ async def _embed_chunks(chunks: list[Chunk]) -> list[list[float]]:
     # without recovering any prose queries. Keep chart content in the
     # embedded text so chart-numeric queries can match via dense
     # vector similarity.
+    # EmbeddingGemma native doc prompt (`title: … | text: …`) when enabled
+    # (default ON); else bare `chunk.text` (the A/B / revert path). The
+    # prompt wraps ONLY the transient `encode` input — the Chunk objects
+    # flowing to the stores keep their original `.text`.
+    if native_prompts_enabled():
+        inputs = [document_input(chunk_title(c), c.text) for c in chunks]
+    else:
+        inputs = [c.text for c in chunks]
     async with registry.use("embedder") as embedder:
-        # SentenceTransformer.encode is sync + heavy; offload.
+        # SentenceTransformer.encode is sync + heavy; offload. `inputs` is
+        # the first positional param in sentence-transformers 5.5.1.
         def _encode() -> Any:
             return embedder.encode(
-                [c.text for c in chunks],
+                inputs,
                 normalize_embeddings=True,
                 convert_to_numpy=True,
                 batch_size=batch_size,
@@ -132,6 +146,18 @@ async def _embed_chunks(chunks: list[Chunk]) -> list[list[float]]:
 
         embeddings = await asyncio.to_thread(_encode)
     return [list(map(float, row)) for row in embeddings]
+
+
+def _embed_recipe_version() -> str:
+    """The embedding-recipe version tag recorded in the manifest.
+
+    Bumping this versus the prior manifest value auto-forces a full
+    re-embed (query- and doc-side embeddings must change together for a
+    bi-encoder). `"v0"` is the back-compat bare baseline; native prompts
+    bump to `"v1-gemma-prompts"`. Toggling native prompts off self-heals
+    back to `"v0"`.
+    """
+    return "v1-gemma-prompts" if native_prompts_enabled() else "v0"
 
 
 async def index_document(doc_id: str, *, force: bool = False) -> IndexResult:
@@ -162,17 +188,25 @@ async def index_document(doc_id: str, *, force: bool = False) -> IndexResult:
     # existing vectors are in the wrong space — force a full re-embed.
     if not force:
         prior = await read_manifest(settings.vault_path, doc_id)
-        if (
-            prior is not None
-            and prior.index is not None
-            and prior.index.embedding_model != settings.models.embedder
-        ):
-            log.info(
-                "index.embedder_changed",
-                prior=prior.index.embedding_model,
-                current=settings.models.embedder,
-            )
-            force = True
+        if prior is not None and prior.index is not None:
+            if prior.index.embedding_model != settings.models.embedder:
+                log.info(
+                    "index.embedder_changed",
+                    prior=prior.index.embedding_model,
+                    current=settings.models.embedder,
+                )
+                force = True
+            # Orthogonal to the embedder swap: an embedding-recipe change
+            # (e.g. enabling/disabling native prompts) also invalidates the
+            # existing vectors — query+doc embeddings must share a space.
+            recipe = _embed_recipe_version()
+            if prior.index.embedding_recipe_version != recipe:
+                log.info(
+                    "index.recipe_changed",
+                    prior=prior.index.embedding_recipe_version,
+                    current=recipe,
+                )
+                force = True
 
     # Open the three stores under a single AsyncExitStack so a failure
     # opening any one of them closes the others cleanly. The graph
@@ -248,6 +282,7 @@ async def index_document(doc_id: str, *, force: bool = False) -> IndexResult:
             indexed_at=now_utc(),
             embedding_model=settings.models.embedder,
             embedding_dim=EMBEDDING_DIM,
+            embedding_recipe_version=_embed_recipe_version(),
             chunk_count=len(new_chunks),
             chunks_added=chunks_added,
             chunks_deleted=chunks_deleted,

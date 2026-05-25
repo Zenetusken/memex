@@ -9,6 +9,7 @@ import structlog
 
 from memex.core.config import get_settings
 from memex.core.types import Chunk
+from memex.index.embed_prompts import EMBED_QUERY_PROMPT_NAME, native_prompts_enabled
 from memex.index.fts_store import FTSStore
 from memex.index.vector_store import VectorStore
 from memex.models.registry import get_registry
@@ -20,9 +21,20 @@ logger = structlog.get_logger(__name__)
 async def _embed_query(query: str) -> list[float]:
     """Embed `query` with the registry's embedder."""
     registry = get_registry()
+    use_prompt = native_prompts_enabled()
     async with registry.use("embedder") as embedder:
-
+        # EmbeddingGemma's built-in `query` prompt (`task: search result |
+        # query: `) when enabled (default ON); else bare (the A/B / revert
+        # path). This is the SINGLE query-embed entry point — both
+        # hybrid_search and hybrid_search_in_docs route through it.
         def _encode() -> Any:
+            if use_prompt:
+                return embedder.encode(
+                    [query],
+                    prompt_name=EMBED_QUERY_PROMPT_NAME,
+                    normalize_embeddings=True,
+                    convert_to_numpy=True,
+                )[0]
             return embedder.encode([query], normalize_embeddings=True, convert_to_numpy=True)[0]
 
         embedding = await asyncio.to_thread(_encode)

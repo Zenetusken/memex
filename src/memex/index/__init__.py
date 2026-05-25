@@ -9,6 +9,12 @@ Part II and Part IV.
 """
 
 from memex.index.chunker import chunk_document
+from memex.index.embed_prompts import (
+    EMBED_QUERY_PROMPT_NAME,
+    chunk_title,
+    document_input,
+    native_prompts_enabled,
+)
 from memex.index.fts_store import FTSStore
 from memex.index.graph_store import GraphNeighbor, GraphStore
 from memex.index.pipeline import (
@@ -25,6 +31,7 @@ from memex.index.vector_store import EMBEDDING_DIM, VectorStore
 
 __all__ = [
     "EMBEDDING_DIM",
+    "EMBED_QUERY_PROMPT_NAME",
     "FTSStore",
     "GraphNeighbor",
     "GraphStore",
@@ -34,8 +41,11 @@ __all__ = [
     "TableStore",
     "VectorStore",
     "chunk_document",
+    "chunk_title",
+    "document_input",
     "extract_tables",
     "index_document",
+    "native_prompts_enabled",
     "reindex_vault",
     "remove_document",
     "retitle_document",
