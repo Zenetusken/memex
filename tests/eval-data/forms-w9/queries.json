@@ -1,0 +1,237 @@
+{
+  "_description": "Hand-labelled answer-quality eval corpus for IRS Form W-9 (Request for Taxpayer Identification Number and Certification, Rev. March 2024). New category for the P0 multi-category extension: a FORM / government structured document (fillable fields + line-by-line instructions + a name/number table) \u2014 distinct from the slide/financial/chart/security-standard/scientific/technical corpora.",
+  "_doc_id": "2d420cbb-irs-w9",
+  "_query_count": 18,
+  "_mix": {
+    "ans": 12,
+    "ref": 6,
+    "ref_in_corpus_unanswerable": 3,
+    "ref_out_of_corpus": 3
+  },
+  "_labelling_rule": "ANS queries: `_anchor_phrase` is a distinctive verbatim substring from the chunk holding the answer; resolve via FTS. REF: should_refuse=true, relevant_chunk_ids=[]. Refusals split into in-corpus-unanswerable + out-of-corpus (incl. tax-form confabulation traps).",
+  "_created": "2026-05-25",
+  "_purpose": "Extend the eval matrix to the forms category so the queued P2.x A/Bs get a structured-form / government-document signal. HARD GATES: refusal_rate_on_counterfactuals == 1.0, zero hallucinations.",
+  "_source_note": "IRS Form W-9 (Rev. March 2024), US-federal public domain (a work of the US government, not subject to copyright). Local eval material only; the PDF is not committed to the repo (only this query set ships).",
+  "_parse_note": "The interactive form PAGE (fields, Part I TIN, Part II Certification) parsed into a `[chart-text]` block (pymupdf4llm treats the multi-column fillable layout as picture-text), which is stripped from the FTS/BM25 body \u2014 so answerable anchors target the INSTRUCTION PROSE (Purpose of Form onward), which is FTS-discoverable. Form-field content is still in the dense embedding, just not FTS-anchorable.",
+  "_baseline_2026_05_25": {
+    "stack": "Qwen3-8B-AWQ orchestrator + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3 (cross_encoder, bf16), top_k=5",
+    "doc_id": "2d420cbb-irs-w9",
+    "index": "33 chunks, 2 tables, PyMuPDF born-digital (Tier 2 fonted), 1/33 enrich chunk_failure",
+    "answered_count": 11,
+    "answerable_count": 12,
+    "refused_count": 7,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "hallucinations": 0,
+    "mean_citation_precision": 0.944,
+    "mean_citation_precision_answered_only": 0.909,
+    "false_refusals": ["forms-w9-05"],
+    "notes": "HARD GATES hold — refusal_cf=1.0 (incl. all 3 tax-form confabulation traps: Form 1040 standard deduction, 401k limit, W-2 filing deadline — adjacent IRS content NOT in W-9), 0 hallucinations. 1 false-refusal (w9-05 'who should use W-9' — the Purpose-of-Form chunk didn't reach top-5; retrieval/assess miss, not fabrication). w9-07 (ITIN/W-7) answered correctly but cp=0.0 — sibling-chunk artifact (the How-to-get-a-TIN / W-7/SS-4/SS-5 content spans chunks). The fillable form PAGE parsed into a [chart-text] block (FTS-stripped), so answerable anchors target the instruction prose; form-field content is dense-retrievable only. 11/12 ANS leaves headroom for the P2.1 reranker A/B."
+  },
+  "queries": [
+    {
+      "qid": "forms-w9-01",
+      "question": "What percentage does backup withholding take from applicable payments under Form W-9?",
+      "_anchor_phrase": "withhold and pay to the IRS 24% of such payments",
+      "_expected_answer": "24%.",
+      "_answer_type": "single_fact",
+      "_note": "What is backup withholding section. Distinctive numeric.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "2d420cbb-irs-w9#fd9b98acb3"
+      ]
+    },
+    {
+      "qid": "forms-w9-02",
+      "question": "What is the penalty for failing to furnish your correct TIN to a requester?",
+      "_anchor_phrase": "subject to a penalty of $50 for each such failure",
+      "_expected_answer": "$50 for each failure (unless due to reasonable cause and not willful neglect).",
+      "_answer_type": "single_fact",
+      "_note": "Penalties \u2014 Failure to furnish TIN.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "2d420cbb-irs-w9#0aa2314da4"
+      ]
+    },
+    {
+      "qid": "forms-w9-03",
+      "question": "What is the civil penalty for making a false statement that results in no backup withholding?",
+      "_anchor_phrase": "you are subject to a $500 penalty",
+      "_expected_answer": "$500.",
+      "_answer_type": "single_fact",
+      "_note": "Penalties \u2014 Civil penalty for false information.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "2d420cbb-irs-w9#0aa2314da4"
+      ]
+    },
+    {
+      "qid": "forms-w9-04",
+      "question": "What can happen if you willfully falsify certifications on Form W-9?",
+      "_anchor_phrase": "Willfully falsifying certifications or affirmations may subject you to criminal penalties",
+      "_expected_answer": "Criminal penalties including fines and/or imprisonment.",
+      "_answer_type": "single_fact",
+      "_note": "Penalties \u2014 Criminal penalty.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "2d420cbb-irs-w9#0aa2314da4"
+      ]
+    },
+    {
+      "qid": "forms-w9-05",
+      "question": "Who should use Form W-9?",
+      "_anchor_phrase": "Use Form W-9 only if you are a U.S. person",
+      "_expected_answer": "A U.S. person (including a resident alien), to provide their correct TIN to a requester.",
+      "_answer_type": "single_fact",
+      "_note": "Purpose of Form.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "2d420cbb-irs-w9#a39bea5629"
+      ]
+    },
+    {
+      "qid": "forms-w9-06",
+      "question": "What form should a foreign person use instead of Form W-9?",
+      "_anchor_phrase": "use the appropriate Form W-8 or Form 8233",
+      "_expected_answer": "The appropriate Form W-8 (or Form 8233) \u2014 a foreign person does not use Form W-9.",
+      "_answer_type": "single_fact",
+      "_note": "Foreign person paragraph.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "2d420cbb-irs-w9#2ea2b8aba2"
+      ]
+    },
+    {
+      "qid": "forms-w9-07",
+      "question": "Which IRS form do you use to apply for an ITIN?",
+      "_anchor_phrase": "Use Form W-7, Application for IRS Individual Taxpayer Identification Number, to apply for an ITIN",
+      "_expected_answer": "Form W-7 (SS-5 is for an SSN; SS-4 is for an EIN).",
+      "_answer_type": "single_fact",
+      "_note": "How to get a TIN.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "2d420cbb-irs-w9#39e095e37b"
+      ]
+    },
+    {
+      "qid": "forms-w9-08",
+      "question": "Are real estate transactions subject to backup withholding under Form W-9?",
+      "_anchor_phrase": "Real estate transactions are not subject to backup withholding",
+      "_expected_answer": "No \u2014 real estate transactions are not subject to backup withholding.",
+      "_answer_type": "single_fact",
+      "_note": "What is backup withholding section.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "2d420cbb-irs-w9#fd9b98acb3"
+      ]
+    },
+    {
+      "qid": "forms-w9-09",
+      "question": "What does FATCA require a participating foreign financial institution to report?",
+      "_anchor_phrase": "requires a participating foreign financial institution to report all U.S. account holders",
+      "_expected_answer": "All U.S. account holders that are specified U.S. persons.",
+      "_answer_type": "single_fact",
+      "_note": "FATCA paragraph.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "2d420cbb-irs-w9#a267b7953a"
+      ]
+    },
+    {
+      "qid": "forms-w9-10",
+      "question": "According to Form W-9, who is considered a U.S. person for federal tax purposes?",
+      "_anchor_phrase": "you are considered a U.S. person if you are",
+      "_expected_answer": "A U.S. citizen or resident alien; a partnership/corporation/company organized in the U.S.; a domestic estate; or a domestic trust.",
+      "_answer_type": "single_fact",
+      "_note": "Definition of a U.S. person.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "2d420cbb-irs-w9#c133856e2f"
+      ]
+    },
+    {
+      "qid": "forms-w9-11",
+      "question": "What happens if a requester misuses TINs in violation of federal law?",
+      "_anchor_phrase": "If the requester discloses or uses TINs in violation of federal law",
+      "_expected_answer": "The requester may be subject to civil and criminal penalties.",
+      "_answer_type": "single_fact",
+      "_note": "Penalties \u2014 Misuse of TINs.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "2d420cbb-irs-w9#0aa2314da4"
+      ]
+    },
+    {
+      "qid": "forms-w9-12",
+      "question": "For a joint account documented to an FFI, what must each U.S.-person holder provide?",
+      "_anchor_phrase": "each holder of the account that is a U.S. person must provide a Form W-9",
+      "_expected_answer": "Each U.S.-person holder must provide their own Form W-9.",
+      "_answer_type": "single_fact",
+      "_note": "Line 1 / joint-account instructions.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "2d420cbb-irs-w9#3e9c440947"
+      ]
+    },
+    {
+      "qid": "forms-w9-13",
+      "question": "What is the deadline by which Form W-9 must be filed with the IRS?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 Form W-9 is given to the requester, NOT filed with the IRS, and the form states no filing deadline.",
+      "_answer_type": "counterfactual",
+      "_note": "In-corpus-unanswerable: W-9 isn't IRS-filed; no deadline exists. HARD GATE.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "forms-w9-14",
+      "question": "What is the filing fee for submitting Form W-9?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 there is no fee, and the form states none.",
+      "_answer_type": "counterfactual",
+      "_note": "In-corpus-unanswerable: no fee mentioned. HARD GATE.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "forms-w9-15",
+      "question": "What dollar threshold of payments must be exceeded before backup withholding applies?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 backup withholding is a 24% rate on applicable payments; the form states no dollar threshold.",
+      "_answer_type": "counterfactual",
+      "_note": "In-corpus-unanswerable: rate is given (24%), no threshold. HARD GATE.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "forms-w9-16",
+      "question": "What is the standard deduction amount on Form 1040 for tax year 2024?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 that is Form 1040 (income tax return), a different form not in this corpus; Form W-9 has no standard deduction.",
+      "_answer_type": "counterfactual",
+      "_note": "Out-of-corpus: tax-form confabulation trap (different IRS form). HARD GATE.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "forms-w9-17",
+      "question": "What is the annual employee contribution limit for a 401(k) plan?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 retirement contribution limits are unrelated to Form W-9 and not in this corpus.",
+      "_answer_type": "counterfactual",
+      "_note": "Out-of-corpus: tax-adjacent but absent. HARD GATE.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "forms-w9-18",
+      "question": "By what date must an employer file Form W-2 with the Social Security Administration?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 Form W-2 is a different form; its filing deadline is not in Form W-9 or this corpus.",
+      "_answer_type": "counterfactual",
+      "_note": "Out-of-corpus: different form (W-2) confabulation trap. HARD GATE.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    }
+  ],
+  "_resolved_at": "2026-05-25T19:02:23Z"
+}
