@@ -22,17 +22,17 @@
   "scoring": {
     "cer_threshold": 0.03,
     "wer_threshold": 0.08,
-    "structural_f1_threshold": 0.88,
+    "structural_f1_threshold": 0.95,
     "structural_f1_tables_threshold": 0.95
   },
   "measured_baseline_2026_05_25": {
-    "parser": "pymupdf4llm (born-digital route, no OCR) + table-aware <br> fix",
+    "parser": "pymupdf4llm (born-digital) + table-aware <br> fix + misdetected-heading demote",
     "renderer": "LibreOffice 7.3 (source.fodt -> PDF, writer_pdf_Export)",
-    "cer": 0.018,
-    "wer": 0.048,
-    "structural_f1_headings": 0.923,
+    "cer": 0.016,
+    "wer": 0.044,
+    "structural_f1_headings": 1.0,
     "structural_f1_tables": 1.0,
-    "note": "Migrated from HTML->ODT->PDF to a native .fodt with a bordered table (commit pending). The table now parses as a proper GFM table (tables-F1 0.0 -> 1.0) and CER/WER dropped sharply (the old spaced-pipe ground-truth carried formatting noise; ground truth now uses the parser's compact GFM pipe style, content unchanged). Residual: pymupdf4llm mis-detects the short standalone 'Visibility readings...' line before the table as a spurious `## ` heading (caps headings-F1 at 0.923) -- a PyMuPDF heading-misdetection class (cf. the Docling worker's _demote_misdetected_headers), not introduced by this fixture."
+    "note": "Migrated from HTML->ODT->PDF to a native .fodt with a bordered table. The table now parses as a proper GFM table (tables-F1 0.0 -> 1.0) and CER/WER dropped sharply (ground truth uses the parser's compact GFM pipe style, content unchanged). The earlier residual -- pymupdf4llm mis-detecting the short standalone 'Visibility readings...' line as a spurious `## ` heading -- is now FIXED: the PyMuPDF worker's _remap_heading_levels demotes a heading line whose font is body-size-or-smaller AND reads as prose (port of the Docling worker's _demote_misdetected_headers). headings-F1 0.923 -> 1.0; all three structural facets now perfect."
   },
   "measured_baseline_2026_05_24": {
     "parser": "pymupdf4llm (born-digital route, no OCR)",
@@ -42,5 +42,5 @@
     "structural_f1_headings": 0.9231,
     "note": "Superseded by the 2026-05-25 native-.fodt migration. Post heading-level-recovery fix (pymupdf_worker re-derives heading levels from font size). structural-F1 jumped from the pre-fix all-## collapse (forms 0.75, technical-docs 0.33, tidewater 0.615) to near-perfect."
   },
-  "notes": "Synthetic born-digital fixture: a native LibreOffice Flat-ODF (`source.fodt`) rendered to PDF by generate.py \u2014 see CITATION.md for the independence rationale. MIGRATED 2026-05-25 from an HTML->ODT->PDF render whose table flattened (the HTML->ODT filter dropped cell borders, so pymupdf4llm read the header as a spurious `## Date Visibility Notes` heading + rows as flat prose \u2014 tables-F1 0.0). The `.fodt` table has explicit cell borders (like forms/quarterly-uptime-report) and now parses as a proper GFM table (tables-F1 1.0). Heading levels are correct (H1/H2/H3 recovered via the worker's font-size remap). Ground truth uses the parser's compact GFM pipe style so WER measures content/structure, not pipe-spacing (cf. quarterly). Residual: pymupdf4llm mis-detects the short standalone 'Visibility readings...' prose line before the table as a spurious `## ` heading (caps headings-F1 at 0.923) \u2014 a PyMuPDF heading-misdetection class, addressable later by porting the Docling worker's _demote_misdetected_headers. Thresholds are REGRESSION gates calibrated to the 2026-05-25 measured baseline + margin."
+  "notes": "Synthetic born-digital fixture: a native LibreOffice Flat-ODF (`source.fodt`) rendered to PDF by generate.py \u2014 see CITATION.md for the independence rationale. MIGRATED 2026-05-25 from an HTML->ODT->PDF render whose table flattened (the HTML->ODT filter dropped cell borders, so pymupdf4llm read the header as a spurious `## Date Visibility Notes` heading + rows as flat prose \u2014 tables-F1 0.0). The `.fodt` table has explicit cell borders (like forms/quarterly-uptime-report) and now parses as a proper GFM table (tables-F1 1.0). Heading levels are correct (H1/H2/H3 recovered via the worker's font-size remap). Ground truth uses the parser's compact GFM pipe style so WER measures content/structure, not pipe-spacing (cf. quarterly). The short standalone 'Visibility readings...' prose line that pymupdf4llm mis-flagged as a spurious `## ` heading is now demoted to a paragraph by the worker's _remap_heading_levels (body-font + prose heuristic, ported from the Docling worker's _demote_misdetected_headers) \u2014 headings-F1 0.923 -> 1.0. All three structural facets (headings/tables/equations) score 1.0. Thresholds are REGRESSION gates calibrated to the 2026-05-25 measured baseline + margin."
 }

@@ -32,7 +32,7 @@ The following items must be confirmed present and serviceable before the inspect
 
 ## **Observed Conditions** 
 
-## Visibility readings were taken at dawn from the gallery deck. 
+Visibility readings were taken at dawn from the gallery deck. 
 
 | Date| Visibility| Notes|
 |---|---|---|
@@ -41,9 +41,9 @@ The following items must be confirmed present and serviceable before the inspect
 |2026-04-12|Good|Clear horizon, calm sea state.|
 
 [table-rows]
-[Visibility readings were taken at dawn from the gallery deck.] Date=2026-04-10, Visibility=Good, Notes=Light haze offshore, cleared by midday.
-[Visibility readings were taken at dawn from the gallery deck.] Date=2026-04-11, Visibility=Poor, Notes=Dense fog; foghorn engaged for six hours.
-[Visibility readings were taken at dawn from the gallery deck.] Date=2026-04-12, Visibility=Good, Notes=Clear horizon, calm sea state.
+[**Observed Conditions**] Date=2026-04-10, Visibility=Good, Notes=Light haze offshore, cleared by midday.
+[**Observed Conditions**] Date=2026-04-11, Visibility=Poor, Notes=Dense fog; foghorn engaged for six hours.
+[**Observed Conditions**] Date=2026-04-12, Visibility=Good, Notes=Clear horizon, calm sea state.
 [/table-rows]
 
 

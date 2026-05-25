@@ -223,12 +223,41 @@ def _norm_heading(text: str) -> str:
     return " ".join(_HEADING_EMPHASIS_RE.sub("", text).split()).lower()
 
 
+# pymupdf4llm sometimes over-flags a body sentence as a heading (e.g. a short
+# standalone line just before a table). `_remap_heading_levels` only demotes
+# one whose font size is also body-size-or-smaller, so this prose check is a
+# conservative second guard. Ported from the Docling worker's
+# `_looks_like_prose_heading` (same thresholds).
+_TERMINAL_PUNCT = (".", "!", "?")
+_MAX_HEADING_WORDS = 15  # longer than this reads as prose regardless of punctuation
+_MIN_PROSE_WORDS = 4  # a terminal-punct line needs ≥ this many words to be prose
+
+
+def _looks_like_prose_heading(heading_text: str) -> bool:
+    """True if a heading line's text reads as a body sentence, not a title."""
+    t = _HEADING_EMPHASIS_RE.sub("", heading_text).strip()
+    if not t:
+        return False
+    words = t.split()
+    if len(words) > _MAX_HEADING_WORDS:
+        return True
+    return len(words) >= _MIN_PROSE_WORDS and t[-1] in _TERMINAL_PUNCT
+
+
 def _remap_heading_levels(page_md: str, page: Any, size_to_level: dict[int, int]) -> str:
     """Rewrite the level of each heading line in `page_md` from the real
-    font size of the matching span on `page`. Only lines pymupdf4llm
-    already marked as headings are touched (we never add/remove
-    headings); lines inside fenced code blocks are skipped; a heading
-    with no size match is left exactly as emitted."""
+    font size of the matching span on `page`, and DEMOTE misdetected
+    headings to paragraphs.
+
+    Only lines pymupdf4llm already marked as headings are touched; fenced
+    code blocks are skipped. A heading line is:
+      - re-levelled when its span font size is a heading tier;
+      - DEMOTED to a paragraph (prefix stripped) when its span font size is
+        body-size-or-smaller (not a heading tier) AND its text reads as prose
+        — pymupdf4llm over-flagged a body sentence (ported from the Docling
+        worker's `_demote_misdetected_headers`, here gated on real font size);
+      - left exactly as emitted when it matches no span (font unknown →
+        conservative)."""
     if not size_to_level:
         return page_md
 
@@ -252,10 +281,19 @@ def _remap_heading_levels(page_md: str, page: Any, size_to_level: dict[int, int]
             continue
         m = _HEADING_LINE_RE.match(line)
         if m is not None and not in_fence:
-            key = _norm_heading(line[len(m.group(1)) :])
-            level = size_to_level.get(text_size.get(key, -1))
+            text = line[len(m.group(1)) :]
+            key = _norm_heading(text)
+            matched_size = text_size.get(key)
+            level = size_to_level.get(matched_size) if matched_size is not None else None
             if level is not None:
-                out.append("#" * level + line[len(m.group(1)) :])
+                out.append("#" * level + text)
+                continue
+            # Demote: matched a real span whose font is body-size-or-smaller
+            # (not a heading tier) AND reads as prose → strip the prefix so the
+            # chunker + heading_path see a paragraph. No span match → keep it
+            # (can't confirm the font, so stay conservative).
+            if matched_size is not None and _looks_like_prose_heading(text):
+                out.append(text.lstrip())
                 continue
         out.append(line)
     return "\n".join(out)

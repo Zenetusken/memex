@@ -12,6 +12,7 @@ from typing import Any
 
 from memex.parse.pymupdf_worker import (
     _heading_size_to_level,
+    _looks_like_prose_heading,
     _normalise_breaks,
     _remap_heading_levels,
 )
@@ -116,3 +117,52 @@ def test_normalise_breaks_table_survives_intact() -> None:
         "Incidents",
         "Notes",
     ]
+
+
+# --- demotion of misdetected headings (ported from the Docling worker) ------
+
+
+def test_looks_like_prose_heading() -> None:
+    assert _looks_like_prose_heading("This is a body sentence that ends here.")  # >=4 words + .
+    assert _looks_like_prose_heading(
+        "one two three four five six seven eight nine ten "
+        "eleven twelve thirteen fourteen fifteen sixteen"
+    )  # >15 words
+    assert not _looks_like_prose_heading("Overview")  # one word
+    assert not _looks_like_prose_heading("Service Metrics")  # no terminal punctuation
+    assert not _looks_like_prose_heading("Item 1.")  # ends "." but < 4 words (short label)
+    assert not _looks_like_prose_heading("**Recommendations**")  # emphasis stripped → one word
+
+
+def test_remap_demotes_body_font_prose_heading() -> None:
+    # pymupdf4llm over-flagged a body sentence as a heading; its font is body
+    # size (11, not the 22 heading tier) AND it reads as prose → demote.
+    page = _FakePage(
+        [
+            ("Real Title", 22.0),
+            ("Visibility readings were taken at dawn from the gallery deck.", 11.0),
+        ]
+    )
+    md = "# Real Title\n\n## Visibility readings were taken at dawn from the gallery deck.\n"
+    out = _remap_heading_levels(md, page, {22: 1})
+    assert out.split("\n")[0] == "# Real Title"  # real heading kept + re-levelled
+    vis = next(ln for ln in out.split("\n") if "Visibility" in ln)
+    assert not vis.startswith("#")  # demoted to a plain paragraph
+    assert vis == "Visibility readings were taken at dawn from the gallery deck."
+
+
+def test_remap_keeps_short_body_font_heading() -> None:
+    # A body-font flagged heading that is NOT prose-like stays a heading
+    # (conservative — a short label like "Summary" isn't a sentence).
+    page = _FakePage([("Summary", 11.0)])
+    out = _remap_heading_levels("## Summary\n", page, {22: 1})
+    assert out.strip() == "## Summary"
+
+
+def test_remap_keeps_prose_heading_without_span_match() -> None:
+    # A prose-like heading whose text matches no span (font unknown) is left
+    # exactly as emitted — we can't confirm it's body-size, so stay safe.
+    page = _FakePage([("Totally different text", 22.0)])
+    md = "## A sentence that has no matching span but ends with a period.\n"
+    out = _remap_heading_levels(md, page, {22: 1})
+    assert out.strip().startswith("## ")
