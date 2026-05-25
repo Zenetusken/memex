@@ -1,50 +1,59 @@
 {% if error %}
-<div class="p-4 bg-red-950/30 border border-red-800 rounded-md">
-  <h3 class="font-semibold text-red-200">Error</h3>
-  <p class="text-sm text-red-300 mt-1">{{ error }}</p>
+<div class="ans-flash ans-flash-error" role="alert">
+  <p class="ans-eyebrow">Error</p>
+  <p class="ans-flash-msg">{{ error }}</p>
 </div>
 {% elif response.answered %}
-<article>
-  <h3 class="text-lg font-semibold mb-3">{{ response.summary }}</h3>
-  <ul class="space-y-3">
-    {% for claim in response.claims %}
-    <li class="p-3 bg-zinc-900 border border-zinc-800 rounded-md">
-      <p class="text-zinc-100">{{ claim.claim }}</p>
-      <p class="mt-2 text-xs text-zinc-500 flex items-center gap-3">
-        <span>chunk <code class="text-zinc-300">{{ claim.source_chunk_id }}</code></span>
-        <span class="px-2 py-0.5 rounded
-          {% if claim.confidence == 'high' %}bg-emerald-950/40 text-emerald-300
-          {% elif claim.confidence == 'medium' %}bg-yellow-950/40 text-yellow-300
-          {% else %}bg-zinc-800 text-zinc-400{% endif %}">{{ claim.confidence }}</span>
-      </p>
-    </li>
-    {% endfor %}
-  </ul>
+<article class="ans">
+  <section>
+    <p class="ans-eyebrow">Answer</p>
+    <p class="ans-answer">{{ response.summary }}</p>
+  </section>
+
+  {% if response.claims %}
+  <section>
+    <p class="ans-eyebrow">Grounded claims <span class="count">· {{ response.claims|length }}</span></p>
+    <ul class="claim-list">
+      {% for claim in response.claims %}
+      <li class="claim">
+        <p class="claim-text">{{ claim.claim }}</p>
+        <p class="claim-meta">
+          <span class="conf conf-{{ claim.confidence }}">{{ claim.confidence }} confidence</span>
+          <span class="claim-src">source</span>
+          <code class="chunk-id">{{ claim.source_chunk_id }}</code>
+        </p>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
   {% if response.wikilinks %}
-  <div class="mt-4 pt-3 border-t border-zinc-800">
-    <h4 class="text-xs font-semibold uppercase tracking-wide text-zinc-500 mb-2">Sources</h4>
-    <ul class="space-y-1 text-sm">
+  <section>
+    <p class="ans-eyebrow">Sources</p>
+    <ul class="ans-sources">
       {% for wikilink in response.wikilinks %}
       <li>{{ wikilink | render_wikilink }}</li>
       {% endfor %}
     </ul>
-  </div>
+  </section>
   {% endif %}
 </article>
 {% else %}
-<div class="p-4 bg-amber-950/30 border border-amber-800 rounded-md">
-  <h3 class="font-semibold text-amber-200">Refused</h3>
-  <p class="text-sm text-amber-300 mt-1">{{ response.refusal_reason }}</p>
+<div class="ans-flash ans-flash-refused" role="status">
+  <p class="ans-eyebrow">Refused</p>
+  <p class="ans-flash-msg">{{ response.refusal_reason }}</p>
   {% if response.used_chunks %}
-  <details class="mt-3">
-    <summary class="text-xs text-amber-400 cursor-pointer">
-      Show retrieved chunks ({{ response.used_chunks|length }})
-    </summary>
-    <ul class="mt-2 space-y-2 text-sm text-zinc-400">
+  <details class="ans-evidence">
+    <summary>Retrieved chunks ({{ response.used_chunks|length }})</summary>
+    <ul class="claim-list" style="margin-top:0.6rem">
       {% for chunk in response.used_chunks %}
-      <li class="p-2 bg-zinc-900 rounded border border-zinc-800">
-        <p class="text-xs text-zinc-500 mb-1">{{ chunk.document_title }} · chunk {{ chunk.chunk_id }}</p>
-        <p>{{ chunk.text|truncate(280) }}</p>
+      <li class="claim">
+        <p class="claim-meta">
+          <span class="claim-src">{{ chunk.document_title }}</span>
+          <code class="chunk-id">{{ chunk.chunk_id }}</code>
+        </p>
+        <p class="claim-text" style="margin-top:0.35rem">{{ chunk.text|truncate(280) }}</p>
       </li>
       {% endfor %}
     </ul>
@@ -54,10 +63,10 @@
 {% endif %}
 
 {% if response %}
-<p class="mt-4 text-xs text-zinc-600">
-  correlation_id <code>{{ response.correlation_id }}</code>
-  · tokens {{ response.tokens_used }}
-  · nodes {{ response.nodes_traversed }}
-  {% if response.regenerate_attempts %}· regenerated {{ response.regenerate_attempts }}×{% endif %}
+<p class="ans-footer">
+  <span>correlation_id <code>{{ response.correlation_id }}</code></span>
+  <span class="tabular">tokens {{ response.tokens_used }}</span>
+  <span class="tabular">nodes {{ response.nodes_traversed }}</span>
+  {% if response.regenerate_attempts %}<span class="tabular">regenerated {{ response.regenerate_attempts }}×</span>{% endif %}
 </p>
 {% endif %}

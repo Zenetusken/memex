@@ -13,7 +13,8 @@ tests/eval-data/
 ├── nist-zero-trust/      ← NIST SP 800-207 security standard (18 q; 2026-05-25)
 ├── scientific-gte/       ← GTE paper arXiv 2308.03281 (18 q; 2026-05-25)
 ├── technical-guidelines/ ← Memex docs/GUIDELINES.md, rendered (18 q; 2026-05-25)
-└── forms-w9/             ← IRS Form W-9 (18 q; 2026-05-25)
+├── forms-w9/             ← IRS Form W-9 (18 q; 2026-05-25)
+└── cr350-diagrams/       ← VLM-transcribed network/security DIAGRAMS, CR350 Cours 6 (17 q; 2026-05-25; first corpus to exercise the VLM escalation path)
 ```
 
 Each subdirectory holds a `queries.json` (+ optional notes). Source PDFs are

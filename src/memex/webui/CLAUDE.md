@@ -38,6 +38,17 @@ The document view renders the canonical markdown body inside a `<pre>` for fidel
 
 `_walk_headings` is the single source of truth: chart-block-aware (skips inert `# H1` labels inside `[chart-extracted]`), inline-markdown-cleaned (`## [Tips:](url)` → "Tips:" via `clean_heading_text`), and **slug-deduplicated** (`tips`, `tips-1`, `tips-2` — duplicate `id=` is invalid HTML + breaks fragment nav). Both the anchor-span IDs and the TOC hrefs consume it, so they stay in lockstep. TOC gated to `3 ≤ headings ≤ 50` (below = not worth navigating; above = PDF-parse heading-noise, e.g. the 10-K's 501 H2s). When extending: keep slug logic in `_walk_headings`, never recompute it ad-hoc.
 
+## Answer panel (`_answer.html` + `static/style.css`, 2026-05-25)
+
+The `/ask` result (`_answer.html`) renders three **labelled zones** so the reader can tell the parts apart (an earlier version stacked the summary as an `<h3>` above unlabelled claim boxes that often restated it — users couldn't tell answer from citation):
+
+1. **Answer** — `response.summary`, the prominent synthesized answer. A blue left-rule (`.ans-answer`, `border-left: 2px blue-600`) marks it as THE result, reusing the single action accent (focus rings / wikilinks / anchor pulse share it).
+2. **Grounded claims · N** — each `claim` as a `.claim` card: the assertion + a meta row with the **confidence chip** (`.conf-{high,medium,low}`, colour **and** label per WCAG 1.4.1 — never colour alone), a "source" label, and the monospace `.chunk-id`.
+3. **Sources** — `response.wikilinks` via the `render_wikilink` filter (omitted on refusal — `wikilinks` defaults to `[]`).
+Plus the **audit footer** (`.ans-footer`): monospace `correlation_id` + `.tabular` token/node counts — the quiet audit trail the brand wants users to expect. Refusal/error reuse `.ans-flash{,-refused,-error}` with the same eyebrow labels; refusal keeps the collapsible `.ans-evidence` chunk disclosure.
+
+All styling is **semantic classes in `style.css`** (`.ans-*`, `.claim-*`, `.conf-*`), NOT Tailwind utilities — so the answer component stays cohesive and adds nothing to the vendored `tailwind.css` subset. Eyebrow labels (`.ans-eyebrow`) mirror `.toc-sidebar-title` / `.pane-header`. Tests in `test_webui.py` assert on the rendered TEXT (summary, claim, "Sources", wikilink href, "Refused", correlation_id) — keep those strings present when restyling.
+
 ## Adding a route
 
 1. Define it in `webui/app.py:create_app` (the factory pattern is what `test_webui.py` depends on).

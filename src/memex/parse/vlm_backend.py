@@ -14,6 +14,7 @@ functions so the rest of the package stays importable without the
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -44,6 +45,31 @@ _PROMPT = (
     "Output ONLY Markdown for the page contents — no preface, "
     "no commentary, no closing remarks."
 )
+# NB: a more forceful "you MUST transcribe / NEVER emit an image link"
+# rewrite was tried 2026-05-25 and REVERTED — it didn't rescue the one
+# diagram the model punts on (page-26 zoning) and regressed the others
+# (bulleted the firewall chains, code-fenced + mis-hyphenated the 802.1X
+# sequence "EAPOL"→"EAPO-L"). This wording + the `_strip_image_links`
+# safety net below is the validated combination. The model still
+# occasionally punts a hard spatial diagram; the strip removes the
+# resulting broken `![...]()` so it never reaches the vault.
+
+# The VLM transcribes a rendered PAGE image, so any markdown image link it
+# emits points at a file that does not exist — pure noise, and a broken
+# link in the rendered doc. The prompt forbids them; this is the
+# deterministic safety net (the model still occasionally punts a hard
+# diagram with `![...](...)` rather than describing it).
+_IMAGE_LINK_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+
+
+def _strip_image_links(markdown: str) -> str:
+    """Remove spurious markdown image links from VLM output, then collapse
+    the blank line a removed standalone-image line leaves behind."""
+    cleaned = _IMAGE_LINK_RE.sub("", markdown)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
 # A single page's transcribed Markdown is typically 500–800 tokens; 1024
 # leaves headroom for table/code-heavy pages and defends against runaway
 # generation. Tuned per the CUDA audit.
@@ -148,7 +174,7 @@ def _vlm_transcribe_sync(
     # Strip the prompt prefix from the decode.
     generated = outputs[:, inputs["input_ids"].shape[1] :]
     decoded: list[str] = processor.batch_decode(generated, skip_special_tokens=True)
-    return (decoded[0] if decoded else "").strip()
+    return _strip_image_links(decoded[0] if decoded else "")
 
 
 async def _convert_with_handle(
