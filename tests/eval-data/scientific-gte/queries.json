@@ -1,0 +1,243 @@
+{
+  "_description": "Hand-labelled answer-quality eval corpus for the GTE paper (Li et al., 'Towards General Text Embeddings with Multi-stage Contrastive Learning', arXiv 2308.03281). New category for the P0 multi-category extension: a SCIENTIFIC PAPER (2-column NLP/ML, equations, citation-dense prose, benchmark tables) \u2014 the equation/multi-column/table retrieval profile no existing corpus exercises. Thematically apt: GTE is the embedder Memex A/B-tested (see ROADMAP P2.5).",
+  "_doc_id": "d646b885-gte-2308-03281",
+  "_query_count": 18,
+  "_mix": {
+    "ans": 12,
+    "ref": 6,
+    "ref_in_corpus_unanswerable": 3,
+    "ref_out_of_corpus": 3
+  },
+  "_labelling_rule": "ANS queries: `_anchor_phrase` is a distinctive verbatim substring (mostly prose; table facts via the `[table-rows]` linearization) from the chunk holding the answer; `scripts/extend_corpus.py resolve` populates `relevant_chunk_ids` via FTS. REF queries: `should_refuse=true`, `relevant_chunk_ids=[]`. Refusals split into in-corpus-unanswerable (topic present, specific value absent) and out-of-corpus (absent from the entire vault).",
+  "_created": "2026-05-25",
+  "_purpose": "Extend the eval matrix to the scientific-paper category so the queued P2.x A/Bs (reranker, VLM, chunker-size) get a 2-column / equation / benchmark-table signal. HARD GATES: refusal_rate_on_counterfactuals == 1.0, zero hallucinations.",
+  "_source_note": "arXiv 2308.03281 (Aug 2023), license CC BY-NC-ND 4.0 (Creative Commons; attribution: Li, Zhang, Zhang, Long, Xie, Zhang \u2014 Alibaba Group). Used as LOCAL eval material only (non-commercial research; no derivative redistributed) \u2014 the PDF is not committed to the repo; only this query set ships (anchor phrases are <15-word excerpts).",
+  "_baseline_2026_05_25": {
+    "stack": "Qwen3-8B-AWQ orchestrator + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3 (cross_encoder, bf16), top_k=5",
+    "doc_id": "d646b885-gte-2308-03281",
+    "index": "48 chunks, 7 tables, PyMuPDF parse (born-digital, 2-column reflow), 1/48 enrich chunk_failure",
+    "answered_count": 10,
+    "answerable_count": 12,
+    "refused_count": 8,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "hallucinations": 0,
+    "mean_citation_precision": 0.889,
+    "mean_citation_precision_answered_only": 0.8,
+    "false_refusals": ["scientific-gte-04", "scientific-gte-05"],
+    "notes": "HARD GATES hold — refusal_cf=1.0 (incl. cross-paper traps: C-MTEB belongs to BGE/C-Pack, GSM8K is a generative benchmark, text-embedding-3 postdates the paper), 0 hallucinations. 2 false-refusals (τ=0.01, ~800M pairs) are retrieval misses on §3.4 chunks. cite_prec_answered_only=0.80 AFTER a multi-chunk relabel per the eval-data README (raised from 0.60: 110M/A100 facts repeat across abstract/intro/Table 3); the 2 residual cp=0.0 (gte-03 InfoNCE objective, gte-10 MTEB 56/7 counts) are irreducible sibling-chunk artifacts where the concept spans several §3.4/§4.3 chunks — grounded correct answers, not fabrication. 10/12 ANS leaves headroom for the P2.1 reranker A/B; the 2-column scientific-paper retrieval profile is new to the matrix."
+  },
+  "queries": [
+    {
+      "qid": "scientific-gte-01",
+      "question": "How many parameters does the GTE-base model have?",
+      "_anchor_phrase": "modest parameter count of 110M",
+      "_expected_answer": "110M parameters (BERT-base initialized).",
+      "_answer_type": "single_fact",
+      "_note": "GTE-base = 110M, stated in the abstract, intro ('our 110M'), and Table 3 — multi-chunk label per the eval-data README rule.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "d646b885-gte-2308-03281#dc548a3356",
+        "d646b885-gte-2308-03281#ecf9f7c85f",
+        "d646b885-gte-2308-03281#5c46275389",
+        "d646b885-gte-2308-03281#9aabe98345"
+      ]
+    },
+    {
+      "qid": "scientific-gte-02",
+      "question": "What encoder architecture does the GTE embedding model use?",
+      "_anchor_phrase": "vanilla dual-encoder architecture with mean pooling",
+      "_expected_answer": "A vanilla dual-encoder: a deep Transformer encoder (BERT-initialized) with mean pooling over the contextualized token representations.",
+      "_answer_type": "single_fact",
+      "_note": "Section 3.1 Model Architecture.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "d646b885-gte-2308-03281#f49487a7de"
+      ]
+    },
+    {
+      "qid": "scientific-gte-03",
+      "question": "What contrastive learning objective does GTE build on?",
+      "_anchor_phrase": "the InfoNCE loss",
+      "_expected_answer": "The InfoNCE loss (extended into an improved bidirectional contrastive loss using in-batch queries and documents as negatives).",
+      "_answer_type": "single_fact",
+      "_note": "Section 3.1 names InfoNCE; Section 3.4 describes the improved contrastive loss built on it — both ground the answer.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "d646b885-gte-2308-03281#f49487a7de",
+        "d646b885-gte-2308-03281#d305269abe"
+      ]
+    },
+    {
+      "qid": "scientific-gte-04",
+      "question": "What temperature value does GTE fix in its contrastive loss?",
+      "_anchor_phrase": "is fixed to 0.01 in this work",
+      "_expected_answer": "The temperature \u03c4 is fixed to 0.01.",
+      "_answer_type": "single_fact",
+      "_note": "Section 3.4. Distinctive numeric.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "d646b885-gte-2308-03281#d305269abe"
+      ]
+    },
+    {
+      "qid": "scientific-gte-05",
+      "question": "Approximately how many text pairs were used for GTE's unsupervised pre-training?",
+      "_anchor_phrase": "800M text pairs",
+      "_expected_answer": "About 800M text pairs (Table 1 totals 788M across 33 datasets).",
+      "_answer_type": "single_fact",
+      "_note": "Section 3.2.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "d646b885-gte-2308-03281#2ed5e4227e"
+      ]
+    },
+    {
+      "qid": "scientific-gte-06",
+      "question": "Approximately how many text pairs were used for GTE's supervised fine-tuning?",
+      "_anchor_phrase": "3M pairs for fine-tuning",
+      "_expected_answer": "About 3M pairs.",
+      "_answer_type": "single_fact",
+      "_note": "Section 3.3.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "d646b885-gte-2308-03281#da19f8247e"
+      ]
+    },
+    {
+      "qid": "scientific-gte-07",
+      "question": "What are the two training stages of GTE?",
+      "_anchor_phrase": "two stages: unsupervised pre-training and supervised fine-tuning",
+      "_expected_answer": "Unsupervised contrastive pre-training, then supervised contrastive fine-tuning.",
+      "_answer_type": "single_fact",
+      "_note": "Section 3 / 3.4.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "d646b885-gte-2308-03281#48909a587a"
+      ]
+    },
+    {
+      "qid": "scientific-gte-08",
+      "question": "How does GTE sample data batches across sources of different sizes during pre-training?",
+      "_anchor_phrase": "multinomial distribution to sample data batches",
+      "_expected_answer": "With a multinomial distribution over sources weighted by size (\u03b1 = 0.5), and all instances in a batch drawn from the same task.",
+      "_answer_type": "single_fact",
+      "_note": "Section 3.4 Data Sampling. Expected answer includes \u03b1=0.5.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "d646b885-gte-2308-03281#84cbeb0271"
+      ]
+    },
+    {
+      "qid": "scientific-gte-09",
+      "question": "What GPUs was GTE trained on?",
+      "_anchor_phrase": "8 NVIDIA A100 GPUs with 80GB memory",
+      "_expected_answer": "Up to 8 NVIDIA A100 GPUs with 80GB memory (evaluation on up to 8 V100 32GB).",
+      "_answer_type": "single_fact",
+      "_note": "Section 3.4 prose ('8 A100 80GB') + Table 3 GPUs column (GTE-large=8) both ground the GPU answer.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "d646b885-gte-2308-03281#5c46275389",
+        "d646b885-gte-2308-03281#9aabe98345"
+      ]
+    },
+    {
+      "qid": "scientific-gte-10",
+      "question": "How many datasets and task categories does the MTEB English benchmark used in the GTE paper cover?",
+      "_anchor_phrase": "56 English datasets across seven distinct tasks",
+      "_expected_answer": "56 English datasets across 7 task categories (classification, clustering, pairwise classification, reranking, retrieval, STS, summarization).",
+      "_answer_type": "single_fact",
+      "_note": "Section 4.3.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "d646b885-gte-2308-03281#c872ae30e3"
+      ]
+    },
+    {
+      "qid": "scientific-gte-11",
+      "question": "Which base language model is GTE-large initialized from?",
+      "_anchor_phrase": "bert-large-uncased",
+      "_expected_answer": "bert-large-uncased (330M params); GTE-base uses bert-base-uncased and GTE-small uses MiniLM.",
+      "_answer_type": "single_fact",
+      "_note": "Table 3 (linearized [table-rows]).",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "d646b885-gte-2308-03281#9aabe98345",
+        "d646b885-gte-2308-03281#5c46275389"
+      ]
+    },
+    {
+      "qid": "scientific-gte-12",
+      "question": "How many programming languages does the CodeSearchNet benchmark used by GTE cover?",
+      "_anchor_phrase": "encompasses six programming languages",
+      "_expected_answer": "Six programming languages (GTE handles code as text without per-language fine-tuning).",
+      "_answer_type": "single_fact",
+      "_note": "Intro / code-search discussion.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "d646b885-gte-2308-03281#34e9ac1c96",
+        "d646b885-gte-2308-03281#ecf9f7c85f"
+      ]
+    },
+    {
+      "qid": "scientific-gte-13",
+      "question": "What was the total monetary cost (in dollars) of training the GTE models?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 the paper reports GPU types/counts and step counts but no monetary training cost.",
+      "_answer_type": "counterfactual",
+      "_note": "In-corpus-unanswerable: compute is described, no $ figure. HARD GATE.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "scientific-gte-14",
+      "question": "How many wall-clock days did it take to train GTE-large?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 the paper gives 50,000 pre-training steps and GPU counts but no wall-clock training duration in days.",
+      "_answer_type": "counterfactual",
+      "_note": "In-corpus-unanswerable: steps/GPUs given, no wall-clock time. HARD GATE.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "scientific-gte-15",
+      "question": "What is GTE's inference latency in milliseconds per query?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 the paper uses parameter count as a proxy for inference speed but reports no millisecond latency.",
+      "_answer_type": "counterfactual",
+      "_note": "In-corpus-unanswerable: speed discussed via params, no ms figure. HARD GATE.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "scientific-gte-16",
+      "question": "What embedding dimension does OpenAI's text-embedding-3-large model use?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 text-embedding-3-large is a later OpenAI model not discussed in this 2023 paper (which only notes outperforming OpenAI's then-current API).",
+      "_answer_type": "counterfactual",
+      "_note": "Out-of-corpus: a newer external model not in the paper or vault. HARD GATE.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "scientific-gte-17",
+      "question": "What accuracy does GTE achieve on the GSM8K math-reasoning benchmark?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 GTE is a text-embedding model; GSM8K (math reasoning for generative LLMs) is not evaluated in the paper.",
+      "_answer_type": "counterfactual",
+      "_note": "Out-of-corpus: wrong benchmark/model-type trap. HARD GATE.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "scientific-gte-18",
+      "question": "What score does GTE report on the Chinese C-MTEB benchmark?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 this English GTE paper evaluates on English MTEB/BEIR; C-MTEB belongs to the separate C-Pack/BGE work, which is not in the vault.",
+      "_answer_type": "counterfactual",
+      "_note": "Out-of-corpus: cross-paper confabulation trap (C-MTEB is the BGE/C-Pack paper). HARD GATE.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    }
+  ],
+  "_resolved_at": "2026-05-25T17:26:35Z"
+}
