@@ -33,9 +33,7 @@ def tmp_vault(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def settings(
-    tmp_vault: Path, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[MemexSettings]:
+def settings(tmp_vault: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[MemexSettings]:
     monkeypatch.setenv("MEMEX_VAULT_PATH", str(tmp_vault))
     monkeypatch.setenv("MEMEX_OBSERVABILITY__LANGFUSE_ENABLED", "false")
     s = MemexSettings()  # type: ignore[call-arg]
@@ -137,9 +135,7 @@ async def test_watcher_confirm_publishes_to_bus_when_configured(
     bus = EventBus(db_path=None, queue_size=16).start()
     set_bus(bus)
     try:
-        ref = await ingest_markdown_passthrough(
-            "# Bus test\n\nbefore.\n", source_stem="bus_test"
-        )
+        ref = await ingest_markdown_passthrough("# Bus test\n\nbefore.\n", source_stem="bus_test")
         md_path = settings.vault_path / "documents" / f"{ref.doc_id}.md"
         # Make sure _confirm_user_edit will surface a notice.
         with md_path.open("a", encoding="utf-8") as f:
@@ -275,16 +271,16 @@ async def test_docling_worker_subprocess_success_round_trips(
 
     ok_script = tmp_path / "ok.py"
     ok_script.write_text(
-        'import json, sys\n'
-        'payload = {\n'
+        "import json, sys\n"
+        "payload = {\n"
         '    "markdown": "# Faked\\n\\nbody.\\n",\n'
         '    "pages": [{"page": 1, "markdown": "# Faked", "confidence": 0.92}],\n'
         '    "docling_version": "fake-1.0",\n'
         '    "figure_count": 0,\n'
         '    "table_count": 0,\n'
         '    "equation_count": 0,\n'
-        '}\n'
-        'json.dump(payload, sys.stdout)\n',
+        "}\n"
+        "json.dump(payload, sys.stdout)\n",
         encoding="utf-8",
     )
 
@@ -296,9 +292,7 @@ async def test_docling_worker_subprocess_success_round_trips(
         new_args = (sys.executable, str(ok_script), args[-1])
         return await real_spawn(*new_args, **kwargs)
 
-    monkeypatch.setattr(
-        backend.asyncio, "create_subprocess_exec", _spawn
-    )
+    monkeypatch.setattr(backend.asyncio, "create_subprocess_exec", _spawn)
 
     source = tmp_path / "source.pdf"
     source.write_bytes(b"%PDF-1.7\n%%EOF\n")
@@ -327,8 +321,8 @@ async def test_docling_worker_figures_metadata_roundtrips(
 
     ok_script = tmp_path / "ok_with_figures.py"
     ok_script.write_text(
-        'import json, sys\n'
-        'payload = {\n'
+        "import json, sys\n"
+        "payload = {\n"
         '    "markdown": "# Doc\\n\\n<!-- image -->\\n",\n'
         '    "pages": [{"page": 1, "markdown": "# Doc", "confidence": 0.9}],\n'
         '    "docling_version": "fake-2.0",\n'
@@ -340,9 +334,9 @@ async def test_docling_worker_figures_metadata_roundtrips(
         '         "caption": "Figure 1: Chart"},\n'
         '        {"page_no": 3, "bbox": [50.5, 60.0, 200.0, 150.0],\n'
         '         "caption": None},\n'
-        '    ],\n'
-        '}\n'
-        'json.dump(payload, sys.stdout)\n',
+        "    ],\n"
+        "}\n"
+        "json.dump(payload, sys.stdout)\n",
         encoding="utf-8",
     )
 
@@ -354,9 +348,7 @@ async def test_docling_worker_figures_metadata_roundtrips(
         new_args = (sys.executable, str(ok_script), args[-1])
         return await real_spawn(*new_args, **kwargs)
 
-    monkeypatch.setattr(
-        backend.asyncio, "create_subprocess_exec", _spawn
-    )
+    monkeypatch.setattr(backend.asyncio, "create_subprocess_exec", _spawn)
 
     source = tmp_path / "source.pdf"
     source.write_bytes(b"%PDF-1.7\n%%EOF\n")

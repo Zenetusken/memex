@@ -39,9 +39,7 @@ class ModelSettings(BaseModel):
     # path on Ada (see ADR-0001 Revisit + ADR-0006). Default matches the
     # `Qwen/Qwen3-8B-AWQ` model id above. The Q*_K_M variants are kept in
     # the literal for users running gguf-via-vLLM experimentally.
-    orchestrator_quantization: Literal[
-        "AWQ", "GPTQ", "Q4_K_M", "Q5_K_M", "Q8_0"
-    ] = "AWQ"
+    orchestrator_quantization: Literal["AWQ", "GPTQ", "Q4_K_M", "Q5_K_M", "Q8_0"] = "AWQ"
     # Default VLM is the AWQ-Int4 build that fits 12 GB on the reference
     # rig. Qwen3-VL-8B is the eval-gated successor (see ADR-0001 Revisit);
     # swap the string + adjust vlm_quantization in tandem.
@@ -213,18 +211,14 @@ class ParseSettings(BaseModel):
     # query outcome for that deck. Users who want more aggressive
     # OCR (academic docs with figure-embedded text, technical
     # diagrams with critical labels) can lower to 0.20.
-    pymupdf_mixed_content_image_area_threshold: float = Field(
-        default=0.35, ge=0.0, le=1.0
-    )
+    pymupdf_mixed_content_image_area_threshold: float = Field(default=0.35, ge=0.0, le=1.0)
     # Minimum fraction of pages that must individually be image-heavy
     # (>3 images per page) for the mixed-content classification to
     # fire. 0.30 = 30% of pages must independently flag image-heavy
     # before we force-OCR. Both gates must pass (AND) — protects
     # against false-positives on text docs with a single front-cover
     # image, and on decorative-heavy decks whose image-text is noise.
-    pymupdf_mixed_content_min_image_heavy_pages: float = Field(
-        default=0.30, ge=0.0, le=1.0
-    )
+    pymupdf_mixed_content_min_image_heavy_pages: float = Field(default=0.30, ge=0.0, le=1.0)
     # Slide-deck override (Tier 1.5 in the classifier). When the
     # document's average page aspect ratio is at or above this
     # threshold AND chars-per-page is below the companion threshold,
@@ -236,9 +230,7 @@ class ParseSettings(BaseModel):
     # GTC 2024 CUDA deck: legitimate answer rate 4/7 → 6/7 (+50%).
     # Reference values: portrait letter ≈ 0.77; 4:3 slides ≈ 1.33;
     # 16:9 slides ≈ 1.78. 1.3 is the floor catching both 4:3 and 16:9.
-    pymupdf_slide_deck_aspect_threshold: float = Field(
-        default=1.3, ge=1.0, le=3.0
-    )
+    pymupdf_slide_deck_aspect_threshold: float = Field(default=1.3, ge=1.0, le=3.0)
     # Companion to pymupdf_slide_deck_aspect_threshold. When the
     # document's average chars-per-page is below this value AND the
     # aspect threshold is met, the document is classified as a slide
@@ -256,9 +248,7 @@ class ParseSettings(BaseModel):
     # Without this gate, PyMuPDF emits `[chart-text]` blocks of axis
     # labels interleaved with body prose; chart-OCR over Docling
     # figures handles the same content as structured tables.
-    pymupdf_slide_deck_chart_heavy_image_area_threshold: float = Field(
-        default=0.20, ge=0.0, le=1.0
-    )
+    pymupdf_slide_deck_chart_heavy_image_area_threshold: float = Field(default=0.20, ge=0.0, le=1.0)
     pymupdf_timeout_s: int = Field(default=120, ge=5)
     pymupdf_crash_threshold: int = Field(default=5, ge=1)
     # Network-egress sandbox for the PyMuPDF worker. Symmetric with
@@ -337,9 +327,7 @@ class ObservabilitySettings(BaseModel):
         config load rather than at first model call, so misconfiguration
         is a startup failure with a clear message.
         """
-        if self.langfuse_enabled and (
-            not self.langfuse_public_key or not self.langfuse_secret_key
-        ):
+        if self.langfuse_enabled and (not self.langfuse_public_key or not self.langfuse_secret_key):
             raise ValueError(
                 "langfuse_enabled=true but the keys are missing. Either\n"
                 "  set MEMEX_OBSERVABILITY__LANGFUSE_PUBLIC_KEY and\n"
@@ -347,8 +335,8 @@ class ObservabilitySettings(BaseModel):
                 "  or write them to ~/.config/memex/config.toml under\n"
                 "    [observability]\n"
                 "    langfuse_enabled = true\n"
-                "    langfuse_public_key = \"pk-…\"\n"
-                "    langfuse_secret_key = \"sk-…\"\n"
+                '    langfuse_public_key = "pk-…"\n'
+                '    langfuse_secret_key = "sk-…"\n'
                 "  or just omit `langfuse_enabled` — it now defaults to\n"
                 "  false (local-first; tracing is opt-in)."
             )
@@ -373,9 +361,7 @@ class MemexSettings(BaseSettings):
     models: ModelSettings = Field(default_factory=ModelSettings)
     hardware: HardwareSettings = Field(default_factory=HardwareSettings)
     inference: InferenceSettings = Field(default_factory=InferenceSettings)
-    observability: ObservabilitySettings = Field(
-        default_factory=ObservabilitySettings
-    )
+    observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     ingest: IngestSettings = Field(default_factory=IngestSettings)
     parse: ParseSettings = Field(default_factory=ParseSettings)
     index: IndexSettings = Field(default_factory=IndexSettings)
@@ -398,9 +384,7 @@ class MemexSettings(BaseSettings):
         try:
             v.mkdir(parents=True, exist_ok=True, mode=0o700)
         except OSError as e:
-            raise ValueError(
-                f"vault_path {v!s} is not creatable: {e}"
-            ) from e
+            raise ValueError(f"vault_path {v!s} is not creatable: {e}") from e
         if not os.access(v, os.W_OK):
             raise ValueError(f"vault_path {v!s} exists but is not writable.")
         return v
@@ -441,8 +425,7 @@ def get_settings() -> MemexSettings:
             "MemexSettings is not initialised",
             context={
                 "fix": (
-                    "call set_settings() from the entry point "
-                    "(typically `cli.bootstrap.bootstrap`)"
+                    "call set_settings() from the entry point (typically `cli.bootstrap.bootstrap`)"
                 ),
             },
         )

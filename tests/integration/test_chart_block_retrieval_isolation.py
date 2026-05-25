@@ -172,9 +172,7 @@ async def test_chart_block_does_not_outrank_prose_for_unrelated_query(
     # in chunk_with_chart contained "2014 | 50"), with chunk_with_
     # chart possibly outranking chunk_prose because of repetition.
     result_ids = [r.chunk_id for r in results]
-    assert "prose-only" in result_ids, (
-        f"prose chunk missing from results: {result_ids}"
-    )
+    assert "prose-only" in result_ids, f"prose chunk missing from results: {result_ids}"
     assert "chart-only" not in result_ids, (
         f"chart-bearing chunk leaked into results for '2014' — the "
         f"strip on FTS upsert is broken. Results: {result_ids}"

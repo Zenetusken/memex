@@ -93,8 +93,9 @@ async def test_write_document_expected_sha_none_skips_cas_check(
     await write_document(vault, _build_doc(vault, doc_id, "v1"))
     # No expected_sha → no raise, second write lands.
     ref2 = await write_document(vault, _build_doc(vault, doc_id, "v2"))
-    assert ref2.markdown_path.read_text(encoding="utf-8").endswith("v2\n") or \
-        "v2" in ref2.markdown_path.read_text(encoding="utf-8")
+    assert ref2.markdown_path.read_text(encoding="utf-8").endswith(
+        "v2\n"
+    ) or "v2" in ref2.markdown_path.read_text(encoding="utf-8")
 
 
 @pytest.mark.asyncio

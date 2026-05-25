@@ -40,10 +40,7 @@ def test_stitch_replaces_each_image_placeholder_with_chart_block() -> None:
     placeholders themselves stay in the text (they're documentation
     of where the image was); the chart data follows immediately.
     """
-    md = (
-        "# Doc\n\n"
-        "First chart:\n\n<!-- image -->\n\nSecond chart:\n\n<!-- image -->\n"
-    )
+    md = "# Doc\n\nFirst chart:\n\n<!-- image -->\n\nSecond chart:\n\n<!-- image -->\n"
     conversion = _conv(md)
     extractions: list[ChartOCROutput | Exception] = [
         ChartOCROutput(
@@ -83,9 +80,7 @@ def test_stitch_skips_extraction_errors() -> None:
     md = "<!-- image -->\n\nMiddle text\n\n<!-- image -->\n"
     conversion = _conv(md)
     extractions: list[ChartOCROutput | Exception] = [
-        ChartOCROutput(
-            page_no=1, bbox=(0.0, 0.0, 100.0, 100.0), markdown="ok-data"
-        ),
+        ChartOCROutput(page_no=1, bbox=(0.0, 0.0, 100.0, 100.0), markdown="ok-data"),
         PDFFigureRenderError("degenerate bbox", context={}),
     ]
 
@@ -107,9 +102,7 @@ def test_stitch_skips_empty_extraction() -> None:
     md = "<!-- image -->\n"
     conversion = _conv(md)
     extractions: list[ChartOCROutput | Exception] = [
-        ChartOCROutput(
-            page_no=1, bbox=(0.0, 0.0, 100.0, 100.0), markdown="   \n  "
-        ),
+        ChartOCROutput(page_no=1, bbox=(0.0, 0.0, 100.0, 100.0), markdown="   \n  "),
     ]
 
     stitched = _stitch_chart_extractions(conversion, extractions)
@@ -129,9 +122,7 @@ def test_stitch_count_mismatch_returns_unchanged() -> None:
     original_markdown = md
     conversion = _conv(md)
     extractions: list[ChartOCROutput | Exception] = [
-        ChartOCROutput(
-            page_no=1, bbox=(0.0, 0.0, 100.0, 100.0), markdown="data"
-        ),
+        ChartOCROutput(page_no=1, bbox=(0.0, 0.0, 100.0, 100.0), markdown="data"),
         # Only one extraction for two placeholders → mismatch.
     ]
 
@@ -159,14 +150,10 @@ def test_stitch_preserves_placeholder_token() -> None:
     md = "<!-- image -->\n"
     conversion = _conv(md)
     extractions: list[ChartOCROutput | Exception] = [
-        ChartOCROutput(
-            page_no=1, bbox=(0.0, 0.0, 100.0, 100.0), markdown="data"
-        ),
+        ChartOCROutput(page_no=1, bbox=(0.0, 0.0, 100.0, 100.0), markdown="data"),
     ]
     stitched = _stitch_chart_extractions(conversion, extractions)
     assert "<!-- image -->" in stitched.markdown
     assert "[chart-extracted]" in stitched.markdown
     # Placeholder comes before the chart-extracted block.
-    assert stitched.markdown.index("<!-- image -->") < stitched.markdown.index(
-        "[chart-extracted]"
-    )
+    assert stitched.markdown.index("<!-- image -->") < stitched.markdown.index("[chart-extracted]")

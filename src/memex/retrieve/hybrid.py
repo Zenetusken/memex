@@ -21,10 +21,9 @@ async def _embed_query(query: str) -> list[float]:
     """Embed `query` with the registry's embedder."""
     registry = get_registry()
     async with registry.use("embedder") as embedder:
+
         def _encode() -> Any:
-            return embedder.encode(
-                [query], normalize_embeddings=True, convert_to_numpy=True
-            )[0]
+            return embedder.encode([query], normalize_embeddings=True, convert_to_numpy=True)[0]
 
         embedding = await asyncio.to_thread(_encode)
     return [float(x) for x in embedding]
@@ -75,12 +74,8 @@ async def hybrid_search_in_docs(
     fstore = await FTSStore.open(settings.vault_path)
     try:
         embedding = await _embed_query(query)
-        dense_task = asyncio.create_task(
-            vstore.search_in_docs(embedding, doc_ids=doc_ids, k=k)
-        )
-        bm25_task = asyncio.create_task(
-            fstore.search_in_docs(query, doc_ids=doc_ids, k=k)
-        )
+        dense_task = asyncio.create_task(vstore.search_in_docs(embedding, doc_ids=doc_ids, k=k))
+        bm25_task = asyncio.create_task(fstore.search_in_docs(query, doc_ids=doc_ids, k=k))
         dense, bm25 = await asyncio.gather(dense_task, bm25_task)
     finally:
         await fstore.close()

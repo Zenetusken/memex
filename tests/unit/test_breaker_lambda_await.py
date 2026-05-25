@@ -94,9 +94,7 @@ async def test_breaker_trips_open_after_threshold_lambda_failures() -> None:
     async def _async_raiser() -> None:
         raise _Boom()
 
-    breaker: CircuitBreaker[None] = CircuitBreaker(
-        name="test", threshold=3
-    )
+    breaker: CircuitBreaker[None] = CircuitBreaker(name="test", threshold=3)
 
     for _ in range(3):
         with pytest.raises(_Boom):
@@ -113,9 +111,7 @@ async def test_breaker_trips_open_after_threshold_lambda_failures() -> None:
 
     with pytest.raises(CircuitBreakerOpen):
         await breaker.run(lambda: _tracker())
-    assert call_count == 0, (
-        "breaker open but still invoked the lambda — short-circuit broken"
-    )
+    assert call_count == 0, "breaker open but still invoked the lambda — short-circuit broken"
 
 
 @pytest.mark.asyncio
@@ -159,9 +155,7 @@ async def test_breaker_is_failure_predicate_filters_lambda_exceptions() -> None:
     async def _raiser(exc: Exception) -> None:
         raise exc
 
-    breaker: CircuitBreaker[None] = CircuitBreaker(
-        name="test", threshold=3
-    )
+    breaker: CircuitBreaker[None] = CircuitBreaker(name="test", threshold=3)
 
     def _is_infra(e: BaseException) -> bool:
         return isinstance(e, _InfraError)

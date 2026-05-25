@@ -115,25 +115,17 @@ async def test_no_graph_available_falls_back_to_flat_retrieval(
     async def _hybrid(query: str, k: int = 50) -> list[Chunk]:
         return list(candidates)
 
-    async def _hybrid_in_docs(
-        query: str, doc_ids: list[str], *, k: int
-    ) -> list[Chunk]:
+    async def _hybrid_in_docs(query: str, doc_ids: list[str], *, k: int) -> list[Chunk]:
         raise AssertionError("expand_graph should not call this when graph is unavailable")
 
     async def _rerank(query: str, cands: list[Chunk], top_k: int = 10) -> list[Chunk]:
         return list(cands[:top_k])
 
     monkeypatch.setattr("memex.agents.answering.hybrid_search", _hybrid)
-    monkeypatch.setattr(
-        "memex.agents.answering.hybrid_search_in_docs", _hybrid_in_docs
-    )
+    monkeypatch.setattr("memex.agents.answering.hybrid_search_in_docs", _hybrid_in_docs)
     monkeypatch.setattr("memex.agents.answering.cross_encoder_rerank", _rerank)
-    monkeypatch.setattr(
-        "memex.agents.answering.render_prompt", _make_fake_render()
-    )
-    monkeypatch.setattr(
-        "memex.agents.answering.complete_structured", _make_fake_llm()
-    )
+    monkeypatch.setattr("memex.agents.answering.render_prompt", _make_fake_render())
+    monkeypatch.setattr("memex.agents.answering.complete_structured", _make_fake_llm())
 
     response = await answer_query("What does the primary doc say?")
 
@@ -163,9 +155,7 @@ async def test_graph_expansion_disabled_skips_lookup(
     async def _hybrid(query: str, k: int = 50) -> list[Chunk]:
         return list(candidates)
 
-    async def _hybrid_in_docs(
-        query: str, doc_ids: list[str], *, k: int
-    ) -> list[Chunk]:
+    async def _hybrid_in_docs(query: str, doc_ids: list[str], *, k: int) -> list[Chunk]:
         raise AssertionError("disabled — should not be called")
 
     async def _rerank(query, cands, top_k=10):  # type: ignore[no-untyped-def]
@@ -175,20 +165,12 @@ async def test_graph_expansion_disabled_skips_lookup(
         raise AssertionError("disabled — graph store should not be opened")
 
     monkeypatch.setattr("memex.agents.answering.hybrid_search", _hybrid)
-    monkeypatch.setattr(
-        "memex.agents.answering.hybrid_search_in_docs", _hybrid_in_docs
-    )
+    monkeypatch.setattr("memex.agents.answering.hybrid_search_in_docs", _hybrid_in_docs)
     monkeypatch.setattr("memex.agents.answering.cross_encoder_rerank", _rerank)
-    monkeypatch.setattr(
-        "memex.agents.answering.render_prompt", _make_fake_render()
-    )
-    monkeypatch.setattr(
-        "memex.agents.answering.complete_structured", _make_fake_llm()
-    )
+    monkeypatch.setattr("memex.agents.answering.render_prompt", _make_fake_render())
+    monkeypatch.setattr("memex.agents.answering.complete_structured", _make_fake_llm())
     # If `expand_graph` reaches the graph-store import, this will raise.
-    monkeypatch.setattr(
-        "memex.index.graph_store.GraphStore.open", _explode_graph
-    )
+    monkeypatch.setattr("memex.index.graph_store.GraphStore.open", _explode_graph)
 
     response = await answer_query(
         "What does the primary doc say?",
@@ -267,9 +249,7 @@ async def test_expand_graph_pulls_chunks_from_neighbour_docs(
 
     in_docs_calls: list[tuple[str, list[str], int]] = []
 
-    async def _hybrid_in_docs(
-        query: str, doc_ids: list[str], *, k: int
-    ) -> list[Chunk]:
+    async def _hybrid_in_docs(query: str, doc_ids: list[str], *, k: int) -> list[Chunk]:
         in_docs_calls.append((query, list(doc_ids), k))
         if "cited" in doc_ids:
             return [cited_chunk]
@@ -280,13 +260,9 @@ async def test_expand_graph_pulls_chunks_from_neighbour_docs(
         return list(cands[:top_k])
 
     monkeypatch.setattr("memex.agents.answering.hybrid_search", _hybrid)
-    monkeypatch.setattr(
-        "memex.agents.answering.hybrid_search_in_docs", _hybrid_in_docs
-    )
+    monkeypatch.setattr("memex.agents.answering.hybrid_search_in_docs", _hybrid_in_docs)
     monkeypatch.setattr("memex.agents.answering.cross_encoder_rerank", _rerank)
-    monkeypatch.setattr(
-        "memex.agents.answering.render_prompt", _make_fake_render()
-    )
+    monkeypatch.setattr("memex.agents.answering.render_prompt", _make_fake_render())
     # The fake LLM cites `cited#k` — only possible if expand_graph
     # actually surfaced it into the pool.
     monkeypatch.setattr(
@@ -308,9 +284,7 @@ async def test_expand_graph_pulls_chunks_from_neighbour_docs(
             ]
         }
     )
-    monkeypatch.setattr(
-        "memex.index.graph_store.GraphStore.open", fake_open
-    )
+    monkeypatch.setattr("memex.index.graph_store.GraphStore.open", fake_open)
 
     try:
         response = await answer_query("What does Smith argue about reflexivity?")
@@ -375,13 +349,9 @@ async def test_expand_graph_dedups_neighbour_already_in_pool(
         return list(cands[:top_k])
 
     monkeypatch.setattr("memex.agents.answering.hybrid_search", _hybrid)
-    monkeypatch.setattr(
-        "memex.agents.answering.hybrid_search_in_docs", _hybrid_in_docs
-    )
+    monkeypatch.setattr("memex.agents.answering.hybrid_search_in_docs", _hybrid_in_docs)
     monkeypatch.setattr("memex.agents.answering.cross_encoder_rerank", _rerank)
-    monkeypatch.setattr(
-        "memex.agents.answering.render_prompt", _make_fake_render()
-    )
+    monkeypatch.setattr("memex.agents.answering.render_prompt", _make_fake_render())
     monkeypatch.setattr(
         "memex.agents.answering.complete_structured",
         _make_fake_llm(cited_chunk_id="primary#a"),
@@ -407,9 +377,7 @@ async def test_expand_graph_dedups_neighbour_already_in_pool(
             ],
         }
     )
-    monkeypatch.setattr(
-        "memex.index.graph_store.GraphStore.open", fake_open
-    )
+    monkeypatch.setattr("memex.index.graph_store.GraphStore.open", fake_open)
 
     try:
         response = await answer_query("anything")
@@ -438,6 +406,7 @@ async def test_expand_graph_skips_when_retrieval_returned_nothing(
     """No retrieval candidates → no source docs to expand from →
     no-op. The agent then short-circuits at `assess` (empty reranked)
     and refuses politely."""
+
     async def _hybrid(query: str, k: int = 50) -> list[Chunk]:
         return []
 
@@ -451,19 +420,11 @@ async def test_expand_graph_skips_when_retrieval_returned_nothing(
         raise AssertionError("graph store should not be opened on empty candidates")
 
     monkeypatch.setattr("memex.agents.answering.hybrid_search", _hybrid)
-    monkeypatch.setattr(
-        "memex.agents.answering.hybrid_search_in_docs", _hybrid_in_docs
-    )
+    monkeypatch.setattr("memex.agents.answering.hybrid_search_in_docs", _hybrid_in_docs)
     monkeypatch.setattr("memex.agents.answering.cross_encoder_rerank", _rerank)
-    monkeypatch.setattr(
-        "memex.agents.answering.render_prompt", _make_fake_render()
-    )
-    monkeypatch.setattr(
-        "memex.agents.answering.complete_structured", _make_fake_llm()
-    )
-    monkeypatch.setattr(
-        "memex.index.graph_store.GraphStore.open", _explode_open
-    )
+    monkeypatch.setattr("memex.agents.answering.render_prompt", _make_fake_render())
+    monkeypatch.setattr("memex.agents.answering.complete_structured", _make_fake_llm())
+    monkeypatch.setattr("memex.index.graph_store.GraphStore.open", _explode_open)
 
     response = await answer_query("an unanswerable question")
     # The assess node's short-circuit fires and produces an

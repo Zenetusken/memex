@@ -18,9 +18,7 @@ from memex.core.manifest import IngestStage, Manifest, write_manifest
 from memex.parse.pipeline import derive_title
 
 
-async def _write_manifest_with_source(
-    vault: Path, doc_id: str, source_path: str
-) -> None:
+async def _write_manifest_with_source(vault: Path, doc_id: str, source_path: str) -> None:
     await write_manifest(
         vault,
         Manifest(
@@ -53,9 +51,7 @@ async def testderive_title_from_source_filename(tmp_path: Path) -> None:
 async def testderive_title_preserves_full_topic(tmp_path: Path) -> None:
     """Long descriptive filenames carry through intact (no truncation)."""
     name = "CR350 - Cours 6 - Coupe-feu, serveurs mandataires, détection d’intrusion, 802.1X"
-    await _write_manifest_with_source(
-        tmp_path, "abcd1234-cr350-cours-6", f"/x/{name}.pdf"
-    )
+    await _write_manifest_with_source(tmp_path, "abcd1234-cr350-cours-6", f"/x/{name}.pdf")
     title = await derive_title(tmp_path, "abcd1234-cr350-cours-6")
     assert title == name
 
@@ -88,8 +84,6 @@ async def testderive_title_skips_inline_passthrough_source(
 ) -> None:
     """Inline markdown passthrough records `<inline:stem>` as the
     source_path — don't surface that placeholder as a title."""
-    await _write_manifest_with_source(
-        tmp_path, "abc1-inline", "<inline:some-stem>"
-    )
+    await _write_manifest_with_source(tmp_path, "abc1-inline", "<inline:some-stem>")
     title = await derive_title(tmp_path, "abc1-inline")
     assert title == "abc1-inline"

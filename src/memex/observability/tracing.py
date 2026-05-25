@@ -104,9 +104,7 @@ def bind_run_context(correlation_id: str, **fields: Any) -> None:
 
     Pair with `clear_run_context()` in a `finally` at the run's exit.
     """
-    structlog.contextvars.bind_contextvars(
-        correlation_id=correlation_id, **fields
-    )
+    structlog.contextvars.bind_contextvars(correlation_id=correlation_id, **fields)
 
 
 def clear_run_context() -> None:

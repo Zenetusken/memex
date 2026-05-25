@@ -138,9 +138,7 @@ async def ingest_file(req: IngestRequest) -> IngestResult:
     # parse stage will produce. To avoid a chicken-and-egg with `memex
     # ask` when no parse step has run, the parse stage's passthrough
     # branch reads source.md and writes {doc_id}.md identically.
-    await _copy_source(
-        settings.vault_path, doc_id, req.source_path, validation.kind
-    )
+    await _copy_source(settings.vault_path, doc_id, req.source_path, validation.kind)
 
     ingest_stage = IngestStage(
         correlation_id=req.correlation_id,
@@ -187,9 +185,7 @@ async def ingest_directory(
         # Skip hidden files and previously-ingested vault content.
         if any(part.startswith(".") for part in child.parts):
             continue
-        yield await ingest_file(
-            IngestRequest(source_path=child)
-        )
+        yield await ingest_file(IngestRequest(source_path=child))
 
 
 async def ingest_markdown_passthrough(

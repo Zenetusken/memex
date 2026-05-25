@@ -51,26 +51,18 @@ def test_cited_claim_claim_rejects_over_max_length() -> None:
     chars is plenty (Path C tightening fits worst-case schema output
     within max_tokens=1024). Bound prevents per-claim ramble
     exhausting max_tokens before the claims list closes."""
-    CitedClaim(
-        claim="x" * 300, source_chunk_id="abc", confidence="high"
-    )
+    CitedClaim(claim="x" * 300, source_chunk_id="abc", confidence="high")
     with pytest.raises(ValidationError):
-        CitedClaim(
-            claim="x" * 301, source_chunk_id="abc", confidence="high"
-        )
+        CitedClaim(claim="x" * 301, source_chunk_id="abc", confidence="high")
 
 
 def test_cited_claim_source_chunk_id_rejects_over_max_length() -> None:
     """Path C: source_chunk_id is bounded so a hallucinated chunk_id
     (e.g. model dumping chunk text into the id field) can't run away.
     Real chunk_ids are ~40 chars (sha1[:10] + slug); 80 is headroom."""
-    CitedClaim(
-        claim="ok", source_chunk_id="x" * 80, confidence="high"
-    )
+    CitedClaim(claim="ok", source_chunk_id="x" * 80, confidence="high")
     with pytest.raises(ValidationError):
-        CitedClaim(
-            claim="ok", source_chunk_id="x" * 81, confidence="high"
-        )
+        CitedClaim(claim="ok", source_chunk_id="x" * 81, confidence="high")
 
 
 def test_draft_answer_summary_rejects_over_max_length() -> None:
@@ -90,8 +82,7 @@ def test_draft_answer_claims_list_bounded() -> None:
     DraftAnswer(
         summary="ok",
         claims=[
-            CitedClaim(claim=f"c{i}", source_chunk_id=f"id{i}", confidence="high")
-            for i in range(8)
+            CitedClaim(claim=f"c{i}", source_chunk_id=f"id{i}", confidence="high") for i in range(8)
         ],
     )
     with pytest.raises(ValidationError):
@@ -119,9 +110,7 @@ def test_extracted_entity_name_bounds() -> None:
 def test_extracted_entity_span_text_bounds() -> None:
     """Quoted phrase from passage — 200 chars covers a long
     sentence fragment without enabling whole-paragraph emission."""
-    ExtractedEntity(
-        name="Alice", kind="person", confidence="high", span_text="x" * 200
-    )
+    ExtractedEntity(name="Alice", kind="person", confidence="high", span_text="x" * 200)
     with pytest.raises(ValidationError):
         ExtractedEntity(
             name="Alice",

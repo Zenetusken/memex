@@ -131,9 +131,7 @@ class CircuitBreaker(Generic[T]):
     async def _record_success(self) -> None:
         async with self._lock:
             if self._state == "half_open":
-                logger.info(
-                    "breaker.closed_after_probe", breaker=self.name
-                )
+                logger.info("breaker.closed_after_probe", breaker=self.name)
             self._state = "closed"
             self._failures = 0
             self._opened_at = None
