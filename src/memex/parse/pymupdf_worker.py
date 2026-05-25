@@ -97,8 +97,16 @@ _PICTURE_TEXT_BOUNDARY_RE = re.compile(
 _BLANK_LINE_RUN_RE = re.compile(r"\n{3,}")
 
 
+def _looks_like_table_row(line: str) -> bool:
+    """A GFM table row carries ≥2 pipe characters bordering its cells.
+
+    Used only to decide `<br>` handling: a `<br>` inside a table row is an
+    in-cell line wrap, not a paragraph boundary."""
+    return line.count("|") >= 2
+
+
 def _normalise_breaks(text: str) -> str:
-    """Convert `<br>` runs to paragraph breaks.
+    """Convert `<br>` runs to paragraph breaks — except inside GFM table rows.
 
     pymupdf4llm renders text extracted from inside images as a single
     `<br>`-joined run (chart labels, screenshot text, diagram
@@ -108,10 +116,26 @@ def _normalise_breaks(text: str) -> str:
     too large for the reranker's attention window. Turning each `<br>`
     run into `\\n\\n` keeps the data points addressable while letting
     the chunker bundle them into reasonable-sized windows.
+
+    **Table exception.** pymupdf4llm also emits `<br>` for in-cell line
+    wraps *inside* GFM table rows (e.g. `|Gateway|99.95%|1|Brief restart
+    during a<br>deploy.|`, and even a wrapped header `|<br>Service|<br>…`).
+    A blind `<br>`→`\\n\\n` there shatters the row across lines and destroys
+    the pipe table (breaking the chunker, table linearization, and text-to-
+    SQL). Within a table row a `<br>` run collapses to a single space so the
+    row stays on one line and cell content matches the source; everywhere
+    else the paragraph-break behaviour is unchanged.
     """
     if "<br" not in text:
         return text
-    return _BR_RUN_RE.sub("\n\n", text)
+    out: list[str] = []
+    for line in text.split("\n"):
+        if "<br" in line and _looks_like_table_row(line):
+            out.append(_BR_RUN_RE.sub(" ", line))
+        else:
+            out.append(line)
+    # Remaining (non-table) <br> runs → paragraph breaks, as before.
+    return _BR_RUN_RE.sub("\n\n", "\n".join(out))
 
 
 def _strip_pymupdf_markers(text: str) -> str:

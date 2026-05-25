@@ -140,6 +140,21 @@ def strip_frontmatter(markdown: str) -> str:
     return _FRONTMATTER_RE.sub("", markdown, count=1)
 
 
+# Memex appends a `[table-rows]...[/table-rows]` KV block after each well-formed
+# GFM table (a retrieval aid — see core.text). It DUPLICATES the table content
+# already present in (and scored by) the GFM table, and hand-authored ground
+# truth never contains it. Strip it before parse-fidelity scoring — otherwise a
+# *better* parse (one whose table was clean enough to linearize) scores WORSE on
+# CER/WER than a parse that mangled the table so badly linearization never fired.
+_TABLE_ROWS_BLOCK_RE = re.compile(r"\n?\[table-rows\].*?\[/table-rows\][ \t]*\n?", re.DOTALL)
+
+
+def strip_derived_blocks(markdown: str) -> str:
+    """Remove Memex's `[table-rows]` linearization augmentation so parse-eval
+    compares document content, not an internal retrieval duplicate."""
+    return _TABLE_ROWS_BLOCK_RE.sub("\n", markdown)
+
+
 def extract_markdown_headings(markdown: str) -> list[tuple[int, str]]:
     """Extract `(level, text)` ATX heading tuples for structural F1.
 
@@ -193,8 +208,8 @@ def score_parse_quality(predicted: str, reference: str) -> ParseQualityScores:
     runner calls per document — it bundles the primitives so the runner
     stays thin.
     """
-    pred = strip_frontmatter(predicted)
-    ref = strip_frontmatter(reference)
+    pred = strip_derived_blocks(strip_frontmatter(predicted))
+    ref = strip_derived_blocks(strip_frontmatter(reference))
     return ParseQualityScores(
         cer=character_error_rate(pred, ref),
         wer=word_error_rate(pred, ref),

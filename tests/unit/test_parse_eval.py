@@ -19,6 +19,7 @@ from memex.eval.scoring import (
     extract_markdown_tables,
     normalize_equation,
     score_parse_quality,
+    strip_derived_blocks,
     strip_frontmatter,
     structural_f1_equations,
     structural_f1_tables,
@@ -164,6 +165,27 @@ def test_score_parse_quality_includes_table_and_equation_facets() -> None:
     plain = score_parse_quality("# H\n\nJust prose.\n", "# H\n\nJust prose.\n")
     assert plain.structural_f1_tables == 1.0
     assert plain.structural_f1_equations == 1.0
+
+
+def test_strip_derived_blocks_removes_table_rows_keeps_gfm() -> None:
+    md = "Body.\n\n|a|b|\n|---|---|\n|1|2|\n\n[table-rows]\n[**H**] a=1, b=2\n[/table-rows]\n\nMore.\n"
+    out = strip_derived_blocks(md)
+    assert "[table-rows]" not in out
+    assert "|a|b|" in out  # the GFM table itself is kept
+    assert "Body." in out and "More." in out
+
+
+def test_score_parse_quality_ignores_table_rows_augmentation() -> None:
+    # A clean parse linearizes its table → appends a [table-rows] block the
+    # hand-authored ground truth lacks. That augmentation must NOT inflate
+    # CER/WER (else a better parse scores worse). Regression for the
+    # quarterly-uptime-report fixture after the <br> table fix.
+    gt = "# H\n\n|a|b|\n|---|---|\n|1|2|\n"
+    pred = gt + "\n[table-rows]\n[**H**] a=1, b=2\n[/table-rows]\n"
+    s = score_parse_quality(pred, gt)
+    assert s.cer < 0.01
+    assert s.wer < 0.01
+    assert s.structural_f1_tables == 1.0
 
 
 def _write_doc(

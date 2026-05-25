@@ -12,6 +12,7 @@ from typing import Any
 
 from memex.parse.pymupdf_worker import (
     _heading_size_to_level,
+    _normalise_breaks,
     _remap_heading_levels,
 )
 
@@ -79,3 +80,39 @@ def test_remap_noop_without_tiers() -> None:
     page = _FakePage([("Anything", 24.0)])
     md = "## **Anything**\n"
     assert _remap_heading_levels(md, page, {}) == md
+
+
+# --- <br> normalisation: table-aware (regression for the row-shatter bug) ---
+
+
+def test_normalise_breaks_non_table_becomes_paragraphs() -> None:
+    # The original behaviour: a <br>-joined run (chart/picture text) → \n\n.
+    out = _normalise_breaks("Web Search<br>Paraphrase<br>Open QA")
+    assert out == "Web Search\n\nParaphrase\n\nOpen QA"
+
+
+def test_normalise_breaks_keeps_table_row_on_one_line() -> None:
+    # pymupdf4llm emits in-cell wraps as <br> INSIDE a pipe row; converting
+    # them to \n\n would shatter the GFM table. They must collapse to a space.
+    row = "|Gateway|99.95%|1|Brief restart during a<br>deploy.|"
+    assert _normalise_breaks(row) == "|Gateway|99.95%|1|Brief restart during a deploy.|"
+
+
+def test_normalise_breaks_table_survives_intact() -> None:
+    # The quarterly-uptime-report failure mode: a <br>-wrapped header + body.
+    raw = (
+        "|<br>Service|<br>Uptime|<br>Incidents|Notes|\n"
+        "|---|---|---|---|\n"
+        "|Gateway|99.95%|1|Brief restart during a<br>deploy.|\n"
+    )
+    out = _normalise_breaks(raw)
+    # Every row stays on its own single line — no row shattered across lines.
+    assert "\n\n" not in out
+    assert len([ln for ln in out.splitlines() if ln.strip()]) == 3  # header, delimiter, body
+    # Cells reconstruct correctly once stripped.
+    assert [c.strip() for c in out.splitlines()[0].strip("|").split("|")] == [
+        "Service",
+        "Uptime",
+        "Incidents",
+        "Notes",
+    ]
