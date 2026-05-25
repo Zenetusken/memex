@@ -309,7 +309,9 @@ The corpus is itself versioned semantically.
 > human curator). All rendered via **LibreOffice** (a born-digital
 > producer the classifier recognizes; `generate.py` carries an
 > `LD_LIBRARY_PATH` fix for this host). Fixtures:
-> `modern-printed/tidewater-maintenance-log` (prose + lists + HTML table),
+> `modern-printed/tidewater-maintenance-log` (prose + lists + a native
+> `.fodt` bordered table — migrated 2026-05-25 from a flattening HTML→ODT
+> render; tables-F1 1.0),
 > `forms/quarterly-uptime-report` (native `.fodt` → its table parses as a
 > proper **GFM table**), `technical-docs/widget-cli-reference` (deep
 > H1–H4 + code blocks). Full-corpus `memex eval-parse` (post the
