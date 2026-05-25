@@ -1,0 +1,101 @@
+# Spec: Table-RAG Phase 2 — structured table store + text-to-SQL agent tool
+
+**Status:** spec draft v2 (2026-05-24, post round-1 independent validation — addresses B1/B2/I1–I4/M1). Phase 2 of `docs/specs/table-rag.md` (Phase 1 = linearization, shipped). Process: spec → independent validation (until clean) → subagent build → independent validation → GPU acceptance → final cross-spec coherence pass.
+
+## Problem
+Phase-1 linearization makes table **row-lookup** answerable (a value co-located with its labels). It does NOT handle **aggregation / superlative / filtered-set** queries — "total revenue across all market platforms", "which segment had the highest operating income", "which directors hold > 100k options". Those need to select/compute over the table's rows, which the answer LLM can't do reliably over a `truncate(1800)` slice of markdown. TableRAG (EMNLP'25) shows SQL execution is the dominant lever here.
+
+## Round-1 hazards + the validation findings this v2 resolves
+1. **No LangGraph tool-node pattern** — `agents/answering.py:1031-1065` is a fixed state machine (retrieve→expand_graph→rerank→assess→{answer,refuse}; answer→verify→{compose,regenerate,refuse}); no `ToolNode`. → We add a **regular node**, not a tool-calling loop.
+2. **SQL rows have no `chunk_id`** — grounding is strictly "claim cites a `chunk_id` in `state.reranked`" (`verify` builds `chunk_by_id = {c.chunk_id: c for c in state.reranked}` at answering.py:676; `compose` maps back at :901-902). → We inject SQL results as **synthetic `Chunk`s into `state.reranked`** and reuse the grounding/verify/compose machinery.
+3. **Confident-wrong SQL is a HARD-GATE risk** (`hallucinations == 0`). Round-1 validation (B1) proved the naïve "inject the result number + let verify catch it" defeats itself: `verify_grounding/v2.md:13-15` rules "structural adjacency in the chunk is sufficient evidence", so a wrong number placed *in* a chunk is rubber-stamped — the model's output becomes its own evidence. The 1200/1800 truncate budget (`assess_sufficiency/v1.md:33`, `answer/v3.md:97`, `verify_grounding/v2.md:42`) also clips any "source rows" appended after the result. → **§4 is rebuilt** around a fabrication/no-fabrication distinction + an independent recompute that *gates* injection.
+
+## Core safety principle (the B1 fix)
+A claim is a **hallucination only if it asserts a value the document does not contain.** From that:
+- **Row-returning SQL** (`SELECT … [WHERE/ORDER BY/LIMIT]`, no aggregate function) returns *verbatim cells from the stored table*. Every value is real document data; SQL only chose *which* rows. Grounding a claim against those rows is legitimate. Worst case of a wrong filter is an incomplete/over-inclusive answer (a relevance error) — **not** a fabricated value. → safe to inject.
+- **Aggregate SQL** (`SUM/COUNT/AVG/MIN/MAX`, or any computed-scalar/derived column) produces a number **not present in any source row**. This is the only fabrication vector. → inject **only when an independent Python recompute over the original cell text agrees**; otherwise do not inject (the query falls back to the normal retrieval→assess path, which refuses if it can't ground).
+
+This holds the HARD gate by *construction*: shipped numbers are either verbatim document cells (row results) or deterministically recomputed-and-agreeing aggregates. Anything we can't verify → refuse, never ship.
+
+## Design
+
+### 1. Table store — `src/memex/index/table_store.py` (NEW), mirrors `fts_store.py`
+Per-vault `~/.memex/vault/.memex/tables.sqlite` (regenerable derived state, ADR-0003; added to the `reindex --force` teardown tuple at `pipeline.py:429` alongside `embeddings.lance`/`search.sqlite`/`graph.ryu`). `TableStore.open(vault_path) -> TableStore` mirrors `FTSStore` exactly: sqlite3 `connect(path, isolation_level=None, check_same_thread=False)` via `asyncio.to_thread` (fts_store.py:106), schema-on-open via `executescript`, an `asyncio.Lock` gating multi-statement writes (fts_store.py:90,183), per-doc `upsert_document`/`delete_document`. Path alongside `search.sqlite` (fts_store.py:98). Schema:
+```
+CREATE TABLE IF NOT EXISTS doc_tables (
+  doc_id TEXT, table_id TEXT, section TEXT,
+  header_json TEXT,         -- list[str] column names
+  rows_json TEXT,           -- list[list[str]] cell values (original text, verbatim)
+  char_start INT, char_end INT,   -- source span in the .md (citation back to source)
+  n_rows INT, n_cols INT,
+  PRIMARY KEY (doc_id, table_id));
+CREATE INDEX IF NOT EXISTS doc_tables_doc ON doc_tables(doc_id);
+```
+- `tables_for_document(doc_id) -> list[StoredTable]` (a `core/types.py` pydantic model: `doc_id, table_id, section, header: list[str], rows: list[list[str]], char_start, char_end`).
+- **Build at `index_document`** (pipeline.py:154-155 reads `doc = await read_document(...)` then chunks — `doc.body` is in hand): extract well-formed GFM tables from `doc.body` via a `parse_gfm_table(block, offset) -> ParsedTable | None` helper **factored out of `parse/table_linearize.py`** (reuses `_split_pipe_row`/`_clean_cell`/`_GFM_TABLE_RE`; `_GFM_TABLE_RE.finditer` gives `match.start()/end()` → `char_start/char_end`), applying the **same header-sanity gate** (`_header_all_value_like` OR `_header_has_prose_cell` → skip). `table_id = sha1(doc_id + char_start + first-data-row-text)[:10]` (position-qualified — see GPU-acceptance refinement 1; filings repeat header rows, so a first-row-only hash collides). **Phase-1 byte-identity is pinned**: `linearize_gfm_tables` is refactored to call the factored parser but emit the same bytes (a regression test asserts byte-equality). Only well-formed tables enter the store — the mis-bounded segment table is *absent*, so no wrong SQL can run over it (coherent with Phase 1). Open `TableStore` in `index_document`'s existing `AsyncExitStack` (pipeline.py:180-187); `upsert_document(doc_id, tables)` after chunking; `delete_document(doc_id)` on the diff path.
+
+### 2. SQL helper — `src/memex/agents/table_sql.py` (NEW)
+`query_doc_tables(question, tables: list[StoredTable]) -> TableQueryResult | None`:
+- **Numeric coercion** — `coerce_number(cell: str) -> float | None`, a single documented grammar used to build the SQL numeric column: strip a leading `$`/`€`/`£`; thousands separators (`,`); a trailing `%` (kept as the percent value); accounting negatives `(1,234)` → `-1234`; trailing scale words `thousand|million|billion|trillion`/`K|M|B|T` → ×1e3/1e6/1e9/1e12; else `None`. Heavily unit-tested (these 10-K shapes are the live data).
+- Load the doc's tables into a fresh **in-memory `sqlite3`** db (`:memory:`): one SQL table per `StoredTable`, sanitized column names (map back to originals), each numeric-parseable column duplicated as `<col>__num REAL` via `coerce_number`. Original text columns retained for display.
+- Generate SQL via `complete_structured` (imported into this module — the test patch seam is `memex.agents.table_sql.complete_structured`) with a bounded `GeneratedSQL(sql: str = Field(max_length=600), target_table_id: str = Field(max_length=16))` schema and a new prompt `prompts/generate_table_sql/v1.md` (question + each table's schema: name, columns, 2 sample rows). **Read-only guard**: the SQL must be a single `SELECT` (no `;`-chain, no `PRAGMA/ATTACH/INSERT/UPDATE/DELETE/DROP/CREATE/ALTER`); reject otherwise. Execute with a row cap + a `set_progress_handler` step cap (no wall-clock dependency).
+- **Classify the result** and apply the §4 gate:
+  - **`kind="rows"`** — the SQL has no aggregate function and no computed/aliased scalar column (every selected column maps to a stored column): the result rows are verbatim document cells → return them.
+  - **`kind="aggregate"`** — the SQL is a single-table single-column `SUM/COUNT/AVG/MIN/MAX` with an optional simple `WHERE` (equality or numeric comparison on one column). Run `_recompute_aggregate(table, op, column, filter)` **independently from `StoredTable.rows` (re-parsing original cell text via `coerce_number`, NOT reading the sqlite `__num` column)** — this catches a wrong column-mapping/filter even though the number grammar is shared (the residual shared-grammar risk is bounded by coercion unit tests). Return the result **only if** `abs(sql_value - recompute) <= max(1, 1e-6 * |recompute|)`; else return `None`.
+  - **anything else** (joins, group-by, HAVING, derived superlatives like "fastest-growing", non-recomputable scalars) → return `None`.
+- Returns `TableQueryResult(kind, sql, target_table_id, rows | aggregate_value, contributing_rows, header, char_start, char_end, doc_id, document_title, heading_path, section)` or `None` (no relevant table / gen fails / non-SELECT / exec error / empty / `kind` unsupported / recompute disagrees → caller no-ops).
+
+### 3. Agent integration — `src/memex/agents/answering.py`: a `query_tables` node
+- **Placement:** a node between `rerank` and `assess` (`g.add_edge("rerank", "query_tables")`, `g.add_edge("query_tables", "assess")`, replacing the current `rerank→assess` edge). Runs only when a table is plausibly relevant: gate on (a) `state.reranked` has a chunk from a doc with stored tables NEAR the retrieved region (proximity-scoped via `_relevant_tables` — see GPU-acceptance refinement 2; passing all of a 74-table doc overflows the SQL-gen prompt), AND (b) the query is aggregation/superlative/filter-shaped (cheap keyword heuristic). The gate decides whether to *attempt*; the **§4 injection gate** is the safety boundary, so a broad gate is fine — an attempt that can't be verified simply no-ops. On gate-false → `return {"nodes_traversed": state.nodes_traversed + 1}` (no model call).
+- **Store handle:** open `TableStore.open(get_settings().vault_path)` **inside the node** (mirroring `expand_graph`'s lazy `GraphStore` open at answering.py:340-341) in a `try/finally` that closes it — there is no threaded store handle in `AnswerState`.
+- On a `TableQueryResult`, build **one** synthetic `Chunk` and **return the full augmented list** `{"reranked": state.reranked + [synthetic], "nodes_traversed": …}` — `AnswerState.reranked` is a plain field (answering.py:211, no `Annotated` reducer), so a node update **replaces** it; returning only `[synthetic]` would wipe the real chunks (the `rerank` node itself returns the complete list at :415). The synthetic chunk:
+  - `chunk_id = f"{doc_id}#sql0001"` — suffix `sql0001` is 7 chars; `_repair_claim_chunk_ids` short-circuits its Levenshtein when `abs(len(a)-len(b)) > 2` (answering.py:478) so a 7-char suffix can't fuzzy-collide with a real 10-hex-hash, and `s/q/l` are non-hex so a real hash can't contain `sql` (round-1 M1, verified). At most one synthetic chunk per query, suffix length ≤7.
+  - `text` — **source rows / contributing rows FIRST**, bounded to **≤ ~900 chars** so the evidence survives the `truncate(1200)` assess budget and the `truncate(1800)` answer/verify budgets (round-1 B1c). For `kind="rows"`: the result rows as KV lines (reuse Phase-1 `_linearize_row` rendering). For `kind="aggregate"`: `"<op>(<column>) = <value> over <N> rows:"` then the contributing rows as KV. The SQL string is appended *last* (informational; clippable).
+  - `char_start/char_end` = the source table's span; `document_id/document_title/heading_path` = the source table's; `score=0.0, rerank_score=None` (defaults; no downstream reads them post-rerank — round-1 OK).
+- Then `assess`/`answer`/`verify`/`compose` run **unchanged**. The answer cites the synthetic chunk; verify grounds the claim against its text (real rows for `kind="rows"`; recomputed-and-agreeing aggregate + its contributing rows for `kind="aggregate"`); compose maps it into `used_chunks`. No grounding-contract change.
+
+### 4. Why this holds the HARD gate (the rebuilt containment)
+1. **Fabrication boundary**: the only shipped *new* number is a `kind="aggregate"` value that passed an **independent Python recompute** (re-parsed from original cell text, different code path from the sqlite load → catches wrong column/filter). Row results are verbatim document cells (no new number). Everything unverifiable (joins/group-by/derived-superlative/recompute-disagree) → **no injection** → the query proceeds on the normal reranked set, which refuses if it can't ground. Refuse-over-hallucinate by construction.
+2. **Evidence survives truncation**: contributing/source rows are rendered FIRST and the synthetic text is bounded < the smallest (1200) truncate budget, so verify always sees the real basis — not a bare scalar.
+3. **No self-evidence for aggregates**: a `kind="aggregate"` number is in the chunk only *after* it agreed with the independent recompute, so verify's structural-adjacency rule rubber-stamping it is acceptable (the number is already validated). A *disagreeing* aggregate is never injected.
+4. **Read-only, capped, deterministic** sqlite execution; no mutation; the only failure mode is *wrong SQL*, which the recompute (aggregates) or the verbatim-rows property (row results) bounds.
+5. **No-op fallback** on every failure path. Never fabricates.
+
+### 5. Wiring / build
+- `parse/table_linearize.py`: factor `parse_gfm_table`; `linearize_gfm_tables` calls it and emits byte-identical Phase-1 output (pinned).
+- `index/table_store.py` (NEW) + `index/__init__.py` re-export; `agents/table_sql.py` (NEW) + `agents/__init__.py` re-export; `prompts/generate_table_sql/v1.md` (NEW); `core/types.py`: `StoredTable`, `TableQueryResult`, `GeneratedSQL`.
+- `index/pipeline.py::index_document`: open `TableStore` in the `AsyncExitStack`, `upsert_document` after chunking, `delete_document` on diff; add `"tables.sqlite"` to the `reindex --force` teardown tuple (:429).
+- `agents/answering.py`: the `query_tables` node + the gate + the rerank→query_tables→assess re-wire; lazy `TableStore` open inside the node.
+- No new `IndexSettings` field (module constants; `MEMEX_*` env only if a cap needs tuning).
+- **sqlite3, not duckdb** — chosen because the read-only single-SELECT guard + in-memory per-doc load is simplest and we need no cross-table joins; `sqlite3` is stdlib (fts_store.py:11). NB `duckdb>=1.5` is *already* a declared dep (pyproject.toml:38) but imported nowhere in `src/` — Phase 2 does **not** add it and does not depend on it; whether to prune the orphaned dep is a separate cleanup, out of scope here. (Round-1 B2: the earlier "avoid a new dep" rationale was wrong — the dep already exists; the real reason is guard simplicity.)
+
+## Tests
+- **table_store** (`tests/unit/test_table_store.py`): open/upsert/delete/`tables_for_document` round-trip; regenerable; only well-formed tables stored (mis-bounded/value-like skipped — same gate as Phase 1).
+- **parse_gfm_table factor**: pin `linearize_gfm_tables` output byte-identical after the refactor (golden compare on the Phase-1 fixtures).
+- **coerce_number** (`tests/unit/test_table_sql.py`): `$22.5 billion`→2.25e10, `(1,234)`→-1234, `45%`→45, `1,000,000`→1e6, `N/A`→None, plain prose→None. The accounting-negative + scale-word + thousands-sep cases are load-bearing.
+- **table_sql**: in-memory load + `__num` columns; row-SELECT → `kind="rows"` verbatim; single-column `SUM` with filter → `kind="aggregate"` only when `_recompute_aggregate` agrees; **recompute-disagree (wrong-column SQL) → None**; group-by/join/derived-superlative → None; non-SELECT / injection (`;`, DROP, PRAGMA, ATTACH) rejected → None; empty/exec-error → None.
+- **agent node** (`tests/integration/test_table_sql_agent.py`, patch `memex.agents.table_sql.complete_structured` with a `**_kw: object` fake): gate fires only on table-relevant aggregation-shaped queries; node returns the **full** `reranked + [synthetic]` (not just the synthetic); synthetic `chunk_id` non-colliding; the existing verify/compose ground + cite it; **HARD GATE** — a `should_refuse` aggregate over an absent column → SQL gen empty/recompute-disagree → no injection → refuse; a confident-wrong SQL (LLM emits a wrong-column aggregate) → recompute disagrees → no injection → refuse.
+- Local gates: `uv run pytest tests/ -q`, `uv run pyright` (src/memex 0/0), `uv run ruff check` + `format`.
+
+## GPU acceptance — RESULT (2026-05-24): PASSED
+Built `tables.sqlite` for the 10-K (74 well-formed tables; the degenerate segment tables correctly absent). Three new annual-report queries on the clean Director-Compensation-for-Fiscal-2026 table:
+- **ar-14** `kind="aggregate"` — "total fees earned/paid in cash to all directors" → `SELECT SUM(fees__num)` → recompute-gated → **ANS "$956,250"** (correct), grounded + cited to the synthetic chunk (evidence-rows first).
+- **ar-15** `kind="rows"` superlative — "lowest total compensation paid to any single director" → `SELECT * … ORDER BY total__num ASC LIMIT 1` → **ANS "$321,309 (Ellen Ochoa)"** (verbatim row).
+- **ar-16** counterfactual — "total stock options granted to directors" (no options column) → SQL no-op + base agent → **REF**.
+
+Final 16-query scorecard: **refusal_cf=1.0**, **all 16 `refusal_correct` (0 misses)**, **0 hallucinations** (every answered query correct); answered 10 / refused 6. **Phase-1 win (ar-13 gaming, cite 1.0) + chart-content (09/10) preserved.**
+
+### Implementation refinements found during GPU acceptance (and fixed + regression-tested)
+1. **`table_id` collisions** — `sha1(doc_id + first-row)` collided on filings' repeated header rows → `UNIQUE` constraint crash. Fixed: position-qualify with `char_start` (`sha1(doc_id + char_start + first-row)`), unique per table, stable across re-extraction.
+2. **SQL-gen prompt overflow** — passing all 74 tables' schemas overflowed the 6144 context. Fixed: a `query_tables` proximity scope (`_relevant_tables`/`_span_gap`) passes only tables whose char-span is within `_TABLE_PROXIMITY_MARGIN` of a reranked chunk, capped at `_TABLE_CANDIDATE_CAP=6` — retrieval already surfaced the region.
+3. **Sanitized-identifier mismatch (the load-bearing one)** — the prompt showed the LLM ORIGINAL names (`Fees Earned or Paid in Cash ($)`, `0d724996f7`) but the in-memory db used sanitized ones (`fees_earned_or_paid_in_cash`, `c_0d724996f7`) → every generated SQL errored → `no_result`. Fixed: `_compute_schemas` is now the single source of truth for sql identifiers; both `_load_tables` (CREATE/INSERT) and the prompt consume the same schema, and `query_doc_tables` maps the LLM's returned `target_table_id` back via `sql_name`.
+
+### Known limitation (deferred, HARD-GATE-safe)
+Row-superlative *attribution* ("**which** director got the lowest pay") is phrasing-sensitive: the answer agent conservatively REFUSES when it can't confirm the extremum from one returned row (we deliberately do NOT inject an unverified "lowest" claim — `kind="rows"` has no recompute gate). The value-form ("**what was** the lowest …") answers. The recompute-gated aggregate path is the robust core. A future row-superlative recompute gate (verify the returned row IS the extremum) would close it.
+
+## Anti-scope / coherence
+- Reuses Phase-1's GFM parser + header-sanity gate (mis-bounded tables excluded everywhere). The degenerate segment table is absent from the store → no wrong SQL over it.
+- No group-by / cross-table joins / derived-superlative aggregates in v2 (they → no-op → refuse; revisit only if the recompute can be extended to cover them safely). No DuckDB (see §5). No cross-document SQL (per-doc store; the agent queries docs whose chunks retrieved).
+- No new grounding/verify contract; no `ToolNode`. The synthetic chunk is **query-time-only** — never written to FTS/dense index, so the 3-channel contract, the chunker, and Phase-1's char-split/header-recovery are untouched.
+- Markdown vault stays source of truth; `tables.sqlite` is regenerable.
+- The final cross-spec coherence pass validates Phase 1 + Phase 2 + the shipped char-split/header-recovery hang together (ordering, no double-processing, HARD GATES).

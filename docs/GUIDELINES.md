@@ -241,7 +241,7 @@ Agents in Memex are **state machines with budgets**, not free-form ReAct loops. 
 The answering agent looks roughly like:
 
 ```
-[start] → retrieve → expand_graph → rerank → assess_sufficiency
+[start] → retrieve → expand_graph → rerank → query_tables → assess_sufficiency
                                                    │
                                           ┌────────┴────────┐
                                           │                 │
@@ -267,6 +267,8 @@ The answering agent looks roughly like:
 ```
 
 The `verify` node is non-negotiable. Before an answer reaches the user, a second model pass checks that every claim in the answer is grounded in a retrieved chunk. Ungrounded claims get marked or removed. This is the difference between an agent that's useful and an agent that's a liability.
+
+The `query_tables` node (Table-RAG Phase 2) is an optional augmentation: for aggregation/superlative-shaped queries over a doc with structured tables, it runs guarded text-to-SQL and injects the result as a **synthetic chunk** into the reranked set — so `verify` then grounds it like any other chunk (no separate grounding path). It holds the HARD gate by construction: row-returning SQL ships verbatim document cells; an aggregate (a *new* number) is injected only when an independent Python recompute agrees, otherwise the node no-ops and the agent refuses. See `docs/specs/table-sql.md`.
 
 ### Structured outputs, always
 

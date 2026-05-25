@@ -82,6 +82,7 @@ Performance optimization at the cost of every other goal. Not seriously consider
 - `vault/.memex/embeddings.lance` — vector index (LanceDB)
 - `vault/.memex/search.sqlite` — FTS5 + relational metadata
 - `vault/.memex/graph.ryu` — entity and citation graph (RyuGraph — see ADR-0005, which superseded Kuzu after upstream archival)
+- `vault/.memex/tables.sqlite` — per-document structured table store for text-to-SQL (Table-RAG Phase 2); rebuilt from each document's GFM tables on index, dropped on `reindex --force`
 - `vault/.memex/manifests/{doc_id}.json` — per-document processing provenance
 - `vault/.memex/traces/` — Langfuse-compatible trace exports (optional)
 - `vault/.memex/cache/` — content-addressed derived artifacts
