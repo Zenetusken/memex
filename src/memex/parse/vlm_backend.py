@@ -35,7 +35,12 @@ _PROMPT = (
     "- Tables (GFM table syntax)\n"
     "- Bulleted and numbered lists\n"
     "- Equations as LaTeX ($inline$ or $$display$$)\n"
-    "- Code blocks (```fenced)\n\n"
+    "- Code blocks (```fenced)\n"
+    "- Diagrams, flowcharts, network/architecture diagrams and figures: "
+    "transcribe their content as text — every label and node name, plus "
+    "the connections or flow between them (e.g. 'Router -> Firewall -> "
+    "Private Network'). Describe what the figure shows; do NOT emit an "
+    "image placeholder like ![...].\n\n"
     "Output ONLY Markdown for the page contents — no preface, "
     "no commentary, no closing remarks."
 )

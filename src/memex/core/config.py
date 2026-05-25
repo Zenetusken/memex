@@ -140,6 +140,18 @@ class ParseSettings(BaseModel):
     """Parser routing knobs — see IMPLEMENTATION-PLAN §1.3."""
 
     vlm_confidence_threshold: float = Field(default=0.65, ge=0.0, le=1.0)
+    # Escalate a Docling page to the VLM when figures cover at least this
+    # fraction of the page area. The confidence trigger above is the wrong
+    # signal for diagram/figure pages: Docling reports high confidence for
+    # a slide whose title it read cleanly while the diagram content (the
+    # part only a VLM can read) is entirely lost. An image-area-dominant
+    # page is exactly the case the VLM exists for, so route it there
+    # regardless of text confidence. Calibrated on real CR350 network
+    # diagrams (firewall-architecture 0.38, pfSense screenshot 0.26,
+    # 802.1X sequence 0.26, zoning 0.24): 0.25 routes substantively
+    # diagrammatic slides to the VLM while leaving prose pages that carry
+    # only a small logo/icon on the Docling path.
+    vlm_image_area_threshold: float = Field(default=0.25, ge=0.0, le=1.0)
     # Default-off: the VLM escalation path is fully wired, but it
     # demands ~5 GB of VRAM (Qwen2.5-VL-7B AWQ-Int4 + processor) on top
     # of the embedder + reranker resident set. Opt in once you've

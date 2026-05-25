@@ -34,7 +34,7 @@ import re
 import sys
 import traceback
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 # CRITICAL: the worker's stdout IS the protocol channel — the parent
 # parses it as JSON via `json.loads`. Anything written to stdout by
@@ -232,6 +232,33 @@ def _demote_prose_headings(markdown: str) -> tuple[str, int]:
     return "\n".join(out), demoted
 
 
+def _image_fraction_by_page(
+    figures: list[dict[str, Any]], page_areas: dict[int, float]
+) -> dict[int, float]:
+    """Fraction of each page's area covered by figures, clamped to [0, 1].
+
+    Drives the VLM-escalation image-dominance trigger
+    (`pipeline._route_and_escalate`): a diagram/screenshot page Docling
+    reads "confidently" while losing the figure content. `figures` carry
+    `page_no` + `bbox=[x0, y_bottom, x1, y_top]` (PDF points, the same
+    units as `page_areas`). A page with no figures, or whose dimensions
+    were unavailable (area 0), maps to 0.0. Overlapping bboxes can sum
+    past the page area, hence the clamp.
+    """
+    fig_area: dict[int, float] = {}
+    for fig in figures:
+        fx0, fy_bot, fx1, fy_top = fig["bbox"]
+        page_no = int(fig["page_no"])
+        fig_area[page_no] = fig_area.get(page_no, 0.0) + max(0.0, fx1 - fx0) * max(
+            0.0, fy_top - fy_bot
+        )
+    fractions: dict[int, float] = {}
+    for page_no, area in page_areas.items():
+        frac = fig_area.get(page_no, 0.0) / area if area > 0.0 else 0.0
+        fractions[page_no] = min(1.0, max(0.0, frac))
+    return fractions
+
+
 def _convert_to_payload(source: Path) -> dict[str, Any]:
     """Run Docling, return a JSON-serialisable dict matching the
     `DoclingConversion` pydantic schema in `docling_backend.py`.
@@ -309,26 +336,49 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
         print(f"docling: demoted {demoted} prose headings (fallback)", file=sys.stderr)
 
     pages: list[dict[str, Any]] = []
-    # Docling's `DoclingDocument` ships `py.typed`, but its dynamic surface
-    # (`.pages`, `.pictures`, provenance entries) resolves to Unknown under
-    # strict, and we probe it defensively across docling versions anyway.
-    # Annotate the boundary as `Any` so the `getattr` probing type-checks.
-    page_list: list[Any] = getattr(doc, "pages", None) or []
-    for p in page_list:
-        page_no = getattr(p, "page_no", None) or getattr(p, "number", None) or len(pages) + 1
+    page_areas: dict[int, float] = {}
+    # `DoclingDocument.pages` is a dict[int, PageItem] keyed by page number
+    # (NOT a list) — iterate the VALUES to reach the PageItems. Iterating
+    # the mapping directly yields the integer keys, which is the bug that
+    # left page_area (and per-page markdown) empty. Tolerate a list too for
+    # resilience across docling versions. The dynamic surface resolves to
+    # Unknown under strict, so probe via `Any` + getattr.
+    pages_obj: Any = getattr(doc, "pages", None)
+    page_items: list[Any] = (
+        list(cast("dict[int, Any]", pages_obj).values())
+        if isinstance(pages_obj, dict)
+        else (pages_obj or [])
+    )
+    for idx, p in enumerate(page_items):
+        page_no = int(getattr(p, "page_no", None) or getattr(p, "number", None) or idx + 1)
+        # PageItem.size (width/height in PDF points) → page area, for the
+        # image_fraction escalation signal computed after the figure pass.
+        size = getattr(p, "size", None)
+        page_w = float(getattr(size, "width", 0.0) or 0.0)
+        page_h = float(getattr(size, "height", 0.0) or 0.0)
+        page_areas[page_no] = page_w * page_h
+        # Per-page markdown via the document exporter's page_no filter —
+        # a PageItem has no exporter of its own. This inherits the in-place
+        # heading-level recovery + prose-demotion already applied to `doc`;
+        # only the doc-level header-aware table merge has no per-page form,
+        # which matters solely for the VLM-escalation re-stitch of a page
+        # that also carries a multi-header table.
         page_md = ""
-        export = getattr(p, "export_to_markdown", None)
-        if callable(export):
-            try:
-                raw_page_md: Any = export()
-                page_md, _ = _demote_prose_headings(raw_page_md)
-            except Exception:
-                page_md = ""
+        try:
+            raw_page_md: Any = doc.export_to_markdown(page_no=page_no)
+            page_md, _ = _demote_prose_headings(raw_page_md)
+        except Exception:
+            page_md = ""
+        # Docling exposes a per-DOCUMENT ConfidenceReport (parse/layout/
+        # ocr/table grades), NOT a per-PageItem `.confidence`, and those
+        # grades are NaN unless a pipeline option populates them. So this
+        # getattr almost always falls back to 1.0 — meaning the
+        # confidence-based escalation never fires on its own and the
+        # image_fraction signal below is the primary trigger. Kept as a
+        # forward-compat hook for a Docling that surfaces per-page scores.
         confidence = float(getattr(p, "confidence", 1.0))
         # Docling sometimes reports NaN for empty pages. The parent's
-        # `json.loads` rejects literal NaN, so coerce to 0.0 here — the
-        # downstream VLM-escalation decision is "below threshold" either
-        # way, but the JSON has to be RFC-strict for the parent to parse.
+        # `json.loads` rejects literal NaN, so coerce to 0.0 here.
         if math.isnan(confidence) or math.isinf(confidence):
             confidence = 0.0
         pages.append({"page": page_no, "markdown": page_md, "confidence": confidence})
@@ -418,6 +468,14 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
                 "classification_confidence": classification_confidence,
             }
         )
+
+    # Per-page image dominance = sum of figure-bbox areas / page area. This
+    # is the escalation signal the (effectively-always-1.0) page confidence
+    # cannot provide — diagram/screenshot pages where Docling read the title
+    # but lost the figure content. See pipeline._route_and_escalate.
+    fractions = _image_fraction_by_page(figures, page_areas)
+    for page in pages:
+        page["image_fraction"] = fractions.get(int(page["page"]), 0.0)
 
     return {
         "markdown": markdown,

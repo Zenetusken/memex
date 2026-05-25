@@ -56,6 +56,7 @@ async def test_escalation_wraps_pause_and_unloads_vlm(monkeypatch) -> None:
         _conversion(),
         source=Path("scan.pdf"),
         threshold=0.65,
+        image_area_threshold=0.5,
         disable_vlm=False,
         log=structlog.get_logger("test"),
     )
@@ -86,6 +87,7 @@ async def test_disable_vlm_skips_escalation_pause_and_unload(monkeypatch) -> Non
         _conversion(),
         source=Path("scan.pdf"),
         threshold=0.65,
+        image_area_threshold=0.5,
         disable_vlm=True,
         log=structlog.get_logger("test"),
     )
@@ -93,3 +95,51 @@ async def test_disable_vlm_skips_escalation_pause_and_unload(monkeypatch) -> Non
     assert all(d.engine == "docling" for d in decisions)  # nothing escalated
     assert entered == []  # vLLM never paused (no VLM work)
     assert conv.markdown == "page one\n\npage two"  # unchanged
+
+
+async def test_image_dominant_page_escalates_despite_high_confidence(monkeypatch) -> None:
+    """The dominant real-world trigger. Docling reports full confidence
+    for a diagram/screenshot page (it read the title) while losing the
+    figure content, so confidence never escalates it. A high
+    `image_fraction` must escalate it anyway — and a confident page with
+    only a small figure must NOT escalate.
+    """
+
+    @contextlib.asynccontextmanager
+    async def fake_pause() -> AsyncGenerator[None]:
+        yield
+
+    async def fake_vlm(*, source_pdf: Path, page_numbers: list[int], **_kw: object):
+        assert page_numbers == [2]  # only the image-dominant page escalates
+        return {2: DoclingPageOutput(page=2, markdown="VLM diagram transcription", confidence=1.0)}
+
+    class _FakeRegistry:
+        async def unload(self, name: str) -> None:
+            return None
+
+    monkeypatch.setattr(P, "_pause_vllm_for_gpu_parse", fake_pause)
+    monkeypatch.setattr(P, "vlm_convert_pages", fake_vlm)
+    monkeypatch.setattr("memex.models.registry.get_registry", lambda: _FakeRegistry())
+
+    conversion = DoclingConversion(
+        markdown="text page\n\ndiagram page",
+        pages=[
+            # confident, only a small figure → kept
+            DoclingPageOutput(page=1, markdown="text page", confidence=1.0, image_fraction=0.1),
+            # confident BUT figure-dominant → escalated
+            DoclingPageOutput(page=2, markdown="diagram page", confidence=1.0, image_fraction=0.6),
+        ],
+    )
+    decisions, conv = await P._route_and_escalate(
+        conversion,
+        source=Path("deck.pdf"),
+        threshold=0.65,
+        image_area_threshold=0.3,
+        disable_vlm=False,
+        log=structlog.get_logger("test"),
+    )
+
+    by_page = {d.page: d for d in decisions}
+    assert by_page[1].engine == "docling"  # confident + only a small figure
+    assert by_page[2].engine == "vlm"  # image-dominant despite confidence 1.0
+    assert "VLM diagram transcription" in conv.markdown

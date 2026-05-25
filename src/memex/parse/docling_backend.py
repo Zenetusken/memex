@@ -33,12 +33,17 @@ logger = structlog.get_logger(__name__)
 
 class DoclingPageOutput(BaseModel):
     """Per-page Docling output — the rendered Markdown, the page
-    number, and Docling's self-reported confidence (used by the
-    parse-stage VLM-escalation router)."""
+    number, Docling's self-reported confidence, and the fraction of the
+    page area covered by figures (both consumed by the parse-stage
+    VLM-escalation router; see `pipeline._route_and_escalate`)."""
 
     page: int
     markdown: str
     confidence: float
+    # Sum of figure-bbox areas / page area, clamped to [0, 1]. 0.0 when
+    # the page has no figures or the page dimensions were unavailable.
+    # The VLM backend re-emits this default (its pages have no figures).
+    image_fraction: float = 0.0
 
 
 class FigureMetadata(BaseModel):

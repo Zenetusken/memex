@@ -967,6 +967,7 @@ async def _parse_with_docling(
         conversion,
         source=source,
         threshold=settings.parse.vlm_confidence_threshold,
+        image_area_threshold=settings.parse.vlm_image_area_threshold,
         disable_vlm=settings.parse.disable_vlm,
         log=log,
     )
@@ -1098,16 +1099,23 @@ async def _route_and_escalate(
     *,
     source: Path,
     threshold: float,
+    image_area_threshold: float,
     disable_vlm: bool,
     log: structlog.stdlib.BoundLogger,
 ) -> tuple[list[PageDecision], DoclingConversion]:
     """For each Docling page, decide engine routing. When `disable_vlm`
-    is False AND the source is a PDF, batch every below-threshold page
-    through a single VLM acquisition (`vlm_convert_pages`) so we pay
-    the lock + future-eviction cost once per document, not once per
-    page. Successfully escalated pages replace Docling's per-page
-    markdown, and the document-level `conversion.markdown` is
-    re-stitched so the canonical write picks up the corrections.
+    is False AND the source is a PDF, batch every VLM-eligible page
+    through a single VLM acquisition (`vlm_convert_pages`) so we pay the
+    lock + future-eviction cost once per document, not once per page. A
+    page is VLM-eligible when its Docling confidence is below `threshold`
+    OR its figures cover at least `image_area_threshold` of the page —
+    the latter catches diagram/screenshot pages Docling reads
+    "confidently" while losing the figure content, and is the dominant
+    signal in practice since per-page Docling confidence is effectively
+    always 1.0 (it lives in a separate document-level ConfidenceReport).
+    Successfully escalated pages replace Docling's per-page markdown, and
+    the document-level `conversion.markdown` is re-stitched so the
+    canonical write picks up the corrections.
     """
     decisions: list[PageDecision] = []
     escalated_pages: dict[int, DoclingPageOutput] = {}
@@ -1116,18 +1124,22 @@ async def _route_and_escalate(
     to_escalate: list[int] = []
     page_index = {p.page: p for p in conversion.pages}
     for p in conversion.pages:
-        below = p.confidence < threshold
-        if not below or disable_vlm or source.suffix.lower() != ".pdf":
+        below_conf = p.confidence < threshold
+        image_dominant = p.image_fraction >= image_area_threshold
+        wants_vlm = below_conf or image_dominant
+        if not wants_vlm or disable_vlm or source.suffix.lower() != ".pdf":
+            if wants_vlm and disable_vlm:
+                rationale = "VLM-eligible but VLM disabled — Docling output kept"
+            elif wants_vlm:
+                rationale = "VLM-eligible but source is not a PDF — Docling output kept"
+            else:
+                rationale = "kept Docling output (confident, not image-dominant)"
             decisions.append(
                 PageDecision(
                     page=p.page,
                     engine="docling",
                     confidence=p.confidence,
-                    rationale=(
-                        "low-confidence; VLM disabled — Docling output kept"
-                        if below and disable_vlm
-                        else "high-confidence docling output"
-                    ),
+                    rationale=rationale,
                 )
             )
             continue
@@ -1160,10 +1172,15 @@ async def _route_and_escalate(
                         page=page_no,
                         engine="vlm",
                         confidence=result.confidence,
-                        rationale="escalated from low-confidence Docling output",
+                        rationale="escalated to VLM (low-confidence or image-dominant page)",
                     )
                 )
-                log.info("parse.vlm.escalated", page=page_no)
+                log.info(
+                    "parse.vlm.escalated",
+                    page=page_no,
+                    docling_confidence=original.confidence,
+                    image_fraction=round(original.image_fraction, 3),
+                )
             else:
                 err = result or VLMUnavailable("VLM call returned no result")
                 decisions.append(

@@ -55,6 +55,53 @@ def _bf16() -> Any:
     return torch.bfloat16  # type: ignore[reportPrivateImportUsage]  # torch star-exports dtypes from _C; stub omits them from __all__
 
 
+def _vlm_attn_implementation() -> str:
+    """Pick the VLM attention backend, FA2 when available else `sdpa`.
+
+    ADR-0006 mandates FlashAttention-2 for the VLM on Ada (sm_89). FA2 is
+    an optional, separately-compiled native dependency (`flash_attn`);
+    when it isn't installed transformers raises ImportError at model
+    construction, which would kill the entire VLM escalation path. Degrade
+    to PyTorch's built-in scaled-dot-product attention (`sdpa` — no extra
+    dependency, numerically correct, modestly slower) rather than
+    hard-failing. FA2 stays the preferred path and is used whenever the
+    package is importable, so a later `pip install flash-attn` transparently
+    restores it.
+    """
+    import importlib.util
+
+    if importlib.util.find_spec("flash_attn") is not None:
+        return "flash_attention_2"
+    structlog.get_logger(__name__).warning(
+        "vlm.attn.flash_attn_unavailable",
+        fallback="sdpa",
+        hint="pip install flash-attn restores the ADR-0006 FA2 path",
+    )
+    return "sdpa"
+
+
+def _ensure_awq_import_compat() -> None:
+    """Restore the `PytorchGELUTanh` symbol AutoAWQ imports at load time.
+
+    The AWQ VLM (`Qwen2.5-VL-7B-Instruct-AWQ`) is dequantised through
+    AutoAWQ, which `from transformers.activations import PytorchGELUTanh`.
+    transformers renamed that class to `GELUTanh` (same tanh-approx GELU,
+    still registered as `ACT2CLS["gelu_pytorch_tanh"]`), so on current
+    transformers AutoAWQ fails to import and the VLM can't load at all.
+    Alias the renamed class back under the old name before the load
+    triggers the AutoAWQ import. Idempotent, and a no-op once AutoAWQ is
+    retired (the durable fix — it's deprecated; see ROADMAP VLM upgrade).
+    """
+    import transformers.activations as act
+
+    if not hasattr(act, "PytorchGELUTanh"):
+        replacement = getattr(act, "GELUTanh", None)
+        if replacement is not None:
+            # Dynamic back-compat alias injected into a third-party module;
+            # pyright can't see the new attribute, ruff dislikes setattr.
+            act.PytorchGELUTanh = replacement  # type: ignore[reportAttributeAccessIssue]  # injecting renamed-symbol alias for AutoAWQ
+
+
 _TPretrained = TypeVar("_TPretrained")
 
 
@@ -444,6 +491,7 @@ class ModelRegistry:
             ProcessorMixin,
         )
 
+        _ensure_awq_import_compat()
         min_pixels = 256 * 28 * 28
         max_pixels = 1280 * 28 * 28
         processor = _from_pretrained(
@@ -459,7 +507,7 @@ class ModelRegistry:
             model_id,
             torch_dtype=_bf16(),
             device_map={"": "cuda:0"},
-            attn_implementation="flash_attention_2",
+            attn_implementation=_vlm_attn_implementation(),
             low_cpu_mem_usage=True,
         )
         model.eval()
