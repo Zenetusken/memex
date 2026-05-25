@@ -54,7 +54,7 @@ from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, Field, create_model
 
 from memex.core.errors import AnswerStateInvariantError
-from memex.core.types import Chunk
+from memex.core.types import Chunk, StoredTable, TableQueryResult
 from memex.models.client import complete_structured
 from memex.observability.tracing import (
     bind_run_context,
@@ -90,6 +90,53 @@ class AnswerStateUpdate(TypedDict, total=False):
     nodes_traversed: int
     tokens_used: int
     final: FinalResponse
+
+
+# Keyword heuristic for the `query_tables` gate (Table-RAG Phase 2). Cheap
+# precondition deciding whether to ATTEMPT a SQL query — the §4 injection gate
+# (recompute / verbatim-rows) is the real safety boundary, so a broad gate is
+# fine: an attempt that can't be verified simply no-ops. Aggregation /
+# superlative / filtered-set shapes are what row-lookup retrieval misses.
+_TABLE_QUERY_KEYWORDS: tuple[str, ...] = (
+    "total",
+    "sum",
+    "average",
+    "avg",
+    "mean",
+    "count",
+    "how many",
+    "number of",
+    "highest",
+    "lowest",
+    "largest",
+    "smallest",
+    "biggest",
+    "maximum",
+    "minimum",
+    "max ",
+    "min ",
+    "most",
+    "least",
+    "greater than",
+    "less than",
+    "more than",
+    "fewer than",
+    "at least",
+    "at most",
+    "combined",
+    "across all",
+    "which segment",
+    "which had",
+    "rank",
+    "top ",
+)
+
+
+def _query_is_table_shaped(query: str) -> bool:
+    """Cheap keyword test: does the query look aggregation/superlative/filter
+    shaped (the shapes row-lookup retrieval misses)?"""
+    q = query.lower()
+    return any(kw in q for kw in _TABLE_QUERY_KEYWORDS)
 
 
 # =============================================================================
@@ -413,6 +460,204 @@ async def rerank(state: AnswerState) -> AnswerStateUpdate:
     log.info("done", reranked_count=len(reranked))
     return {
         "reranked": reranked,
+        "nodes_traversed": state.nodes_traversed + 1,
+    }
+
+
+def _render_kv_row(header: list[str], cells: list[str]) -> str:
+    """Render one table row as a compact markdown-KV line: `h0=c0, h1=c1, …`.
+
+    A local renderer (not the private `table_linearize._linearize_row`) so the
+    synthetic-chunk evidence reads like the Phase-1 `[table-rows]` KV the
+    answer/verify prompts already understand. A cell with no matching header
+    column is keyed by 1-based position; an empty header cell uses `colN`.
+    """
+    n = max(len(header), len(cells))
+
+    def _hdr(j: int) -> str:
+        return header[j] if j < len(header) and header[j] else f"col{j + 1}"
+
+    def _val(j: int) -> str:
+        return cells[j] if j < len(cells) else ""
+
+    return ", ".join(f"{_hdr(j)}={_val(j)}" for j in range(n))
+
+
+# Max chars of the synthetic chunk's evidence text. Bounded < the smallest
+# (assess) truncate budget (1200) so the contributing rows always survive
+# into the assess/answer/verify prompts (spec §3 / round-1 B1c).
+_SYNTHETIC_TEXT_MAX = 900
+
+
+def _build_synthetic_chunk(result: TableQueryResult) -> Chunk:
+    """Build the single synthetic `Chunk` injected into `state.reranked` for a
+    `TableQueryResult` (Table-RAG Phase 2, spec §3).
+
+    The evidence — source/contributing rows as KV lines — comes FIRST and is
+    bounded to `_SYNTHETIC_TEXT_MAX` so it survives the downstream truncate
+    budgets; the SQL string is appended LAST (informational, clippable). The
+    chunk_id suffix `sql0001` is 7 chars and contains the non-hex letters
+    `s/q/l`, so `_repair_claim_chunk_ids` can't fuzzy-collide it with a real
+    10-hex-char chunk hash.
+    """
+    header = result.header
+    lines: list[str] = []
+    if result.kind == "aggregate":
+        op_col = result.sql
+        # Lead with the validated aggregate framing, then the basis rows.
+        agg_val = result.aggregate_value
+        val_str = f"{agg_val:g}" if agg_val is not None else "n/a"
+        lines.append(f"Aggregate result = {val_str} over {len(result.contributing_rows)} rows:")
+        _ = op_col
+    else:
+        lines.append("Matching rows:")
+    for cells in result.contributing_rows:
+        candidate = "\n".join([*lines, _render_kv_row(header, cells)])
+        # Stop adding rows once we'd exceed the evidence budget (leaving room
+        # for the trailing SQL line). Keep at least the framing line.
+        if len(candidate) > _SYNTHETIC_TEXT_MAX:
+            break
+        lines.append(_render_kv_row(header, cells))
+    text = "\n".join(lines)
+    # Append as much of the trailing `[sql]` line as fits within the TOTAL
+    # _SYNTHETIC_TEXT_MAX budget — truncate the SQL tail, never the evidence,
+    # so the whole chunk stays under the smallest (1200) assess truncate and
+    # the contributing rows always survive (spec §3/§4).
+    sql_line = f"\n[sql] {result.sql}"
+    remaining = _SYNTHETIC_TEXT_MAX - len(text)
+    if remaining > 0:
+        text = text + sql_line[:remaining]
+    return Chunk(
+        chunk_id=f"{result.doc_id}#sql0001",
+        document_id=result.doc_id,
+        document_title=result.document_title,
+        text=text,
+        char_start=result.char_start,
+        char_end=result.char_end,
+        score=0.0,
+        rerank_score=None,
+        heading_path=result.heading_path,
+    )
+
+
+# Phase-2 table-SQL prompt-size guard. A real filing (the NVIDIA 10-K) has ~74
+# stored tables; rendering every one's schema into the generate_table_sql prompt
+# overflows the 6144-token context. The retrieval already surfaced the relevant
+# region, so we pass only the tables whose char-span is at/near a reranked chunk
+# of the target doc, capped — turning "all the doc's tables" into "the handful
+# the query actually retrieved". (GPU-acceptance finding 2026-05-24.)
+_TABLE_PROXIMITY_MARGIN = 2000  # chars; ~one chunk of slop, catches the adjacent [table-rows] chunk
+_TABLE_CANDIDATE_CAP = 6
+
+
+def _span_gap(a0: int, a1: int, b0: int, b1: int) -> int:
+    """Char gap between spans [a0,a1) and [b0,b1): 0 if they overlap/touch."""
+    if a1 >= b0 and b1 >= a0:
+        return 0
+    return b0 - a1 if b0 > a1 else a0 - b1
+
+
+def _relevant_tables(
+    tables: list[StoredTable], reranked: list[Chunk], doc_id: str
+) -> list[StoredTable]:
+    """Tables of *doc_id* whose span is within `_TABLE_PROXIMITY_MARGIN` of a
+    reranked chunk of the same doc, nearest first, capped. Empty when the
+    retrieved chunks aren't near any table (→ the node no-ops)."""
+    spans = [
+        (c.char_start, c.char_end)
+        for c in reranked
+        if c.document_id == doc_id and c.char_end > c.char_start
+    ]
+    if not spans:
+        return []
+    scored = sorted(
+        (
+            (min(_span_gap(t.char_start, t.char_end, s0, s1) for s0, s1 in spans), i, t)
+            for i, t in enumerate(tables)
+        ),
+        key=lambda x: (x[0], x[1]),
+    )
+    return [t for gap, _, t in scored if gap <= _TABLE_PROXIMITY_MARGIN][:_TABLE_CANDIDATE_CAP]
+
+
+async def query_tables(state: AnswerState) -> AnswerStateUpdate:
+    """Text-to-SQL over a relevant document's structured tables (Phase 2).
+
+    Runs between `rerank` and `assess`. Gate: a reranked chunk is a
+    `[table-rows]` chunk OR comes from a doc that has stored tables, AND the
+    query is aggregation/superlative/filter shaped. On a gated-in query it
+    asks `query_doc_tables` for a SQL answer over the most-relevant doc's
+    tables and, on a result, injects ONE synthetic Chunk into `state.reranked`
+    (returning the FULL augmented list so the plain `reranked` field is
+    replaced, not wiped). Every failure path no-ops — the §4 injection gate
+    inside `query_doc_tables` is the safety boundary, so a broad attempt that
+    can't be verified simply adds nothing and the query proceeds normally.
+    """
+    from memex.agents.table_sql import query_doc_tables
+    from memex.core.config import get_settings
+    from memex.index.table_store import TableStore
+
+    log = logger.bind(node="query_tables")
+
+    if not state.reranked or not _query_is_table_shaped(state.query):
+        log.info("skip", reason="empty_or_not_table_shaped")
+        return {"nodes_traversed": state.nodes_traversed + 1}
+
+    vault_path = get_settings().vault_path
+    store = await TableStore.open(vault_path)
+    try:
+        # Gate (a): which reranked docs have stored tables? Iterate reranked
+        # docs in order; the first doc with tables is the query target.
+        seen_docs: list[str] = []
+        for c in state.reranked:
+            if c.document_id not in seen_docs:
+                seen_docs.append(c.document_id)
+
+        # Pick the first reranked doc that has stored tables NEAR the retrieved
+        # chunks (proximity-scoped — passing all of a 74-table doc overflows the
+        # SQL-gen prompt). A doc with tables only far from the retrieved region
+        # is skipped, as is one with no stored tables at all.
+        target_tables: list[StoredTable] = []
+        target_title = ""
+        any_doc_has_tables = False
+        for doc_id in seen_docs:
+            tables = await store.tables_for_document(doc_id)
+            if not tables:
+                continue
+            any_doc_has_tables = True
+            near = _relevant_tables(tables, state.reranked, doc_id)
+            if near:
+                target_tables = near
+                target_title = next(
+                    (c.document_title for c in state.reranked if c.document_id == doc_id),
+                    "",
+                )
+                break
+
+        if not target_tables:
+            log.info(
+                "skip",
+                reason="no_relevant_tables" if any_doc_has_tables else "no_stored_tables",
+            )
+            return {"nodes_traversed": state.nodes_traversed + 1}
+
+        result = await query_doc_tables(state.query, target_tables)
+    finally:
+        await store.close()
+
+    if result is None:
+        log.info("no_table_answer")
+        return {"nodes_traversed": state.nodes_traversed + 1}
+
+    synthetic = _build_synthetic_chunk(
+        result.model_copy(update={"document_title": result.document_title or target_title})
+    )
+    log.info("injected", kind=result.kind, chunk_id=synthetic.chunk_id)
+    # FULL augmented list — `reranked` is a plain field, so this REPLACES it
+    # (returning only `[synthetic]` would wipe the real chunks). The spread
+    # form is the same new-list replacement as `state.reranked + [synthetic]`.
+    return {
+        "reranked": [*state.reranked, synthetic],
         "nodes_traversed": state.nodes_traversed + 1,
     }
 
@@ -1002,7 +1247,7 @@ def build_answering_graph() -> CompiledStateGraph:
         START
           |
           v
-      retrieve --> expand_graph --> rerank --> assess
+      retrieve --> expand_graph --> rerank --> query_tables --> assess
                                                  |
                                        +---------+---------+
                                        |                   |
@@ -1031,6 +1276,7 @@ def build_answering_graph() -> CompiledStateGraph:
     g.add_node("retrieve", retrieve)
     g.add_node("expand_graph", expand_graph)
     g.add_node("rerank", rerank)
+    g.add_node("query_tables", query_tables)
     g.add_node("assess", assess)
     g.add_node("answer", answer)
     g.add_node("verify", verify)
@@ -1042,7 +1288,8 @@ def build_answering_graph() -> CompiledStateGraph:
     g.add_edge(START, "retrieve")
     g.add_edge("retrieve", "expand_graph")
     g.add_edge("expand_graph", "rerank")
-    g.add_edge("rerank", "assess")
+    g.add_edge("rerank", "query_tables")
+    g.add_edge("query_tables", "assess")
     g.add_edge("answer", "verify")
     g.add_edge("regenerate", "answer")  # the loop
     g.add_edge("compose", END)

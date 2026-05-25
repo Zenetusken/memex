@@ -179,7 +179,10 @@ ignore = [
 # Tests: asserts (S101), test-data "passwords"/tokens (S105/S106),
 # binding "0.0.0.0" as MCP host test data (S104), and subprocess calls
 # with controlled, literal argv (S603) are all intentional in tests.
-"tests/**/*.py" = ["S101", "S105", "S106", "S104", "S603"]
+# S608: table-SQL tests construct SELECTs from sanitized literal table
+# names over an in-memory db (the same controlled-identifier pattern as
+# the table_sql source) — never from user data.
+"tests/**/*.py" = ["S101", "S105", "S106", "S104", "S603", "S608"]
 # Dev scripts shell out to the `memex` CLI with controlled argv (S603)
 # via a partial executable name (S607); print to stdout (T201).
 "scripts/**/*.py" = ["T201", "S603", "S607"]
@@ -187,6 +190,12 @@ ignore = [
 # fragments are `?`-placeholder lists whose length comes from len(),
 # never from user data. S608 is a false positive here.
 "src/memex/index/fts_store.py" = ["S608"]
+# Table-RAG Phase 2 text-to-SQL: the in-memory db's CREATE/INSERT use
+# `_sanitize_identifier`-cleaned table + column names (alphanumerics +
+# `_` only) and the executed SELECT passes a read-only single-statement
+# guard before it runs over a throwaway `:memory:` connection. The
+# string-built SQL is by sanitized identifiers, never raw user data.
+"src/memex/agents/table_sql.py" = ["S608"]
 
 [tool.ruff.format]
 quote-style = "double"

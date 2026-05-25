@@ -44,6 +44,7 @@ from memex.core.types import Chunk
 from memex.index.chunker import chunk_document
 from memex.index.fts_store import FTSStore
 from memex.index.graph_store import GraphStore
+from memex.index.table_store import TableStore, extract_tables
 from memex.index.vector_store import EMBEDDING_DIM, VectorStore
 from memex.models.registry import get_registry
 from memex.vault.store import (
@@ -182,6 +183,8 @@ async def index_document(doc_id: str, *, force: bool = False) -> IndexResult:
         stack.push_async_callback(vstore.close)
         fstore = await FTSStore.open(settings.vault_path)
         stack.push_async_callback(fstore.close)
+        tstore = await TableStore.open(settings.vault_path)
+        stack.push_async_callback(tstore.close)
         gstore = await _open_graph(settings.vault_path)
         if gstore is not None:
             stack.push_async_callback(gstore.close)
@@ -216,6 +219,15 @@ async def index_document(doc_id: str, *, force: bool = False) -> IndexResult:
         if chunks_to_add:
             await vstore.upsert(chunks_to_add, embeddings)
             await fstore.upsert(chunks_to_add)
+
+        # Table-RAG Phase 2: extract the well-formed GFM tables from the
+        # document body and replace this doc's structured-table set. This
+        # is a full per-doc replacement (extract_tables scans the whole
+        # body), so it's correct on both the force path and the diff path —
+        # it always reflects the current body. The agent's `query_tables`
+        # node reads these at answer time. On a body with no tables this is
+        # a cheap DELETE (clears any stale rows from a prior version).
+        await tstore.upsert_document(doc_id, extract_tables(doc_id, doc.body))
 
         # Register the document node in the graph; enrich adds the
         # MENTIONS / CITES edges when it runs. We do this on every
@@ -382,12 +394,15 @@ async def remove_document(doc_id: str) -> None:
         stack.push_async_callback(vstore.close)
         fstore = await FTSStore.open(settings.vault_path)
         stack.push_async_callback(fstore.close)
+        tstore = await TableStore.open(settings.vault_path)
+        stack.push_async_callback(tstore.close)
         gstore = await _open_graph(settings.vault_path)
         if gstore is not None:
             stack.push_async_callback(gstore.close)
 
         await vstore.delete_document(doc_id)
         await fstore.delete_document(doc_id)
+        await tstore.delete_document(doc_id)
         if gstore is not None:
             await gstore.delete_document(doc_id)
 
@@ -426,7 +441,7 @@ async def reindex_vault(*, force: bool = False) -> ReindexReport:
         # Bypass any persistence checks; recursively drop the .memex/{embeddings,search,graph}.*
         # We don't touch traces/ or manifests/ — they're independent derived state.
         derived = settings.vault_path / ".memex"
-        for target in ("embeddings.lance", "search.sqlite", "graph.ryu"):
+        for target in ("embeddings.lance", "search.sqlite", "tables.sqlite", "graph.ryu"):
             path = derived / target
             if path.is_file():
                 path.unlink(missing_ok=True)

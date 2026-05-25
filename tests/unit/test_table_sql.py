@@ -1,0 +1,433 @@
+"""Unit tests for the text-to-SQL helper (Table-RAG Phase 2).
+
+Covers `agents/table_sql.py`:
+  - `coerce_number` grammar table (load-bearing 10-K shapes).
+  - `query_doc_tables`: row-SELECT → kind="rows" (verbatim cells);
+    single-column SUM with filter → kind="aggregate" only when the independent
+    recompute agrees; wrong-column SQL → recompute disagrees → None;
+    group-by / join / derived superlative → None; non-SELECT / injection
+    (`;`, DROP, PRAGMA, ATTACH) → None; empty / exec-error → None.
+
+`complete_structured` is patched at `memex.agents.table_sql.complete_structured`
+with a `**_kw: object` fake (forward-compatible kwargs).
+"""
+
+from __future__ import annotations
+
+import re
+import sqlite3
+
+import pytest
+
+from memex.agents import table_sql
+from memex.agents.table_sql import coerce_number, query_doc_tables
+from memex.core.types import GeneratedSQL, StoredTable
+
+# ======================================================================
+# coerce_number grammar
+# ======================================================================
+
+
+@pytest.mark.parametrize(
+    ("cell", "expected"),
+    [
+        ("$22.5 billion", 2.25e10),
+        ("(1,234)", -1234.0),
+        ("45%", 45.0),
+        ("1,000,000", 1e6),
+        ("$1,234.56", 1234.56),
+        ("2.5B", 2.5e9),
+        ("3K", 3000.0),
+        ("€1,000", 1000.0),  # `,` is the thousands sep (`.` stays decimal)
+        ("€500", 500.0),  # leading euro symbol stripped
+        ("-50", -50.0),
+        ("$-5", -5.0),
+        ("100", 100.0),
+        ("N/A", None),
+        ("Revenue", None),
+        ("", None),
+        ("Compute & Networking", None),
+        ("B", None),  # bare scale letter is not a number
+    ],
+)
+def test_coerce_number(cell: str, expected: float | None) -> None:
+    got = coerce_number(cell)
+    if expected is None:
+        assert got is None
+    else:
+        assert got is not None
+        assert got == pytest.approx(expected)
+
+
+# ======================================================================
+# query_doc_tables — fixtures + helpers
+# ======================================================================
+
+
+def _segments_table() -> StoredTable:
+    return StoredTable(
+        doc_id="doc-1",
+        table_id="abc1234567",
+        section="Reportable Segments",
+        header=["Segment", "Revenue"],
+        rows=[
+            ["Compute & Networking", "$116,193"],
+            ["Graphics", "$17,109"],
+            ["All Other", "$1,000"],
+        ],
+        char_start=10,
+        char_end=120,
+    )
+
+
+def _patch_sql(monkeypatch: pytest.MonkeyPatch, sql: str, target_table_id: str) -> None:
+    async def _fake(*, prompt: object, schema: type, **_kw: object) -> tuple[object, int]:
+        assert schema is GeneratedSQL
+        return GeneratedSQL(sql=sql, target_table_id=target_table_id), 10
+
+    monkeypatch.setattr("memex.agents.table_sql.complete_structured", _fake)
+
+
+# ======================================================================
+# kind="rows"
+# ======================================================================
+
+
+@pytest.mark.asyncio
+async def test_row_select_returns_verbatim_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    t = _segments_table()
+    _patch_sql(
+        monkeypatch,
+        f'SELECT * FROM "{table_sql._sanitize_identifier(t.table_id, fallback="t0")}" '
+        "ORDER BY revenue__num DESC LIMIT 1",
+        t.table_id,
+    )
+    result = await query_doc_tables("which segment had the highest revenue?", [t])
+    assert result is not None
+    assert result.kind == "rows"
+    assert result.rows is not None
+    # Highest revenue → Compute & Networking (verbatim cells).
+    assert result.rows[0] == ["Compute & Networking", "$116,193"]
+    assert result.target_table_id == t.table_id
+    assert result.char_start == 10 and result.char_end == 120
+
+
+# ======================================================================
+# kind="aggregate" — recompute agrees / disagrees
+# ======================================================================
+
+
+@pytest.mark.asyncio
+async def test_aggregate_sum_agrees_returns_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    t = _segments_table()
+    sql_name = table_sql._sanitize_identifier(t.table_id, fallback="t0")
+    _patch_sql(monkeypatch, f'SELECT SUM(revenue__num) FROM "{sql_name}"', t.table_id)
+    result = await query_doc_tables("total revenue across all segments?", [t])
+    assert result is not None
+    assert result.kind == "aggregate"
+    assert result.aggregate_value == pytest.approx(116193 + 17109 + 1000)
+    assert len(result.contributing_rows) == 3
+
+
+@pytest.mark.asyncio
+async def test_aggregate_with_filter(monkeypatch: pytest.MonkeyPatch) -> None:
+    t = _segments_table()
+    sql_name = table_sql._sanitize_identifier(t.table_id, fallback="t0")
+    _patch_sql(
+        monkeypatch,
+        f"SELECT SUM(revenue__num) FROM \"{sql_name}\" WHERE segment = 'Graphics'",
+        t.table_id,
+    )
+    result = await query_doc_tables("total Graphics revenue?", [t])
+    assert result is not None
+    assert result.kind == "aggregate"
+    assert result.aggregate_value == pytest.approx(17109)
+    assert result.contributing_rows == [["Graphics", "$17,109"]]
+
+
+@pytest.mark.asyncio
+async def test_aggregate_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    t = _segments_table()
+    sql_name = table_sql._sanitize_identifier(t.table_id, fallback="t0")
+    _patch_sql(monkeypatch, f'SELECT COUNT(*) FROM "{sql_name}"', t.table_id)
+    result = await query_doc_tables("how many segments?", [t])
+    assert result is not None
+    assert result.kind == "aggregate"
+    assert result.aggregate_value == pytest.approx(3)
+
+
+@pytest.mark.asyncio
+async def test_aggregate_recompute_disagree_real_no_patch_returns_none() -> None:
+    """REAL recompute-disagreement — no monkeypatch on `_recompute_aggregate`.
+
+    Drives a genuine numeric disagreement through the whole live path
+    (`_load_tables` → sqlite SELECT → `_AGG_RE` → real `_recompute_aggregate`
+    → the `abs() > tol` tolerance check):
+
+      - The table has a case-collision in the filter column: `Graphics` (100)
+        and `graphics` (999), plus an unrelated `Other` (1).
+      - The LLM emits `SUM(revenue__num) WHERE segment = 'graphics'`.
+      - sqlite's `=` on TEXT is case-SENSITIVE → matches only the lowercase
+        row → SUM = 999.
+      - the independent recompute's `_row_matches` lowercases both sides →
+        matches BOTH `Graphics` and `graphics` → 100 + 999 = 1099.
+      - 999 vs 1099 exceeds `max(1, 1e-6*|1099|)` → the gate refuses → None.
+
+    This exercises the real recompute + real tolerance with two genuinely
+    different non-trivial numbers, not a stub."""
+    t = StoredTable(
+        doc_id="doc-2",
+        table_id="def7654321",
+        section="Mixed Case",
+        header=["Segment", "Revenue"],
+        rows=[
+            ["Graphics", "100"],
+            ["graphics", "999"],
+            ["Other", "1"],
+        ],
+        char_start=0,
+        char_end=50,
+    )
+    sql_name = table_sql._sanitize_identifier(t.table_id, fallback="t0")
+
+    async def _fake(*, prompt: object, schema: type, **_kw: object) -> tuple[object, int]:
+        return (
+            GeneratedSQL(
+                sql=f"SELECT SUM(revenue__num) FROM \"{sql_name}\" WHERE segment = 'graphics'",
+                target_table_id=t.table_id,
+            ),
+            10,
+        )
+
+    # Sanity: confirm sqlite and the real recompute genuinely disagree here
+    # (so the test is meaningful, not vacuously passing on some other path).
+    import sqlite3
+
+    db = sqlite3.connect(":memory:")
+    try:
+        loaded = table_sql._load_tables(db, table_sql._compute_schemas([t]))[t.table_id]
+        sqlite_rows = table_sql._execute_select(
+            db, f"SELECT SUM(revenue__num) FROM \"{sql_name}\" WHERE segment = 'graphics'"
+        )
+        assert sqlite_rows is not None
+        raw = sqlite_rows[0][0]
+        assert isinstance(raw, (int, float))
+        sqlite_val = float(raw)
+        recompute = table_sql._recompute_aggregate(
+            t, loaded, "SUM", "revenue__num", "segment = 'graphics'"
+        )
+    finally:
+        db.close()
+    assert recompute is not None
+    assert sqlite_val == pytest.approx(999)
+    assert recompute == pytest.approx(1099)  # case-insensitive → both rows
+    assert abs(sqlite_val - recompute) > max(1.0, 1e-6 * abs(recompute))
+
+    # End-to-end: the live gate must refuse injection (→ None).
+    import pytest as _pytest
+
+    monkeypatch = _pytest.MonkeyPatch()
+    try:
+        monkeypatch.setattr("memex.agents.table_sql.complete_structured", _fake)
+        result = await query_doc_tables("total graphics revenue?", [t])
+    finally:
+        monkeypatch.undo()
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_aggregate_recompute_disagree_via_stub_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Boundary check: an injected disagreeing recompute (simulating a
+    wrong-column mapping the recompute catches) → the gate refuses → None.
+
+    Complements the real-disagreement test above — that one exercises the
+    actual numeric path; this one pins the gate's contract independently of
+    how the disagreement arises."""
+    t = _segments_table()
+    sql_name = table_sql._sanitize_identifier(t.table_id, fallback="t0")
+    _patch_sql(monkeypatch, f'SELECT SUM(revenue__num) FROM "{sql_name}"', t.table_id)
+
+    def _wrong(*_a: object, **_k: object) -> float:
+        return 999999.0
+
+    monkeypatch.setattr("memex.agents.table_sql._recompute_aggregate", _wrong)
+    result = await query_doc_tables("total revenue?", [t])
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_count_distinct_refused_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`COUNT(DISTINCT col)` is not recomputable (a DISTINCT off-by-one could
+    slip the ±1 tolerance against a plain count) → `_recompute_aggregate`
+    refuses → no injection → None."""
+    t = _segments_table()
+    sql_name = table_sql._sanitize_identifier(t.table_id, fallback="t0")
+    _patch_sql(monkeypatch, f'SELECT COUNT(DISTINCT segment) FROM "{sql_name}"', t.table_id)
+    assert await query_doc_tables("how many distinct segments?", [t]) is None
+
+
+def test_recompute_aggregate_refuses_distinct_unit() -> None:
+    """Unit pin: `_recompute_aggregate` returns None whenever the aggregate
+    arg contains DISTINCT (case-insensitive), regardless of op."""
+    import sqlite3
+
+    t = _segments_table()
+    db = sqlite3.connect(":memory:")
+    try:
+        loaded = table_sql._load_tables(db, table_sql._compute_schemas([t]))[t.table_id]
+        assert table_sql._recompute_aggregate(t, loaded, "count", "DISTINCT segment", None) is None
+        assert table_sql._recompute_aggregate(t, loaded, "count", "distinct segment", None) is None
+        assert (
+            table_sql._recompute_aggregate(t, loaded, "sum", "DISTINCT revenue__num", None) is None
+        )
+        # A non-distinct count still computes.
+        assert table_sql._recompute_aggregate(t, loaded, "count", "*", None) == pytest.approx(3)
+    finally:
+        db.close()
+
+
+# ======================================================================
+# unsupported → None
+# ======================================================================
+
+
+@pytest.mark.asyncio
+async def test_group_by_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    t = _segments_table()
+    sql_name = table_sql._sanitize_identifier(t.table_id, fallback="t0")
+    _patch_sql(
+        monkeypatch,
+        f'SELECT segment, SUM(revenue__num) FROM "{sql_name}" GROUP BY segment',
+        t.table_id,
+    )
+    assert await query_doc_tables("revenue by segment?", [t]) is None
+
+
+@pytest.mark.asyncio
+async def test_computed_scalar_select_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A non-aggregate SELECT with a computed/aliased scalar is not verbatim
+    rows → None (it produces a new number)."""
+    t = _segments_table()
+    sql_name = table_sql._sanitize_identifier(t.table_id, fallback="t0")
+    _patch_sql(
+        monkeypatch,
+        f'SELECT revenue__num * 2 AS doubled FROM "{sql_name}"',
+        t.table_id,
+    )
+    assert await query_doc_tables("double the revenue?", [t]) is None
+
+
+# ======================================================================
+# read-only guard / injection
+# ======================================================================
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "DROP TABLE x",
+        "PRAGMA table_info(x)",
+        "ATTACH DATABASE 'evil.db' AS evil",
+        "SELECT 1; DROP TABLE x",
+        "INSERT INTO x VALUES (1)",
+        "UPDATE x SET a = 1",
+        "DELETE FROM x",
+        "CREATE TABLE y (a)",
+        "",
+    ],
+)
+async def test_injection_and_non_select_rejected(monkeypatch: pytest.MonkeyPatch, sql: str) -> None:
+    t = _segments_table()
+    _patch_sql(monkeypatch, sql, t.table_id)
+    assert await query_doc_tables("totals?", [t]) is None
+
+
+@pytest.mark.asyncio
+async def test_unknown_target_table_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    t = _segments_table()
+    _patch_sql(monkeypatch, "SELECT * FROM t0", "nope9999")
+    assert await query_doc_tables("totals?", [t]) is None
+
+
+@pytest.mark.asyncio
+async def test_empty_tables_returns_none() -> None:
+    assert await query_doc_tables("totals?", []) is None
+
+
+@pytest.mark.asyncio
+async def test_exec_error_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A SELECT over a non-existent column → sqlite error → None (no crash)."""
+    t = _segments_table()
+    sql_name = table_sql._sanitize_identifier(t.table_id, fallback="t0")
+    _patch_sql(monkeypatch, f'SELECT nonexistent FROM "{sql_name}"', t.table_id)
+    assert await query_doc_tables("totals?", [t]) is None
+
+
+@pytest.mark.asyncio
+async def test_empty_result_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    t = _segments_table()
+    sql_name = table_sql._sanitize_identifier(t.table_id, fallback="t0")
+    _patch_sql(
+        monkeypatch,
+        f"SELECT * FROM \"{sql_name}\" WHERE segment = 'DoesNotExist'",
+        t.table_id,
+    )
+    assert await query_doc_tables("rows for missing segment?", [t]) is None
+
+
+# ======================================================================
+# read-only guard unit
+# ======================================================================
+
+
+def test_is_read_only_select_unit() -> None:
+    assert table_sql._is_read_only_select("SELECT * FROM t")
+    assert table_sql._is_read_only_select("SELECT * FROM t;")  # trailing ; tolerated
+    assert table_sql._is_read_only_select("WITH x AS (SELECT 1) SELECT * FROM x")
+    assert not table_sql._is_read_only_select("SELECT 1; SELECT 2")
+    assert not table_sql._is_read_only_select("DROP TABLE t")
+    assert not table_sql._is_read_only_select("DELETE FROM t")
+    assert not table_sql._is_read_only_select("")
+
+
+# ======================================================================
+# schema/prompt-identifier consistency — GPU-acceptance regression 2026-05-24
+# ======================================================================
+
+_SQL_IDENT = re.compile(r"^[a-z_][a-z0-9_]*$")
+
+
+def test_compute_schemas_emits_valid_sql_identifiers_matching_the_db() -> None:
+    """The sanitized names shown to the LLM in the prompt MUST be the same
+    valid SQL identifiers `_load_tables` creates — else the generated SQL
+    references columns that don't exist and every query errors (the bug GPU
+    acceptance surfaced: prompt showed `Fees Earned or Paid in Cash ($)` while
+    the db column was `fees_earned_or_paid_in_cash`)."""
+    t = StoredTable(
+        doc_id="d1",
+        table_id="0d724996f7",  # leading digit → must get a `c_` prefix
+        section="Director Compensation",
+        header=["Name", "Fees Earned or Paid in Cash ($)", "Total ($)"],
+        rows=[["Ochoa", "42,500", "321,309"], ["Coxe", "85,000", "363,809"]],
+        char_start=0,
+        char_end=10,
+    )
+    (schema,) = table_sql._compute_schemas([t])
+    # Every identifier the prompt will show is SQL-safe.
+    assert _SQL_IDENT.match(schema.sql_name), schema.sql_name
+    assert schema.sql_name == "c_0d724996f7"  # leading-digit prefix
+    for col in schema.columns:
+        assert _SQL_IDENT.match(col), col
+    # And the db built from the SAME schema is queryable by those names.
+    db = sqlite3.connect(":memory:")
+    try:
+        table_sql._load_tables(db, [schema])
+        # FROM <sql_name> + a numeric companion column resolve.
+        num_col = schema.columns[schema.numeric_cols[0]]
+        rows = db.execute(f"SELECT {num_col}, {num_col}__num FROM {schema.sql_name}").fetchall()
+        assert len(rows) == 2
+    finally:
+        db.close()

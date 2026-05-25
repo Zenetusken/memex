@@ -18,6 +18,7 @@ from memex.agents.answering import (
     answer_query,
     build_answering_graph,
 )
+from memex.agents.table_sql import coerce_number, query_doc_tables
 
 __all__ = [
     "AnswerState",
@@ -28,4 +29,6 @@ __all__ = [
     "VerificationResult",
     "answer_query",
     "build_answering_graph",
+    "coerce_number",
+    "query_doc_tables",
 ]

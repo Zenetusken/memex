@@ -36,7 +36,14 @@ import re
 
 from memex.core.text import looks_like_value
 
-__all__ = ["linearize_gfm_tables"]
+__all__ = [
+    "GFM_TABLE_RE",
+    "header_all_value_like",
+    "header_has_prose_cell",
+    "linearize_gfm_tables",
+    "nearest_heading_text",
+    "parse_gfm_table",
+]
 
 # A GFM delimiter row: pipes / dashes / colons / whitespace with >=1 dash.
 # Mirrors `index.chunker._GFM_DELIM_RE` so "is this a table delimiter" is
@@ -148,6 +155,62 @@ def _header_has_prose_cell(header: list[str]) -> bool:
     return False
 
 
+# Public wrappers over the header-sanity gate so other modules (e.g.
+# `index/table_store.py`) can apply the SAME skip predicate without importing
+# the private `_header_*` symbols across a module boundary (forbidden by
+# `src/memex/CLAUDE.md`). The behaviour is unchanged — these forward verbatim.
+def header_all_value_like(header: list[str]) -> bool:
+    """Public alias for the all-value-like header-sanity gate.
+
+    See `_header_all_value_like` for the rationale: a header row that is ALL
+    value-like (digits/``$``/``%``) is a mis-structured header → skip the table.
+    """
+    return _header_all_value_like(header)
+
+
+def header_has_prose_cell(header: list[str]) -> bool:
+    """Public alias for the prose-cell (mis-bounding) header-sanity gate.
+
+    See `_header_has_prose_cell`: a header cell that reads as a pulled-in
+    sentence/heading is the tell of a mis-bounded table → skip it.
+    """
+    return _header_has_prose_cell(header)
+
+
+def parse_gfm_table(block: str) -> tuple[list[str], list[list[str]]] | None:
+    """Parse one GFM table block into its (header, data_rows) cell text, or
+    None to skip — the reusable core factored out of `_linearize_table`.
+
+    Returns the cleaned header cells and the cleaned data-row cells (footnote
+    markers stripped, whitespace collapsed, values otherwise verbatim — see
+    `_clean_cell`). Returns None for the SAME structural skip conditions the
+    linearizer has always applied:
+      - fewer than 3 non-blank lines (no header + delimiter + >=1 data row);
+      - the second line is not a GFM delimiter row;
+      - no non-empty data rows survive.
+
+    It does NOT apply the header-sanity gate (`header_all_value_like` /
+    `header_has_prose_cell`) — that stays the caller's responsibility, so both
+    consumers (the linearizer and the table store) apply it identically while
+    `parse_gfm_table` itself returns the raw parse. Pure-sync.
+    """
+    lines = [ln for ln in block.split("\n") if ln.strip()]
+    if len(lines) < 3:
+        return None
+    header_line = lines[0]
+    delim_line = lines[1]
+    if not _is_delimiter_row(delim_line):
+        return None
+    data_lines = lines[2:]
+
+    header = [_clean_cell(c) for c in _split_pipe_row(header_line)]
+    data_rows = [[_clean_cell(c) for c in _split_pipe_row(ln)] for ln in data_lines]
+    data_rows = [r for r in data_rows if any(c for c in r)]
+    if not data_rows:
+        return None
+    return header, data_rows
+
+
 def _linearize_row(
     header: list[str],
     cells: list[str],
@@ -196,6 +259,19 @@ def _nearest_heading_prefix(markdown: str, table_start: int) -> str:
     return f"[{nearest}] "
 
 
+def nearest_heading_text(body: str, pos: int) -> str:
+    """Return the text of the nearest ATX heading at/before *pos*, or ``""``.
+
+    Public sibling of `_nearest_heading_prefix` (which wraps the same lookup in
+    ``[...] ``): used by `index/table_store.py` to populate `StoredTable.section`
+    without an `index/ → parse/` private-symbol import.
+    """
+    nearest = ""
+    for m in _HEADING_RE.finditer(body[:pos]):
+        nearest = m.group(2).strip()
+    return nearest
+
+
 def _linearize_table(markdown: str, match: re.Match[str]) -> str | None:
     """Build the `[table-rows]` block for one GFM table match, or None to skip.
 
@@ -203,21 +279,10 @@ def _linearize_table(markdown: str, match: re.Match[str]) -> str | None:
     header) or there are no data rows. The returned block does NOT include the
     leading `\\n\\n` separator — the caller inserts it.
     """
-    block = match.group(0)
-    lines = [ln for ln in block.split("\n") if ln.strip()]
-    if len(lines) < 3:
+    parsed = parse_gfm_table(match.group(0))
+    if parsed is None:
         return None
-    header_line = lines[0]
-    delim_line = lines[1]
-    if not _is_delimiter_row(delim_line):
-        return None
-    data_lines = lines[2:]
-
-    header = [_clean_cell(c) for c in _split_pipe_row(header_line)]
-    data_rows = [[_clean_cell(c) for c in _split_pipe_row(ln)] for ln in data_lines]
-    data_rows = [r for r in data_rows if any(c for c in r)]
-    if not data_rows:
-        return None
+    header, data_rows = parsed
 
     if _header_all_value_like(header) or _header_has_prose_cell(header):
         return None
@@ -241,6 +306,12 @@ _GFM_TABLE_RE = re.compile(
     r"(?:[ \t]*\|.*\|[ \t]*(?:\n|$))+",  # >=1 data pipe-row
     flags=re.MULTILINE,
 )
+
+# Public alias so other modules (`index/table_store.py`) can scan a body for
+# GFM tables with `match.start()/end()` spans without importing the private
+# name across a module boundary (forbidden by `src/memex/CLAUDE.md`). Same
+# compiled object — no behaviour change.
+GFM_TABLE_RE = _GFM_TABLE_RE
 
 # A `[table-rows]` opener — used to detect an already-linearized table so the
 # pass is idempotent.

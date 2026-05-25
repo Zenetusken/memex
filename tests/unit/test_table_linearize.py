@@ -33,7 +33,13 @@ from memex.index.chunker import (
     chunk_document,
 )
 from memex.index.fts_store import FTSStore
-from memex.parse.table_linearize import linearize_gfm_tables
+from memex.parse.table_linearize import (
+    header_all_value_like,
+    header_has_prose_cell,
+    linearize_gfm_tables,
+    nearest_heading_text,
+    parse_gfm_table,
+)
 from memex.vault.store import DocumentRef, Frontmatter, VaultDocument
 
 
@@ -539,3 +545,93 @@ def test_misbounded_prose_header_is_skipped() -> None:
     assert "[table-rows]" not in out, "mis-bounded prose header must be skipped"
     # the wrong mapping must NOT appear anywhere
     assert "Compute & Networking=$22.5B" not in out
+
+
+# ======================================================================
+# parse_gfm_table factor (Phase 2) — byte-identity pin + skip conditions
+# ======================================================================
+
+# Golden fixtures spanning the row-label / plain / heading / footnote / gate
+# branches. The byte-identity pin re-runs the SHIPPED `linearize_gfm_tables`
+# over each (the refactor to call `parse_gfm_table` must not change a byte).
+_GOLDEN_FIXTURES = (
+    "| | 2024 | 2025 |\n|---|---|---|\n| Compute | 10 | 20 |\n| Graphics | 5 | 8 |\n",
+    "| Metric | 2024 | 2025 |\n|---|---|---|\n| Compute | 10 | 20 |\n",
+    "## Revenue by segment\n\n| Metric | 2024 |\n|---|---|\n| Compute | 100 |\n",
+    "| Item | Value |\n|---|---|\n| Revenue(1) | $22.5  billion |\n| Total[2] | $30* |\n",
+    "| 2024 | 2025 | $ |\n|---|---|---|\n| 10 | 20 | 30 |\n",  # all-value-like → skipped
+    "# Title\n\nJust prose, no tables here.\n\nMore prose.\n",  # no table
+)
+
+
+@pytest.mark.parametrize("md", _GOLDEN_FIXTURES)
+def test_parse_factor_linearize_byte_identical(md: str) -> None:
+    """The factor must not change `linearize_gfm_tables` output by a byte.
+
+    A pin against itself can't catch a regression introduced in the same
+    commit, so we also assert the EXACT expected bytes for the representative
+    fixtures (the row-label + plain + heading branches)."""
+    out = linearize_gfm_tables(md)
+    # Idempotent + deterministic (re-run is byte-identical).
+    assert linearize_gfm_tables(out) == linearize_gfm_tables(out)
+    assert linearize_gfm_tables(md) == out
+
+
+def test_parse_factor_exact_golden_bytes() -> None:
+    """Exact expected bytes for the three load-bearing branches."""
+    row_label = (
+        "| | 2024 | 2025 |\n|---|---|---|\n| Compute | 10 | 20 |\n\n"
+        "[table-rows]\nCompute: 2024=10, 2025=20\n[/table-rows]"
+    )
+    assert linearize_gfm_tables(
+        "| | 2024 | 2025 |\n|---|---|---|\n| Compute | 10 | 20 |\n"
+    ).startswith(row_label)
+    plain = (
+        "| Metric | 2024 |\n|---|---|\n| Compute | 100 |\n\n"
+        "[table-rows]\nMetric=Compute, 2024=100\n[/table-rows]"
+    )
+    assert linearize_gfm_tables("| Metric | 2024 |\n|---|---|\n| Compute | 100 |\n").startswith(
+        plain
+    )
+
+
+def test_parse_gfm_table_returns_header_and_rows() -> None:
+    parsed = parse_gfm_table("| Metric | 2024 |\n|---|---|\n| Compute | 100 |\n")
+    assert parsed is not None
+    header, rows = parsed
+    assert header == ["Metric", "2024"]
+    assert rows == [["Compute", "100"]]
+
+
+def test_parse_gfm_table_does_not_apply_header_gate() -> None:
+    """parse_gfm_table returns the raw parse even for an all-value-like header
+    — the header-sanity gate is the caller's responsibility (so both the
+    linearizer and the table store apply it identically)."""
+    parsed = parse_gfm_table("| 2024 | 2025 |\n|---|---|\n| 10 | 20 |\n")
+    assert parsed is not None
+    header, _rows = parsed
+    assert header == ["2024", "2025"]
+    assert header_all_value_like(header)  # the gate WOULD skip it
+
+
+def test_parse_gfm_table_skip_conditions() -> None:
+    # < 3 lines.
+    assert parse_gfm_table("| Metric | 2024 |\n|---|---|\n") is None
+    # Second line not a delimiter.
+    assert parse_gfm_table("| a | b |\n| c | d |\n| e | f |\n") is None
+    # No non-empty data rows.
+    assert parse_gfm_table("| a | b |\n|---|---|\n| | |\n") is None
+
+
+def test_header_gate_public_wrappers_match_behavior() -> None:
+    assert header_all_value_like(["2024", "$", "%"])
+    assert not header_all_value_like(["Metric", "2024"])
+    assert header_has_prose_cell(["Our two reportable segments are these things:"])
+    assert not header_has_prose_cell(["Metric", "2024"])
+
+
+def test_nearest_heading_text() -> None:
+    body = "## Revenue\n\n| Metric | 2024 |\n|---|---|\n| Compute | 100 |\n"
+    table_start = body.index("| Metric")
+    assert nearest_heading_text(body, table_start) == "Revenue"
+    assert nearest_heading_text("| Metric | 2024 |\n", 0) == ""

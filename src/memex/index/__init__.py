@@ -20,6 +20,7 @@ from memex.index.pipeline import (
     remove_document,
     retitle_document,
 )
+from memex.index.table_store import TableStore, extract_tables
 from memex.index.vector_store import EMBEDDING_DIM, VectorStore
 
 __all__ = [
@@ -30,8 +31,10 @@ __all__ = [
     "IndexResult",
     "ReindexReport",
     "RetitleResult",
+    "TableStore",
     "VectorStore",
     "chunk_document",
+    "extract_tables",
     "index_document",
     "reindex_vault",
     "remove_document",
