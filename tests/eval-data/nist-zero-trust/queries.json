@@ -1,0 +1,236 @@
+{
+  "_description": "Hand-labelled answer-quality eval corpus for NIST SP 800-207 (Zero Trust Architecture). New category for the P0 multi-category extension: a government/technical security standard (dense structured prose + definitional content + tables), distinct from the existing slide-deck / financial-report / chart corpora. Coheres thematically with the CR350 French security corpus for future cross-doc work.",
+  "_doc_id": "0290d6ec-nist-sp-800-207",
+  "_query_count": 18,
+  "_mix": {
+    "ans": 12,
+    "ref": 6,
+    "ref_in_corpus_unanswerable": 3,
+    "ref_out_of_corpus": 3
+  },
+  "_labelling_rule": "ANS queries: `_anchor_phrase` is a distinctive verbatim substring from the chunk holding the answer; `scripts/extend_corpus.py resolve` populates `relevant_chunk_ids` via FTS. REF queries: `should_refuse=true`, `relevant_chunk_ids=[]`. Refusals split into in-corpus-unanswerable (topic present, specific answer absent) and out-of-corpus (absent from the entire vault).",
+  "_created": "2026-05-25",
+  "_purpose": "Extend the eval matrix to a new category (security standard / government technical doc) so the queued P2.x A/Bs (reranker, VLM, chunker-size) have cross-category signal. HARD GATES: refusal_rate_on_counterfactuals == 1.0, zero hallucinations.",
+  "_source_note": "NIST SP 800-207 (Aug 2020), US-federal public domain \u2014 'not subject to copyright in the United States'. Local eval material only; the PDF is not committed to the repo (only this query set is).",
+  "_baseline_2026_05_25": {
+    "stack": "Qwen3-8B-AWQ orchestrator + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3 (cross_encoder, bf16), top_k=5",
+    "doc_id": "0290d6ec-nist-sp-800-207",
+    "index": "108 chunks, 2 tables, PyMuPDF parse (born-digital), 1/108 enrich chunk_failure",
+    "answered_count": 8,
+    "answerable_count": 12,
+    "refused_count": 10,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "hallucinations": 0,
+    "mean_citation_precision": 0.944,
+    "mean_citation_precision_answered_only": 0.875,
+    "false_refusals": ["nist-zero-trust-01", "nist-zero-trust-07", "nist-zero-trust-10", "nist-zero-trust-12"],
+    "notes": "HARD GATES hold \u2014 refusal_cf=1.0 (incl. all 3 confabulation traps 16/17/18), 0 hallucinations. The 4 false-refusals are conservative retrieval/assess misses on long/dense chunks (q07+q10 share the \u00a73.3.1 contextual-TA chunk #83f5557874 that doesn't reach top-5) \u2014 a chunk-granularity signal for P1.6, NOT fabrication. q11 answered correctly (2 verified claims) but cites a sibling network-location chunk outside the label \u2192 cp=0.0 (known not-comparable-across-siblings artifact). 8/12 ANS leaves discrimination headroom for the P2.1 reranker A/B."
+  },
+  "queries": [
+    {
+      "qid": "nist-zero-trust-01",
+      "question": "How many basic tenets of zero trust does NIST SP 800-207 define?",
+      "_anchor_phrase": "designed and deployed with adherence to the following zero trust basic tenets",
+      "_expected_answer": "Seven (7) basic tenets.",
+      "_answer_type": "single_fact",
+      "_note": "Section 2.1. The famous numbered list of 7 tenets.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "0290d6ec-nist-sp-800-207#933cd9fab1"
+      ]
+    },
+    {
+      "qid": "nist-zero-trust-02",
+      "question": "In SP 800-207, the policy decision point (PDP) is broken down into which two logical components?",
+      "_anchor_phrase": "the policy decision point (PDP) is broken down into two logical components",
+      "_expected_answer": "The policy engine (PE) and the policy administrator (PA).",
+      "_answer_type": "single_fact",
+      "_note": "Section 3. PDP = PE + PA.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "0290d6ec-nist-sp-800-207#bcd581d692"
+      ]
+    },
+    {
+      "qid": "nist-zero-trust-03",
+      "question": "Which zero trust component is responsible for the ultimate decision to grant access to a resource?",
+      "_anchor_phrase": "responsible for the ultimate decision to grant access to a resource",
+      "_expected_answer": "The policy engine (PE).",
+      "_answer_type": "single_fact",
+      "_note": "Section 3, Policy engine description.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "0290d6ec-nist-sp-800-207#bcd581d692"
+      ]
+    },
+    {
+      "qid": "nist-zero-trust-04",
+      "question": "What is the policy administrator (PA) responsible for in a zero trust architecture?",
+      "_anchor_phrase": "establishing and/or shutting down the communication path between a subject and a resource",
+      "_expected_answer": "Establishing and/or shutting down the communication path between a subject and a resource (via commands to the relevant PEPs); it executes the policy engine's decision and generates session-specific authentication tokens/credentials.",
+      "_answer_type": "single_fact",
+      "_note": "Section 3, Policy administrator description.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "0290d6ec-nist-sp-800-207#bcd581d692"
+      ]
+    },
+    {
+      "qid": "nist-zero-trust-05",
+      "question": "According to SP 800-207, who coined the term 'zero trust' and at which company?",
+      "_anchor_phrase": "later coined by John Kindervag",
+      "_expected_answer": "John Kindervag, while at Forrester.",
+      "_answer_type": "single_fact",
+      "_note": "Section 1.1 History. Proper-noun anchor.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "0290d6ec-nist-sp-800-207#7f666ad2c9"
+      ]
+    },
+    {
+      "qid": "nist-zero-trust-06",
+      "question": "Besides how factors are weighted, what are the two major characteristics SP 800-207 uses to differentiate trust algorithms?",
+      "_anchor_phrase": "two other major characteristics that can be used to differentiate",
+      "_expected_answer": "Criteria-based versus score-based, and singular versus contextual.",
+      "_answer_type": "multi_hop",
+      "_note": "Section 3.3.1. Two axes of TA variation.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "0290d6ec-nist-sp-800-207#869801623b"
+      ]
+    },
+    {
+      "qid": "nist-zero-trust-07",
+      "question": "What type of trust algorithm does SP 800-207 say a ZTA should ideally use?",
+      "_anchor_phrase": "a ZTA trust algorithm should be contextual",
+      "_expected_answer": "A contextual trust algorithm (one that takes the subject's recent history into account).",
+      "_answer_type": "single_fact",
+      "_note": "Section 3.3.1.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "0290d6ec-nist-sp-800-207#83f5557874"
+      ]
+    },
+    {
+      "qid": "nist-zero-trust-08",
+      "question": "What is the difference between a criteria-based and a score-based trust algorithm in SP 800-207?",
+      "_anchor_phrase": "criteria-based TA assumes a set of qualified attributes that must be met",
+      "_expected_answer": "A criteria-based TA grants access only if a set of enterprise-configured qualified attributes are all met; a score-based TA computes a confidence level from weighted data sources and grants access if the score exceeds the resource's configured threshold.",
+      "_answer_type": "multi_hop",
+      "_note": "Section 3.3.1, Criteria- versus score-based.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "0290d6ec-nist-sp-800-207#869801623b"
+      ]
+    },
+    {
+      "qid": "nist-zero-trust-09",
+      "question": "What three approaches to implementing a zero trust architecture does SP 800-207 describe?",
+      "_anchor_phrase": "A full ZT solution will include elements of all three approaches",
+      "_expected_answer": "Enhanced identity governance-driven, logical micro-segmentation, and network infrastructure / network-based segmentation (software defined perimeters).",
+      "_answer_type": "single_fact",
+      "_note": "Section 3.1.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "0290d6ec-nist-sp-800-207#60d594c589"
+      ]
+    },
+    {
+      "qid": "nist-zero-trust-10",
+      "question": "In SP 800-207's contextual trust-algorithm example, how many employee records does an HR employee typically access in a workday?",
+      "_anchor_phrase": "normally accesses 20 to 30 employee records",
+      "_expected_answer": "20 to 30 records in a typical workday (a contextual TA might alert if requests suddenly exceed 100).",
+      "_answer_type": "single_fact",
+      "_note": "Section 3.3.1. Distinctive numeric anchor.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "0290d6ec-nist-sp-800-207#83f5557874"
+      ]
+    },
+    {
+      "qid": "nist-zero-trust-11",
+      "question": "What does SP 800-207 say about trust based on network location?",
+      "_anchor_phrase": "Network location alone does not imply trust",
+      "_expected_answer": "Network location alone does not imply trust; all communication must be secured regardless of network location (tenet 2), and access requests from enterprise-owned infrastructure must meet the same requirements as those from any other network.",
+      "_answer_type": "single_fact",
+      "_note": "Section 2.1, tenet 2. Baseline cp=0.0 is a sibling-chunk artifact (network-location trust appears in tenet 2, §2.2, and §3.4.1); the answer is grounded, just citing an unlabeled valid chunk.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "0290d6ec-nist-sp-800-207#933cd9fab1"
+      ]
+    },
+    {
+      "qid": "nist-zero-trust-12",
+      "question": "What separation between communication flows does SP 800-207 recommend for ZTA networks?",
+      "_anchor_phrase": "control plane for network control communication and a data plane",
+      "_expected_answer": "A separation (logical or physical) between the control plane (used to control/configure the network and make access decisions) and the data plane (used for actual application/service communication).",
+      "_answer_type": "multi_hop",
+      "_note": "Section 3.4.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "0290d6ec-nist-sp-800-207#489ad33de9"
+      ]
+    },
+    {
+      "qid": "nist-zero-trust-13",
+      "question": "What specific encryption algorithm does SP 800-207 mandate for securing all ZTA communications?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 800-207 requires communication be secured 'in the most secure manner available' (confidentiality, integrity, source authentication) but is technology-agnostic and mandates no specific encryption algorithm.",
+      "_answer_type": "counterfactual",
+      "_note": "In-corpus-unanswerable: the topic (securing communication) is present but no specific algorithm is named. HARD GATE.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "nist-zero-trust-14",
+      "question": "According to SP 800-207, what is the maximum allowed latency in milliseconds for a policy engine to make an access decision?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 the document discusses minimizing temporal delays and provisioning for scale qualitatively, but gives no millisecond latency figure.",
+      "_answer_type": "counterfactual",
+      "_note": "In-corpus-unanswerable: performance is discussed qualitatively; no number exists. HARD GATE.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "nist-zero-trust-15",
+      "question": "How much does SP 800-207 estimate it costs a federal agency to migrate to a zero trust architecture?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 the publication discusses migration steps and cost-effectiveness qualitatively but provides no cost estimate or dollar figure.",
+      "_answer_type": "counterfactual",
+      "_note": "In-corpus-unanswerable: migration is covered (Section 7) but no cost figures. HARD GATE.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "nist-zero-trust-16",
+      "question": "What minimum password length does NIST Special Publication 800-63B recommend?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 that guidance is in SP 800-63B (Digital Identity Guidelines), a different publication not in this corpus. SP 800-207 does not specify password length.",
+      "_answer_type": "counterfactual",
+      "_note": "Out-of-corpus: NIST-adjacent confabulation trap (a different SP not in the vault). HARD GATE.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "nist-zero-trust-17",
+      "question": "What post-quantum cryptography key length does SP 800-207 recommend for zero trust deployments?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 SP 800-207 does not address post-quantum cryptography or key lengths (that is covered by FIPS 203 / SP 800-208).",
+      "_answer_type": "counterfactual",
+      "_note": "Out-of-corpus: security-adjacent topic absent from the document and vault. HARD GATE.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "nist-zero-trust-18",
+      "question": "Which commercial vendor's product does NIST SP 800-207 recommend for implementing the Policy Enforcement Point?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 NIST explicitly makes no product endorsements ('does not imply a recommendation or endorsement by NIST'); the PEP is described as a logical component, with no vendor named.",
+      "_answer_type": "counterfactual",
+      "_note": "Out-of-corpus: the doc explicitly disclaims product endorsement; tests cross-doc non-confabulation. HARD GATE.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    }
+  ],
+  "_resolved_at": "2026-05-25T16:41:36Z"
+}

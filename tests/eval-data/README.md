@@ -4,10 +4,17 @@ This directory holds the **versioned query sets** that `memex eval` consumes to 
 
 ```
 tests/eval-data/
-├── README.md                       ← this file
-└── slide-decks/
-    └── queries.json                ← the bootstrapped CUDA-deck queries
+├── README.md          ← this file
+├── slide-decks/       ← CUDA deck (33 q; +chart-content blocks)
+├── annual-report/     ← NVIDIA FY26 10-K (16 q; +table-SQL)
+├── chart-types/       ← "which chart" dataviz guide (chart-content)
+├── french-course/     ← CR350 French security course (8 q)
+├── cr350-multidoc/    ← 7-lecture cross-doc disambiguation (15 q)
+└── nist-zero-trust/   ← NIST SP 800-207 security standard (18 q; 2026-05-25)
 ```
+
+Each subdirectory holds a `queries.json` (+ optional notes). Source PDFs are
+**not** committed — only the query sets are (eval material stays local).
 
 Run outputs land under `tests/eval-results/` (gitignored — these are timestamped + regenerable and shouldn't be versioned).
 
@@ -111,7 +118,7 @@ The `EvalReport` schema lives at `src/memex/eval/runner.py::EvalReport`. `mean_c
 ## What's NOT here yet
 
 - **Parsing evals** (CER / WER / structural F1) — the metrics are implemented in `src/memex/eval/scoring.py` but not wired into `runner.py`. The spec calls these out as Phase 2; they need hand-curated ground-truth markdown per document, which is a deeper labour expense.
-- **The other 6 categories** — `modern-printed`, `scientific-papers`, `technical-docs`, `historical-scans`, `handwritten`, `forms`. Each one needs documents in the vault + a `queries.json` here. The slide-decks bootstrap establishes the pattern.
+- **Remaining parse-plan categories** — `modern-printed`, `scientific-papers`, `historical-scans`, `handwritten`, `forms` (the `nist-zero-trust` corpus, added 2026-05-25, covers the government / technical security-standard slice). Each needs a doc in the vault + a `queries.json` here; the repeatable playbook is in [`scripts/extend_corpus.py`](../../scripts/extend_corpus.py) (ingest → init → author anchors → resolve → eval).
 - **Counterfactual diversity** — three refusal queries against a single-document corpus is the minimum. A larger corpus would let counterfactuals exercise *retrieval-distractor* refusals (questions that pull near-miss chunks the agent has to recognise as off-topic), not just *empty-retrieval* refusals.
 
 See `docs/eval-corpus-plan.md` for the full multi-category vision and CER/F1 thresholds.
