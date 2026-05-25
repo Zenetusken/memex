@@ -66,6 +66,13 @@ class TableQueryResult(BaseModel):
     built from (rendered first in the synthetic chunk so the evidence survives
     the answer/verify truncation budgets). The citation fields mirror the source
     table's so the synthetic chunk cites the real document span.
+
+    `superlative`, when set on a `kind="rows"` result, is `(column_label,
+    "highest"|"lowest")` — meaning the returned row was INDEPENDENTLY verified
+    (Python recompute over the source column) to hold the extremum of that
+    column. The synthetic chunk frames it as such so the agent can attribute the
+    superlative confidently; it's only set when the verification agrees, so the
+    framing is grounded, not an unchecked claim.
     """
 
     kind: Literal["rows", "aggregate"]
@@ -81,6 +88,7 @@ class TableQueryResult(BaseModel):
     document_title: str
     heading_path: list[str]
     section: str
+    superlative: tuple[str, str] | None = None
 
 
 class GeneratedSQL(BaseModel):

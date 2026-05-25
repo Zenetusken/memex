@@ -431,3 +431,116 @@ def test_compute_schemas_emits_valid_sql_identifiers_matching_the_db() -> None:
         assert len(rows) == 2
     finally:
         db.close()
+
+
+# ======================================================================
+# row-superlative recompute gate (Table-RAG Phase 2 follow-up 2026-05-24)
+# ======================================================================
+
+
+def _dircomp_table() -> StoredTable:
+    return StoredTable(
+        doc_id="d",
+        table_id="dircomp01",  # lowercase-alnum → sql_name == table_id
+        section="Director Compensation",
+        header=["Name", "Total ($)"],
+        rows=[["Ochoa", "321,309"], ["Coxe", "363,809"], ["Burgess", "342,559"]],
+        char_start=0,
+        char_end=50,
+    )
+
+
+@pytest.mark.asyncio
+async def test_superlative_asc_limit1_verified_frames_lowest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`ORDER BY <num> ASC LIMIT 1` over a table whose min the returned row holds
+    → kind="rows" with superlative=(label, "lowest"), returning the min row."""
+    t = _dircomp_table()
+
+    async def _fake(*, prompt: object, schema: type, **_kw: object) -> tuple[object, int]:
+        return (
+            GeneratedSQL(
+                sql='SELECT * FROM "dircomp01" ORDER BY total__num ASC LIMIT 1',
+                target_table_id=t.table_id,
+            ),
+            10,
+        )
+
+    monkeypatch.setattr(table_sql, "complete_structured", _fake)
+    res = await query_doc_tables("which director got the lowest total comp", [t])
+    assert res is not None and res.kind == "rows"
+    assert res.superlative == ("Total ($)", "lowest")
+    assert res.rows == [["Ochoa", "321,309"]]
+
+
+@pytest.mark.asyncio
+async def test_superlative_desc_limit1_verified_frames_highest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    t = _dircomp_table()
+
+    async def _fake(*, prompt: object, schema: type, **_kw: object) -> tuple[object, int]:
+        return (
+            GeneratedSQL(
+                sql='SELECT * FROM "dircomp01" ORDER BY total__num DESC LIMIT 1',
+                target_table_id=t.table_id,
+            ),
+            10,
+        )
+
+    monkeypatch.setattr(table_sql, "complete_structured", _fake)
+    res = await query_doc_tables("highest paid director", [t])
+    assert res is not None and res.superlative == ("Total ($)", "highest")
+    assert res.rows == [["Coxe", "363,809"]]
+
+
+@pytest.mark.asyncio
+async def test_superlative_limit_gt_1_not_framed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A multi-row `LIMIT 3` is a verbatim list, not a single-row superlative →
+    no extremum framing (superlative stays None)."""
+    t = _dircomp_table()
+
+    async def _fake(*, prompt: object, schema: type, **_kw: object) -> tuple[object, int]:
+        return (
+            GeneratedSQL(
+                sql='SELECT * FROM "dircomp01" ORDER BY total__num ASC LIMIT 3',
+                target_table_id=t.table_id,
+            ),
+            10,
+        )
+
+    monkeypatch.setattr(table_sql, "complete_structured", _fake)
+    res = await query_doc_tables("list directors by pay", [t])
+    assert res is not None and res.kind == "rows"
+    assert res.superlative is None
+
+
+def test_verify_superlative_returned_row_not_extremum_returns_none() -> None:
+    """Direct unit: a returned row that is NOT the column extremum → None (the
+    safety check — a wrong ORDER BY can't self-certify a superlative claim)."""
+    t = _dircomp_table()
+    loaded = table_sql._load_tables(
+        __import__("sqlite3").connect(":memory:"), table_sql._compute_schemas([t])
+    )[t.table_id]
+    # ASC asks for the minimum; hand it the MAX row → must not verify.
+    assert (
+        table_sql._verify_superlative(t, loaded, "total__num", "asc", None, ["Coxe", "363,809"])
+        is None
+    )
+    # The real minimum row DOES verify.
+    assert table_sql._verify_superlative(
+        t, loaded, "total__num", "asc", None, ["Ochoa", "321,309"]
+    ) == ("Total ($)", "lowest")
+
+
+def test_verify_superlative_non_numeric_order_col_returns_none() -> None:
+    """Ordering by a text column is not framed (lexicographic extremum is risky)."""
+    t = _dircomp_table()
+    loaded = table_sql._load_tables(
+        __import__("sqlite3").connect(":memory:"), table_sql._compute_schemas([t])
+    )[t.table_id]
+    assert (
+        table_sql._verify_superlative(t, loaded, "name", "asc", None, ["Burgess", "342,559"])
+        is None
+    )

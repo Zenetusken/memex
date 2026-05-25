@@ -324,6 +324,83 @@ def _strip_quotes(ident: str) -> str:
     return ident.strip().strip('"').strip("'")
 
 
+# A single-row superlative SELECT: `SELECT ... FROM tbl [WHERE ...] ORDER BY col
+# [ASC|DESC] LIMIT 1`. Captures the order column, direction (default ASC), and
+# the optional WHERE body. Scoped to `LIMIT 1` — the "which X has the most/least
+# Y" case — so the verification is a single boundary check (a multi-row list is
+# already a verbatim list the agent reads; it gets no superlative framing).
+_SUPERLATIVE_RE = re.compile(
+    r"^\s*select\s+.+?\s+from\s+(?P<tbl>[\w\"]+)\s*"
+    r"(?:where\s+(?P<where>.+?)\s+)?"
+    r"order\s+by\s+(?P<col>[\w\".]+)\s*(?P<dir>asc|desc)?\s*"
+    r"limit\s+1\s*$",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+
+
+def _verify_superlative(
+    stored: StoredTable,
+    loaded: _LoadedTable,
+    order_col: str,
+    direction: str,
+    where: str | None,
+    returned_cells: list[str],
+) -> tuple[str, str] | None:
+    """Independently confirm *returned_cells* holds the extremum of *order_col*
+    (what a `LIMIT 1` superlative claims), or None when it can't be verified.
+
+    Like `_recompute_aggregate`, the extremum is recomputed over the ORIGINAL
+    cell text (`coerce_number`, not the sqlite `__num` column) so a wrong ORDER
+    BY can't self-certify, and the returned row's order-column value is compared
+    to that extremum (a VALUE check — tie-safe: a row tied at the extremum still
+    verifies). Returns `(column_label, "highest"|"lowest")` for framing only
+    when the order column is numeric-coercible and the returned row sits at the
+    extremum. The returned-row check makes the framing grounded.
+    """
+    desc = direction.lower() == "desc"
+    col_name = _strip_quotes(order_col).split(".")[-1].lower()
+    cidx = _column_index(loaded, col_name)
+    if cidx is None or cidx not in loaded.numeric_cols:
+        return None  # only numeric ordering is framed (text ordering is risky)
+
+    where_filter: tuple[int, str, str] | None = None
+    if where is not None:
+        wm = _WHERE_RE.match(where)
+        if wm is None:
+            return None
+        wcol = _strip_quotes(wm.group("col")).split(".")[-1].lower()
+        widx = _column_index(loaded, wcol)
+        if widx is None:
+            return None
+        where_filter = (widx, wm.group("op"), _strip_quotes(wm.group("lit")))
+
+    vals: list[float] = []
+    for row in stored.rows:
+        if where_filter is not None and not _row_matches(row, where_filter):
+            continue
+        if cidx < len(row) and row[cidx].strip():
+            n = coerce_number(row[cidx])
+            if n is not None:
+                vals.append(n)
+    if not vals:
+        return None
+    if cidx >= len(returned_cells):
+        return None
+    returned = coerce_number(returned_cells[cidx])
+    if returned is None:
+        return None
+    extremum = max(vals) if desc else min(vals)
+    # The `±1.0` floor mirrors the aggregate gate's tolerance. It's dead slack
+    # here, not load-bearing: `_load_tables` builds the sqlite `__num` column via
+    # the SAME `coerce_number`, so sqlite's `ORDER BY <col>__num` and this
+    # recompute operate on bit-identical floats and can't disagree on the
+    # extremum — `returned` is the genuine extremum, compared against itself.
+    if abs(returned - extremum) > max(1.0, 1e-6 * abs(extremum)):
+        return None  # the returned row is NOT the extremum → don't frame
+    label = stored.header[cidx] if cidx < len(stored.header) else col_name
+    return (label, "highest" if desc else "lowest")
+
+
 def _classify_columns_are_stored(sql: str, loaded: _LoadedTable) -> bool:
     """Heuristic for `kind="rows"`: every selected column maps to a stored
     column (no aggregate fn, no computed/aliased scalar).
@@ -590,6 +667,23 @@ def _classify_and_build(
         for r in rows:
             cells = [("" if v is None else str(v)) for v in r[:n_text]]
             result_rows.append(cells)
+        # A `LIMIT 1` superlative (`ORDER BY <numeric col> ASC|DESC LIMIT 1`)
+        # gets a verified extremum framing IFF the returned row independently
+        # checks out as the column extremum — so the agent can confidently
+        # attribute "which X is highest/lowest". Unverified → plain rows (the
+        # agent conservatively refuses, which is HARD-gate-safe).
+        superlative: tuple[str, str] | None = None
+        sm = _SUPERLATIVE_RE.match(sql)
+        if sm is not None and result_rows:
+            where = sm.group("where")
+            superlative = _verify_superlative(
+                target,
+                loaded,
+                sm.group("col"),
+                sm.group("dir") or "asc",
+                where.strip() if where else None,
+                result_rows[0],
+            )
         return TableQueryResult(
             kind="rows",
             sql=sql,
@@ -604,6 +698,7 @@ def _classify_and_build(
             document_title="",
             heading_path=[target.section] if target.section else [],
             section=target.section,
+            superlative=superlative,
         )
 
     # kind="aggregate" — single scalar, recompute-gated. `is_agg` already

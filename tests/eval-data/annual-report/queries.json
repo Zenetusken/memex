@@ -168,13 +168,13 @@
     },
     {
       "qid": "annual-report-15",
-      "question": "What was the lowest total compensation paid to any single NVIDIA director in fiscal 2026?",
+      "question": "Which NVIDIA director received the lowest total compensation in fiscal 2026?",
       "should_refuse": false,
       "_answer_type": "superlative",
       "_anchor_phrase": "321,309",
       "relevant_chunk_ids": [],
-      "_expected_answer": "$321,309 (Ellen Ochoa) — the minimum 'Total ($)' in the Director Compensation for Fiscal 2026 table. Phase-2 row-returning SQL superlative (ORDER BY total__num ASC LIMIT 1) returns the verbatim minimum row.",
-      "_note": "Phase-2 row-returning SQL superlative: returns the verbatim extremum row (no fabricated value). NB row-superlatives are phrasing-sensitive — a 'which director...' framing makes the answer agent conservatively REFUSE (it won't assert an unverified extremum from one row), which is HARD-GATE-safe; the recompute-gated aggregate path (ar-14) is the robust core."
+      "_expected_answer": "Ellen Ochoa — the unique minimum 'Total ($)' ($321,309) in the Director Compensation for Fiscal 2026 table. Phase-2 row-superlative with the verified-extremum gate: SQL ORDER BY total__num ASC LIMIT 1, the returned row independently confirmed to hold the column minimum, so the agent confidently attributes 'which director'.",
+      "_note": "Phase-2 row-superlative recompute gate (2026-05-24 follow-up): an independent Python check confirms the returned row IS the column extremum before framing it as such, so the 'which X is highest/lowest' attribution answers instead of conservatively refusing. A wrong ORDER BY → mismatch → no framing → refuse (HARD-gate-safe)."
     },
     {
       "qid": "annual-report-16",

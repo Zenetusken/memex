@@ -509,6 +509,13 @@ def _build_synthetic_chunk(result: TableQueryResult) -> Chunk:
         val_str = f"{agg_val:g}" if agg_val is not None else "n/a"
         lines.append(f"Aggregate result = {val_str} over {len(result.contributing_rows)} rows:")
         _ = op_col
+    elif result.superlative is not None:
+        # Verified extremum framing — the returned row was independently
+        # confirmed to hold the {highest|lowest} value of this column, so the
+        # agent can attribute the superlative (the framing is grounded, not an
+        # unchecked claim).
+        col_label, direction = result.superlative
+        lines.append(f"Row with the {direction} {col_label} in this table:")
     else:
         lines.append("Matching rows:")
     for cells in result.contributing_rows:
