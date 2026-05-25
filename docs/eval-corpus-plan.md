@@ -316,7 +316,9 @@ The corpus is itself versioned semantically.
 > heading-level-recovery parser fix): **3/3 pass, mean CER 0.036 / WER
 > 0.106 / structural-F1 0.974** (was 0.566 before the fix). Findings:
 > native ODF tables parse as GFM + **code blocks parse with high
-> fidelity**; the table header row still splits. **The
+> fidelity**; the table header/body `<br>`-shatter the table-F1 metric
+> surfaced is now **FIXED** (commit `0b97775`, table-aware
+> `_normalise_breaks`: quarterly tables-F1 0.23→1.00). **The
 > heading-collapse defect these fixtures surfaced is now FIXED**
 > (commit `bb66c82`): pymupdf4llm 1.27.x emitted every heading as `##`
 > regardless of font size, so `parse/pymupdf_worker.py` re-derives the
