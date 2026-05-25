@@ -10,8 +10,9 @@ tests/eval-data/
 ├── chart-types/       ← "which chart" dataviz guide (chart-content)
 ├── french-course/     ← CR350 French security course (8 q)
 ├── cr350-multidoc/    ← 7-lecture cross-doc disambiguation (15 q)
-├── nist-zero-trust/   ← NIST SP 800-207 security standard (18 q; 2026-05-25)
-└── scientific-gte/    ← GTE paper arXiv 2308.03281 (18 q; 2026-05-25)
+├── nist-zero-trust/      ← NIST SP 800-207 security standard (18 q; 2026-05-25)
+├── scientific-gte/       ← GTE paper arXiv 2308.03281 (18 q; 2026-05-25)
+└── technical-guidelines/ ← Memex docs/GUIDELINES.md, rendered (18 q; 2026-05-25)
 ```
 
 Each subdirectory holds a `queries.json` (+ optional notes). Source PDFs are
@@ -119,7 +120,7 @@ The `EvalReport` schema lives at `src/memex/eval/runner.py::EvalReport`. `mean_c
 ## What's NOT here yet
 
 - **Parsing evals** (CER / WER / structural F1) — the metrics are implemented in `src/memex/eval/scoring.py` but not wired into `runner.py`. The spec calls these out as Phase 2; they need hand-curated ground-truth markdown per document, which is a deeper labour expense.
-- **Remaining parse-plan categories** — `modern-printed`, `technical-docs` (code/deep-headings), `historical-scans`, `handwritten`, `forms`. Added 2026-05-25: `nist-zero-trust` (security standard) + `scientific-gte` (scientific paper) cover the government-standard and scientific-paper slices. Each remaining one needs a doc in the vault + a `queries.json` here; the repeatable playbook is in [`scripts/extend_corpus.py`](../../scripts/extend_corpus.py) (ingest → init → author anchors → resolve → eval).
+- **Remaining parse-plan categories** — `modern-printed`, `historical-scans`, `handwritten`, `forms`. Added 2026-05-25: `nist-zero-trust` (security standard), `scientific-gte` (scientific paper), `technical-guidelines` (technical docs — code/deep-headings) cover three slices. Each remaining one needs a doc in the vault + a `queries.json` here; the repeatable playbook is in [`scripts/extend_corpus.py`](../../scripts/extend_corpus.py) (ingest → init → author anchors → resolve → eval).
 - **Counterfactual diversity** — three refusal queries against a single-document corpus is the minimum. A larger corpus would let counterfactuals exercise *retrieval-distractor* refusals (questions that pull near-miss chunks the agent has to recognise as off-topic), not just *empty-retrieval* refusals.
 
 See `docs/eval-corpus-plan.md` for the full multi-category vision and CER/F1 thresholds.

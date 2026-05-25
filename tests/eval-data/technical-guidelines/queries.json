@@ -1,0 +1,237 @@
+{
+  "_description": "Hand-labelled answer-quality eval corpus for Memex's own docs/GUIDELINES.md (engineering practices). New category for the P0 multi-category extension: TECHNICAL DOCUMENTATION (code blocks + deep H1-H3 headings + config snippets) \u2014 the code-block/deep-heading retrieval profile no prior corpus exercises. 'Our own docs', rendered to PDF so the corpus reflects a user dropping a technical PDF.",
+  "_doc_id": "f59860eb-guidelines",
+  "_query_count": 18,
+  "_mix": {
+    "ans": 12,
+    "ref": 6,
+    "ref_in_corpus_unanswerable": 3,
+    "ref_out_of_corpus": 3
+  },
+  "_labelling_rule": "ANS queries: `_anchor_phrase` is a distinctive verbatim substring from the chunk holding the answer (anchored on PROSE rules, which survived the round-trip cleanly); resolve via FTS. REF: should_refuse=true, relevant_chunk_ids=[]. Refusals split into in-corpus-unanswerable and out-of-corpus.",
+  "_created": "2026-05-25",
+  "_purpose": "Extend the eval matrix to the technical-docs category (code/deep-headings) so the queued P2.x A/Bs get a code-block/deep-heading signal. HARD GATES: refusal_rate_on_counterfactuals == 1.0, zero hallucinations.",
+  "_source_note": "Rendered from this repo's docs/GUIDELINES.md (project-owned) \u2192 markdown_it HTML \u2192 LibreOffice PDF \u2192 ingested (PyMuPDF born-digital, 57 chunks, 3 tables). Local eval material; the PDF is not committed (only this query set ships).",
+  "_parse_note": "Technical-docs round-trip surfaced real parse artifacts (the value this category adds): code-comment lines like '# src/memex/core/events.py' were mis-promoted to headings, code blocks fragmented (104 fences vs 24 in source), and the Evaluation GFM table broke across rows. Questions are therefore anchored on PROSE rules, which round-tripped cleanly.",
+  "_baseline_2026_05_25": {
+    "stack": "Qwen3-8B-AWQ orchestrator + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3 (cross_encoder, bf16), top_k=5",
+    "doc_id": "f59860eb-guidelines",
+    "index": "57 chunks, 3 tables, PyMuPDF born-digital (rendered from docs/GUIDELINES.md), 3/57 enrich chunk_failures (fragmented code-block chunks)",
+    "answered_count": 11,
+    "answerable_count": 12,
+    "refused_count": 7,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "hallucinations": 0,
+    "mean_citation_precision": 1.0,
+    "mean_citation_precision_answered_only": 1.0,
+    "false_refusals": ["technical-guidelines-01"],
+    "notes": "HARD GATES hold — refusal_cf=1.0 (incl. local-first-contradiction traps: cloud deploy, SaaS pricing, npm install), 0 hallucinations. PERFECT citation precision (1.0) — prose-anchored questions, no sibling-chunk artifact (contrast scientific-gte). 1 false-refusal (gl-01, MemexError inheritance) is a retrieval/assess miss — the answer is in the labeled coding-standards chunk (gl-02/03/04 answered from it), the agent just didn't surface it for that phrasing; not fabrication. Best ANS of the 3 new corpora (11/12). The MD→PDF→parse round-trip surfaced real technical-docs parse artifacts (code-comment-as-heading, code-fence fragmentation) — the value this category adds."
+  },
+  "queries": [
+    {
+      "qid": "technical-guidelines-01",
+      "question": "According to the developer guidelines, what must every custom exception inherit from, and what field must it include?",
+      "_anchor_phrase": "Every custom exception inherits from",
+      "_expected_answer": "Every custom exception inherits from MemexError and includes a `context: dict` field.",
+      "_answer_type": "single_fact",
+      "_note": "Coding standards \u2014 errors carry context.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "f59860eb-guidelines#de93ff91c3"
+      ]
+    },
+    {
+      "qid": "technical-guidelines-02",
+      "question": "What is the guidelines' rule about passing data across module boundaries?",
+      "_anchor_phrase": "Pydantic models cross module boundaries, dicts don't",
+      "_expected_answer": "Pydantic models cross module boundaries, not dicts \u2014 a shared payload is a pydantic model in core/types.py, not dict[str, Any].",
+      "_answer_type": "single_fact",
+      "_note": "Coding standards.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "f59860eb-guidelines#de93ff91c3"
+      ]
+    },
+    {
+      "qid": "technical-guidelines-03",
+      "question": "What pyright policy do the guidelines mandate for src/memex in CI?",
+      "_anchor_phrase": "0 errors / 0 warnings",
+      "_expected_answer": "pyright --strict runs in CI and src/memex is kept at 0 errors / 0 warnings.",
+      "_answer_type": "single_fact",
+      "_note": "Coding standards \u2014 types are not optional.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "f59860eb-guidelines#de93ff91c3"
+      ]
+    },
+    {
+      "qid": "technical-guidelines-04",
+      "question": "What is the guidelines' rule about async versus sync code?",
+      "_anchor_phrase": "Async-first for I/O, sync for CPU",
+      "_expected_answer": "Async-first for I/O (filesystem, HTTP, model calls, DB writes); sync for pure CPU computation (parsing tokens, formatting).",
+      "_answer_type": "single_fact",
+      "_note": "Coding standards.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "f59860eb-guidelines#de93ff91c3"
+      ]
+    },
+    {
+      "qid": "technical-guidelines-05",
+      "question": "How many stages does a document flow through in the Memex pipeline, and what are they?",
+      "_anchor_phrase": "A document flows through Memex in five stages",
+      "_expected_answer": "Five stages: ingest \u2192 parse \u2192 enrich \u2192 index \u2192 retrieve.",
+      "_answer_type": "single_fact",
+      "_note": "Architecture \u2014 the pipeline.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "f59860eb-guidelines#9e47b74725"
+      ]
+    },
+    {
+      "qid": "technical-guidelines-06",
+      "question": "What type of identifier is the correlation_id, and when is it generated?",
+      "_anchor_phrase": "It's a ULID generated at ingest",
+      "_expected_answer": "A ULID, generated at ingest (for documents) or at query receipt (for retrievals); it threads through every event, log line, trace, and model call.",
+      "_answer_type": "single_fact",
+      "_note": "Architecture \u2014 event-driven communication.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "f59860eb-guidelines#0521e0abb6"
+      ]
+    },
+    {
+      "qid": "technical-guidelines-07",
+      "question": "Where and for how long are pipeline events persisted?",
+      "_anchor_phrase": "persisted to SQLite in a rolling 30-day window",
+      "_expected_answer": "To SQLite, in a rolling 30-day window (enabling debugging replay, recovery, and evaluation).",
+      "_answer_type": "single_fact",
+      "_note": "Architecture \u2014 event bus.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "f59860eb-guidelines#0521e0abb6"
+      ]
+    },
+    {
+      "qid": "technical-guidelines-08",
+      "question": "What does the module-boundary rule forbid a module from doing?",
+      "_anchor_phrase": "import private symbols (anything prefixed with",
+      "_expected_answer": "A module may not reach into another module's internals, write to another module's data store, or import private symbols (anything prefixed with _).",
+      "_answer_type": "single_fact",
+      "_note": "Architecture \u2014 module boundaries.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "f59860eb-guidelines#64e4d17d49"
+      ]
+    },
+    {
+      "qid": "technical-guidelines-09",
+      "question": "In Memex's hybrid retrieval, how many fused candidates does the reranker take and how many does it return?",
+      "_anchor_phrase": "second stage on the top 50 fused candidates",
+      "_expected_answer": "bge-reranker-v2-m3 reranks the top 50 fused candidates and returns the top 10 (BM25 + dense vector combined via reciprocal rank fusion).",
+      "_answer_type": "single_fact",
+      "_note": "Storage and retrieval \u2014 hybrid retrieval.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "f59860eb-guidelines#5041fd9630"
+      ]
+    },
+    {
+      "qid": "technical-guidelines-10",
+      "question": "What knowledge-graph database does Memex use, and what is it a fork of?",
+      "_anchor_phrase": "RyuGraph (the maintained fork of Kuzu",
+      "_expected_answer": "RyuGraph, the maintained fork of Kuzu (see ADR-0005).",
+      "_answer_type": "single_fact",
+      "_note": "Storage and retrieval \u2014 the knowledge graph.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "f59860eb-guidelines#405027631f"
+      ]
+    },
+    {
+      "qid": "technical-guidelines-11",
+      "question": "What are the three caching tiers described in the guidelines?",
+      "_anchor_phrase": "Three tiers, all content-addressed",
+      "_expected_answer": "Memory (LRU ~500MB, session model outputs), on-disk (~/.cache/memex, default 5GB cap), and vault (forever) \u2014 all content-addressed.",
+      "_answer_type": "single_fact",
+      "_note": "Storage and retrieval \u2014 caching.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "f59860eb-guidelines#a1e10fe5ba"
+      ]
+    },
+    {
+      "qid": "technical-guidelines-12",
+      "question": "What do the guidelines call the public API of Memex?",
+      "_anchor_phrase": "the public API of Memex",
+      "_expected_answer": "The MCP server (anything an external agent should be able to do is an MCP tool; anything not exposed is internal). The CLI is the canonical interface.",
+      "_answer_type": "single_fact",
+      "_note": "Interfaces \u2014 MCP server.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "f59860eb-guidelines#d8303ef8d7"
+      ]
+    },
+    {
+      "qid": "technical-guidelines-13",
+      "question": "What is the exact maximum line length in characters that the coding standards enforce?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 the coding standards cover types, errors, async, logging, etc., but specify no maximum line length.",
+      "_answer_type": "counterfactual",
+      "_note": "In-corpus-unanswerable: coding standards present, no line-length rule. HARD GATE.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "technical-guidelines-14",
+      "question": "How many unit tests does the Memex test suite currently contain?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 the guidelines describe the four test LAYERS and cadences but give no test count.",
+      "_answer_type": "counterfactual",
+      "_note": "In-corpus-unanswerable: test layers described, no count. HARD GATE.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "technical-guidelines-15",
+      "question": "Which commercial cloud LLM API do the guidelines recommend as a fallback when local models are insufficient?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 Memex is local-first / air-gapped; the guidelines recommend no cloud LLM API fallback (no remote endpoints).",
+      "_answer_type": "counterfactual",
+      "_note": "In-corpus-unanswerable / contradicts local-first: discusses models but no cloud fallback exists. HARD GATE.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "technical-guidelines-16",
+      "question": "What do the guidelines recommend for deploying Memex to AWS or a cloud Kubernetes cluster?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 Memex is a single-machine, local-first system; the guidelines give no cloud/Kubernetes deployment guidance.",
+      "_answer_type": "counterfactual",
+      "_note": "Out-of-corpus / contradicts local-first single-machine design. HARD GATE.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "technical-guidelines-17",
+      "question": "What is the recommended monthly price for the Memex SaaS subscription tier?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 Memex is a local-first open project; there is no SaaS subscription or pricing in the guidelines.",
+      "_answer_type": "counterfactual",
+      "_note": "Out-of-corpus: no SaaS/pricing exists. HARD GATE.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "technical-guidelines-18",
+      "question": "What is the npm package name to install Memex?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 Memex is a Python project (uv/pyproject); there is no npm package.",
+      "_answer_type": "counterfactual",
+      "_note": "Out-of-corpus: cross-ecosystem confabulation trap (Python, not npm). HARD GATE.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    }
+  ],
+  "_resolved_at": "2026-05-25T17:53:18Z"
+}
