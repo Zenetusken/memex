@@ -767,13 +767,18 @@ async def _vllm_restart(scripts_dir: Path) -> None:
 
 
 @asynccontextmanager
-async def _pause_vllm_for_chart_ocr() -> AsyncGenerator[None]:
-    """Pause-and-restart vLLM around the chart-OCR pass (P3.3).
+async def _pause_vllm_for_gpu_parse() -> AsyncGenerator[None]:
+    """Pause-and-restart vLLM around a GPU-heavy parse pass.
 
-    On the 12 GB reference rig, vLLM's ~8.5 GB resident footprint
-    plus the embedder + reranker + chart-OCR's ~2.3 GB doesn't fit.
-    Stopping vLLM during parse frees the budget; restarting after
-    keeps the user-facing inference daemon alive in the long run.
+    Two callers share it: the chart-OCR pass (P3.3) and the VLM
+    escalation path (low-confidence/scanned pages → Qwen2.5-VL). Both
+    load a multi-GB model in-process via the registry; on the 12 GB
+    reference rig vLLM's ~8.5 GB resident footprint plus the embedder +
+    reranker + that model doesn't fit. Stopping vLLM during parse frees
+    the budget; restarting after keeps the user-facing inference daemon
+    alive in the long run. The caller MUST `registry.unload(...)` its
+    model inside the context (before the `finally` restart) so the VRAM
+    is actually free when vLLM comes back.
 
     The restart is in `finally` so a parse crash doesn't strand the
     user without inference. The restart failure (rare) logs at ERROR
@@ -783,7 +788,7 @@ async def _pause_vllm_for_chart_ocr() -> AsyncGenerator[None]:
     No-op when vLLM is not reachable at the start of the context
     (e.g., the user is running parse with vLLM intentionally off).
     """
-    log = logger.bind(component="chart_ocr.pause_vllm")
+    log = logger.bind(component="parse.pause_vllm")
     settings = get_settings()
     base_url = settings.inference.base_url
 
@@ -979,7 +984,7 @@ async def _parse_with_docling(
             figure_count=len(conversion.figures),
         )
         try:
-            async with _pause_vllm_for_chart_ocr():
+            async with _pause_vllm_for_gpu_parse():
                 extractions = await chart_ocr_extract(
                     source_pdf=source,
                     figures=conversion.figures,
@@ -1129,11 +1134,22 @@ async def _route_and_escalate(
         to_escalate.append(p.page)
 
     # Second pass: batch VLM call. One context acquisition for the lot.
+    # The VLM loads in-process (~5-6 GB AWQ), so on the 12 GB rig pause
+    # vLLM around it (same dance as chart-OCR) and unload it before the
+    # restart — else it OOMs against the ~8.5 GB resident vLLM. The pause
+    # is a no-op when vLLM isn't running.
     if to_escalate:
-        results = await vlm_convert_pages(
-            source_pdf=source,
-            page_numbers=to_escalate,
-        )
+        async with _pause_vllm_for_gpu_parse():
+            results = await vlm_convert_pages(
+                source_pdf=source,
+                page_numbers=to_escalate,
+            )
+            try:
+                from memex.models.registry import get_registry
+
+                await get_registry().unload("vlm")
+            except Exception as ex:
+                log.warning("parse.vlm.unload_failed", error=str(ex))
         for page_no in to_escalate:
             result = results.get(page_no)
             original = page_index[page_no]
