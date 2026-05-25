@@ -217,12 +217,23 @@ def register(app: typer.Typer) -> None:
                 "classifier would normally route to PyMuPDF."
             ),
         ),
+        refresh_vlm: bool = _Option(
+            False,
+            "--refresh-vlm",
+            help=(
+                "Bust this document's cached VLM transcriptions and re-run them "
+                "(the VLM is non-deterministic; transcriptions are cached by "
+                "default for reproducibility)."
+            ),
+        ),
     ) -> None:
         """Re-parse a document already in the vault."""
 
         async def _run():
             bootstrap()
-            return await parse_document(doc_id, force_docling=force_docling)
+            return await parse_document(
+                doc_id, force_docling=force_docling, refresh_vlm=refresh_vlm
+            )
 
         _print(asyncio.run(_run()))
 

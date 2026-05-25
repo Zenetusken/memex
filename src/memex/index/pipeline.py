@@ -483,7 +483,13 @@ async def reindex_vault(*, force: bool = False) -> ReindexReport:
         # Bypass any persistence checks; recursively drop the .memex/{embeddings,search,graph}.*
         # We don't touch traces/ or manifests/ — they're independent derived state.
         derived = settings.vault_path / ".memex"
-        for target in ("embeddings.lance", "search.sqlite", "tables.sqlite", "graph.ryu"):
+        for target in (
+            "embeddings.lance",
+            "search.sqlite",
+            "tables.sqlite",
+            "graph.ryu",
+            "vlm_cache.sqlite",
+        ):
             path = derived / target
             if path.is_file():
                 path.unlink(missing_ok=True)

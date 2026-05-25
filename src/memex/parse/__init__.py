@@ -37,6 +37,7 @@ from memex.parse.sandbox import (
     enable_network_block,
 )
 from memex.parse.vlm_backend import VLMUnavailable
+from memex.parse.vlm_cache import VLMTranscriptionCache
 
 __all__ = [
     "DoclingConversion",
@@ -53,6 +54,7 @@ __all__ = [
     "PyMuPDFUnavailable",
     "SandboxLoadFailed",
     "SandboxStatus",
+    "VLMTranscriptionCache",
     "VLMUnavailable",
     "derive_title",
     "enable_network_block",

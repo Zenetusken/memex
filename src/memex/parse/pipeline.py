@@ -75,6 +75,7 @@ from memex.parse.vlm_backend import (
 from memex.parse.vlm_backend import (
     convert_pages as vlm_convert_pages,
 )
+from memex.parse.vlm_cache import VLMTranscriptionCache
 from memex.vault.store import (
     DocumentRef,
     Frontmatter,
@@ -929,6 +930,7 @@ async def _parse_with_docling(
     source: Path,
     *,
     force_ocr: bool | None = None,
+    refresh_vlm: bool = False,
 ) -> ParseResult:
     settings = get_settings()
     correlation_id = str(ulid.ULID())
@@ -963,14 +965,27 @@ async def _parse_with_docling(
     # Decide per-page engine routing AND escalate low-confidence pages to
     # the VLM when enabled. Pages the VLM successfully transcribes have
     # their Docling output replaced in `conversion.markdown`.
-    pages, conversion = await _route_and_escalate(
-        conversion,
-        source=source,
-        threshold=settings.parse.vlm_confidence_threshold,
-        image_area_threshold=settings.parse.vlm_image_area_threshold,
-        disable_vlm=settings.parse.disable_vlm,
-        log=log,
+    # VLM-escalation transcriptions are cached per (pdf-bytes, page, model,
+    # prompt) so a re-parse reuses them — the VLM is non-deterministic (see
+    # vlm_cache.py). Regenerable derived state (ADR-0003), dropped by
+    # `reindex --force`. Only opened when the VLM path is enabled.
+    vlm_cache = (
+        await VLMTranscriptionCache.open(vault_path) if not settings.parse.disable_vlm else None
     )
+    try:
+        pages, conversion = await _route_and_escalate(
+            conversion,
+            source=source,
+            threshold=settings.parse.vlm_confidence_threshold,
+            image_area_threshold=settings.parse.vlm_image_area_threshold,
+            disable_vlm=settings.parse.disable_vlm,
+            log=log,
+            cache=vlm_cache,
+            refresh_vlm=refresh_vlm,
+        )
+    finally:
+        if vlm_cache is not None:
+            await vlm_cache.close()
 
     # P3.3 chart-OCR pass over Docling figures (opt-in via
     # `MEMEX_PARSE__DISABLE_CHART_OCR=false`). vLLM is paused for the
@@ -1102,6 +1117,8 @@ async def _route_and_escalate(
     image_area_threshold: float,
     disable_vlm: bool,
     log: structlog.stdlib.BoundLogger,
+    cache: VLMTranscriptionCache | None = None,
+    refresh_vlm: bool = False,
 ) -> tuple[list[PageDecision], DoclingConversion]:
     """For each Docling page, decide engine routing. When `disable_vlm`
     is False AND the source is a PDF, batch every VLM-eligible page
@@ -1155,6 +1172,8 @@ async def _route_and_escalate(
             results = await vlm_convert_pages(
                 source_pdf=source,
                 page_numbers=to_escalate,
+                cache=cache,
+                refresh_vlm=refresh_vlm,
             )
             try:
                 from memex.models.registry import get_registry
@@ -1411,6 +1430,7 @@ async def _parse_pdf(
     source: Path,
     *,
     force_docling: bool = False,
+    refresh_vlm: bool = False,
 ) -> ParseResult:
     """Route a PDF through PyMuPDF pre-filter → Docling fallback.
 
@@ -1426,22 +1446,30 @@ async def _parse_pdf(
     """
     if force_docling:
         logger.bind(doc_id=doc_id, engine="docling").info("parse.force_docling")
-        return await _parse_with_docling(vault_path, doc_id, source)
+        return await _parse_with_docling(vault_path, doc_id, source, refresh_vlm=refresh_vlm)
     decision = await _parse_with_pymupdf(vault_path, doc_id, source)
     if decision.result is not None:
         return decision.result
     return await _parse_with_docling(
-        vault_path, doc_id, source, force_ocr=decision.force_ocr_on_fallthrough or None
+        vault_path,
+        doc_id,
+        source,
+        force_ocr=decision.force_ocr_on_fallthrough or None,
+        refresh_vlm=refresh_vlm,
     )
 
 
-async def parse_document(doc_id: str, *, force_docling: bool | None = None) -> ParseResult:
+async def parse_document(
+    doc_id: str, *, force_docling: bool | None = None, refresh_vlm: bool = False
+) -> ParseResult:
     """Parse the document with `doc_id`'s source into canonical markdown.
 
     `force_docling` overrides the classifier and routes the source
     straight to Docling. `None` (default) means "use the
     `ParseSettings.force_docling` value." Explicit `True`/`False`
-    overrides the setting for this call.
+    overrides the setting for this call. `refresh_vlm` busts this
+    document's cached VLM transcriptions first, forcing a fresh draw
+    (the VLM is non-deterministic; transcriptions are cached by default).
     """
     settings = get_settings()
     effective_force = force_docling if force_docling is not None else settings.parse.force_docling
@@ -1456,6 +1484,7 @@ async def parse_document(doc_id: str, *, force_docling: bool | None = None) -> P
             doc_id,
             source,
             force_docling=effective_force,
+            refresh_vlm=refresh_vlm,
         )
 
-    return await _parse_with_docling(settings.vault_path, doc_id, source)
+    return await _parse_with_docling(settings.vault_path, doc_id, source, refresh_vlm=refresh_vlm)

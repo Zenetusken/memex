@@ -14,18 +14,22 @@ functions so the rest of the package stays importable without the
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import structlog
 
+from memex.core.config import get_settings
 from memex.core.errors import MemexError
 from memex.models.registry import VLMHandle, get_registry
 from memex.parse.docling_backend import DoclingPageOutput
 
 if TYPE_CHECKING:
     from PIL import Image
+
+    from memex.parse.vlm_cache import VLMTranscriptionCache
 
 logger = structlog.get_logger(__name__)
 
@@ -74,6 +78,11 @@ def _strip_image_links(markdown: str) -> str:
 # leaves headroom for table/code-heavy pages and defends against runaway
 # generation. Tuned per the CUDA audit.
 _MAX_NEW_TOKENS = 1024
+
+# Don't cache a near-empty transcription — the VLM occasionally punts a hard
+# diagram with a few chars (or just a stripped image link). Leaving it
+# uncached lets the NEXT parse retry rather than freezing a bad draw.
+_MIN_CACHEABLE_CHARS = 20
 
 
 class VLMUnavailable(MemexError):
@@ -159,6 +168,13 @@ def _vlm_transcribe_sync(
         padding=True,
     ).to(model.device)
 
+    # NB: forcing the deterministic SDPA *math* backend here (to steady the
+    # non-deterministic greedy draw) was tried 2026-05-25 and REVERTED — on
+    # the 12 GB rig the math backend materialises the full B×H×S×S attention
+    # matrix for Qwen2.5-VL's ~1k+ visual tokens and CUDA-OOMs mid-generate.
+    # The VLM cache (`vlm_cache.py`) is the reproducibility guarantee, and a
+    # best-of-N keep-longest draw addresses completeness — neither needs the
+    # math backend.
     with torch.inference_mode():
         # With the default `return_dict_in_generate=False`, `generate`
         # returns a token-id tensor; cast for the slice + decode below.
@@ -182,15 +198,29 @@ async def _convert_with_handle(
     source_pdf: Path,
     page_number: int,
     max_new_tokens: int,
+    samples: int = 1,
 ) -> DoclingPageOutput:
-    """Internal: render + transcribe one page given an already-acquired VLM."""
+    """Internal: render + transcribe one page given an already-acquired VLM.
+
+    Takes `samples` independent greedy draws (the VLM is non-deterministic,
+    so they differ) and keeps the LONGEST — a content-completeness proxy,
+    since a draw that silently drops content is shorter. `samples=1` is a
+    single draw. The chosen draw is what `convert_pages` caches, so the
+    completeness choice is made once and frozen reproducibly.
+    """
     log = logger.bind(page=page_number, source=str(source_pdf))
-    log.info("vlm.start")
+    n = max(1, samples)
+    log.info("vlm.start", samples=n)
 
     image = await asyncio.to_thread(_render_page_to_image, source_pdf, page_number)
-    markdown = await asyncio.to_thread(_vlm_transcribe_sync, handle, image, _PROMPT, max_new_tokens)
+    drafts: list[str] = []
+    for _ in range(n):
+        drafts.append(
+            await asyncio.to_thread(_vlm_transcribe_sync, handle, image, _PROMPT, max_new_tokens)
+        )
+    markdown = max(drafts, key=len)
 
-    log.info("vlm.done", chars=len(markdown))
+    log.info("vlm.done", chars=len(markdown), samples=n, draft_chars=[len(d) for d in drafts])
     return DoclingPageOutput(page=page_number, markdown=markdown, confidence=1.0)
 
 
@@ -199,34 +229,87 @@ async def convert_pages(
     source_pdf: Path,
     page_numbers: list[int],
     max_new_tokens: int = _MAX_NEW_TOKENS,
+    cache: VLMTranscriptionCache | None = None,
+    refresh_vlm: bool = False,
 ) -> dict[int, DoclingPageOutput | Exception]:
     """Per-document batch transcription. CUDA audit, item 8.
 
-    Acquires `registry.use("vlm")` once, iterates `page_numbers`
-    sequentially under that single context, releases at the end.
-    Failures on individual pages are returned as exception objects in
-    the result dict; the caller is responsible for routing each to
-    either an escalated `PageDecision(engine="vlm")` or a fallback
-    `PageDecision(engine="docling", rationale="VLM escalation failed: ...")`.
+    With a `cache`, each page's transcription is keyed by
+    `sha256(source_pdf_bytes):page:model:prompt` and reused on re-parse.
+    The VLM is non-deterministic, so this makes transcription reproducible
+    by construction (see `vlm_cache.py`). Pages served from cache skip the
+    GPU entirely — the `registry.use("vlm")` acquisition (and its load) only
+    happens if at least one page misses. `refresh_vlm` busts this document's
+    cached pages first (force a fresh draw). `cache=None` ⇒ pre-cache
+    behaviour, unchanged.
 
-    Why this matters: today the `ModelRegistry` keeps the VLM
-    resident after first load, so per-page calls don't reload. But
-    once the registry grows OOM-driven eviction (Phase 4 hardening),
-    per-page acquisition would thrash load/unload across a single
-    document's parse. Acquiring once per document is the correct
-    boundary regardless.
+    Per-page failures are returned as exception objects in the result dict;
+    the caller routes each to an escalated `PageDecision(engine="vlm")` or a
+    fallback `PageDecision(engine="docling", rationale="...")`.
+
+    Acquiring the VLM once for all misses (not once per page): the
+    `ModelRegistry` keeps the VLM resident after first load, so per-page
+    calls don't reload — but once the registry grows OOM-driven eviction,
+    per-page acquisition would thrash. Once per document is correct.
     """
     if not page_numbers:
         return {}
 
-    registry = get_registry()
+    settings = get_settings()
+    samples = settings.parse.vlm_transcription_samples
     results: dict[int, DoclingPageOutput | Exception] = {}
+
+    # Cache-key components — computed once per document. Hashing the source
+    # PDF bytes (not the rendered image) is content-true and needs no render
+    # to check the cache.
+    keys: dict[int, str] = {}
+    pdf_sha256 = ""
+    prompt_sha8 = ""
+    vlm_model = ""
+    if cache is not None:
+        pdf_sha256 = hashlib.sha256(source_pdf.read_bytes()).hexdigest()
+        prompt_sha8 = hashlib.sha256(_PROMPT.encode()).hexdigest()[:8]
+        vlm_model = settings.models.vlm
+        if refresh_vlm:
+            deleted = await cache.delete_by_pdf(pdf_sha256)
+            logger.info("vlm.cache_refresh", source=str(source_pdf), deleted=deleted)
+        keys = {p: f"{pdf_sha256}:{p}:m={vlm_model}:p={prompt_sha8}" for p in page_numbers}
+
+    # First pass: serve cache hits, collect misses (no GPU touched yet).
+    misses: list[int] = []
+    for page_number in page_numbers:
+        if cache is not None:
+            hit = await cache.get(keys[page_number])
+            if hit is not None:
+                logger.info("vlm.cache_hit", page=page_number, source=str(source_pdf))
+                results[page_number] = DoclingPageOutput(
+                    page=page_number, markdown=hit, confidence=1.0
+                )
+                continue
+        misses.append(page_number)
+
+    if not misses:
+        return results  # everything served from cache — no VLM load
+
+    # Second pass: acquire the VLM once, transcribe the misses, cache them.
+    registry = get_registry()
     async with registry.use("vlm") as handle:
-        for page_number in page_numbers:
+        for page_number in misses:
             try:
-                results[page_number] = await _convert_with_handle(
-                    handle, source_pdf, page_number, max_new_tokens
+                output = await _convert_with_handle(
+                    handle, source_pdf, page_number, max_new_tokens, samples=samples
                 )
             except (VLMUnavailable, PDFRenderError) as e:
                 results[page_number] = e
+                continue
+            results[page_number] = output
+            if cache is not None and len(output.markdown.strip()) >= _MIN_CACHEABLE_CHARS:
+                await cache.put(
+                    keys[page_number],
+                    pdf_sha256=pdf_sha256,
+                    page_no=page_number,
+                    vlm_model=vlm_model,
+                    prompt_sha8=prompt_sha8,
+                    markdown=output.markdown,
+                )
     return results

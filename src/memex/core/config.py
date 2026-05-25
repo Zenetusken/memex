@@ -154,6 +154,17 @@ class ParseSettings(BaseModel):
     # below it — while leaving prose pages that carry only a small
     # logo/icon (well under a fifth of the page) on the Docling path.
     vlm_image_area_threshold: float = Field(default=0.20, ge=0.0, le=1.0)
+    # The VLM's greedy decode is non-deterministic (BF16 mantissa + AWQ/SDPA
+    # accumulation order — an early near-tied-logit flip cascades), so a
+    # given transcription draw can silently DROP content (we observed a
+    # package description present in one draw, gone in the next). Take this
+    # many independent draws per page and keep the LONGEST (a completeness
+    # proxy — a draw that drops content is shorter). 1 = a single draw
+    # (fastest, current default). Raise to 2–3 to converge toward the
+    # most-complete transcription at N× the per-page VLM cost — paid once,
+    # then the chosen draw is cached (`vlm_cache.py`). No extra VRAM (draws
+    # are sequential), so it does not OOM the way the SDPA-math approach did.
+    vlm_transcription_samples: int = Field(default=1, ge=1, le=8)
     # Default-off: the VLM escalation path is fully wired, but it
     # demands ~5 GB of VRAM (Qwen2.5-VL-7B AWQ-Int4 + processor) on top
     # of the embedder + reranker resident set. Opt in once you've
