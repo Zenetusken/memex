@@ -35,11 +35,11 @@ inspector signs off:
 
 Visibility readings were taken at dawn from the gallery deck.
 
-| Date | Visibility | Notes |
-| --- | --- | --- |
-| 2026-04-10 | Good | Light haze offshore, cleared by midday. |
-| 2026-04-11 | Poor | Dense fog; foghorn engaged for six hours. |
-| 2026-04-12 | Good | Clear horizon, calm sea state. |
+| Date| Visibility| Notes|
+|---|---|---|
+|2026-04-10|Good|Light haze offshore, cleared by midday.|
+|2026-04-11|Poor|Dense fog; foghorn engaged for six hours.|
+|2026-04-12|Good|Clear horizon, calm sea state.|
 
 ## Recommendations
 

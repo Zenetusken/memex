@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<office:document
+ xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+ xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0"
+ xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"
+ office:version="1.3"
+ office:mimetype="application/vnd.oasis.opendocument.text">
+ <office:automatic-styles>
+  <style:style style:name="H1" style:family="paragraph"><style:text-properties fo:font-size="22pt" fo:font-weight="bold"/></style:style>
+  <style:style style:name="H2" style:family="paragraph"><style:text-properties fo:font-size="16pt" fo:font-weight="bold"/></style:style>
+  <style:style style:name="H3" style:family="paragraph"><style:text-properties fo:font-size="13pt" fo:font-weight="bold"/></style:style>
+  <style:style style:name="Body" style:family="paragraph"><style:text-properties fo:font-size="11pt"/></style:style>
+  <style:style style:name="Cell" style:family="table-cell"><style:table-cell-properties fo:border="0.5pt solid #000000" fo:padding="0.04in"/></style:style>
+  <style:style style:name="ColDate" style:family="table-column"><style:table-column-properties style:column-width="1.1in"/></style:style>
+  <style:style style:name="ColVis" style:family="table-column"><style:table-column-properties style:column-width="1.0in"/></style:style>
+  <style:style style:name="ColNotes" style:family="table-column"><style:table-column-properties style:column-width="3.4in"/></style:style>
+  <text:list-style style:name="Bullets">
+   <text:list-level-style-bullet text:level="1" text:bullet-char="&#8226;">
+    <style:list-level-properties text:list-level-position-and-space-mode="label-alignment">
+     <style:list-level-label-alignment text:label-followed-by="listtab" fo:margin-left="0.25in" fo:text-indent="-0.25in"/>
+    </style:list-level-properties>
+   </text:list-level-style-bullet>
+  </text:list-style>
+ </office:automatic-styles>
+ <office:body>
+  <office:text>
+   <text:h text:style-name="H1" text:outline-level="1">Tidewater Lighthouse Maintenance Log</text:h>
+   <text:h text:style-name="H2" text:outline-level="2">Overview</text:h>
+   <text:p text:style-name="Body">This log records the quarterly inspection of the Tidewater lighthouse and its supporting equipment. The structure has operated continuously since its last refit and remains within expected tolerances. Routine maintenance keeps the optic, the rotation drive, and the backup power chain in service.</text:p>
+   <text:h text:style-name="H2" text:outline-level="2">Inspection Schedule</text:h>
+   <text:p text:style-name="Body">Inspections run on a fixed quarterly cadence. Each visit covers the optic assembly, the structural envelope, and the electrical systems in that order.</text:p>
+   <text:list text:style-name="Bullets">
+    <text:list-item><text:p text:style-name="Body">Clean the optic and verify the lamp changer rotates freely.</text:p></text:list-item>
+    <text:list-item><text:p text:style-name="Body">Check the gallery railing and the access ladder for corrosion.</text:p></text:list-item>
+    <text:list-item><text:p text:style-name="Body">Test the backup generator under load for thirty minutes.</text:p></text:list-item>
+   </text:list>
+   <text:h text:style-name="H3" text:outline-level="3">Equipment Checklist</text:h>
+   <text:p text:style-name="Body">The following items must be confirmed present and serviceable before the inspector signs off:</text:p>
+   <text:list text:style-name="Bullets">
+    <text:list-item><text:p text:style-name="Body">Spare lamp set, sealed and dated.</text:p></text:list-item>
+    <text:list-item><text:p text:style-name="Body">Hand winch with an intact safety pawl.</text:p></text:list-item>
+    <text:list-item><text:p text:style-name="Body">First aid kit within its expiry window.</text:p></text:list-item>
+   </text:list>
+   <text:h text:style-name="H2" text:outline-level="2">Observed Conditions</text:h>
+   <text:p text:style-name="Body">Visibility readings were taken at dawn from the gallery deck.</text:p>
+   <table:table table:name="Conditions">
+    <table:table-column table:style-name="ColDate"/>
+    <table:table-column table:style-name="ColVis"/>
+    <table:table-column table:style-name="ColNotes"/>
+    <table:table-row>
+     <table:table-cell table:style-name="Cell"><text:p>Date</text:p></table:table-cell>
+     <table:table-cell table:style-name="Cell"><text:p>Visibility</text:p></table:table-cell>
+     <table:table-cell table:style-name="Cell"><text:p>Notes</text:p></table:table-cell>
+    </table:table-row>
+    <table:table-row>
+     <table:table-cell table:style-name="Cell"><text:p>2026-04-10</text:p></table:table-cell>
+     <table:table-cell table:style-name="Cell"><text:p>Good</text:p></table:table-cell>
+     <table:table-cell table:style-name="Cell"><text:p>Light haze offshore, cleared by midday.</text:p></table:table-cell>
+    </table:table-row>
+    <table:table-row>
+     <table:table-cell table:style-name="Cell"><text:p>2026-04-11</text:p></table:table-cell>
+     <table:table-cell table:style-name="Cell"><text:p>Poor</text:p></table:table-cell>
+     <table:table-cell table:style-name="Cell"><text:p>Dense fog; foghorn engaged for six hours.</text:p></table:table-cell>
+    </table:table-row>
+    <table:table-row>
+     <table:table-cell table:style-name="Cell"><text:p>2026-04-12</text:p></table:table-cell>
+     <table:table-cell table:style-name="Cell"><text:p>Good</text:p></table:table-cell>
+     <table:table-cell table:style-name="Cell"><text:p>Clear horizon, calm sea state.</text:p></table:table-cell>
+    </table:table-row>
+   </table:table>
+   <text:h text:style-name="H2" text:outline-level="2">Recommendations</text:h>
+   <text:p text:style-name="Body">The inspector recommends the following actions before the next quarter:</text:p>
+   <text:p text:style-name="Body">1. Replace the gallery railing fasteners showing surface rust.</text:p>
+   <text:p text:style-name="Body">2. Schedule a load test of the secondary battery bank.</text:p>
+   <text:p text:style-name="Body">3. Restock the spare lamp set to the full complement of four.</text:p>
+  </office:text>
+ </office:body>
+</office:document>

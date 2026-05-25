@@ -32,17 +32,24 @@ The following items must be confirmed present and serviceable before the inspect
 
 ## **Observed Conditions** 
 
-Visibility readings were taken at dawn from the gallery deck. 
+## Visibility readings were taken at dawn from the gallery deck. 
 
-## **Date Visibility Notes** 
+| Date| Visibility| Notes|
+|---|---|---|
+|2026-04-10|Good|Light haze offshore, cleared by midday.|
+|2026-04-11|Poor|Dense fog; foghorn engaged for six hours.|
+|2026-04-12|Good|Clear horizon, calm sea state.|
 
-2026-04-10 Good Light haze offshore, cleared by midday. 2026-04-11 Poor Dense fog; foghorn engaged for six hours. 2026-04-12 Good Clear horizon, calm sea state. 
+[table-rows]
+[Visibility readings were taken at dawn from the gallery deck.] Date=2026-04-10, Visibility=Good, Notes=Light haze offshore, cleared by midday.
+[Visibility readings were taken at dawn from the gallery deck.] Date=2026-04-11, Visibility=Poor, Notes=Dense fog; foghorn engaged for six hours.
+[Visibility readings were taken at dawn from the gallery deck.] Date=2026-04-12, Visibility=Good, Notes=Clear horizon, calm sea state.
+[/table-rows]
+
 
 ## **Recommendations** 
 
 The inspector recommends the following actions before the next quarter: 
-
-
 
 1. Replace the gallery railing fasteners showing surface rust. 
 
