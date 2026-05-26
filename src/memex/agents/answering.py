@@ -87,6 +87,7 @@ class AnswerStateUpdate(TypedDict, total=False):
     sufficiency: SufficiencyAssessment
     draft: DraftAnswer
     verification: VerificationResult
+    relevance: RelevanceAssessment
     regenerate_attempts: int
     nodes_traversed: int
     tokens_used: int
@@ -205,6 +206,29 @@ class SufficiencyAssessment(BaseModel):
     # sentence" per the prompt.
 
 
+class RelevanceAssessment(BaseModel):
+    """Does the VERIFIED draft actually RESPOND to the specific question?
+
+    Grounding (the verify pass) confirms each claim is supported by its
+    cited chunk. This is the orthogonal check: a claim can be perfectly
+    grounded yet answer a RELATED-BUT-DIFFERENT question than the one
+    asked. The motivating case (slide-decks-30): the deck's "C++ and
+    Python abstractions for tensor cores" content grounds a claim about
+    library usage, which the agent passed off as the answer to "which
+    language writes CUDA *kernels*" — grounded, but non-responsive. This
+    gate runs after verify, before compose, and routes a non-responsive
+    answer to `refuse`. It is deliberately conservative (default
+    responsive) so it removes only clear question/answer topic mismatches,
+    not legitimate answers that need light reading.
+    """
+
+    responsive: bool
+    reason: str = Field(
+        description="One sentence: does the answer address the specific question, or a related-but-different one?",
+        max_length=500,
+    )
+
+
 class VerificationResult(BaseModel):
     """Per-claim grounding verdict from the verifier pass.
 
@@ -283,6 +307,7 @@ class AnswerState(BaseModel):
     sufficiency: SufficiencyAssessment | None = None
     draft: DraftAnswer | None = None
     verification: VerificationResult | None = None
+    relevance: RelevanceAssessment | None = None
 
     # --- Budgets (the difference between an agent and a runaway loop) ---
     regenerate_attempts: int = 0
@@ -1144,7 +1169,12 @@ async def refuse(state: AnswerState) -> AnswerStateUpdate:
     log = logger.bind(node="refuse")
     log.info("start")
 
-    if state.sufficiency and not state.sufficiency.sufficient:
+    if state.relevance and not state.relevance.responsive:
+        reason = (
+            "The retrieved material addresses a related topic but not your "
+            f"specific question. {state.relevance.reason}"
+        )
+    elif state.sufficiency and not state.sufficiency.sufficient:
         reason = state.sufficiency.reason
     elif state.verification and state.verification.ungrounded:
         reason = (
@@ -1172,6 +1202,46 @@ async def refuse(state: AnswerState) -> AnswerStateUpdate:
         regenerate_attempts=state.regenerate_attempts,
     )
     return {"final": final, "nodes_traversed": new_nodes}
+
+
+async def assess_relevance(state: AnswerState) -> AnswerStateUpdate:
+    """Responsiveness gate — runs after verify (grounded path), before compose.
+
+    Grounding confirms each claim is supported by its chunk; this confirms the
+    grounded answer actually RESPONDS to the specific question (vs a related-
+    but-different one). Catches the conflation where adjacent-topic content is
+    passed off as the answer. Conservative by design (defaults responsive) so
+    it removes only clear question/answer topic mismatches. See
+    `RelevanceAssessment`. Non-responsive routes to `refuse`.
+    """
+    log = logger.bind(node="assess_relevance")
+    log.info("start")
+    # Only reached on the grounded path, so draft + verification are present;
+    # guard defensively and pass through as responsive if they somehow aren't.
+    if state.draft is None or state.verification is None:
+        return {
+            "relevance": RelevanceAssessment(responsive=True, reason="no grounded draft to assess"),
+            "nodes_traversed": state.nodes_traversed + 1,
+        }
+    grounded = set(state.verification.grounded)
+    grounded_claims = [c.claim for i, c in enumerate(state.draft.claims) if i in grounded]
+    prompt = render_prompt(
+        "assess_relevance",
+        query=state.query,
+        summary=state.draft.summary,
+        claims=grounded_claims,
+    )
+    relevance, tokens = await complete_structured(
+        prompt=prompt,
+        schema=RelevanceAssessment,
+        prompt_tag="assess_relevance@v1",
+    )
+    log.info("relevance", responsive=relevance.responsive)
+    return {
+        "relevance": relevance,
+        "tokens_used": state.tokens_used + tokens,
+        "nodes_traversed": state.nodes_traversed + 1,
+    }
 
 
 async def compose(state: AnswerState) -> AnswerStateUpdate:
@@ -1282,6 +1352,18 @@ def route_after_verify(
     return "refuse"
 
 
+def route_after_relevance(state: AnswerState) -> Literal["compose", "refuse"]:
+    """Responsive -> compose. Non-responsive -> refuse.
+
+    A non-responsive verdict means the draft was grounded but answered a
+    related-but-different question than the one asked (the conflation guard).
+    Conservative: only refuses on an explicit non-responsive verdict.
+    """
+    if state.relevance and not state.relevance.responsive:
+        return "refuse"
+    return "compose"
+
+
 # =============================================================================
 # Graph construction
 # =============================================================================
@@ -1373,6 +1455,7 @@ def build_answering_graph() -> CompiledStateGraph:
     g.add_node("verify", verify)
     g.add_node("regenerate", regenerate)
     g.add_node("refuse", refuse)
+    g.add_node("assess_relevance", assess_relevance)
     g.add_node("compose", compose)
 
     # Linear edges
@@ -1396,10 +1479,15 @@ def build_answering_graph() -> CompiledStateGraph:
         "verify",
         route_after_verify,
         {
-            "compose": "compose",
+            "compose": "assess_relevance",  # grounded -> responsiveness gate -> compose
             "regenerate": "regenerate",
             "refuse": "refuse",
         },
+    )
+    g.add_conditional_edges(
+        "assess_relevance",
+        route_after_relevance,
+        {"compose": "compose", "refuse": "refuse"},
     )
 
     return g.compile()

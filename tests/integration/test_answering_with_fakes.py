@@ -21,6 +21,7 @@ from memex.agents.answering import (
     Chunk,
     CitedClaim,
     DraftAnswer,
+    RelevanceAssessment,
     SufficiencyAssessment,
     VerificationResult,
     answer_query,
@@ -121,6 +122,11 @@ class FakeLLM:
             # bounded variant retains `__name__ == "VerificationResult"`.
             if (sch is schema or sch.__name__ == schema.__name__) and frag in prompt_text:
                 return value, 10
+        # The relevance gate (assess_relevance) runs on every grounded answer.
+        # Unless a test explicitly cans a non-responsive verdict, default to
+        # responsive so the grounded answer flows through to compose.
+        if schema.__name__ == "RelevanceAssessment":
+            return RelevanceAssessment(responsive=True, reason="(test default)"), 6
         raise AssertionError(f"no canned response for ({prompt_text!r}, {schema.__name__})")
 
 
@@ -174,6 +180,55 @@ async def test_happy_path_returns_grounded_answer(fake_llm: FakeLLM) -> None:
     assert len(response.claims) == 2
     assert {c.source_chunk_id for c in response.claims} == {"c1", "c2"}
     assert response.refusal_reason is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_retrieve", "patch_prompt")
+async def test_non_responsive_grounded_answer_is_refused(fake_llm: FakeLLM) -> None:
+    """The relevance gate: a fully GROUNDED answer that addresses a
+    related-but-different question than asked is refused (the slide-decks-30
+    conflation — library-usage content passed off as a kernel-language answer).
+    """
+    fake_llm.respond(
+        "assess_sufficiency",
+        SufficiencyAssessment,
+        SufficiencyAssessment(sufficient=True, reason="on-topic chunk present"),
+    )
+    fake_llm.respond(
+        "answer",
+        DraftAnswer,
+        DraftAnswer(
+            summary="C++ and Python library abstractions are available.",
+            claims=[
+                CitedClaim(
+                    claim="C++ and Python abstractions for tensor cores exist.",
+                    source_chunk_id="c1",
+                    confidence="high",
+                ),
+            ],
+        ),
+    )
+    fake_llm.respond(
+        "verify_grounding",
+        VerificationResult,
+        VerificationResult(grounded=[0], ungrounded=[]),
+    )
+    # The grounded claim is about library abstractions, not the asked-about
+    # kernel-writing languages -> non-responsive -> the gate refuses.
+    fake_llm.respond(
+        "assess_relevance",
+        RelevanceAssessment,
+        RelevanceAssessment(
+            responsive=False, reason="Answer is about libraries, not kernel languages."
+        ),
+    )
+
+    response = await answer_query("Which language must I use to write CUDA kernels?")
+
+    assert response.answered is False  # grounded but non-responsive -> refused
+    assert response.refusal_reason is not None
+    assert "related topic" in response.refusal_reason  # the relevance-refusal text
+    assert not response.claims
 
 
 @pytest.mark.asyncio
@@ -303,6 +358,8 @@ async def test_ungrounded_triggers_regeneration_then_succeeds(
             return next(drafts), 30
         if schema is VerificationResult or schema.__name__ == VerificationResult.__name__:
             return next(verdicts), 15
+        if schema.__name__ == "RelevanceAssessment":
+            return RelevanceAssessment(responsive=True, reason="(test default)"), 6
         raise AssertionError(f"unexpected schema {schema}")
 
     # Use monkeypatch so the patch is restored at test teardown — direct

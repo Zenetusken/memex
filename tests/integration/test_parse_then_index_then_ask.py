@@ -20,6 +20,7 @@ from memex.agents.answering import (
     Chunk,
     CitedClaim,
     DraftAnswer,
+    RelevanceAssessment,
     SufficiencyAssessment,
     VerificationResult,
     answer_query,
@@ -371,6 +372,8 @@ def patch_agent(monkeypatch: pytest.MonkeyPatch) -> None:
             ), 25
         if schema is VerificationResult or schema.__name__ == VerificationResult.__name__:
             return VerificationResult(grounded=[0], ungrounded=[]), 10
+        if schema.__name__ == "RelevanceAssessment":
+            return RelevanceAssessment(responsive=True, reason="ok"), 6
         raise AssertionError(f"unexpected schema {schema}")
 
     monkeypatch.setattr("memex.agents.answering.complete_structured", _structured)

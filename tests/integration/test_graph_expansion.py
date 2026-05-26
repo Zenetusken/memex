@@ -28,6 +28,7 @@ from memex.agents.answering import (
     Chunk,
     CitedClaim,
     DraftAnswer,
+    RelevanceAssessment,
     SufficiencyAssessment,
     VerificationResult,
     answer_query,
@@ -82,6 +83,8 @@ def _make_fake_llm(
             )
         if schema is VerificationResult or schema.__name__ == VerificationResult.__name__:
             return VerificationResult(grounded=[0], ungrounded=[]), 10
+        if schema.__name__ == "RelevanceAssessment":
+            return RelevanceAssessment(responsive=True, reason="ok"), 6
         raise AssertionError(f"unexpected schema {schema}")
 
     return _fake

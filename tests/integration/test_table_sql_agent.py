@@ -29,6 +29,7 @@ from memex.agents.answering import (
     Chunk,
     CitedClaim,
     DraftAnswer,
+    RelevanceAssessment,
     SufficiencyAssessment,
     VerificationResult,
     _build_synthetic_chunk,
@@ -458,6 +459,8 @@ class _GraphFakeLLM:
             )
         if name == "VerificationResult":
             return VerificationResult(grounded=[0], ungrounded=[]), 10
+        if name == "RelevanceAssessment":
+            return RelevanceAssessment(responsive=True, reason="ok"), 6
         raise AssertionError(f"unexpected schema {name}")
 
 
