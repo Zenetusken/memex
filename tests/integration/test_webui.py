@@ -90,26 +90,6 @@ def fake_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("memex.webui.app.answer_query", _fake)
 
 
-@pytest.fixture
-def fake_scoped_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
-    """#256: a refusal where the query named an artifact, so retrieval was
-    re-scoped to its document(s). The panel must surface that scope so the
-    user can see WHY the pool was narrowed."""
-
-    async def _fake(question: str, **_kw: Any) -> FinalResponse:
-        return FinalResponse(
-            answered=False,
-            refusal_reason="The firewall diagram document has no VLAN address range.",
-            artifact_scope_doc_ids=["ccd09479-cr350-network-diagrams", "499c900d-cr350-cours-6"],
-            correlation_id="01HZTESTSCOPE00000000000000",
-            tokens_used=20,
-            nodes_traversed=6,
-            regenerate_attempts=0,
-        )
-
-    monkeypatch.setattr("memex.webui.app.answer_query", _fake)
-
-
 # ----- Tests -----
 
 
@@ -162,15 +142,43 @@ def test_ask_renders_refusal(client: TestClient, fake_refused: None) -> None:
     assert "Scoped to" not in r.text
 
 
-def test_ask_refusal_surfaces_artifact_scope(client: TestClient, fake_scoped_refusal: None) -> None:
+@pytest.mark.asyncio
+async def test_ask_refusal_surfaces_artifact_scope_titles(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch, client: TestClient
+) -> None:
     """#256 observability: a refusal caused by a re-scope shows which document(s)
-    the query was narrowed to, so the narrowing is auditable."""
+    the query was narrowed to — by HUMAN TITLE (the doc-id is the hover tooltip +
+    the link target), so the narrowing is auditable + readable."""
+    fw = await ingest_markdown_passthrough(
+        "# Firewall\n\nCoupe-feu architectures.\n", source_stem="CR350 Firewall Diagrams"
+    )
+    lec = await ingest_markdown_passthrough(
+        "# Cours 6\n\nPare-feu et mandataires.\n", source_stem="CR350 Cours 6 Coupe-feu"
+    )
+
+    async def _fake(question: str, **_kw: Any) -> FinalResponse:
+        return FinalResponse(
+            answered=False,
+            refusal_reason="The firewall documents have no VLAN address range.",
+            artifact_scope_doc_ids=[fw.doc_id, lec.doc_id],
+            correlation_id="01HZTESTSCOPE00000000000000",
+            tokens_used=20,
+            nodes_traversed=6,
+            regenerate_attempts=0,
+        )
+
+    monkeypatch.setattr("memex.webui.app.answer_query", _fake)
+
     r = client.post("/ask", data={"question": "Quelle plage VLAN dans le diagramme de coupe-feu ?"})
     assert r.status_code == 200
     assert "Refused" in r.text
     assert "Scoped to the documents you named" in r.text
-    assert "ccd09479-cr350-network-diagrams" in r.text
-    assert "499c900d-cr350-cours-6" in r.text
+    # Human titles render (not the raw doc-ids as the visible text).
+    assert "CR350 Firewall Diagrams" in r.text
+    assert "CR350 Cours 6 Coupe-feu" in r.text
+    # The doc-id is retained as the link target + hover tooltip (stable identifier).
+    assert f'href="/documents/{fw.doc_id}"' in r.text
+    assert f'title="{fw.doc_id}"' in r.text
 
 
 def test_ask_rejects_empty_question(client: TestClient, fake_answered: None) -> None:

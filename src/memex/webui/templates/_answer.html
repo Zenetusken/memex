@@ -62,10 +62,10 @@
 </div>
 {% endif %}
 
-{% if response and response.artifact_scope_doc_ids %}
+{% if scope_docs %}
 <p class="ans-scope" role="note">
-  <span class="ans-scope-label">Scoped to the document{{ "s" if response.artifact_scope_doc_ids|length > 1 else "" }} you named:</span>
-  {% for doc_id in response.artifact_scope_doc_ids %}<code class="chunk-id">{{ doc_id }}</code>{% endfor %}
+  <span class="ans-scope-label">Scoped to the document{{ "s" if scope_docs|length > 1 else "" }} you named:</span>
+  {% for d in scope_docs %}<a class="ans-scope-doc" href="/documents/{{ d.doc_id }}" title="{{ d.doc_id }}">{{ d.title }}</a>{% endfor %}
 </p>
 {% endif %}
 

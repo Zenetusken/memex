@@ -233,10 +233,19 @@ def create_app() -> FastAPI:
                 },
                 status_code=503,
             )
+        # #256: resolve the re-scoped doc-ids to human titles for the answer
+        # panel's "Scoped to …" note (doc-ids stay the stable identifier on the
+        # FinalResponse / MCP / CLI; titles are a presentation concern).
+        # `read_document_title` falls back to the doc_id if a title can't be read.
+        settings = get_settings()
+        scope_docs = [
+            {"doc_id": doc_id, "title": await read_document_title(settings.vault_path, doc_id)}
+            for doc_id in response.artifact_scope_doc_ids
+        ]
         return templates.TemplateResponse(
             request,
             "_answer.html",
-            {"response": response, "error": None},
+            {"response": response, "error": None, "scope_docs": scope_docs},
         )
 
     # ----- Documents -----
