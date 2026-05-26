@@ -122,7 +122,9 @@ class ParseResult(BaseModel):
 async def parse_document(doc_id: str) -> ParseResult: ...
 ```
 
-**Routing logic.** First pass: Docling on the whole document. Second pass: any page where Docling reports confidence < `MEMEX_PARSE__VLM_THRESHOLD` (default 0.65) gets re-run with the VLM under `ModelRegistry.use("vlm")`. Output for that page replaces Docling's. Both decisions go into the manifest.
+**Routing logic.** First pass: Docling on the whole document. Second pass: any page where Docling reports confidence < `MEMEX_PARSE__VLM_THRESHOLD` (default 0.65) gets re-run with the VLM under `ModelRegistry.use("vlm")`. Output for that page replaces Docling's. Both decisions go into the manifest. (As-built the escalation trigger is a per-page `image_fraction` + diagram-class signal, not Docling's confidence — see `parse/pipeline.py::_route_and_escalate`.)
+
+**Office sources.** `.pptx`/`.docx`/`.xlsx` + their ODF cousins can't be rendered by pypdfium2 (the VLM + chart-OCR figure renderers are PDF-only), so `parse_document` converts an Office source to a cached `documents/{doc_id}/converted.pdf` via headless LibreOffice (`parse/office_convert.py`) and runs the FULL PDF pipeline on it — Docling + VLM + chart-OCR all operate on the PDF, so figure bboxes align and diagrams transcribe. The converted PDF is cached + reused so its bytes (hence the content-addressed VLM/chart-OCR cache keys) stay byte-stable across re-parses.
 
 **Dependencies.** `memex.vault`, `memex.core`, `memex.models` (for the VLM context manager), `memex.observability`, `docling` (optional extra `[parse]`), the VLM via the model registry. Spawns a child process via `multiprocessing.get_context("spawn")` with `start_method="spawn"` so parser crashes never take down the daemon.
 
@@ -416,6 +418,8 @@ memex parse <doc_id>                         # explicit re-parse
 memex enrich <doc_id>                        # explicit re-enrich
 memex index <doc_id>                         # explicit re-index
 memex reindex [--force]                      # rebuild .memex/ from documents/
+memex retitle <doc_id> [TITLE] [--derive]    # metadata-only rename (no re-embed)
+memex remove <doc_id> [--yes]                # drop a doc: Markdown + asset dir + manifest + all index state
 memex ask <question>                         # JSON-when-piped, rich-when-TTY
 memex search <query> [--k N]
 memex graph --document <doc_id>

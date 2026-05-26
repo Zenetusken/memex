@@ -40,6 +40,7 @@ Memex helps you:
 | Disk | 50 GB for models + your vault | — |
 | OS | **Linux** (Ubuntu 22.04+, Pop!_OS, Fedora 39+, Arch). macOS is dev-tier only — the CUDA-only stack doesn't apply. Windows is unsupported. | Pop!_OS 22.04 |
 | Python | 3.12+ | — |
+| LibreOffice | _Optional_ — only to ingest Office docs (`.pptx`/`.docx`/`.xlsx`); `soffice` must be on PATH | system package (`apt install libreoffice` / `dnf install libreoffice`) |
 
 Per ADR-0001 the project doesn't ship a CPU fallback. If `torch.cuda.is_available()` is False, startup fails fast with a clear message.
 
