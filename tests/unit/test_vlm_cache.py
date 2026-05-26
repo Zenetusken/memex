@@ -108,7 +108,7 @@ def _fake_vlm_env(monkeypatch: Any, calls: list[int]) -> None:
         vlm_backend,
         "get_settings",
         lambda: SimpleNamespace(
-            models=SimpleNamespace(vlm="test-vlm"),
+            models=SimpleNamespace(vlm="test-vlm", vlm_serving="transformers"),
             parse=SimpleNamespace(vlm_transcription_samples=1),
         ),
     )
@@ -171,7 +171,8 @@ async def test_convert_pages_min_length_guard_not_frozen(tmp_path: Path, monkeyp
         vlm_backend,
         "get_settings",
         lambda: SimpleNamespace(
-            models=SimpleNamespace(vlm="m"), parse=SimpleNamespace(vlm_transcription_samples=1)
+            models=SimpleNamespace(vlm="m", vlm_serving="transformers"),
+            parse=SimpleNamespace(vlm_transcription_samples=1),
         ),
     )
     try:
@@ -197,3 +198,71 @@ async def test_convert_with_handle_keeps_longest_of_n(tmp_path: Path, monkeypatc
         fake_handle, tmp_path / "x.pdf", 1, 1024, samples=3
     )
     assert out.markdown == "the much longer and more complete draw"
+
+
+# ── vLLM-served VLM backend (vlm_serving="vllm") ─────────────────────────
+
+
+def _fake_vllm_env(monkeypatch: Any, calls: list[int], server_starts: list[str]) -> None:
+    """Fake the vLLM-served VLM path: a no-launch server CM that records each
+    start, and a per-page transcription that records pages — no subprocess,
+    no torch, no openai."""
+
+    @contextlib.asynccontextmanager
+    async def fake_serve(model_id: str) -> AsyncGenerator[str]:
+        server_starts.append(model_id)
+        yield "http://fake-vlm:8001/v1"
+
+    async def fake_convert(
+        base_url: str,
+        model_id: str,
+        source_pdf: Path,
+        page_number: int,
+        max_new_tokens: int,
+        samples: int = 1,
+    ) -> DoclingPageOutput:
+        calls.append(page_number)
+        return DoclingPageOutput(
+            page=page_number, markdown=f"vLLM transcription of page {page_number}", confidence=1.0
+        )
+
+    monkeypatch.setattr(vlm_backend, "_serve_vlm_vllm", fake_serve)
+    monkeypatch.setattr(vlm_backend, "_convert_one_via_vllm", fake_convert)
+    monkeypatch.setattr(
+        vlm_backend,
+        "get_settings",
+        lambda: SimpleNamespace(
+            models=SimpleNamespace(vlm="test-vlm", vlm_serving="vllm"),
+            parse=SimpleNamespace(vlm_transcription_samples=1),
+        ),
+    )
+
+
+async def test_convert_pages_vllm_backend_caches_and_skips_server_when_cached(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """The vLLM path transcribes misses (server started ONCE for the batch),
+    caches them, and on a full cache hit never starts the VLM vLLM at all
+    (no wasteful ~30 s boot when nothing needs transcribing)."""
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"%PDF-1.7 vllm fake")
+    cache = await VLMTranscriptionCache.open(tmp_path)
+    calls: list[int] = []
+    server_starts: list[str] = []
+    _fake_vllm_env(monkeypatch, calls, server_starts)
+    try:
+        # 1st: both miss → one server start, both transcribed + cached.
+        r1 = await vlm_backend.convert_pages(source_pdf=pdf, page_numbers=[1, 2], cache=cache)
+        assert calls == [1, 2]
+        assert server_starts == ["test-vlm"]  # server lifecycle wraps the whole batch
+        assert isinstance(r1[1], DoclingPageOutput) and "page 1" in r1[1].markdown
+
+        # 2nd: both hit → VLM vLLM NEVER started (no misses), byte-identical.
+        calls.clear()
+        server_starts.clear()
+        r2 = await vlm_backend.convert_pages(source_pdf=pdf, page_numbers=[1, 2], cache=cache)
+        assert calls == []
+        assert server_starts == []  # no misses → no vLLM boot
+        assert isinstance(r2[2], DoclingPageOutput) and r2[2].markdown == r1[2].markdown
+    finally:
+        await cache.close()

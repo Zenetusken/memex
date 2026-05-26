@@ -15,7 +15,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import re
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -193,6 +196,189 @@ def _vlm_transcribe_sync(
     return _strip_image_links(decoded[0] if decoded else "")
 
 
+# ── vLLM-served VLM backend (parse-time, for Qwen3-VL etc.) ──────────────
+# Qwen3-VL ships only compressed-tensors int4 community builds, which
+# transformers can't run in-process on 12 GB (it decompresses int4→dense and
+# OOMs; see ADR-0006 §VLM-via-vLLM). vLLM runs them via the Marlin int4 kernel
+# at ~7.4 GB. The VLM vLLM is a SHORT-LIVED process started on the GPU freed by
+# the parse-time `pause_vllm_for_gpu()` (orchestrator down) and torn down before
+# `convert_pages` returns — so it never co-resides with the in-process chart-OCR
+# pass that follows. Recipe + the 12 GB gotchas live in `VLMServeSettings`.
+
+
+def _png_b64(image: Image.Image) -> str:
+    """Encode a PIL image to a base64 PNG payload (no `data:` prefix)."""
+    import base64
+    import io
+
+    buf = io.BytesIO()
+    image.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+async def _vlm_vllm_reachable(url: str, timeout_s: float = 2.0) -> bool:
+    """True iff a GET to `url` returns 2xx — the VLM vLLM readiness probe."""
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            resp = await client.get(url)
+            return 200 <= resp.status_code < 300
+    except Exception:
+        return False
+
+
+@asynccontextmanager
+async def _serve_vlm_vllm(model_id: str) -> AsyncGenerator[str]:
+    """Start a short-lived vLLM serving `model_id`, yield its base_url, and tear
+    it down (process group + GPU release) on exit.
+
+    The recipe is `VLMServeSettings` (validated on the 12 GB rig). The process
+    gets its own session group so teardown's `killpg` reaps the EngineCore
+    children too; readiness + GPU-release are gated on `/v1/models`. Raises
+    `VLMUnavailable` if the process exits or never becomes ready.
+    """
+    import os
+    import signal
+
+    serve = get_settings().models.vlm_serve
+    base_url = f"http://{serve.host}:{serve.port}/v1"
+    log = logger.bind(component="vlm.vllm", model=model_id, port=serve.port)
+    cmd = [
+        "uv",
+        "run",
+        "--extra",
+        "serve",
+        "vllm",
+        "serve",
+        model_id,
+        "--host",
+        serve.host,
+        "--port",
+        str(serve.port),
+        "--gpu-memory-utilization",
+        str(serve.gpu_memory_utilization),
+        "--max-model-len",
+        str(serve.max_model_len),
+        "--max-num-seqs",
+        "1",
+        "--max-num-batched-tokens",
+        str(serve.max_model_len),
+        "--enforce-eager",
+        "--kv-cache-dtype",
+        "auto",
+        "--mm-processor-kwargs",
+        json.dumps({"max_pixels": serve.max_pixels, "min_pixels": serve.min_pixels}),
+        "--limit-mm-per-prompt",
+        json.dumps({"image": 1, "video": 0}),
+    ]
+    env = {**os.environ, "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"}
+    log.info("vlm.vllm.start")
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+        stdin=asyncio.subprocess.DEVNULL,
+        start_new_session=True,
+        env=env,
+    )
+    try:
+        ready = False
+        for _ in range(serve.startup_timeout_s):
+            if await _vlm_vllm_reachable(f"{base_url}/models"):
+                ready = True
+                break
+            if proc.returncode is not None:
+                raise VLMUnavailable(
+                    "VLM vLLM process exited during startup",
+                    context={"model": model_id, "returncode": proc.returncode},
+                )
+            await asyncio.sleep(1.0)
+        if not ready:
+            raise VLMUnavailable(
+                "VLM vLLM did not become ready in time",
+                context={"model": model_id, "timeout_s": serve.startup_timeout_s},
+            )
+        log.info("vlm.vllm.ready")
+        yield base_url
+    finally:
+        log.info("vlm.vllm.stop")
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=30.0)
+        except TimeoutError:
+            with _suppress_proc_lookup():
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        # Settle: wait for the port to stop answering so the GPU is actually
+        # freed before the caller (chart-OCR) loads its in-process model.
+        for _ in range(15):
+            if not await _vlm_vllm_reachable(f"{base_url}/models", timeout_s=1.0):
+                break
+            await asyncio.sleep(1.0)
+
+
+def _suppress_proc_lookup() -> Any:
+    """`contextlib.suppress(ProcessLookupError)` without the top-level import."""
+    import contextlib
+
+    return contextlib.suppress(ProcessLookupError)
+
+
+async def _vllm_transcribe(
+    base_url: str, model_id: str, image: Image.Image, prompt: str, max_new_tokens: int
+) -> str:
+    """Transcribe one page image via the VLM vLLM OpenAI multimodal API
+    (greedy: temperature 0). Mirrors `_vlm_transcribe_sync`'s prompt + strip."""
+    from openai import AsyncOpenAI
+
+    b64 = await asyncio.to_thread(_png_b64, image)
+    client = AsyncOpenAI(base_url=base_url, api_key="EMPTY")
+    resp = await client.chat.completions.create(
+        model=model_id,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{b64}"},
+                    },
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ],
+        max_tokens=max_new_tokens,
+        temperature=0.0,
+    )
+    content = resp.choices[0].message.content or ""
+    return _strip_image_links(content)
+
+
+async def _convert_one_via_vllm(
+    base_url: str,
+    model_id: str,
+    source_pdf: Path,
+    page_number: int,
+    max_new_tokens: int,
+    samples: int = 1,
+) -> DoclingPageOutput:
+    """Render + transcribe one page via the VLM vLLM; best-of-N keep-longest
+    (the same completeness proxy as the in-process `_convert_with_handle`)."""
+    log = logger.bind(page=page_number, source=str(source_pdf), backend="vllm")
+    n = max(1, samples)
+    log.info("vlm.start", samples=n)
+    image = await asyncio.to_thread(_render_page_to_image, source_pdf, page_number)
+    drafts: list[str] = []
+    for _ in range(n):
+        drafts.append(await _vllm_transcribe(base_url, model_id, image, _PROMPT, max_new_tokens))
+    markdown = max(drafts, key=len)
+    log.info("vlm.done", chars=len(markdown), samples=n, draft_chars=[len(d) for d in drafts])
+    return DoclingPageOutput(page=page_number, markdown=markdown, confidence=1.0)
+
+
 async def _convert_with_handle(
     handle: VLMHandle,
     source_pdf: Path,
@@ -291,7 +477,34 @@ async def convert_pages(
     if not misses:
         return results  # everything served from cache — no VLM load
 
-    # Second pass: acquire the VLM once, transcribe the misses, cache them.
+    # Second pass: transcribe the misses. Either via a short-lived VLM vLLM
+    # process (Qwen3-VL — no in-process int4 kernel for its compressed-tensors
+    # build; ADR-0006 §VLM-via-vLLM) or in-process via the registry (the legacy
+    # AutoAWQ Qwen2.5-VL path). The chosen draw is cached either way.
+    if settings.models.vlm_serving == "vllm":
+        model_id = settings.models.vlm
+        async with _serve_vlm_vllm(model_id) as base_url:
+            for page_number in misses:
+                try:
+                    output = await _convert_one_via_vllm(
+                        base_url, model_id, source_pdf, page_number, max_new_tokens, samples
+                    )
+                except (VLMUnavailable, PDFRenderError) as e:
+                    results[page_number] = e
+                    continue
+                results[page_number] = output
+                if cache is not None and len(output.markdown.strip()) >= _MIN_CACHEABLE_CHARS:
+                    await cache.put(
+                        keys[page_number],
+                        pdf_sha256=pdf_sha256,
+                        page_no=page_number,
+                        vlm_model=vlm_model,
+                        prompt_sha8=prompt_sha8,
+                        markdown=output.markdown,
+                    )
+        return results
+
+    # In-process (transformers) path: acquire the VLM once for all misses.
     registry = get_registry()
     async with registry.use("vlm") as handle:
         for page_number in misses:

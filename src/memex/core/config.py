@@ -27,6 +27,35 @@ from pydantic_settings import (
 )
 
 
+class VLMServeSettings(BaseModel):
+    """Recipe for the short-lived VLM vLLM process (parse-time only),
+    used when `ModelSettings.vlm_serving == "vllm"`.
+
+    Validated 2026-05-26 on the 12 GB RTX 4070 for
+    `cyankiwi/Qwen3-VL-8B-Instruct-AWQ-4bit` (POC, see ADR-0006
+    §VLM-via-vLLM): the desktop display holds ~1.1 GB so
+    `gpu_memory_utilization` can't exceed ~0.89; the vision encoder
+    cache reserves for the MAX image unless `max_pixels` is capped (else
+    KV starves to ~0.25 GB and vLLM refuses to start); `enforce_eager`
+    skips CUDA-graph capture (faster startup, frees memory). Runs on a
+    port DISTINCT from the orchestrator so the parse pause's reachability
+    check (against the orchestrator base_url) never targets it; the
+    process is started + torn down inside `vlm_backend.convert_pages`, so
+    it phase-separates from the in-process chart-OCR pass that follows
+    (the two can't co-reside: ~7.4 GB + ~3 GB > 12 GB)."""
+
+    host: str = "127.0.0.1"
+    port: int = Field(default=8001, ge=1, le=65535)
+    gpu_memory_utilization: float = Field(default=0.89, ge=0.1, le=1.0)
+    max_model_len: int = Field(default=4096, ge=512)
+    # Cap the visual-token budget so the vLLM vision encoder cache doesn't
+    # reserve for the model's max image (~16384 tokens). 1280*28*28 mirrors
+    # the rasteriser cap in parse/vlm_backend._render_page_to_image.
+    max_pixels: int = Field(default=1003520, ge=50176)
+    min_pixels: int = Field(default=200704, ge=784)
+    startup_timeout_s: int = Field(default=180, ge=10)
+
+
 class ModelSettings(BaseModel):
     """Pydantic-settings record for every model the registry owns —
     orchestrator (out-of-process via vLLM), embedder, reranker, VLM,
@@ -40,11 +69,22 @@ class ModelSettings(BaseModel):
     # `Qwen/Qwen3-8B-AWQ` model id above. The Q*_K_M variants are kept in
     # the literal for users running gguf-via-vLLM experimentally.
     orchestrator_quantization: Literal["AWQ", "GPTQ", "Q4_K_M", "Q5_K_M", "Q8_0"] = "AWQ"
-    # Default VLM is the AWQ-Int4 build that fits 12 GB on the reference
-    # rig. Qwen3-VL-8B is the eval-gated successor (see ADR-0001 Revisit);
-    # swap the string + adjust vlm_quantization in tandem.
-    vlm: str = "Qwen/Qwen2.5-VL-7B-Instruct-AWQ"
+    # VLM default: Qwen3-VL-8B-AWQ, served via vLLM (`vlm_serving`). The
+    # in-process transformers path CANNOT run this compressed-tensors
+    # build on 12 GB — it decompresses int4→dense (~16 GB) and OOMs;
+    # vLLM's Marlin int4 kernel runs it at ~7.4 GB (POC 2026-05-26
+    # confirmed it fixes the diagram-flattening limit Qwen2.5-VL had).
+    # The legacy AutoAWQ build `Qwen/Qwen2.5-VL-7B-Instruct-AWQ` still
+    # works via `vlm_serving="transformers"`. See ADR-0006 §VLM-via-vLLM.
+    vlm: str = "cyankiwi/Qwen3-VL-8B-Instruct-AWQ-4bit"
     vlm_quantization: Literal["awq_int4", "bf16"] = "awq_int4"
+    # How the VLM runs during parse. "vllm": a short-lived vLLM process on
+    # `vlm_serve.port` transcribes pages over the OpenAI multimodal API
+    # (required for Qwen3-VL — no in-process int4 kernel for its
+    # compressed-tensors format). "transformers": the legacy in-process
+    # registry path (AutoAWQ Qwen2.5-VL). See VLMServeSettings.
+    vlm_serving: Literal["transformers", "vllm"] = "vllm"
+    vlm_serve: VLMServeSettings = Field(default_factory=VLMServeSettings)
     embedder: str = "google/embeddinggemma-300m"
     reranker: str = "BAAI/bge-reranker-v2-m3"
     # P3.3 chart-OCR model — default `google/deplot` per Session 1

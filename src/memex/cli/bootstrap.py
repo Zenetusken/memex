@@ -159,8 +159,16 @@ def _verify_vram_fit(settings: MemexSettings) -> None:
         + _VRAM_GB[("reranker", settings.models.reranker_backend)]
         + _OVERHEAD_GB
     )
-    # Only count the VLM if it's actually going to be loaded.
-    if not settings.parse.disable_vlm:
+    # Only count the VLM if it's actually loaded IN-PROCESS. With
+    # vlm_serving="vllm" the VLM runs as a separate, short-lived vLLM
+    # process on the GPU freed by pause_vllm_for_gpu (orchestrator down) —
+    # it never co-resides with the answering stack, so it doesn't belong in
+    # this co-residence estimate (its own footprint is governed by
+    # ModelSettings.vlm_serve.gpu_memory_utilization).
+    vlm_in_process = (not settings.parse.disable_vlm) and (
+        settings.models.vlm_serving == "transformers"
+    )
+    if vlm_in_process:
         estimated += _VRAM_GB[("vlm", settings.models.vlm_quantization)]
     # P3.3 chart-OCR is opt-in via disable_chart_ocr. When enabled, it
     # loads alongside the other parse-stage models BUT vLLM is paused
@@ -178,7 +186,7 @@ def _verify_vram_fit(settings: MemexSettings) -> None:
             budget_gb=round(budget_gb, 1),
             total_gb=round(total_gb, 1),
             gpu=gpu_name,
-            vlm_counted=not settings.parse.disable_vlm,
+            vlm_counted=vlm_in_process,
             fix=(
                 "lower hardware.gpu_memory_fraction, switch to a smaller "
                 "VLM variant (vlm_quantization=awq_int4), or reduce the "
@@ -192,7 +200,7 @@ def _verify_vram_fit(settings: MemexSettings) -> None:
             budget_gb=round(budget_gb, 1),
             total_gb=round(total_gb, 1),
             gpu=gpu_name,
-            vlm_counted=not settings.parse.disable_vlm,
+            vlm_counted=vlm_in_process,
         )
 
 

@@ -1260,11 +1260,14 @@ async def _route_and_escalate(
             continue
         to_escalate.append(p.page)
 
-    # Second pass: batch VLM call. One context acquisition for the lot.
-    # The VLM loads in-process (~5-6 GB AWQ), so on the 12 GB rig pause
-    # vLLM around it (same dance as chart-OCR) and unload it before the
-    # restart — else it OOMs against the ~8.5 GB resident vLLM. The pause
-    # is a no-op when vLLM isn't running.
+    # Second pass: batch VLM call. One acquisition for the lot. Either the
+    # VLM loads in-process (~5-6 GB AWQ, legacy Qwen2.5-VL via
+    # vlm_serving="transformers") OR a short-lived VLM vLLM is started inside
+    # `vlm_convert_pages` (Qwen3-VL, ~7.4 GB — see
+    # vlm_backend._serve_vlm_vllm). Either way, pause the orchestrator vLLM
+    # around it (same dance as chart-OCR) so the GPU budget is free; the
+    # in-process `unload("vlm")` below is an idempotent no-op for the vLLM
+    # path. The pause itself is a no-op when vLLM isn't running.
     if to_escalate:
         async with pause_vllm_for_gpu():
             results = await vlm_convert_pages(
