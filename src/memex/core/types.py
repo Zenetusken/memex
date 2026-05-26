@@ -12,6 +12,26 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+# Canonical set of DATA-chart PictureClassifier class names (docling_core's
+# snake_case labels for bar/line/pie/scatter/etc.). These figures are
+# chart-OCR's domain. The parse worker excludes them from the VLM image-area
+# escalation (`docling_worker._CHART_CLASSES`, kept as a sandbox-local copy
+# pinned equal to this by a unit test); chart_ocr_backend may adopt this too.
+# NB diagram classes (flow_chart / engineering_drawing / screenshot) are NOT
+# here — those are the VLM's domain (the classification-escalation arm).
+CHART_CLASS_NAMES: frozenset[str] = frozenset(
+    {
+        "bar_chart",
+        "line_chart",
+        "pie_chart",
+        "scatter_chart",
+        "box_plot",
+        "stacked_bar_chart",
+        "heatmap",
+        "stratigraphic_chart",
+    }
+)
+
 
 class Chunk(BaseModel):
     """A retrievable unit of document content with citation metadata.

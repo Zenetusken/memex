@@ -232,10 +232,39 @@ def _demote_prose_headings(markdown: str) -> tuple[str, int]:
     return "\n".join(out), demoted
 
 
+# Data-chart PictureClassifier class names (docling_core's snake_case labels).
+# These figures are chart-OCR's domain, NOT the VLM's: a chart-dominant page
+# should route to chart-OCR (structured extraction), not get VLM page-
+# transcribed — which DISPLACES that extraction (observed regressing the
+# slide-decks corpus on the chart-heavy CUDA deck). So they're EXCLUDED from
+# the per-page image_fraction that drives the VLM image-area escalation arm.
+# flow_chart / engineering_drawing / screenshot are deliberately NOT here —
+# those are diagrams the VLM SHOULD transcribe (the classification arm). Kept
+# worker-local (not imported from chart_ocr_backend) so the sandboxed worker
+# stays stdlib/docling-only at module load (before seccomp); pinned equal to
+# `core.types.CHART_CLASS_NAMES` by `test_docling_image_fraction`.
+_CHART_CLASSES: frozenset[str] = frozenset(
+    {
+        "bar_chart",
+        "line_chart",
+        "pie_chart",
+        "scatter_chart",
+        "box_plot",
+        "stacked_bar_chart",
+        "heatmap",
+        "stratigraphic_chart",
+    }
+)
+# Only trust a confident chart classification (mirrors chart_ocr_backend's
+# pre-filter floor); below it, keep the figure in image_fraction so an
+# ambiguous-but-real diagram still escalates.
+_CHART_CLASS_MIN_CONFIDENCE = 0.5
+
+
 def _image_fraction_by_page(
     figures: list[dict[str, Any]], page_areas: dict[int, float]
 ) -> dict[int, float]:
-    """Fraction of each page's area covered by figures, clamped to [0, 1].
+    """Fraction of each page's area covered by NON-CHART figures, clamped to [0, 1].
 
     Drives the VLM-escalation image-dominance trigger
     (`pipeline._route_and_escalate`): a diagram/screenshot page Docling
@@ -243,10 +272,16 @@ def _image_fraction_by_page(
     `page_no` + `bbox=[x0, y_bottom, x1, y_top]` (PDF points, the same
     units as `page_areas`). A page with no figures, or whose dimensions
     were unavailable (area 0), maps to 0.0. Overlapping bboxes can sum
-    past the page area, hence the clamp.
+    past the page area, hence the clamp. Confidently chart-classified
+    figures (`_CHART_CLASSES`) are EXCLUDED — they belong to chart-OCR,
+    so a chart-dominant page should not trip the VLM image-area arm.
     """
     fig_area: dict[int, float] = {}
     for fig in figures:
+        cls = fig.get("classification")
+        conf = float(fig.get("classification_confidence", 0.0) or 0.0)
+        if cls in _CHART_CLASSES and conf >= _CHART_CLASS_MIN_CONFIDENCE:
+            continue  # chart → chart-OCR's domain, not the VLM image-area arm
         fx0, fy_bot, fx1, fy_top = fig["bbox"]
         page_no = int(fig["page_no"])
         fig_area[page_no] = fig_area.get(page_no, 0.0) + max(0.0, fx1 - fx0) * max(
