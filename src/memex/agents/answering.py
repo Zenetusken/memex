@@ -333,6 +333,13 @@ class AnswerState(BaseModel):
     regenerate_attempts: int = 0
     max_regenerate_attempts: int = 2
 
+    # When True, a draft with SOME grounded + some ungrounded claims, once
+    # regeneration is exhausted, ships the grounded SUBSET (relevance-gated;
+    # ungrounded claims dropped) rather than refusing the whole answer — fixes
+    # the compound-question over-refusal. Set from `agents.partial_grounded_answers`
+    # in `answer_query` (fail-open True). A zero-grounded verdict always refuses.
+    allow_partial_grounded: bool = True
+
     nodes_traversed: int = 0
     max_nodes_traversed: int = 20
 
@@ -1434,9 +1441,24 @@ async def compose(state: AnswerState) -> AnswerStateUpdate:
             seen_wikilinks.add(wikilink)
             wikilinks.append(wikilink)
 
+    # Summary safety for a PARTIAL-grounded ship: the model's `summary`
+    # synthesizes the WHOLE draft, so if verification dropped any claim it may
+    # assert the dropped (ungrounded) content. Rebuild the summary from the
+    # surviving grounded claims so no ungrounded assertion reaches the headline.
+    # When every claim survived, keep the model's richer one-line synthesis.
+    if len(surviving_claims) < len(state.draft.claims):
+        summary = " ".join(c.claim for c in surviving_claims)
+        log.info(
+            "partial_grounded_ship",
+            grounded=len(surviving_claims),
+            dropped=len(state.draft.claims) - len(surviving_claims),
+        )
+    else:
+        summary = state.draft.summary
+
     final = FinalResponse(
         answered=True,
-        summary=state.draft.summary,
+        summary=summary,
         claims=surviving_claims,
         used_chunks=used_chunks,
         wikilinks=wikilinks,
@@ -1463,21 +1485,47 @@ def route_after_assess(state: AnswerState) -> Literal["answer", "refuse"]:
     return "refuse"
 
 
+def _has_grounded_claims(state: AnswerState) -> bool:
+    """True iff at least one draft claim was marked grounded with a VALID index.
+
+    Mirrors `compose`'s surviving-claims computation (a grounded index must fall
+    within `draft.claims`), so it answers exactly "would compose ship anything?"
+    """
+    if state.draft is None or state.verification is None:
+        return False
+    n = len(state.draft.claims)
+    return any(0 <= i < n for i in state.verification.grounded)
+
+
 def route_after_verify(
     state: AnswerState,
 ) -> Literal["compose", "regenerate", "refuse"]:
-    """Grounded -> compose. Ungrounded with budget -> regenerate. Otherwise -> refuse.
+    """Route a verified draft.
 
-    Compose is checked *before* the budget gate: if verification passed
-    we already paid for a valid answer, and `compose` does no model
-    work, so a late budget breach shouldn't force us to discard it.
+    - Fully grounded -> compose (via the relevance gate). Checked *before* the
+      budget gate: we already paid for a valid answer and `compose` does no model
+      work, so a late budget breach shouldn't discard it.
+    - Mixed/none grounded, with budget + attempts left -> regenerate (try to
+      ground the rest; the answer node is fed the ungrounded-claim feedback).
+    - Regeneration exhausted (or over budget): if a NON-EMPTY grounded subset
+      remains, ship it -> "compose" (the relevance gate still vets responsiveness;
+      `compose` drops the ungrounded claims and rebuilds the summary from the
+      survivors). Only a ZERO-grounded verdict refuses. This is the fix for the
+      compound-question over-refusal: a question whose groundable half the corpus
+      supports answers that half instead of refusing the whole thing because the
+      other half can't be grounded. Counterfactuals (nothing grounded) still
+      refuse, so `refusal_cf` is unaffected. Gated by `allow_partial_grounded`
+      (default on; `MEMEX_AGENTS__PARTIAL_GROUNDED_ANSWERS=false` restores
+      all-or-nothing).
     """
     if state.verification and state.verification.all_grounded:
         return "compose"
-    if state.over_budget():
-        return "refuse"
-    if state.regenerate_attempts < state.max_regenerate_attempts:
+    # Try to ground the remaining claims while budget + attempts remain.
+    if not state.over_budget() and state.regenerate_attempts < state.max_regenerate_attempts:
         return "regenerate"
+    # Retry exhausted / over budget. Ship the grounded subset if any survives.
+    if state.allow_partial_grounded and _has_grounded_claims(state):
+        return "compose"
     return "refuse"
 
 
@@ -1664,6 +1712,16 @@ async def answer_query(
     neighbours are explored; `chunks_per_neighbor` is the max chunks
     pulled from each neighbour. See `expand_graph` for the design.
     """
+    # Partial-grounded ship is a settings policy toggle (default on). Read it
+    # fail-open so a non-bootstrapped fixture keeps the default behaviour.
+    from memex.core.config import get_settings
+    from memex.core.errors import ConfigurationError, MemexError
+
+    try:
+        allow_partial_grounded = get_settings().agents.partial_grounded_answers
+    except (ConfigurationError, MemexError):
+        allow_partial_grounded = True
+
     initial = AnswerState(
         query=query,
         token_budget=token_budget,
@@ -1671,6 +1729,7 @@ async def answer_query(
         graph_expansion_enabled=graph_expansion_enabled,
         graph_expansion_budget=graph_expansion_budget,
         chunks_per_neighbor=chunks_per_neighbor,
+        allow_partial_grounded=allow_partial_grounded,
     )
 
     clear_run_context()  # belt-and-suspenders: a missed clear elsewhere

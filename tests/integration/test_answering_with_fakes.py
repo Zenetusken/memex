@@ -472,10 +472,15 @@ async def test_verify_missing_index_treated_as_ungrounded(
 ) -> None:
     """If a claim index is missing from both `grounded` and `ungrounded`,
     treat it as ungrounded (conservative — don't default to grounded on
-    verifier omission). Post-audit (2026-05-23): tightened from an `or`-
-    clause that accepted either outcome to an explicit assertion that
-    the omitted claim trips regenerate, then refusal — pinning the
-    'don't silently default to grounded' contract."""
+    verifier omission). Post-audit (2026-05-23): the phantom-index filter
+    conservatively adds the omitted claim to `ungrounded`.
+
+    Partial-grounded update (2026-05-26): with claim 0 grounded and claim 1
+    omitted→ungrounded, the agent regenerates (trying to ground claim 1), then
+    — since claim 1 stays ungrounded — ships the GROUNDED SUBSET (claim 0) and
+    DROPS claim 1. The contract this pins is unchanged: the omitted claim is
+    never treated as grounded (it's dropped, not shipped). The observable
+    outcome moved from whole-answer refusal to a partial-grounded ship."""
     fake_llm.respond(
         "assess_sufficiency",
         SufficiencyAssessment,
@@ -492,11 +497,9 @@ async def test_verify_missing_index_treated_as_ungrounded(
             ],
         ),
     )
-    # Verifier covers ONLY claim 0; claim 1 is omitted from both lists.
-    # The phantom-index filter will conservatively add claim 1 to
-    # ungrounded, which triggers the regenerate path. The regenerate
-    # path will re-call answer/verify; the same FakeLLM canned response
-    # fires again, so regenerate exhausts its budget and refuse() runs.
+    # Verifier covers ONLY claim 0; claim 1 is omitted from both lists. The
+    # phantom-index filter conservatively adds claim 1 to ungrounded → mixed
+    # verdict → regenerate (same canned draft) → exhausts → ships claim 0.
     fake_llm.respond(
         "verify_grounding",
         VerificationResult,
@@ -505,17 +508,152 @@ async def test_verify_missing_index_treated_as_ungrounded(
 
     response = await answer_query("What does Smith say?")
 
-    # Strict contract: omitted claim must NOT be treated as grounded.
-    # Refusal is the correct outcome here — the verifier never confirmed
-    # claim 1, so the system can't ship it.
-    assert response.answered is False, (
-        "Omitted claim was silently treated as grounded; "
-        f"got answered=True with claims={[c.claim for c in response.claims]}"
+    # Claim 0 (grounded) ships; claim 1 (omitted→ungrounded) is DROPPED, never
+    # treated as grounded.
+    assert response.answered is True
+    assert [c.claim for c in response.claims] == ["Claim A"]
+    assert "Claim B" not in [c.claim for c in response.claims], (
+        "Omitted claim was silently treated as grounded + shipped"
     )
-    assert response.regenerate_attempts >= 1, (
-        "Expected at least 1 regenerate attempt before refusal; "
-        f"got regenerate_attempts={response.regenerate_attempts}"
+    # The summary is rebuilt from the surviving claim — it must NOT carry the
+    # original draft summary that referenced both claims.
+    assert response.summary == "Claim A"
+    # It still regenerated (tried to ground claim 1) before shipping the partial.
+    assert response.regenerate_attempts >= 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_retrieve", "patch_prompt")
+async def test_partial_grounded_ships_grounded_subset(fake_llm: FakeLLM) -> None:
+    """#262 — the compound-question fix. A draft with one grounded claim (the
+    answerable half) + one ungrounded claim (the half the corpus can't support)
+    ships the GROUNDED subset: the ungrounded claim is dropped and the summary is
+    rebuilt from the survivor, so no ungrounded assertion reaches the headline.
+    `max_regenerate_attempts=0` exhausts the retry immediately → straight to the
+    partial-ship branch."""
+    fake_llm.respond(
+        "assess_sufficiency",
+        SufficiencyAssessment,
+        SufficiencyAssessment(sufficient=True, reason="diagram present"),
     )
+    fake_llm.respond(
+        "answer",
+        DraftAnswer,
+        DraftAnswer(
+            summary="The High Priority Queue is serviced first, so low-priority traffic is starved.",
+            claims=[
+                CitedClaim(
+                    claim="The High Priority Queue is serviced first.",
+                    source_chunk_id="c1",
+                    confidence="high",
+                ),
+                CitedClaim(
+                    claim="Low-priority traffic is starved.",
+                    source_chunk_id="c2",
+                    confidence="medium",
+                ),
+            ],
+        ),
+    )
+    # Verifier grounds the queue-order claim, rejects the starvation claim
+    # (not in the chunks).
+    fake_llm.respond(
+        "verify_grounding",
+        VerificationResult,
+        VerificationResult(
+            grounded=[0],
+            ungrounded=[1],
+            ungrounded_reasons=["starvation risk not stated in the diagram"],
+        ),
+    )
+
+    response = await answer_query(
+        "Which queue is serviced first and what starvation risk does it create?",
+        max_regenerate_attempts=0,
+    )
+
+    assert response.answered is True
+    # Only the grounded claim ships; the ungrounded "starvation" claim is dropped.
+    assert [c.claim for c in response.claims] == ["The High Priority Queue is serviced first."]
+    # Summary rebuilt from the survivor — the ungrounded "starved" text is GONE.
+    assert response.summary == "The High Priority Queue is serviced first."
+    assert "starv" not in (response.summary or "").lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_retrieve", "patch_prompt")
+async def test_zero_grounded_refuses_even_with_partial(fake_llm: FakeLLM) -> None:
+    """Partial-grounded never rescues a ZERO-grounded verdict — the
+    counterfactual safety boundary (refusal_cf unaffected)."""
+    fake_llm.respond(
+        "assess_sufficiency",
+        SufficiencyAssessment,
+        SufficiencyAssessment(sufficient=True, reason="ok"),
+    )
+    fake_llm.respond(
+        "answer",
+        DraftAnswer,
+        DraftAnswer(
+            summary="Two claims.",
+            claims=[
+                CitedClaim(claim="Claim A", source_chunk_id="c1", confidence="high"),
+                CitedClaim(claim="Claim B", source_chunk_id="c2", confidence="high"),
+            ],
+        ),
+    )
+    fake_llm.respond(
+        "verify_grounding",
+        VerificationResult,
+        VerificationResult(grounded=[], ungrounded=[0, 1]),
+    )
+
+    response = await answer_query("an unanswerable thing", max_regenerate_attempts=0)
+    assert response.answered is False
+    assert response.claims == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_retrieve", "patch_prompt")
+async def test_partial_grounded_kill_switch_refuses(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, fake_llm: FakeLLM
+) -> None:
+    """`MEMEX_AGENTS__PARTIAL_GROUNDED_ANSWERS=false` restores all-or-nothing:
+    a mixed verdict refuses instead of shipping the grounded subset."""
+    from memex.core.config import MemexSettings, set_settings
+
+    monkeypatch.setenv("MEMEX_VAULT_PATH", str(tmp_path))
+    monkeypatch.setenv("MEMEX_OBSERVABILITY__LANGFUSE_ENABLED", "false")
+    monkeypatch.setenv("MEMEX_AGENTS__PARTIAL_GROUNDED_ANSWERS", "false")
+    set_settings(MemexSettings())  # type: ignore[call-arg]
+
+    fake_llm.respond(
+        "assess_sufficiency",
+        SufficiencyAssessment,
+        SufficiencyAssessment(sufficient=True, reason="ok"),
+    )
+    fake_llm.respond(
+        "answer",
+        DraftAnswer,
+        DraftAnswer(
+            summary="Two claims.",
+            claims=[
+                CitedClaim(claim="Claim A", source_chunk_id="c1", confidence="high"),
+                CitedClaim(claim="Claim B", source_chunk_id="c2", confidence="high"),
+            ],
+        ),
+    )
+    fake_llm.respond(
+        "verify_grounding",
+        VerificationResult,
+        VerificationResult(grounded=[0], ungrounded=[1]),
+    )
+
+    try:
+        response = await answer_query("mixed verdict, switch off", max_regenerate_attempts=0)
+    finally:
+        set_settings(None)
+
+    assert response.answered is False  # kill-switch → all-or-nothing refuse
 
 
 # ----- P4.1: compose derives FinalResponse.wikilinks (deterministic) -----

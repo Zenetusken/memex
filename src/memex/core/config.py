@@ -435,9 +435,20 @@ class AgentsSettings(BaseModel):
     artifact, or whose artifact doesn't resolve confidently, take the unchanged
     full-corpus path. Kill-switch: `MEMEX_AGENTS__ARTIFACT_SCOPE_ENABLED=false`
     fully reverts to full-corpus retrieval for every query.
+
+    `partial_grounded_answers`: when a verified draft has SOME grounded claims
+    and some ungrounded ones (e.g. a compound question whose groundable half the
+    corpus supports and whose other half it doesn't), and regeneration can't
+    ground everything, ship the grounded SUBSET (the relevance gate still vets
+    responsiveness; `compose` drops the ungrounded claims and rebuilds the
+    summary from the survivors) instead of refusing the whole answer. Only a
+    ZERO-grounded verdict refuses, so counterfactuals are unaffected. Kill-switch:
+    `MEMEX_AGENTS__PARTIAL_GROUNDED_ANSWERS=false` restores the all-or-nothing
+    behaviour (any ungrounded claim → regenerate-then-refuse).
     """
 
     artifact_scope_enabled: bool = True
+    partial_grounded_answers: bool = True
 
 
 class MemexSettings(BaseSettings):
