@@ -33,6 +33,7 @@ from memex.enrich.citations import (
     CitationCandidate,
     CitationIndex,
     CitationList,
+    CitationListCompact,
     ResolvedCitation,
     insert_wikilinks,
     make_signature,
@@ -42,6 +43,7 @@ from memex.enrich.course_refs import extract_course_references
 from memex.enrich.entities import (
     Entity,
     EntityList,
+    EntityListCompact,
     dedupe,
     merge_entities,
 )
@@ -67,12 +69,14 @@ _ENTITY_PROMPT_NAME = "extract_entities"
 _ENTITY_PROMPT_VERSION = "v2"
 _CITATION_PROMPT_NAME = "extract_citations"
 _CITATION_PROMPT_VERSION = "v2"
-# Per-call output budget for entity/citation extraction. The bounded
-# (max_length=24) lists can still want >1536 completion tokens on the densest
-# table chunks (24 entities with long `span_text` quotes). The truncated
-# passage prompt is only ~1100-1800 tokens, so the 6144 model-len leaves ample
-# room: 3072 completion + ~1800 prompt ≈ 4900 < 6144, with margin. Validated to
-# take the 10-K's residual chunk_failures from 7 → ~0.
+# Per-call output budget for entity/citation extraction, kept safely under the
+# 6144 orchestrator model-len: a dense passage prompt runs ~1800-2700 tokens
+# (the `truncate(6000)`-char passage tokenises denser for numeric tables), so
+# 3072 completion + worst-case prompt stays < 6144. We therefore CANNOT cure a
+# truncation by raising this — it would overflow the model-len. The densest
+# numeric chunks, whose bounded 24-item JSON can still exceed 3072 and truncate
+# (ModelCallError "did not match the requested schema"), are instead handled by
+# the compact-schema retry in `_extract_with_fallback` below.
 _ENRICH_MAX_TOKENS = 3072
 
 _MAX_CONCURRENT = 4  # per-chunk extraction parallelism
@@ -109,36 +113,62 @@ async def _build_citation_index(vault_path: Path, *, skip_doc_id: str) -> Citati
     return idx
 
 
-async def _extract_chunk(chunk: Chunk, title: str) -> tuple[list[Entity], list[CitationCandidate]]:
-    """One LLM call for entities, one for citations. Parallel.
+async def _extract_with_fallback[T: BaseModel](
+    *, prompt: str, full_schema: type[T], compact_schema: type[T], prompt_tag: str
+) -> T:
+    """One structured extraction call, with a compact-schema retry.
 
-    Both calls go through `complete_structured` which is generic over
-    its `schema` parameter — pyright keeps the chain typed without
-    runtime asserts.
+    On a dense chunk the full (max_length=24) list's JSON can run past
+    `_ENRICH_MAX_TOKENS` and truncate, so `complete_structured` raises
+    `ModelCallError` ("did not match the requested schema"). Raising
+    `max_tokens` can't fix it — the 6144 model-len already bounds
+    prompt+completion — so retry ONCE with the half-cap `compact_schema`,
+    whose worst-case output fits with margin: the chunk enriches with its
+    top dozen items instead of being dropped. A second failure propagates
+    to the caller's `gather`, which logs `enrich.chunk_failed`.
+    """
+    try:
+        result, _ = await complete_structured(
+            prompt=prompt, schema=full_schema, prompt_tag=prompt_tag, max_tokens=_ENRICH_MAX_TOKENS
+        )
+        return result
+    except ModelCallError:
+        logger.info("enrich.compact_retry", prompt_tag=prompt_tag)
+        result, _ = await complete_structured(
+            prompt=prompt,
+            schema=compact_schema,
+            prompt_tag=prompt_tag,
+            max_tokens=_ENRICH_MAX_TOKENS,
+        )
+        return result
+
+
+async def _extract_chunk(chunk: Chunk, title: str) -> tuple[list[Entity], list[CitationCandidate]]:
+    """One LLM call for entities, one for citations, in parallel — each with a
+    compact-schema fallback (`_extract_with_fallback`) so a dense chunk that
+    truncates the full extraction still enriches with its top items rather
+    than being dropped. Both calls go through `complete_structured`, generic
+    over its `schema` parameter, so pyright keeps the chain typed.
     """
     entity_prompt = render_prompt(_ENTITY_PROMPT_NAME, document_title=title, passage=chunk.text)
     citation_prompt = render_prompt(_CITATION_PROMPT_NAME, document_title=title, passage=chunk.text)
 
-    # Headroom so the (now bounded, max_length=24) entity/citation lists
-    # complete within budget on dense passages — the JSON must finish before
-    # `max_tokens` or `model_validate_json` rejects the truncated output.
-    entity_task = complete_structured(
+    entity_task = _extract_with_fallback(
         prompt=entity_prompt,
-        schema=EntityList,
+        full_schema=EntityList,
+        compact_schema=EntityListCompact,
         prompt_tag=f"{_ENTITY_PROMPT_NAME}@{_ENTITY_PROMPT_VERSION}",
-        max_tokens=_ENRICH_MAX_TOKENS,
     )
-    citation_task = complete_structured(
+    citation_task = _extract_with_fallback(
         prompt=citation_prompt,
-        schema=CitationList,
+        full_schema=CitationList,
+        compact_schema=CitationListCompact,
         prompt_tag=f"{_CITATION_PROMPT_NAME}@{_CITATION_PROMPT_VERSION}",
-        max_tokens=_ENRICH_MAX_TOKENS,
     )
-    (entity_raw, _), (citation_raw, _) = await asyncio.gather(entity_task, citation_task)
-    # `complete_structured` is typed to return the schema instance, so this
-    # can only fire if a test fake or vendored plugin breaks the contract —
-    # surface explicitly rather than crash. pyright sees the static type as
-    # always-EntityList; the check is a deliberate runtime guard.
+    entity_raw, citation_raw = await asyncio.gather(entity_task, citation_task)
+    # `complete_structured` is typed to return the schema instance (the compact
+    # variants subclass the full schema), so this can only fire if a test fake
+    # breaks the contract — surface explicitly rather than crash.
     if not isinstance(entity_raw, EntityList):  # type: ignore[reportUnnecessaryIsInstance]  # runtime contract guard
         raise ModelCallError(
             "Entity extraction returned unexpected payload type",

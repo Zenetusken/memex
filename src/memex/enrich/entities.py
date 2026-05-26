@@ -53,6 +53,19 @@ class EntityList(BaseModel):
     entities: list[ExtractedEntity] = Field(default_factory=list[ExtractedEntity], max_length=24)
 
 
+class EntityListCompact(EntityList):
+    """Half-cap fallback for the densest chunks. When the full 24-item
+    extraction's JSON runs past the enrich token budget and truncates
+    (the failure can't be cured by raising `max_tokens` — the 6144
+    model-len already bounds prompt+completion), the enrich pipeline
+    retries once with this 12-item cap, whose worst-case output fits
+    with margin. The chunk then enriches with its top dozen entities
+    instead of being dropped entirely. Same item shape, so it's an
+    `EntityList` for every downstream consumer (`merge_entities`)."""
+
+    entities: list[ExtractedEntity] = Field(default_factory=list[ExtractedEntity], max_length=12)
+
+
 class EntityExtractionInput(BaseModel):
     """Documented input shape for the extract_entities prompt."""
 

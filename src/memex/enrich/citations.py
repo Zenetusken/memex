@@ -78,6 +78,16 @@ class CitationList(BaseModel):
     )
 
 
+class CitationListCompact(CitationList):
+    """Half-cap fallback for the densest chunks — see `EntityListCompact`.
+    The enrich pipeline retries with this 12-item cap when the full
+    citation extraction truncates past the token budget."""
+
+    citations: list[CitationCandidate] = Field(
+        default_factory=list[CitationCandidate], max_length=12
+    )
+
+
 class CitationExtractionInput(BaseModel):
     """Documented input shape for the `extract_citations` prompt."""
 
