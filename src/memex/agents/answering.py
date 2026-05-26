@@ -1431,13 +1431,19 @@ def build_answering_graph() -> CompiledStateGraph:
                                        |
                              +---------+---------+
                              |         |         |
-                         compose   regenerate  refuse
+                    assess_relevance regenerate refuse
                              |         |         |
-                             v         v         v
-                           END     (back to    END
-                                    answer)
+                  +----------+----+ (back to    END
+                  |               |  answer)
+              compose          refuse
+                  |               |
+                  v               v
+                END             END
 
-    `expand_graph` augments the candidate pool with chunks from
+    `assess_relevance` is the responsiveness gate: a grounded draft that
+    answers a related-but-different question than asked (a conflation)
+    routes to `refuse` instead of `compose`. `expand_graph` augments the
+    candidate pool with chunks from
     documents the graph store says are related (one-hop CITES /
     shared-entity neighbours). It is a no-op when the graph store
     isn't installed, when expansion is disabled on AnswerState, or

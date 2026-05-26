@@ -1,5 +1,5 @@
 {
-  "_description": "P0 eval-corpus, category: slide-decks. Source doc: Stephen Jones, 'CUDA: New Features and Beyond', GTC 2024. Extended 2026-05-21 from the rigorous baseline (15→30 queries) to give P2.x A/Bs statistical signal. New queries cover NVRTC compilation, kernel fusion, NVLink C2C, CUTLASS abstractions, LU factorization, performance-per-watt thesis, and unified memory. Extended 2026-05-23 with 3 chart-content queries (31-33) targeting content exclusively in chart-extracted blocks (the P3.3 v7 unlock).",
+  "_description": "P0 eval-corpus, category: slide-decks. Source doc: Stephen Jones, 'CUDA: New Features and Beyond', GTC 2024. Extended 2026-05-21 from the rigorous baseline (15\u219230 queries) to give P2.x A/Bs statistical signal. New queries cover NVRTC compilation, kernel fusion, NVLink C2C, CUTLASS abstractions, LU factorization, performance-per-watt thesis, and unified memory. Extended 2026-05-23 with 3 chart-content queries (31-33) targeting content exclusively in chart-extracted blocks (the P3.3 v7 unlock).",
   "_doc_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640",
   "_query_count": 33,
   "_mix": "20 answerable (17 prose + 3 chart-content) + 5 empty-retrieval refusals + 8 near-miss refusals",
@@ -89,7 +89,7 @@
         "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#b19c7160e5"
       ],
       "should_refuse": false,
-      "_expected_answer": "half (FP16) — listed in the precision sign/exponent/mantissa diagram.",
+      "_expected_answer": "half (FP16) \u2014 listed in the precision sign/exponent/mantissa diagram.",
       "_baseline_rerank_top1": 0.9531
     },
     {
@@ -98,7 +98,7 @@
       "relevant_chunk_ids": [],
       "should_refuse": true,
       "_counterfactual_mode": "empty-retrieval",
-      "_expected_answer": "(Refuse — the deck is about CUDA architecture, not corporate M&A history.)"
+      "_expected_answer": "(Refuse \u2014 the deck is about CUDA architecture, not corporate M&A history.)"
     },
     {
       "qid": "slide-decks-09",
@@ -106,7 +106,7 @@
       "relevant_chunk_ids": [],
       "should_refuse": true,
       "_counterfactual_mode": "empty-retrieval",
-      "_expected_answer": "(Refuse — RAG is unrelated to a CUDA architecture deck.)"
+      "_expected_answer": "(Refuse \u2014 RAG is unrelated to a CUDA architecture deck.)"
     },
     {
       "qid": "slide-decks-10",
@@ -114,7 +114,7 @@
       "relevant_chunk_ids": [],
       "should_refuse": true,
       "_counterfactual_mode": "empty-retrieval",
-      "_expected_answer": "(Refuse — pricing is not discussed in this technical deck.)"
+      "_expected_answer": "(Refuse \u2014 pricing is not discussed in this technical deck.)"
     },
     {
       "qid": "slide-decks-11",
@@ -122,7 +122,7 @@
       "relevant_chunk_ids": [],
       "should_refuse": true,
       "_counterfactual_mode": "near-miss",
-      "_expected_answer": "(Refuse — the Energy per FLOP table covers FP64/FP32/FP16/FP8/Int8 but not FP128.) This should pull the precision-table chunks at high rerank but the agent should recognise FP128 is absent.",
+      "_expected_answer": "(Refuse \u2014 the Energy per FLOP table covers FP64/FP32/FP16/FP8/Int8 but not FP128.) This should pull the precision-table chunks at high rerank but the agent should recognise FP128 is absent.",
       "_note": "Tests near-miss refusal: retrieval will route to the FP-precision chunk which is the right neighbourhood, but the specific value asked isn't there."
     },
     {
@@ -131,7 +131,7 @@
       "relevant_chunk_ids": [],
       "should_refuse": true,
       "_counterfactual_mode": "near-miss",
-      "_expected_answer": "(Refuse — the table lists FP8 as the smallest tensor-core precision; FP4 is not in this deck.)",
+      "_expected_answer": "(Refuse \u2014 the table lists FP8 as the smallest tensor-core precision; FP4 is not in this deck.)",
       "_note": "Same chunk-neighbourhood as the precision-table answerable queries; tests whether the agent grounds on the specific value or hallucinates by analogy."
     },
     {
@@ -140,7 +140,7 @@
       "relevant_chunk_ids": [],
       "should_refuse": true,
       "_counterfactual_mode": "near-miss",
-      "_expected_answer": "(Refuse — Grace-Hopper bandwidth is discussed but Blackwell isn't covered in this 2024 deck.)",
+      "_expected_answer": "(Refuse \u2014 Grace-Hopper bandwidth is discussed but Blackwell isn't covered in this 2024 deck.)",
       "_note": "Pulls the NVLink-bandwidth chunks; the agent must distinguish Grace-Hopper from a non-existent Hopper-Blackwell pairing."
     },
     {
@@ -149,7 +149,7 @@
       "relevant_chunk_ids": [],
       "should_refuse": true,
       "_counterfactual_mode": "near-miss",
-      "_expected_answer": "(Refuse — the deck discusses transistor density and SM architecture but does not list CUDA core counts.)",
+      "_expected_answer": "(Refuse \u2014 the deck discusses transistor density and SM architecture but does not list CUDA core counts.)",
       "_note": "Tests whether the agent over-claims about GPU specs based on architecture-discussion chunks."
     },
     {
@@ -158,8 +158,8 @@
       "relevant_chunk_ids": [],
       "should_refuse": true,
       "_counterfactual_mode": "near-miss",
-      "_expected_answer": "(Refuse — kernel fusion is discussed but the example given is FP32→FP16, not FP32→INT8.)",
-      "_note": "Tests whether the agent substitutes the FP32→FP16 example as if it answered the FP32→INT8 question."
+      "_expected_answer": "(Refuse \u2014 kernel fusion is discussed but the example given is FP32\u2192FP16, not FP32\u2192INT8.)",
+      "_note": "Tests whether the agent substitutes the FP32\u2192FP16 example as if it answered the FP32\u2192INT8 question."
     },
     {
       "qid": "slide-decks-16",
@@ -173,7 +173,7 @@
     },
     {
       "qid": "slide-decks-17",
-      "question": "In the deck's basic kernel-fusion example, how many kernel launches does the unfused FP32→FP16 multiplication require versus the single fused version?",
+      "question": "In the deck's basic kernel-fusion example, how many kernel launches does the unfused FP32\u2192FP16 multiplication require versus the single fused version?",
       "relevant_chunk_ids": [
         "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#65ccf92372"
       ],
@@ -271,7 +271,7 @@
       "should_refuse": false,
       "_expected_answer": "It's about performance per watt (the section is titled '_It's about Performance per Watt_').",
       "_baseline_rerank_top1": 0.002,
-      "_note": "Borderline rerank score (0.26) — the answer is the deck's THESIS, captured in section heading. Useful test of whether the agent grounds on heading-level structural signal."
+      "_note": "Borderline rerank score (0.26) \u2014 the answer is the deck's THESIS, captured in section heading. Useful test of whether the agent grounds on heading-level structural signal."
     },
     {
       "qid": "slide-decks-26",
@@ -279,7 +279,7 @@
       "relevant_chunk_ids": [],
       "should_refuse": true,
       "_counterfactual_mode": "near-miss",
-      "_expected_answer": "(Refuse — the precision-bit table covers FP64/32/16/8/Int8 mantissa lengths but FP4 is not in the table.)",
+      "_expected_answer": "(Refuse \u2014 the precision-bit table covers FP64/32/16/8/Int8 mantissa lengths but FP4 is not in the table.)",
       "_note": "Sister near-miss to slide-decks-12 (FP4 tensor core cost). Tests whether the agent extrapolates a mantissa value by analogy with FP8 (3-bit) when FP4 is absent."
     },
     {
@@ -288,7 +288,7 @@
       "relevant_chunk_ids": [],
       "should_refuse": true,
       "_counterfactual_mode": "near-miss",
-      "_expected_answer": "(Refuse — the NVRTC chart shows speedups SINCE CUDA 11.8; CUDA 11.0 is not present.)",
+      "_expected_answer": "(Refuse \u2014 the NVRTC chart shows speedups SINCE CUDA 11.8; CUDA 11.0 is not present.)",
       "_note": "Tests whether the agent extrapolates a value from the chart's domain. Should refuse because 11.0 is outside the chart's range."
     },
     {
@@ -297,7 +297,7 @@
       "relevant_chunk_ids": [],
       "should_refuse": true,
       "_counterfactual_mode": "near-miss",
-      "_expected_answer": "(Refuse — bandwidth is given (900 GB/s), but latency is not.)",
+      "_expected_answer": "(Refuse \u2014 bandwidth is given (900 GB/s), but latency is not.)",
       "_note": "Tests whether the agent substitutes bandwidth for latency. The bandwidth/latency confusion is a common LLM near-miss failure."
     },
     {
@@ -306,15 +306,15 @@
       "relevant_chunk_ids": [],
       "should_refuse": true,
       "_counterfactual_mode": "empty-retrieval",
-      "_expected_answer": "(Refuse — TDP / cooling specs are not in this architectural deck.)"
+      "_expected_answer": "(Refuse \u2014 TDP / cooling specs are not in this architectural deck.)"
     },
     {
       "qid": "slide-decks-30",
-      "question": "What programming language must I use to write CUDA kernels — only C++, or are other options supported?",
+      "question": "What programming language must I use to write CUDA kernels \u2014 only C++, or are other options supported?",
       "relevant_chunk_ids": [],
       "should_refuse": true,
       "_counterfactual_mode": "empty-retrieval",
-      "_expected_answer": "(Refuse — although Python interfaces are mentioned for some libraries, the deck does not give a comprehensive answer to 'which languages can write CUDA kernels'.)"
+      "_expected_answer": "(Refuse \u2014 although Python interfaces are mentioned for some libraries, the deck does not give a comprehensive answer to 'which languages can write CUDA kernels'.)"
     },
     {
       "qid": "slide-decks-31",
@@ -332,7 +332,7 @@
       "should_refuse": false,
       "_answer_type": "chart_content",
       "_expected_answer": "2,070 ms",
-      "_note": "CHART-TARGETED. Duration appears only in the chart-extracted Nsight timeline table (the v7 LaTeX→markdown converter put it in a markdown table). Anchor unresolvable via FTS by design."
+      "_note": "CHART-TARGETED. Duration appears only in the chart-extracted Nsight timeline table (the v7 LaTeX\u2192markdown converter put it in a markdown table). Anchor unresolvable via FTS by design."
     },
     {
       "qid": "slide-decks-33",
@@ -360,6 +360,13 @@
       "slide-decks-23",
       "slide-decks-25"
     ],
-    "note": "Run config: vLLM Qwen/Qwen3-8B-AWQ orchestrator + BAAI/bge-reranker-v2-m3 now loading in bf16 (ADR-0006 intent), restored by the CrossEncoder automodel_args->model_kwargs fix on 2026-05-24. HARD GATES held: refusal_rate_on_counterfactuals=1.0, zero hallucinations (every refusal_correct=False case is a conservative false-refusal on an answerable query, not a wrongly-answered REF). ANS/REF counts identical to the prior (fp32-reranker) baselines. Any citation-precision delta vs the fp32 baseline is a chunk-granularity shift — the bf16 reranker cites an equally-valid sibling chunk in the SAME correct document — not a quality regression (verified: doc disambiguation + answer correctness intact)."
+    "note": "Run config: vLLM Qwen/Qwen3-8B-AWQ orchestrator + BAAI/bge-reranker-v2-m3 now loading in bf16 (ADR-0006 intent), restored by the CrossEncoder automodel_args->model_kwargs fix on 2026-05-24. HARD GATES held: refusal_rate_on_counterfactuals=1.0, zero hallucinations (every refusal_correct=False case is a conservative false-refusal on an answerable query, not a wrongly-answered REF). ANS/REF counts identical to the prior (fp32-reranker) baselines. Any citation-precision delta vs the fp32 baseline is a chunk-granularity shift \u2014 the bf16 reranker cites an equally-valid sibling chunk in the SAME correct document \u2014 not a quality regression (verified: doc disambiguation + answer correctness intact)."
+  },
+  "_baseline_2026_05_26_relevance_gate": {
+    "query_count": 33,
+    "answered": 16,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "hallucinations": 0,
+    "note": "CUDA-deck VLM re-process REVERTED to Docling+chart-OCR (no vault backup \u21d2 irreversible). The relevance gate (agents/answering.py::assess_relevance) restored refusal_cf=1.0 by refusing slide-decks-30 \u2014 a grounded-but-non-responsive conflation (library-abstraction content answering a kernel-language question). Measured over 2 runs (slide-decks-30 refused both; ANS=16). NB borderline counterfactuals are non-deterministic run-to-run (agent BF16/AWQ greedy); refusal_cf=1.0 is a typical-run figure. No _anchor_phrase \u21d2 cite-prec not tracked."
   }
 }

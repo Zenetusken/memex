@@ -1,7 +1,7 @@
 {
-  "_description": "French-language SINGLE-DOC eval corpus over a VLM-transcribed network/security DIAGRAM document — pages extracted from the user's real CR350 'Réseautique et sécurité' Cours 6 (firewall architectures, pfSense/Snort IDS screenshot, 802.1X authentication sequence). Every answerable query targets content that exists ONLY in the diagram imagery (Docling reduced these pages to 'Flow chart'/'Engineering drawing'/'Screenshot' placeholders); the answers come from the Qwen2.5-VL escalation pass. This is the first eval that exercises the VLM parse path end-to-end.",
+  "_description": "French-language SINGLE-DOC eval corpus over a VLM-transcribed network/security DIAGRAM document \u2014 pages extracted from the user's real CR350 'R\u00e9seautique et s\u00e9curit\u00e9' Cours 6 (firewall architectures, pfSense/Snort IDS screenshot, 802.1X authentication sequence). Every answerable query targets content that exists ONLY in the diagram imagery (Docling reduced these pages to 'Flow chart'/'Engineering drawing'/'Screenshot' placeholders); the answers come from the Qwen2.5-VL escalation pass. This is the first eval that exercises the VLM parse path end-to-end.",
   "_doc_id": "ccd09479-cr350-network-diagrams",
-  "_source_note": "Source PDF stays LOCAL (extracted diagram pages 24/26/47/51 of the user's Cours 6). Only this query set is committed — same policy as the other eval corpora.",
+  "_source_note": "Source PDF stays LOCAL (extracted diagram pages 24/26/47/51 of the user's Cours 6). Only this query set is committed \u2014 same policy as the other eval corpora.",
   "_query_count": 17,
   "_mix": {
     "ans": 11,
@@ -15,37 +15,37 @@
   },
   "_labelling_rule": "ANS queries: `_anchor_phrase` is a distinctive substring of the VLM-transcribed answer-bearing chunk; `relevant_chunk_ids` is minted by scripts/extend_corpus.py resolve (FTS). REF queries: should_refuse=true, verified absent from the diagram transcription (HARD GATE).",
   "_created": "2026-05-25",
-  "_purpose": "VLM-path validation — proves the escalation pipeline (image-area trigger -> Qwen2.5-VL -> re-stitch) recovers diagram content that the text parsers cannot, and that the agent answers grounded diagram questions while refusing absent-from-diagram counterfactuals.",
+  "_purpose": "VLM-path validation \u2014 proves the escalation pipeline (image-area trigger -> Qwen2.5-VL -> re-stitch) recovers diagram content that the text parsers cannot, and that the agent answers grounded diagram questions while refusing absent-from-diagram counterfactuals.",
   "queries": [
     {
       "qid": "cr350-diag-01",
-      "question": "Quelles architectures de coupe-feu (firewall) le cours présente-t-il ?",
+      "question": "Quelles architectures de coupe-feu (firewall) le cours pr\u00e9sente-t-il ?",
       "_doc_id": "ccd09479-cr350-network-diagrams",
       "_anchor_phrase": "Single-tier",
       "relevant_chunk_ids": [
         "ccd09479-cr350-network-diagrams#0ded26dfef"
       ],
       "should_refuse": false,
-      "_expected_answer": "Le cours présente cinq architectures : Single-tier (un niveau), Two-tier I et Two-tier II (deux niveaux), Three-tier I et Three-tier II (trois niveaux).",
+      "_expected_answer": "Le cours pr\u00e9sente cinq architectures : Single-tier (un niveau), Two-tier I et Two-tier II (deux niveaux), Three-tier I et Three-tier II (trois niveaux).",
       "_answer_type": "listing",
       "_note": "VLM-only: page 1 firewall-architecture diagram. Docling rendered it as 'Flow chart'."
     },
     {
       "qid": "cr350-diag-02",
-      "question": "Dans l'architecture single-tier, quels équipements relient Internet au réseau privé ?",
+      "question": "Dans l'architecture single-tier, quels \u00e9quipements relient Internet au r\u00e9seau priv\u00e9 ?",
       "_doc_id": "ccd09479-cr350-network-diagrams",
       "_anchor_phrase": "Internet -> Router -> Firewall -> Private Network",
       "relevant_chunk_ids": [
         "ccd09479-cr350-network-diagrams#0ded26dfef"
       ],
       "should_refuse": false,
-      "_expected_answer": "Un routeur (Router) puis un coupe-feu (Firewall), avant d'atteindre le réseau privé (Private Network) : Internet -> Router -> Firewall -> Private Network.",
+      "_expected_answer": "Un routeur (Router) puis un coupe-feu (Firewall), avant d'atteindre le r\u00e9seau priv\u00e9 (Private Network) : Internet -> Router -> Firewall -> Private Network.",
       "_answer_type": "single_fact",
       "_note": "VLM-only diagram topology. Matches the real Cours-6 single-tier diagram."
     },
     {
       "qid": "cr350-diag-03",
-      "question": "Quel segment réseau apparaît uniquement dans les architectures à trois niveaux (three-tier) ?",
+      "question": "Quel segment r\u00e9seau appara\u00eet uniquement dans les architectures \u00e0 trois niveaux (three-tier) ?",
       "_doc_id": "ccd09479-cr350-network-diagrams",
       "_anchor_phrase": "Transaction Subnet",
       "relevant_chunk_ids": [
@@ -53,26 +53,26 @@
         "ccd09479-cr350-network-diagrams#512a070330"
       ],
       "should_refuse": false,
-      "_expected_answer": "Le sous-réseau de transaction (Transaction Subnet), présent dans les architectures three-tier mais pas dans single-tier ou two-tier.",
+      "_expected_answer": "Le sous-r\u00e9seau de transaction (Transaction Subnet), pr\u00e9sent dans les architectures three-tier mais pas dans single-tier ou two-tier.",
       "_answer_type": "single_fact",
       "_note": "VLM-only: 'Transaction Subnet' appears only in the three-tier chains."
     },
     {
       "qid": "cr350-diag-04",
-      "question": "Quel logiciel de détection d'intrusion (IDS) est présenté dans le cours ?",
+      "question": "Quel logiciel de d\u00e9tection d'intrusion (IDS) est pr\u00e9sent\u00e9 dans le cours ?",
       "_doc_id": "ccd09479-cr350-network-diagrams",
       "_anchor_phrase": "Snort package manager interface",
       "relevant_chunk_ids": [
         "ccd09479-cr350-network-diagrams#e23db89fb1"
       ],
       "should_refuse": false,
-      "_expected_answer": "Snort (présenté via son interface dans le gestionnaire de paquets pfSense).",
+      "_expected_answer": "Snort (pr\u00e9sent\u00e9 via son interface dans le gestionnaire de paquets pfSense).",
       "_answer_type": "single_fact",
       "_note": "VLM-only: page 3 pfSense/Snort screenshot. Docling rendered it as 'Screenshot from computer'."
     },
     {
       "qid": "cr350-diag-05",
-      "question": "Quels paquets sont installés dans la configuration pfSense présentée ?",
+      "question": "Quels paquets sont install\u00e9s dans la configuration pfSense pr\u00e9sent\u00e9e ?",
       "_doc_id": "ccd09479-cr350-network-diagrams",
       "_anchor_phrase": "arping",
       "relevant_chunk_ids": [
@@ -85,29 +85,29 @@
     },
     {
       "qid": "cr350-diag-06",
-      "question": "Dans quelle catégorie le paquet nmap est-il classé ?",
+      "question": "Dans quelle cat\u00e9gorie le paquet nmap est-il class\u00e9 ?",
       "_doc_id": "ccd09479-cr350-network-diagrams",
       "_anchor_phrase": "nmap",
       "relevant_chunk_ids": [
         "ccd09479-cr350-network-diagrams#e23db89fb1"
       ],
       "should_refuse": false,
-      "_expected_answer": "Catégorie « security » (sécurité), version 1.4.4.1.",
+      "_expected_answer": "Cat\u00e9gorie \u00ab security \u00bb (s\u00e9curit\u00e9), version 1.4.4.1.",
       "_answer_type": "single_fact",
       "_note": "VLM-only: per-package detail read from the screenshot table."
     },
     {
       "qid": "cr350-diag-07",
-      "question": "Dans quelle catégorie le paquet bandwidthd est-il classé d'après l'interface pfSense ?",
+      "question": "Dans quelle cat\u00e9gorie le paquet bandwidthd est-il class\u00e9 d'apr\u00e8s l'interface pfSense ?",
       "_doc_id": "ccd09479-cr350-network-diagrams",
       "_anchor_phrase": "bandwidthd",
       "relevant_chunk_ids": [
         "ccd09479-cr350-network-diagrams#e23db89fb1"
       ],
       "should_refuse": false,
-      "_expected_answer": "Catégorie « net-mgmt » (gestion réseau).",
+      "_expected_answer": "Cat\u00e9gorie \u00ab net-mgmt \u00bb (gestion r\u00e9seau).",
       "_answer_type": "single_fact",
-      "_note": "VLM-only: per-package detail from the screenshot. Anchored on the package NAME (stable) + category (stable) — the free-text description drifts across VLM transcription draws."
+      "_note": "VLM-only: per-package detail from the screenshot. Anchored on the package NAME (stable) + category (stable) \u2014 the free-text description drifts across VLM transcription draws."
     },
     {
       "qid": "cr350-diag-08",
@@ -118,7 +118,7 @@
         "ccd09479-cr350-network-diagrams#986cedcdda"
       ],
       "should_refuse": false,
-      "_expected_answer": "Le client (Client), le commutateur Catalyst ou routeur Cisco (intermédiaire), et le serveur d'authentification RADIUS.",
+      "_expected_answer": "Le client (Client), le commutateur Catalyst ou routeur Cisco (interm\u00e9diaire), et le serveur d'authentification RADIUS.",
       "_answer_type": "listing",
       "_note": "VLM-only: page 4 802.1X sequence diagram. Docling rendered it as 'Flow chart'."
     },
@@ -131,13 +131,13 @@
         "ccd09479-cr350-network-diagrams#986cedcdda"
       ],
       "should_refuse": false,
-      "_expected_answer": "EAPOL-Start, envoyé par le client au commutateur Catalyst / routeur Cisco.",
+      "_expected_answer": "EAPOL-Start, envoy\u00e9 par le client au commutateur Catalyst / routeur Cisco.",
       "_answer_type": "single_fact",
       "_note": "VLM-only: first message in the transcribed 802.1X sequence."
     },
     {
       "qid": "cr350-diag-10",
-      "question": "Quel type de serveur réalise l'authentification dans le processus 802.1X ?",
+      "question": "Quel type de serveur r\u00e9alise l'authentification dans le processus 802.1X ?",
       "_doc_id": "ccd09479-cr350-network-diagrams",
       "_anchor_phrase": "server responsible for authenticating the client",
       "relevant_chunk_ids": [
@@ -150,44 +150,44 @@
     },
     {
       "qid": "cr350-diag-11",
-      "question": "Quel message provoque la déconnexion (logoff) du client dans le processus 802.1X ?",
+      "question": "Quel message provoque la d\u00e9connexion (logoff) du client dans le processus 802.1X ?",
       "_doc_id": "ccd09479-cr350-network-diagrams",
       "_anchor_phrase": "EAPOL-Logoff",
       "relevant_chunk_ids": [
         "ccd09479-cr350-network-diagrams#986cedcdda"
       ],
       "should_refuse": false,
-      "_expected_answer": "EAPOL-Logoff, envoyé par le client.",
+      "_expected_answer": "EAPOL-Logoff, envoy\u00e9 par le client.",
       "_answer_type": "single_fact",
       "_note": "VLM-only: penultimate message in the transcribed 802.1X sequence."
     },
     {
       "qid": "cr350-diag-12",
-      "question": "Quelle est la plage d'adresses VLAN configurée dans le diagramme de coupe-feu ?",
+      "question": "Quelle est la plage d'adresses VLAN configur\u00e9e dans le diagramme de coupe-feu ?",
       "_doc_id": null,
       "relevant_chunk_ids": [],
       "should_refuse": true,
-      "_expected_answer": "REFUSE — aucun VLAN ni plage d'adresses n'apparaît dans les diagrammes.",
+      "_expected_answer": "REFUSE \u2014 aucun VLAN ni plage d'adresses n'appara\u00eet dans les diagrammes.",
       "_answer_type": "counterfactual",
       "_note": "HARD GATE. No 'VLAN' token anywhere in the transcription."
     },
     {
       "qid": "cr350-diag-13",
-      "question": "Combien d'utilisateurs sont connectés au serveur RADIUS selon le diagramme 802.1X ?",
+      "question": "Combien d'utilisateurs sont connect\u00e9s au serveur RADIUS selon le diagramme 802.1X ?",
       "_doc_id": null,
       "relevant_chunk_ids": [],
       "should_refuse": true,
-      "_expected_answer": "REFUSE — le diagramme décrit l'échange de messages, pas un nombre d'utilisateurs.",
+      "_expected_answer": "REFUSE \u2014 le diagramme d\u00e9crit l'\u00e9change de messages, pas un nombre d'utilisateurs.",
       "_answer_type": "counterfactual",
       "_note": "HARD GATE. No user count present."
     },
     {
       "qid": "cr350-diag-14",
-      "question": "Quelle version du logiciel Snort est installée d'après la capture pfSense ?",
+      "question": "Quelle version du logiciel Snort est install\u00e9e d'apr\u00e8s la capture pfSense ?",
       "_doc_id": null,
       "relevant_chunk_ids": [],
       "should_refuse": true,
-      "_expected_answer": "REFUSE — Snort figure dans le menu Services mais aucune version de Snort n'est indiquée (les versions listées concernent arping, AutoConfigBackup, bandwidthd et nmap).",
+      "_expected_answer": "REFUSE \u2014 Snort figure dans le menu Services mais aucune version de Snort n'est indiqu\u00e9e (les versions list\u00e9es concernent arping, AutoConfigBackup, bandwidthd et nmap).",
       "_answer_type": "counterfactual",
       "_note": "HARD GATE. Plausible distractor: versions ARE present for other packages, but not for Snort."
     },
@@ -197,7 +197,7 @@
       "_doc_id": null,
       "relevant_chunk_ids": [],
       "should_refuse": true,
-      "_expected_answer": "REFUSE — les diagrammes montrent la topologie (noms de segments), pas d'adresses IP.",
+      "_expected_answer": "REFUSE \u2014 les diagrammes montrent la topologie (noms de segments), pas d'adresses IP.",
       "_answer_type": "counterfactual",
       "_note": "HARD GATE. No IP addresses in any diagram."
     },
@@ -207,17 +207,17 @@
       "_doc_id": null,
       "relevant_chunk_ids": [],
       "should_refuse": true,
-      "_expected_answer": "REFUSE — aucun algorithme de chiffrement n'est mentionné dans les diagrammes de coupe-feu.",
+      "_expected_answer": "REFUSE \u2014 aucun algorithme de chiffrement n'est mentionn\u00e9 dans les diagrammes de coupe-feu.",
       "_answer_type": "counterfactual",
       "_note": "HARD GATE. No encryption/chiffrement content."
     },
     {
       "qid": "cr350-diag-17",
-      "question": "Quelle valeur de bande passante le paquet bandwidthd a-t-il mesurée ?",
+      "question": "Quelle valeur de bande passante le paquet bandwidthd a-t-il mesur\u00e9e ?",
       "_doc_id": null,
       "relevant_chunk_ids": [],
       "should_refuse": true,
-      "_expected_answer": "REFUSE — bandwidthd est décrit comme suivant la bande passante, mais aucune valeur mesurée n'est donnée.",
+      "_expected_answer": "REFUSE \u2014 bandwidthd est d\u00e9crit comme suivant la bande passante, mais aucune valeur mesur\u00e9e n'est donn\u00e9e.",
       "_answer_type": "counterfactual",
       "_note": "HARD GATE. Plausible distractor: bandwidthd is described but no measurement value exists."
     }
@@ -231,6 +231,13 @@
     "refusal_rate_on_counterfactuals": 1.0,
     "hallucinations": 0,
     "mean_citation_precision_answered_only": 0.545,
-    "note": "FIRST eval to exercise the VLM escalation path; HARD GATES clean. Transcriptions are CACHED (parse/vlm_cache.py) + best-of-N keep-longest (samples=3): the VLM non-determinism is solved BY CONSTRUCTION — a re-parse REPLAYS the cached draw byte-identically (chunk_ids + anchors stable, no more drift). best-of-3 demonstrably helped: page-3 (pfSense) drew [1324,878,878] across 3 samples; keep-longest cached the 1324-char draw (fuller package detail) → all pfSense queries now answer → 11/11 ANS (vs 10/11 single-draw). page-2 zoning still punts (all 3 draws ~110 — the VLM can't read that spatial layout; best-of-N can't rescue a consistently-punted page). cp answered-only 0.545 = vault-overlap with the source lecture Cours-6 (extracted from it), not fabrication — every answer grounded. Source PDF stays local."
+    "note": "FIRST eval to exercise the VLM escalation path; HARD GATES clean. Transcriptions are CACHED (parse/vlm_cache.py) + best-of-N keep-longest (samples=3): the VLM non-determinism is solved BY CONSTRUCTION \u2014 a re-parse REPLAYS the cached draw byte-identically (chunk_ids + anchors stable, no more drift). best-of-3 demonstrably helped: page-3 (pfSense) drew [1324,878,878] across 3 samples; keep-longest cached the 1324-char draw (fuller package detail) \u2192 all pfSense queries now answer \u2192 11/11 ANS (vs 10/11 single-draw). page-2 zoning still punts (all 3 draws ~110 \u2014 the VLM can't read that spatial layout; best-of-N can't rescue a consistently-punted page). cp answered-only 0.545 = vault-overlap with the source lecture Cours-6 (extracted from it), not fabrication \u2014 every answer grounded. Source PDF stays local."
+  },
+  "_baseline_2026_05_26_relevance_gate": {
+    "query_count": 17,
+    "answered": 12,
+    "refusal_rate_on_counterfactuals": 0.833,
+    "hallucinations": 0,
+    "note": "BORDERLINE: cr350-diag-12 (firewall-diagram VLAN range \u2014 none exists) now answers from semaine-4's VLM-transcribed VLAN content (Fa0/21\u2192VLAN 10/20/30, added by the diagram-arm re-process) \u2014 a CROSS-DOC SCOPE conflation: responsive but wrong-source. Not caught by the relevance gate (the answer IS responsive); needs multi-doc scope disambiguation (roadmapped). Non-deterministic run-to-run. The 11 ANS + the other 5 REF hold."
   }
 }

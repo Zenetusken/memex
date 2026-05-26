@@ -21,7 +21,7 @@
       "_note": "Author attribution from the title page.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "1797d794-which-chart-or-graph-is-right-for-you#efd8eb8982"
+        "1797d794-which-chart-or-graph-is-right-for-you#3644dc0e85"
       ]
     },
     {
@@ -33,7 +33,7 @@
       "_note": "Concept question \u2014 tests prose retrieval on a bullet-list usage section.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "1797d794-which-chart-or-graph-is-right-for-you#4aba838363"
+        "1797d794-which-chart-or-graph-is-right-for-you#1cfbf7b3d8"
       ]
     },
     {
@@ -57,7 +57,7 @@
       "_note": "Tests a specific chart-type concept; should pull from the bar-chart tips section.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "1797d794-which-chart-or-graph-is-right-for-you#4aba838363"
+        "1797d794-which-chart-or-graph-is-right-for-you#1cfbf7b3d8"
       ]
     },
     {
@@ -69,7 +69,7 @@
       "_note": "Tests the bar-chart + map combination guidance.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "1797d794-which-chart-or-graph-is-right-for-you#4aba838363"
+        "1797d794-which-chart-or-graph-is-right-for-you#1cfbf7b3d8"
       ]
     },
     {
@@ -111,11 +111,12 @@
       "_answer_type": "chart_content",
       "_note": "CHART-TARGETED: chart-extracted-block content (the team-by-project Gantt table). Under PyMuPDF, refuse. Under Docling+chart-OCR, answer. Anchor unresolvable via FTS by design.",
       "should_refuse": false,
-      "relevant_chunk_ids": [],
-      "_unresolved": true
+      "relevant_chunk_ids": [
+        "1797d794-which-chart-or-graph-is-right-for-you#5154c8f9c6"
+      ]
     }
   ],
-  "_resolved_at": "2026-05-24T17:29:52Z",
+  "_resolved_at": "2026-05-26T02:39:56Z",
   "_baseline_2026_05_24_bf16_reranker": {
     "query_count": 9,
     "answered": 5,
@@ -129,5 +130,12 @@
       "chart-types-04"
     ],
     "note": "Run config: vLLM Qwen/Qwen3-8B-AWQ orchestrator + BAAI/bge-reranker-v2-m3 now loading in bf16 (ADR-0006 intent), restored by the CrossEncoder automodel_args->model_kwargs fix on 2026-05-24. HARD GATES held: refusal_rate_on_counterfactuals=1.0, zero hallucinations (every refusal_correct=False case is a conservative false-refusal on an answerable query, not a wrongly-answered REF). ANS/REF counts identical to the prior (fp32-reranker) baselines. Any citation-precision delta vs the fp32 baseline is a chunk-granularity shift \u2014 the bf16 reranker cites an equally-valid sibling chunk in the SAME correct document \u2014 not a quality regression (verified: doc disambiguation + answer correctness intact)."
+  },
+  "_baseline_2026_05_26_relevance_gate": {
+    "query_count": 9,
+    "answered": 5,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "hallucinations": 0,
+    "note": "VLM-reprocessed (diagram content added) + relevance gate. HARD gates held; ANS 5 (incl. chart-types-08/09 chart-content). cite-prec drifted from the chart-OCR re-run + re-chunking; anchors re-resolved via scripts/extend_corpus.py."
   }
 }

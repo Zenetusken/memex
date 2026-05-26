@@ -3,8 +3,8 @@
   "_doc_id": "0e725ba0-2026-annual-report-web",
   "_query_count": 16,
   "_mix": {
-    "ans": 8,
-    "ref": 5,
+    "ans": 10,
+    "ref": 6,
     "chart_targeted": 2
   },
   "_chart_targeted_note": "Queries 09-10 target content that exists ONLY in the chart-extracted markdown block from the Compensation Committee timeline figure (which Docling+chart-OCR fires on but PyMuPDF skips). Used for A/B testing chart-OCR's net upside on actual chart-content questions.",
@@ -21,7 +21,7 @@
       "_note": "Headline financial metric from the CEO letter. Should match exactly.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "0e725ba0-2026-annual-report-web#4ed8221e9a"
+        "0e725ba0-2026-annual-report-web#5738dccc13"
       ]
     },
     {
@@ -33,7 +33,7 @@
       "_note": "Bottom-line metric. The number 4.90 appears in both the CEO letter and the financials section.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "0e725ba0-2026-annual-report-web#4ed8221e9a"
+        "0e725ba0-2026-annual-report-web#5738dccc13"
       ]
     },
     {
@@ -46,7 +46,8 @@
       "should_refuse": false,
       "relevant_chunk_ids": [
         "0e725ba0-2026-annual-report-web#20c284a968"
-      ]
+      ],
+      "_unresolved": true
     },
     {
       "qid": "annual-report-04",
@@ -69,14 +70,14 @@
       "_note": "Margin metric. Tests precise-number retrieval from a financial summary table.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "0e725ba0-2026-annual-report-web#b105a2e050"
+        "0e725ba0-2026-annual-report-web#926420bc1c"
       ]
     },
     {
       "qid": "annual-report-06",
       "question": "What is the home address of NVIDIA's Chief Financial Officer?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE — personal addresses of executives are not in a public 10-K.",
+      "_expected_answer": "REFUSE \u2014 personal addresses of executives are not in a public 10-K.",
       "_answer_type": "counterfactual",
       "_note": "HARD GATE refusal. Personal information of executives is never in a public filing.",
       "should_refuse": true,
@@ -86,7 +87,7 @@
       "qid": "annual-report-07",
       "question": "How many NVIDIA employees work specifically in the Stuttgart office in Germany?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE — office-level employee counts are not disclosed at this granularity in 10-K filings.",
+      "_expected_answer": "REFUSE \u2014 office-level employee counts are not disclosed at this granularity in 10-K filings.",
       "_answer_type": "counterfactual",
       "_note": "HARD GATE refusal. Country-or-city-specific employee counts are not in this doc.",
       "should_refuse": true,
@@ -96,7 +97,7 @@
       "qid": "annual-report-08",
       "question": "What was NVIDIA's projected revenue for fiscal Q1 2028?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE — the document doesn't provide quarter-by-quarter forward guidance for FY2028.",
+      "_expected_answer": "REFUSE \u2014 the document doesn't provide quarter-by-quarter forward guidance for FY2028.",
       "_answer_type": "counterfactual",
       "_note": "HARD GATE refusal. The doc mentions cumulative through 2027 but no specific FY2028 Q1 number.",
       "should_refuse": true,
@@ -128,7 +129,7 @@
       "qid": "annual-report-11",
       "question": "What was the operating income of NVIDIA's Automotive market platform in fiscal 2026?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE — the market-platform table reports Automotive *revenue* ($2.3B) only; operating income is broken out for the two reportable segments (Compute & Networking, Graphics), not per market platform.",
+      "_expected_answer": "REFUSE \u2014 the market-platform table reports Automotive *revenue* ($2.3B) only; operating income is broken out for the two reportable segments (Compute & Networking, Graphics), not per market platform.",
       "_answer_type": "counterfactual",
       "_note": "HARD GATE refusal targeting the recovered segment/platform tables. Tempts conflating Automotive revenue ($2.3B) with a per-platform operating income the doc never provides. Verified to refuse 2026-05-24.",
       "should_refuse": true,
@@ -138,7 +139,7 @@
       "qid": "annual-report-12",
       "question": "What was the gross margin of NVIDIA's Graphics segment in fiscal 2026?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE — gross margin is reported only at the consolidated level (71.1%); the doc does not break gross margin out by segment.",
+      "_expected_answer": "REFUSE \u2014 gross margin is reported only at the consolidated level (71.1%); the doc does not break gross margin out by segment.",
       "_answer_type": "counterfactual",
       "_note": "HARD GATE refusal. Tempts conflating the consolidated gross margin (71.1%) with a per-segment figure the doc does not provide. Verified to refuse 2026-05-24.",
       "should_refuse": true,
@@ -148,12 +149,12 @@
       "qid": "annual-report-13",
       "question": "What was NVIDIA's Gaming revenue in fiscal 2026?",
       "_anchor_phrase": "16,042",
-      "_expected_answer": "$16,042 million (≈ $16.0 billion) — a table-only value, now answerable via Phase-1 table linearization ([table-rows] KV block).",
+      "_expected_answer": "$16,042 million (\u2248 $16.0 billion) \u2014 a table-only value, now answerable via Phase-1 table linearization ([table-rows] KV block).",
       "_answer_type": "single_fact",
       "_note": "Phase-1 table-RAG win: a table-only value (Gaming platform/segment revenue) made answerable by linearization. Verified ANS 2026-05-24.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "0e725ba0-2026-annual-report-web#cb3a075eb3"
+        "0e725ba0-2026-annual-report-web#53d244669d"
       ]
     },
     {
@@ -163,8 +164,9 @@
       "_answer_type": "aggregate",
       "_anchor_phrase": "956,250",
       "relevant_chunk_ids": [],
-      "_expected_answer": "$956,250 — the sum of the 'Fees Earned or Paid in Cash ($)' column across all 12 directors in the Director Compensation for Fiscal 2026 table (10x$85,000 + $63,750 + $42,500). Phase-2 text-to-SQL aggregate, gated by the independent Python recompute.",
-      "_note": "Phase-2 table-SQL win: a SUM over a table column (not a row-lookup), gated by the independent recompute. Answer cites a synthetic SQL-result chunk (citation_precision N/A — soft metric)."
+      "_expected_answer": "$956,250 \u2014 the sum of the 'Fees Earned or Paid in Cash ($)' column across all 12 directors in the Director Compensation for Fiscal 2026 table (10x$85,000 + $63,750 + $42,500). Phase-2 text-to-SQL aggregate, gated by the independent Python recompute.",
+      "_note": "Phase-2 table-SQL win: a SUM over a table column (not a row-lookup), gated by the independent recompute. Answer cites a synthetic SQL-result chunk (citation_precision N/A \u2014 soft metric).",
+      "_unresolved": true
     },
     {
       "qid": "annual-report-15",
@@ -172,9 +174,12 @@
       "should_refuse": false,
       "_answer_type": "superlative",
       "_anchor_phrase": "321,309",
-      "relevant_chunk_ids": [],
-      "_expected_answer": "Ellen Ochoa — the unique minimum 'Total ($)' ($321,309) in the Director Compensation for Fiscal 2026 table. Phase-2 row-superlative with the verified-extremum gate: SQL ORDER BY total__num ASC LIMIT 1, the returned row independently confirmed to hold the column minimum, so the agent confidently attributes 'which director'.",
-      "_note": "Phase-2 row-superlative recompute gate (2026-05-24 follow-up): an independent Python check confirms the returned row IS the column extremum before framing it as such, so the 'which X is highest/lowest' attribution answers instead of conservatively refusing. A wrong ORDER BY → mismatch → no framing → refuse (HARD-gate-safe)."
+      "relevant_chunk_ids": [
+        "0e725ba0-2026-annual-report-web#f8cd00400f",
+        "0e725ba0-2026-annual-report-web#790e6b1bff"
+      ],
+      "_expected_answer": "Ellen Ochoa \u2014 the unique minimum 'Total ($)' ($321,309) in the Director Compensation for Fiscal 2026 table. Phase-2 row-superlative with the verified-extremum gate: SQL ORDER BY total__num ASC LIMIT 1, the returned row independently confirmed to hold the column minimum, so the agent confidently attributes 'which director'.",
+      "_note": "Phase-2 row-superlative recompute gate (2026-05-24 follow-up): an independent Python check confirms the returned row IS the column extremum before framing it as such, so the 'which X is highest/lowest' attribution answers instead of conservatively refusing. A wrong ORDER BY \u2192 mismatch \u2192 no framing \u2192 refuse (HARD-gate-safe)."
     },
     {
       "qid": "annual-report-16",
@@ -183,11 +188,11 @@
       "_answer_type": "counterfactual",
       "_anchor_phrase": "",
       "relevant_chunk_ids": [],
-      "_expected_answer": "REFUSE — the Director Compensation table reports Fees Earned, Stock Awards, and Total; it has no stock-option column (directors receive stock awards/RSUs, not options). An aggregate over an absent column must refuse.",
+      "_expected_answer": "REFUSE \u2014 the Director Compensation table reports Fees Earned, Stock Awards, and Total; it has no stock-option column (directors receive stock awards/RSUs, not options). An aggregate over an absent column must refuse.",
       "_note": "Phase-2 HARD GATE: an aggregate-shaped query over a column the table does not contain -> no SQL injection (gen/exec fails or recompute can't run) -> refuse."
     }
   ],
-  "_resolved_at": "2026-05-24T22:35:47Z",
+  "_resolved_at": "2026-05-26T02:39:52Z",
   "_baseline_2026_05_24_bf16_reranker": {
     "query_count": 10,
     "answered": 7,
@@ -197,8 +202,15 @@
     "mean_citation_precision": 0.5,
     "mean_citation_precision_answered_only": 0.2857,
     "conservative_false_refusals": [],
-    "note": "Run config: vLLM Qwen/Qwen3-8B-AWQ orchestrator + BAAI/bge-reranker-v2-m3 now loading in bf16 (ADR-0006 intent), restored by the CrossEncoder automodel_args->model_kwargs fix on 2026-05-24. HARD GATES held: refusal_rate_on_counterfactuals=1.0, zero hallucinations (every refusal_correct=False case is a conservative false-refusal on an answerable query, not a wrongly-answered REF). ANS/REF counts identical to the prior (fp32-reranker) baselines. Any citation-precision delta vs the fp32 baseline is a chunk-granularity shift — the bf16 reranker cites an equally-valid sibling chunk in the SAME correct document — not a quality regression (verified: doc disambiguation + answer correctness intact)."
+    "note": "Run config: vLLM Qwen/Qwen3-8B-AWQ orchestrator + BAAI/bge-reranker-v2-m3 now loading in bf16 (ADR-0006 intent), restored by the CrossEncoder automodel_args->model_kwargs fix on 2026-05-24. HARD GATES held: refusal_rate_on_counterfactuals=1.0, zero hallucinations (every refusal_correct=False case is a conservative false-refusal on an answerable query, not a wrongly-answered REF). ANS/REF counts identical to the prior (fp32-reranker) baselines. Any citation-precision delta vs the fp32 baseline is a chunk-granularity shift \u2014 the bf16 reranker cites an equally-valid sibling chunk in the SAME correct document \u2014 not a quality regression (verified: doc disambiguation + answer correctness intact)."
   },
-  "_table_validation_note": "2026-05-24: added 2 counterfactuals (11,12) targeting the segment/platform tables recovered by the enrich output-bound fix. ANS table-value queries (Graphics segment revenue, C&N OI growth) were tested but FALSE-REFUSE — table-only values don't retrieve reliably (dense table chunks rank poorly; the answer node truncates them) — a separate retrieval-quality gap, not added as passing queries.",
-  "_table_sql_validation_note": "annual-report-14/15/16 added 2026-05-24 for Phase-2 table-SQL GPU acceptance: aggregate (SUM, recompute-gated), row-superlative (ORDER BY/LIMIT verbatim row), counterfactual (absent column -> refuse). 14/15 cite synthetic SQL-result chunks (citation_precision N/A)."
+  "_table_validation_note": "2026-05-24: added 2 counterfactuals (11,12) targeting the segment/platform tables recovered by the enrich output-bound fix. ANS table-value queries (Graphics segment revenue, C&N OI growth) were tested but FALSE-REFUSE \u2014 table-only values don't retrieve reliably (dense table chunks rank poorly; the answer node truncates them) \u2014 a separate retrieval-quality gap, not added as passing queries.",
+  "_table_sql_validation_note": "annual-report-14/15/16 added 2026-05-24 for Phase-2 table-SQL GPU acceptance: aggregate (SUM, recompute-gated), row-superlative (ORDER BY/LIMIT verbatim row), counterfactual (absent column -> refuse). 14/15 cite synthetic SQL-result chunks (citation_precision N/A).",
+  "_baseline_2026_05_26_relevance_gate": {
+    "query_count": 16,
+    "answered": 10,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "hallucinations": 0,
+    "note": "VLM-reprocessed + relevance gate. HARD gates held; ar-14 (Table-RAG $956,250) + ar-09/10 (chart-content) answer. cite-prec drifted (re-chunk); anchors re-resolved."
+  }
 }
