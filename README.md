@@ -171,6 +171,8 @@ Each PDF goes through: validation → ingest copy → parse (PyMuPDF for born-di
 
 For scanned content add `MEMEX_PARSE_DOCLING_OCR=1`; for born-digital PDFs (PowerPoint exports, LaTeX, Word) leave it off — the PyMuPDF pre-filter handles those at ~3× Docling's speed.
 
+**Office documents** (`.pptx`/`.docx`/`.xlsx` + their ODF cousins) are first converted to PDF via headless LibreOffice, then run through the normal PDF pipeline — so a diagram-heavy slide deck's figures flow through the VLM diagram-transcription + chart-OCR passes (enable the VLM with `MEMEX_PARSE__DISABLE_VLM=false` for diagram-rich decks). The converted PDF is cached per document and reused on re-parse. LibreOffice must be installed (`soffice` on PATH). On the 12 GB tier `memex ingest`/`index`/`reindex` pause vLLM for the duration so the embedder isn't starved by a co-resident vLLM — no manual `MEMEX_RERANK_BATCH_SIZE` or daemon juggling needed.
+
 ### Ask grounded questions
 
 ```sh
@@ -215,6 +217,15 @@ uv run memex retitle 2f96ae1c-some-paper --derive                # from the sour
 ```
 
 This rewrites the frontmatter title and fans it out to the FTS, vector, and graph indexes in one cheap, GPU-free pass (it doubles as a way to repair a stale title). The web UI exposes the same thing: click **rename** next to the document title, edit inline, save. A clean title also helps cross-document citation resolution, which scores against other docs' titles.
+
+### Remove a document
+
+```sh
+uv run memex remove 2f96ae1c-some-paper        # prompts for confirmation
+uv run memex remove 2f96ae1c-some-paper --yes  # skip the prompt
+```
+
+Drops the document everywhere — its canonical Markdown, asset dir, manifest, and all derived index state (vector, FTS, tables, graph). Irreversible (the Markdown is the source of truth), so re-add the original source to restore it.
 
 ### Update to a newer Memex
 
