@@ -26,8 +26,10 @@ from memex.agents.answering import (
     VerificationResult,
     answer_query,
     compose,
+    expand_graph,
     refuse,
     reset_compiled_graph,
+    resolve_artifact_scope,
 )
 
 # ----- Fixtures: fake retrieve + fake model + reset graph cache -----
@@ -653,3 +655,475 @@ async def test_compose_no_surviving_claims_refusal_emits_no_wikilinks() -> None:
     assert final is not None
     assert final.answered is False
     assert final.wikilinks == []
+
+
+# ===========================================================================
+# #256 — deterministic artifact→doc re-scope
+# ===========================================================================
+#
+# The `resolve_artifact_scope` node runs between `retrieve` and `expand_graph`.
+# When a query NAMES a specific artifact it resolves the artifact's qualifier to
+# the document(s) it lives in (via the FTS store) and REPLACES the candidate
+# pool with chunks scoped there. These tests fake the FTS store (the resolver's
+# per-token corpus search) alongside the existing retrieve/LLM fakes.
+
+
+class _FakeFTSStore:
+    """In-memory per-token BM25 stand-in for the resolver's corpus search.
+    Replaces `FTSStore.open`. `search(token, k)` returns the corpus list for
+    that exact token (the resolver searches one qualifier atom at a time)."""
+
+    def __init__(self, corpus: dict[str, list[Chunk]]) -> None:
+        self._corpus = corpus
+        self.searched: list[str] = []
+        self.closed = False
+
+    @classmethod
+    def opener(cls, corpus: dict[str, list[Chunk]]) -> tuple[Any, _FakeFTSStore]:
+        instance = cls(corpus)
+
+        async def _open(_vault_path: object) -> _FakeFTSStore:
+            return instance
+
+        return _open, instance
+
+    async def search(self, query: str, *, k: int) -> list[Chunk]:
+        self.searched.append(query)
+        return list(self._corpus.get(query, []))[:k]
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+def _doc_chunk(cid: str, doc: str, title: str, *, text: str = "x", score: float = 1.0) -> Chunk:
+    return Chunk(
+        chunk_id=f"{doc}#{cid}",
+        document_id=doc,
+        document_title=title,
+        text=text,
+        page=1,
+        score=score,
+    )
+
+
+_DIAG12 = "Quelle est la plage d'adresses VLAN configurée dans le diagramme de coupe-feu ?"
+_IMG01 = (
+    "Selon le diagramme de configuration VLAN du commutateur, "
+    "quel port sert de port tronc et vers quels VLAN ?"
+)
+_FW_TITLE = "CR350 Diagrammes coupe-feu"
+_LEC_TITLE = "Cours 6 coupe-feu (firewall)"
+
+
+def _firewall_corpus() -> dict[str, list[Chunk]]:
+    """coupe/feu live ONLY in the two firewall docs (diagram dominates by hits;
+    the lecture is folded in by sibling-by-title)."""
+    return {
+        "coupe": [_doc_chunk(f"d{i}", "fw-diagram", _FW_TITLE, score=5.0 - i) for i in range(6)]
+        + [
+            _doc_chunk("l0", "cours-6", _LEC_TITLE, score=3.0),
+            _doc_chunk("l1", "cours-6", _LEC_TITLE, score=2.0),
+        ],
+        "feu": [_doc_chunk(f"e{i}", "fw-diagram", _FW_TITLE, score=4.0 - i) for i in range(4)],
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_prompt")
+async def test_artifact_scope_rescopes_and_refuses_wrong_source(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, fake_llm: FakeLLM
+) -> None:
+    """diag-12, the motivating bug. Full retrieval surfaces a semaine-4 VLAN
+    chunk (the wrong source). The resolver scopes to the TWO firewall docs; the
+    scoped re-retrieval has NO VLAN content; the reranker therefore never sees
+    the VLAN chunk and the agent refuses — deterministically, regardless of LLM
+    sampling. Also covers the multi-doc-scope case (both firewall ids passed)."""
+    from memex.core.config import MemexSettings, set_settings
+    from memex.index.fts_store import FTSStore
+
+    monkeypatch.setenv("MEMEX_VAULT_PATH", str(tmp_path))
+    monkeypatch.setenv("MEMEX_OBSERVABILITY__LANGFUSE_ENABLED", "false")
+    set_settings(MemexSettings())  # type: ignore[call-arg]
+
+    fake_open, _store = _FakeFTSStore.opener(_firewall_corpus())
+    monkeypatch.setattr(FTSStore, "open", fake_open)
+
+    vlan_chunk = _doc_chunk(
+        "v1",
+        "semaine-4",
+        "Semaine 4 VLAN",
+        text="Le port Fa0/21 est un trunk pour VLAN 10/20/30.",
+        score=0.9,
+    )
+    fw_chunk = _doc_chunk(
+        "fw1",
+        "fw-diagram",
+        _FW_TITLE,
+        text="Architecture coupe-feu single-tier.",
+        score=0.8,
+    )
+
+    async def _hybrid(query: str, k: int = 50) -> list[Chunk]:
+        return [vlan_chunk]  # the WRONG-source chunk full retrieval would surface
+
+    in_docs_calls: list[list[str]] = []
+
+    async def _hybrid_in_docs(query: str, doc_ids: list[str], *, k: int) -> list[Chunk]:
+        in_docs_calls.append(list(doc_ids))
+        return [fw_chunk]
+
+    rerank_saw: list[list[str]] = []
+
+    async def _rerank(query: str, cands: list[Chunk], top_k: int = 10) -> list[Chunk]:
+        rerank_saw.append([c.chunk_id for c in cands])
+        return list(cands[:top_k])
+
+    monkeypatch.setattr("memex.agents.answering.hybrid_search", _hybrid)
+    monkeypatch.setattr("memex.agents.answering.hybrid_search_in_docs", _hybrid_in_docs)
+    monkeypatch.setattr("memex.agents.answering.cross_encoder_rerank", _rerank)
+    # Scoped to firewall docs (no VLAN) → assess can't answer → refuse.
+    fake_llm.respond(
+        "assess_sufficiency",
+        SufficiencyAssessment,
+        SufficiencyAssessment(sufficient=False, reason="No VLAN range in the firewall diagram."),
+    )
+
+    try:
+        response = await answer_query(_DIAG12)
+    finally:
+        set_settings(None)
+
+    assert response.answered is False
+    assert response.claims == []
+    # Re-scope fired with BOTH firewall docs and excluded the wrong-source doc.
+    assert in_docs_calls, "resolver should have re-scoped"
+    assert set(in_docs_calls[0]) == {"fw-diagram", "cours-6"}
+    assert "semaine-4" not in in_docs_calls[0]
+    # Determinism: the VLAN chunk never reached the reranker; only the scoped
+    # firewall chunk did — the LLM had no VLAN evidence to (mis)answer from.
+    assert rerank_saw == [["fw-diagram#fw1"]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_prompt")
+async def test_artifact_scope_near_twin_answers_from_scoped_doc(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, fake_llm: FakeLLM
+) -> None:
+    """img-01, the near-twin. The qualifier INCLUDES 'vlan' (it follows
+    "diagramme de"), so it resolves to the VLAN deck — whose scoped chunk DOES
+    answer the trunk-port question → the agent answers, citing semaine-4."""
+    from memex.core.config import MemexSettings, set_settings
+    from memex.index.fts_store import FTSStore
+
+    monkeypatch.setenv("MEMEX_VAULT_PATH", str(tmp_path))
+    monkeypatch.setenv("MEMEX_OBSERVABILITY__LANGFUSE_ENABLED", "false")
+    set_settings(MemexSettings())  # type: ignore[call-arg]
+
+    corpus = {
+        "configuration": [
+            _doc_chunk("c1", "semaine-4", "Semaine 4 VLAN", score=3.0),
+            _doc_chunk("c2", "semaine-4", "Semaine 4 VLAN", score=2.0),
+        ],
+        "vlan": [
+            _doc_chunk(f"v{i}", "semaine-4", "Semaine 4 VLAN", score=6.0 - i) for i in range(3)
+        ],
+        "commutateur": [_doc_chunk("m1", "semaine-4", "Semaine 4 VLAN", score=3.5)],
+    }
+    fake_open, _store = _FakeFTSStore.opener(corpus)
+    monkeypatch.setattr(FTSStore, "open", fake_open)
+
+    vlan_chunk = _doc_chunk(
+        "v1",
+        "semaine-4",
+        "Semaine 4 VLAN",
+        text="Le port Fa0/21 sert de port tronc vers les VLAN 10, 20 et 30.",
+        score=0.9,
+    )
+
+    async def _hybrid(query: str, k: int = 50) -> list[Chunk]:
+        return [vlan_chunk]
+
+    in_docs_calls: list[list[str]] = []
+
+    async def _hybrid_in_docs(query: str, doc_ids: list[str], *, k: int) -> list[Chunk]:
+        in_docs_calls.append(list(doc_ids))
+        return [vlan_chunk]
+
+    async def _rerank(query: str, cands: list[Chunk], top_k: int = 10) -> list[Chunk]:
+        return list(cands[:top_k])
+
+    monkeypatch.setattr("memex.agents.answering.hybrid_search", _hybrid)
+    monkeypatch.setattr("memex.agents.answering.hybrid_search_in_docs", _hybrid_in_docs)
+    monkeypatch.setattr("memex.agents.answering.cross_encoder_rerank", _rerank)
+    fake_llm.respond(
+        "assess_sufficiency",
+        SufficiencyAssessment,
+        SufficiencyAssessment(sufficient=True, reason="VLAN trunk-port chunk present"),
+    )
+    fake_llm.respond(
+        "answer",
+        DraftAnswer,
+        DraftAnswer(
+            summary="Fa0/21 is the trunk port for VLANs 10/20/30.",
+            claims=[
+                CitedClaim(
+                    claim="Fa0/21 is the trunk port for VLANs 10/20/30.",
+                    source_chunk_id="semaine-4#v1",
+                    confidence="high",
+                )
+            ],
+        ),
+    )
+    fake_llm.respond(
+        "verify_grounding", VerificationResult, VerificationResult(grounded=[0], ungrounded=[])
+    )
+
+    try:
+        response = await answer_query(_IMG01)
+    finally:
+        set_settings(None)
+
+    assert response.answered is True
+    assert in_docs_calls == [["semaine-4"]]
+    assert [c.source_chunk_id for c in response.claims] == ["semaine-4#v1"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_retrieve", "patch_prompt")
+async def test_artifact_scope_noop_when_no_artifact_named(
+    monkeypatch: pytest.MonkeyPatch, fake_llm: FakeLLM
+) -> None:
+    """A query that names no artifact takes a path byte-identical to the
+    pre-#256 pipeline: the resolver never opens the FTS store (detection short-
+    circuits before any settings read) and the candidate pool is untouched."""
+    from memex.index.fts_store import FTSStore
+
+    def _explode_open(*_a: object, **_k: object) -> Any:
+        raise AssertionError("FTSStore must not be opened for a no-artifact query")
+
+    async def _explode_in_docs(query: str, doc_ids: list[str], *, k: int) -> list[Chunk]:
+        raise AssertionError("no re-scope for a no-artifact query")
+
+    monkeypatch.setattr(FTSStore, "open", _explode_open)
+    monkeypatch.setattr("memex.agents.answering.hybrid_search_in_docs", _explode_in_docs)
+    fake_llm.respond(
+        "assess_sufficiency",
+        SufficiencyAssessment,
+        SufficiencyAssessment(sufficient=True, reason="ok"),
+    )
+    fake_llm.respond(
+        "answer",
+        DraftAnswer,
+        DraftAnswer(
+            summary="Reflexivity shapes data.",
+            claims=[
+                CitedClaim(
+                    claim="Reflexivity shapes the data.", source_chunk_id="c1", confidence="high"
+                )
+            ],
+        ),
+    )
+    fake_llm.respond(
+        "verify_grounding", VerificationResult, VerificationResult(grounded=[0], ungrounded=[])
+    )
+
+    response = await answer_query("What does Smith say about reflexivity?")
+    assert response.answered is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_prompt")
+async def test_artifact_scope_fails_open_on_store_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, fake_llm: FakeLLM
+) -> None:
+    """A store error during resolution must NEVER turn an answerable artifact
+    query into a refusal — the node fails open to the full-corpus pool."""
+    from memex.core.config import MemexSettings, set_settings
+    from memex.index.fts_store import FTSStore
+
+    monkeypatch.setenv("MEMEX_VAULT_PATH", str(tmp_path))
+    monkeypatch.setenv("MEMEX_OBSERVABILITY__LANGFUSE_ENABLED", "false")
+    set_settings(MemexSettings())  # type: ignore[call-arg]
+
+    async def _boom_open(_vault_path: object) -> Any:
+        raise OSError("fts store unavailable")
+
+    monkeypatch.setattr(FTSStore, "open", _boom_open)
+
+    answerable = _doc_chunk("a1", "fw-diagram", _FW_TITLE, text="Coupe-feu single-tier.", score=0.9)
+
+    async def _hybrid(query: str, k: int = 50) -> list[Chunk]:
+        return [answerable]
+
+    async def _explode_in_docs(query: str, doc_ids: list[str], *, k: int) -> list[Chunk]:
+        raise AssertionError("must not re-scope after a store error")
+
+    async def _rerank(query: str, cands: list[Chunk], top_k: int = 10) -> list[Chunk]:
+        return list(cands[:top_k])
+
+    monkeypatch.setattr("memex.agents.answering.hybrid_search", _hybrid)
+    monkeypatch.setattr("memex.agents.answering.hybrid_search_in_docs", _explode_in_docs)
+    monkeypatch.setattr("memex.agents.answering.cross_encoder_rerank", _rerank)
+    fake_llm.respond(
+        "assess_sufficiency",
+        SufficiencyAssessment,
+        SufficiencyAssessment(sufficient=True, reason="ok"),
+    )
+    fake_llm.respond(
+        "answer",
+        DraftAnswer,
+        DraftAnswer(
+            summary="Single-tier firewall architecture.",
+            claims=[
+                CitedClaim(
+                    claim="The firewall uses a single-tier architecture.",
+                    source_chunk_id="fw-diagram#a1",
+                    confidence="high",
+                )
+            ],
+        ),
+    )
+    fake_llm.respond(
+        "verify_grounding", VerificationResult, VerificationResult(grounded=[0], ungrounded=[])
+    )
+
+    try:
+        response = await answer_query("Quelles architectures montre le diagramme de coupe-feu ?")
+    finally:
+        set_settings(None)
+
+    assert response.answered is True  # fell back to full retrieval, did not refuse
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_prompt")
+async def test_artifact_scope_kill_switch_disables_rescope(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, fake_llm: FakeLLM
+) -> None:
+    """`MEMEX_AGENTS__ARTIFACT_SCOPE_ENABLED=false` fully reverts: an artifact
+    query is detected but the resolver is never invoked (no store open, no
+    re-scope) — the full-corpus path runs unchanged."""
+    from memex.core.config import MemexSettings, set_settings
+    from memex.index.fts_store import FTSStore
+
+    monkeypatch.setenv("MEMEX_VAULT_PATH", str(tmp_path))
+    monkeypatch.setenv("MEMEX_OBSERVABILITY__LANGFUSE_ENABLED", "false")
+    monkeypatch.setenv("MEMEX_AGENTS__ARTIFACT_SCOPE_ENABLED", "false")
+    set_settings(MemexSettings())  # type: ignore[call-arg]
+
+    def _explode_open(*_a: object, **_k: object) -> Any:
+        raise AssertionError("kill-switch: the resolver must not open the store")
+
+    async def _explode_in_docs(query: str, doc_ids: list[str], *, k: int) -> list[Chunk]:
+        raise AssertionError("kill-switch: no re-scope")
+
+    monkeypatch.setattr(FTSStore, "open", _explode_open)
+    monkeypatch.setattr("memex.agents.answering.hybrid_search_in_docs", _explode_in_docs)
+
+    chunk = _doc_chunk("a1", "fw-diagram", _FW_TITLE, text="Coupe-feu single-tier.", score=0.9)
+
+    async def _hybrid(query: str, k: int = 50) -> list[Chunk]:
+        return [chunk]
+
+    async def _rerank(query: str, cands: list[Chunk], top_k: int = 10) -> list[Chunk]:
+        return list(cands[:top_k])
+
+    monkeypatch.setattr("memex.agents.answering.hybrid_search", _hybrid)
+    monkeypatch.setattr("memex.agents.answering.cross_encoder_rerank", _rerank)
+    fake_llm.respond(
+        "assess_sufficiency",
+        SufficiencyAssessment,
+        SufficiencyAssessment(sufficient=True, reason="ok"),
+    )
+    fake_llm.respond(
+        "answer",
+        DraftAnswer,
+        DraftAnswer(
+            summary="Single-tier.",
+            claims=[
+                CitedClaim(
+                    claim="Single-tier architecture.",
+                    source_chunk_id="fw-diagram#a1",
+                    confidence="high",
+                )
+            ],
+        ),
+    )
+    fake_llm.respond(
+        "verify_grounding", VerificationResult, VerificationResult(grounded=[0], ungrounded=[])
+    )
+
+    try:
+        response = await answer_query(_DIAG12)
+    finally:
+        set_settings(None)
+
+    assert response.answered is True
+
+
+def test_answer_state_artifact_scope_defaults_empty() -> None:
+    assert AnswerState(query="x").artifact_scope_doc_ids == []
+
+
+@pytest.mark.asyncio
+async def test_resolve_node_populates_state_field_and_replaces_pool(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """Direct node call: a confident resolution returns the scoped doc ids AND
+    replaces the candidate pool with the scoped re-retrieval."""
+    from memex.core.config import MemexSettings, set_settings
+    from memex.index.fts_store import FTSStore
+
+    monkeypatch.setenv("MEMEX_VAULT_PATH", str(tmp_path))
+    monkeypatch.setenv("MEMEX_OBSERVABILITY__LANGFUSE_ENABLED", "false")
+    set_settings(MemexSettings())  # type: ignore[call-arg]
+
+    corpus = {
+        "gantt": [
+            _doc_chunk("g1", "tableau-guide", "Tableau chart guide", score=7.0),
+            _doc_chunk("g2", "tableau-guide", "Tableau chart guide", score=6.0),
+        ]
+    }
+    fake_open, _store = _FakeFTSStore.opener(corpus)
+    monkeypatch.setattr(FTSStore, "open", fake_open)
+
+    scoped = _doc_chunk("g1", "tableau-guide", "Tableau chart guide", score=0.9)
+
+    async def _hybrid_in_docs(query: str, doc_ids: list[str], *, k: int) -> list[Chunk]:
+        return [scoped]
+
+    monkeypatch.setattr("memex.agents.answering.hybrid_search_in_docs", _hybrid_in_docs)
+
+    state = AnswerState(
+        query="In the Gantt chart, who is assigned?",
+        candidates=[_doc_chunk("x", "other", "Other Doc")],
+    )
+    try:
+        update = await resolve_artifact_scope(state)
+    finally:
+        set_settings(None)
+
+    assert update.get("artifact_scope_doc_ids") == ["tableau-guide"]
+    assert [c.chunk_id for c in update.get("candidates", [])] == ["tableau-guide#g1"]
+
+
+@pytest.mark.asyncio
+async def test_expand_graph_skips_when_artifact_scope_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The determinism guard: with a scope active, `expand_graph` must NOT open
+    the graph store (which could re-admit out-of-scope chunks and reintroduce
+    the bug). It returns the counter-bump only."""
+
+    def _explode_open(*_a: object, **_k: object) -> Any:
+        raise AssertionError("expand_graph must not open the graph store under an active scope")
+
+    monkeypatch.setattr("memex.index.graph_store.GraphStore.open", _explode_open)
+
+    state = AnswerState(
+        query="anything",
+        candidates=[_doc_chunk("a", "fw-diagram", _FW_TITLE)],
+        artifact_scope_doc_ids=["fw-diagram"],
+    )
+    update = await expand_graph(state)
+    assert update == {"nodes_traversed": 1}

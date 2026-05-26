@@ -53,6 +53,12 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, Field, create_model
 
+from memex.agents.artifact_scope import (
+    ArtifactReference,
+    ResolvedArtifactScope,
+    detect_artifact_reference,
+    resolve_scope,
+)
 from memex.core.errors import AnswerStateInvariantError
 from memex.core.types import Chunk, StoredTable, TableQueryResult
 from memex.core.wikilinks import format_wikilink
@@ -84,6 +90,7 @@ class AnswerStateUpdate(TypedDict, total=False):
     candidates: list[Chunk]
     reranked: list[Chunk]
     graph_expanded_doc_ids: list[str]
+    artifact_scope_doc_ids: list[str]
     sufficiency: SufficiencyAssessment
     draft: DraftAnswer
     verification: VerificationResult
@@ -290,6 +297,11 @@ class AnswerState(BaseModel):
     # state so the trace + `FinalResponse.used_chunks` consumers can
     # tell graph-expanded chunks from lexically-retrieved ones.
     graph_expanded_doc_ids: list[str] = []
+    # Documents the candidate pool was RE-SCOPED to by `resolve_artifact_scope`
+    # (#256): when the query NAMES a specific artifact, retrieval is narrowed to
+    # the document(s) it lives in. Empty = the full-corpus path (the common case
+    # — most queries name no artifact). Kept on state for the trace.
+    artifact_scope_doc_ids: list[str] = []
 
     # --- Graph-expansion budgets ---
     # Toggle the whole expansion step off (e.g. when the graph store
@@ -349,6 +361,101 @@ async def retrieve(state: AnswerState) -> AnswerStateUpdate:
     }
 
 
+async def resolve_artifact_scope(state: AnswerState) -> AnswerStateUpdate:
+    """Deterministic artifact→doc re-scope (#256).
+
+    If the query NAMES a specific artifact ("the firewall diagram", "le diagramme
+    de coupe-feu"), resolve it to the document(s) it lives in and REPLACE the
+    candidate pool with chunks scoped there — the named artifact acts as an
+    automatic doc-selection. The downstream gates then answer from the right
+    source or refuse naturally.
+
+    Conservative + fail-open by construction: no named artifact, no confident
+    resolution, a disabled flag, or any resolver/store error all leave
+    `state.candidates` untouched (the full-corpus path). The node can therefore
+    only NARROW retrieval for clearly artifact-named queries; it never turns an
+    answerable open/multi-file query into a refusal, never adds a chunk, and
+    never relaxes a gate. Worst case is a conservative false-refuse on a
+    mis-resolved artifact query — never a hallucination, never a wrongly-answered
+    counterfactual.
+
+    Runs between `retrieve` and `expand_graph`; `expand_graph` then short-circuits
+    while a scope is active (it would otherwise re-admit other documents' chunks
+    and defeat the determinism guarantee).
+    """
+    import sqlite3
+
+    from memex.core.config import get_settings
+    from memex.core.errors import ConfigurationError, MemexError
+
+    log = logger.bind(node="resolve_artifact_scope")
+    bump = state.nodes_traversed + 1
+
+    # Detection is pure + cheap and needs no settings — run it FIRST so the
+    # common no-artifact query (the overwhelming majority) takes a path
+    # byte-identical to the pre-#256 pipeline, never even reading settings.
+    ref = detect_artifact_reference(state.query)
+    if ref is None:
+        return {"nodes_traversed": bump}
+
+    try:
+        if not get_settings().agents.artifact_scope_enabled:
+            return {"nodes_traversed": bump}  # kill-switch: full revert
+        scope = await _resolve_artifact_scope_via_corpus(ref)
+    except (ImportError, ConfigurationError, MemexError, OSError, sqlite3.Error) as exc:
+        # FAIL-OPEN: an unconfigured settings read (e.g. a non-bootstrapped
+        # fixture) or any resolver/store error must never turn an answerable
+        # query into a refusal — fall back to the full-corpus candidate pool.
+        log.warning("skipped", reason=type(exc).__name__, error=str(exc))
+        return {"nodes_traversed": bump}
+
+    if not scope.doc_ids:
+        log.info("no_scope", via=scope.via, arttype=ref.arttype)
+        return {"artifact_scope_doc_ids": [], "nodes_traversed": bump}
+
+    doc_ids = list(scope.doc_ids)
+    # REPLACE (not top-up): topping up would re-admit the wrong-source chunk and
+    # reintroduce the bug. An empty scoped pool is the correct outcome for a named
+    # artifact whose doc can't answer — the downstream gates then refuse cleanly.
+    scoped = await hybrid_search_in_docs(state.query, doc_ids, k=50)
+    log.info(
+        "scoped",
+        via=scope.via,
+        arttype=ref.arttype,
+        doc_ids=doc_ids,
+        scoped_count=len(scoped),
+        replaced_from=len(state.candidates),
+    )
+    return {
+        "candidates": scoped,
+        "artifact_scope_doc_ids": doc_ids,
+        "nodes_traversed": bump,
+    }
+
+
+async def _resolve_artifact_scope_via_corpus(
+    ref: ArtifactReference,
+) -> ResolvedArtifactScope:
+    """Open the FTS store and resolve `ref` against the whole corpus.
+
+    Lazy-open inside the call (same `agents/ → index/` lazy-store edge as
+    `expand_graph`/`query_tables`); the agent owns no threaded store handle.
+    `resolve_scope` is pure given the injected per-token search.
+    """
+    from memex.core.config import get_settings
+    from memex.index.fts_store import FTSStore
+
+    store = await FTSStore.open(get_settings().vault_path)
+    try:
+
+        async def _search(token: str, k: int) -> list[Chunk]:
+            return await store.search(token, k=k)
+
+        return await resolve_scope(ref, _search)
+    finally:
+        await store.close()
+
+
 async def expand_graph(state: AnswerState) -> AnswerStateUpdate:
     """Best-effort wrapper around `_expand_graph_impl`.
 
@@ -400,6 +507,17 @@ async def _expand_graph_impl(state: AnswerState) -> AnswerStateUpdate:
 
     if not state.graph_expansion_enabled or not state.candidates:
         log.info("skip", reason="disabled_or_empty")
+        return {"nodes_traversed": state.nodes_traversed + 1}
+
+    if state.artifact_scope_doc_ids:
+        # The query named a specific artifact and retrieval was re-scoped to its
+        # doc(s) (#256). Graph expansion pulls in OTHER documents' chunks, which
+        # would re-admit the wrong-source evidence the re-scope deliberately
+        # removed — defeating the determinism guarantee. The scoped docs are
+        # already fully retrieved (hybrid_search_in_docs, k=50), so skip.
+        log.info(
+            "skip", reason="artifact_scope_active", scope_docs=len(state.artifact_scope_doc_ids)
+        )
         return {"nodes_traversed": state.nodes_traversed + 1}
 
     # Top N unique source documents in retrieval order.
@@ -1453,6 +1571,7 @@ def build_answering_graph() -> CompiledStateGraph:
 
     # Nodes
     g.add_node("retrieve", retrieve)
+    g.add_node("resolve_artifact_scope", resolve_artifact_scope)
     g.add_node("expand_graph", expand_graph)
     g.add_node("rerank", rerank)
     g.add_node("query_tables", query_tables)
@@ -1466,7 +1585,8 @@ def build_answering_graph() -> CompiledStateGraph:
 
     # Linear edges
     g.add_edge(START, "retrieve")
-    g.add_edge("retrieve", "expand_graph")
+    g.add_edge("retrieve", "resolve_artifact_scope")
+    g.add_edge("resolve_artifact_scope", "expand_graph")
     g.add_edge("expand_graph", "rerank")
     g.add_edge("rerank", "query_tables")
     g.add_edge("query_tables", "assess")

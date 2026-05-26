@@ -423,6 +423,23 @@ def _default_vault_path() -> Path:
     return Path.home() / ".memex" / "vault"
 
 
+class AgentsSettings(BaseModel):
+    """Answering-agent policy toggles.
+
+    `artifact_scope_enabled` (#256): when a query NAMES a specific artifact
+    ("the firewall diagram", "le diagramme de coupe-feu"), the agent resolves it
+    to the document(s) it lives in and scopes retrieval there — the named
+    artifact acts as an automatic doc-selection (deterministic regex + BM25, no
+    LLM; see `agents/artifact_scope.py`). The normal pipeline then answers from
+    the right source or refuses naturally. Conservative: queries that name no
+    artifact, or whose artifact doesn't resolve confidently, take the unchanged
+    full-corpus path. Kill-switch: `MEMEX_AGENTS__ARTIFACT_SCOPE_ENABLED=false`
+    fully reverts to full-corpus retrieval for every query.
+    """
+
+    artifact_scope_enabled: bool = True
+
+
 class MemexSettings(BaseSettings):
     """Top-level settings. Construct once at startup; treat as immutable."""
 
@@ -435,6 +452,7 @@ class MemexSettings(BaseSettings):
     parse: ParseSettings = Field(default_factory=ParseSettings)
     index: IndexSettings = Field(default_factory=IndexSettings)
     mcp: McpSettings = Field(default_factory=McpSettings)
+    agents: AgentsSettings = Field(default_factory=AgentsSettings)
 
     model_config = SettingsConfigDict(
         toml_file=str(Path.home() / ".config" / "memex" / "config.toml"),
