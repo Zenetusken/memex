@@ -21,6 +21,7 @@ functions so the rest of the package stays importable without the
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,8 +29,10 @@ from typing import TYPE_CHECKING, Any, cast
 
 import structlog
 
+from memex.core.config import get_settings
 from memex.core.errors import MemexError
 from memex.models.registry import ChartOCRHandle, get_registry
+from memex.parse.chart_ocr_cache import ChartOCRCache
 from memex.parse.docling_backend import FigureMetadata
 
 if TYPE_CHECKING:
@@ -1071,6 +1074,54 @@ async def _extract_with_handle(
     )
 
 
+async def _extract_best_of_n(
+    handle: ChartOCRHandle,
+    source_pdf: Path,
+    figure: FigureMetadata,
+    max_new_tokens: int,
+    samples: int,
+) -> ChartOCROutput:
+    """Take `samples` independent extraction draws of one figure and keep the
+    one with the LONGEST markdown — a content-completeness proxy mirroring the
+    VLM's best-of-N (`vlm_backend._convert_with_handle`). Chart-OCR is
+    non-deterministic and a given draw can drop a row or trip the
+    ambiguous-header / UNREADABLE refusal (→ empty markdown); the longest
+    non-empty draw is the most complete. The chosen draw is then cached, so
+    completeness is decided once. `samples <= 1` is exactly today's single-draw
+    behaviour (no extra cost)."""
+    best = await _extract_with_handle(handle, source_pdf, figure, max_new_tokens)
+    n = max(1, samples)
+    if n == 1:
+        return best
+    draft_chars = [len(best.markdown)]
+    for _ in range(n - 1):
+        candidate = await _extract_with_handle(handle, source_pdf, figure, max_new_tokens)
+        draft_chars.append(len(candidate.markdown))
+        if len(candidate.markdown) > len(best.markdown):
+            best = candidate
+    logger.bind(page=figure.page_no, bbox=figure.bbox).info(
+        "chart_ocr.best_of_n", samples=n, draft_chars=draft_chars, chosen_chars=len(best.markdown)
+    )
+    return best
+
+
+# Bump when the chart-OCR prompt/rendering changes in a way that should
+# invalidate cached extractions (the model id is already in the key).
+_CHART_OCR_CACHE_VERSION = "v1"
+
+
+def _chart_cache_key(pdf_sha256: str, figure: FigureMetadata, model_id: str) -> tuple[str, str]:
+    """Return (cache_key, bbox_key) for a figure's chart-OCR extraction. bbox is
+    rounded to whole PDF points so trivial float jitter still hits; the model id
+    + version bust the cache on a model/prompt change."""
+    x0, y0, x1, y1 = figure.bbox
+    bbox_key = f"{round(x0)}_{round(y0)}_{round(x1)}_{round(y1)}"
+    return (
+        f"{pdf_sha256}:{figure.page_no}:{bbox_key}:m={model_id}:v={_CHART_OCR_CACHE_VERSION}",
+        bbox_key,
+    )
+
+
 async def chart_ocr_extract(
     *,
     source_pdf: Path,
@@ -1079,6 +1130,9 @@ async def chart_ocr_extract(
     min_area_sqpt: float = _MIN_FIGURE_AREA_SQPT,
     chart_class_names: frozenset[str] = _CHART_CLASS_NAMES,
     min_classification_confidence: float = _MIN_CLASSIFICATION_CONFIDENCE,
+    cache: ChartOCRCache | None = None,
+    refresh: bool = False,
+    extraction_samples: int = 1,
 ) -> list[ChartOCROutput | Exception]:
     """Per-document batch extraction over a list of figures.
 
@@ -1144,18 +1198,56 @@ async def chart_ocr_extract(
     if not figures_to_extract:
         return results
 
-    log = logger.bind(
-        total_figures=len(figures),
-        figures_to_extract=len(figures_to_extract),
-    )
+    # Cache check: serve hits, collect misses. Chart-OCR is non-deterministic,
+    # so a re-parse otherwise drifts chart content; the cache replays the stored
+    # extraction byte-for-byte (keyed by pdf bytes, page, bbox, model, version).
+    # An all-hit batch skips the GPU acquisition entirely.
+    pdf_sha256 = ""
+    model_id = ""
+    # (slot_idx, figure, cache_key, bbox_key); keys are "" when caching is off.
+    to_run: list[tuple[int, FigureMetadata, str, str]] = []
+    if cache is not None:
+        pdf_sha256 = hashlib.sha256(source_pdf.read_bytes()).hexdigest()
+        model_id = get_settings().models.chart_ocr
+        if refresh:
+            await cache.delete_by_pdf(pdf_sha256)
+        hits = 0
+        for slot_idx, figure in figures_to_extract:
+            key, bbox_key = _chart_cache_key(pdf_sha256, figure, model_id)
+            cached = await cache.get(key)
+            if cached is not None:
+                results[slot_idx] = ChartOCROutput(
+                    page_no=figure.page_no, bbox=figure.bbox, markdown=cached
+                )
+                hits += 1
+            else:
+                to_run.append((slot_idx, figure, key, bbox_key))
+        logger.info("chart_ocr.cache", hits=hits, misses=len(to_run))
+        if not to_run:
+            return results  # every figure cached — no GPU work
+    else:
+        to_run = [(slot_idx, figure, "", "") for slot_idx, figure in figures_to_extract]
+
+    log = logger.bind(total_figures=len(figures), figures_to_extract=len(to_run))
     log.info("chart_ocr.batch.start")
 
     registry = get_registry()
     async with registry.use("chart_ocr") as handle:
-        for slot_idx, figure in figures_to_extract:
+        for slot_idx, figure, key, bbox_key in to_run:
             try:
-                out = await _extract_with_handle(handle, source_pdf, figure, max_new_tokens)
+                out = await _extract_best_of_n(
+                    handle, source_pdf, figure, max_new_tokens, samples=extraction_samples
+                )
                 results[slot_idx] = out
+                if cache is not None:
+                    await cache.put(
+                        key,
+                        pdf_sha256=pdf_sha256,
+                        page_no=figure.page_no,
+                        bbox_key=bbox_key,
+                        chart_ocr_model=model_id,
+                        markdown=out.markdown,
+                    )
             except (ChartOCRUnavailable, PDFFigureRenderError) as e:
                 results[slot_idx] = e
 

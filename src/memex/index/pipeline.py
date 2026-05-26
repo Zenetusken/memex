@@ -489,6 +489,7 @@ async def reindex_vault(*, force: bool = False) -> ReindexReport:
             "tables.sqlite",
             "graph.ryu",
             "vlm_cache.sqlite",
+            "chart_ocr_cache.sqlite",
         ):
             path = derived / target
             if path.is_file():

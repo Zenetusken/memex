@@ -9,6 +9,7 @@ network-egress sandbox (see `memex.parse.sandbox`).
 See GUIDELINES.md Part II "The pipeline" and IMPLEMENTATION-PLAN §1.3.
 """
 
+from memex.parse.chart_ocr_cache import ChartOCRCache
 from memex.parse.docling_backend import (
     DoclingConversion,
     DoclingCrashed,
@@ -40,6 +41,7 @@ from memex.parse.vlm_backend import VLMUnavailable
 from memex.parse.vlm_cache import VLMTranscriptionCache
 
 __all__ = [
+    "ChartOCRCache",
     "DoclingConversion",
     "DoclingCrashed",
     "DoclingPageOutput",

@@ -196,6 +196,19 @@ class ParseSettings(BaseModel):
     # then the chosen draw is cached (`vlm_cache.py`). No extra VRAM (draws
     # are sequential), so it does not OOM the way the SDPA-math approach did.
     vlm_transcription_samples: int = Field(default=1, ge=1, le=8)
+    # Chart-OCR has the SAME greedy non-determinism as the VLM (BF16/AWQ
+    # accumulation-order variance flips near-tied logits) and the same
+    # failure mode: a given draw can DROP a chart row or trip the
+    # ambiguous-header / UNREADABLE refusal and come back empty, so a
+    # re-parse silently loses a chart-content answer (it churned the
+    # chart-types / slide-decks re-baselines). Take this many independent
+    # draws per figure and keep the LONGEST non-empty extraction (the same
+    # completeness proxy the VLM uses — a draw that drops a row or refuses
+    # is shorter/empty). 1 = a single draw (fastest, current default).
+    # Raise to 2–3 to converge toward the most-complete extraction at N×
+    # the per-figure cost — paid once, then the chosen draw is cached
+    # (`chart_ocr_cache.py`). Sequential draws, so no extra VRAM.
+    chart_ocr_extraction_samples: int = Field(default=1, ge=1, le=8)
     # Default-off: the VLM escalation path is fully wired, but it
     # demands ~5 GB of VRAM (Qwen2.5-VL-7B AWQ-Int4 + processor) on top
     # of the embedder + reranker resident set. Opt in once you've

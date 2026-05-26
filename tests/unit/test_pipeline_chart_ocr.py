@@ -12,6 +12,9 @@ backend in Session 5; here we keep it light and fast.
 
 from __future__ import annotations
 
+from typing import Literal
+
+from memex.core.manifest import PageDecision
 from memex.parse.chart_ocr_backend import (
     ChartOCROutput,
     PDFFigureRenderError,
@@ -19,8 +22,9 @@ from memex.parse.chart_ocr_backend import (
 from memex.parse.docling_backend import (
     DoclingConversion,
     DoclingPageOutput,
+    FigureMetadata,
 )
-from memex.parse.pipeline import _stitch_chart_extractions
+from memex.parse.pipeline import _figures_for_chart_ocr, _stitch_chart_extractions
 
 
 def _conv(markdown: str) -> DoclingConversion:
@@ -138,6 +142,41 @@ def test_stitch_no_placeholders_no_extractions_returns_unchanged() -> None:
     conversion = _conv(md)
     stitched = _stitch_chart_extractions(conversion, [])
     assert stitched.markdown == md
+
+
+def _fig(page_no: int) -> FigureMetadata:
+    return FigureMetadata(
+        page_no=page_no,
+        bbox=(0.0, 0.0, 100.0, 100.0),
+        classification="bar_chart",
+        classification_confidence=0.9,
+    )
+
+
+def _decision(
+    page: int, engine: Literal["docling", "vlm", "passthrough", "pymupdf"]
+) -> PageDecision:
+    return PageDecision(page=page, engine=engine, confidence=0.9, rationale="t")
+
+
+def test_figures_for_chart_ocr_skips_escalated_pages() -> None:
+    """Figures on VLM-escalated pages are dropped — their `<!-- image -->`
+    placeholders were replaced by VLM prose, so chart-OCR'ing them would make
+    the extraction count exceed the surviving placeholders and abort the whole
+    stitch. Figures on docling pages survive, in document order."""
+    figures = [_fig(1), _fig(4), _fig(4), _fig(5)]
+    decisions = [_decision(1, "docling"), _decision(4, "vlm"), _decision(5, "docling")]
+    kept = _figures_for_chart_ocr(figures, decisions)
+    assert [f.page_no for f in kept] == [1, 5]  # both page-4 figures dropped
+
+
+def test_figures_for_chart_ocr_passthrough_when_nothing_escalated() -> None:
+    """No VLM escalation → every figure is eligible (the disable_vlm default
+    path is unchanged)."""
+    figures = [_fig(1), _fig(2), _fig(3)]
+    decisions = [_decision(p, "docling") for p in (1, 2, 3)]
+    kept = _figures_for_chart_ocr(figures, decisions)
+    assert [f.page_no for f in kept] == [1, 2, 3]
 
 
 def test_stitch_preserves_placeholder_token() -> None:

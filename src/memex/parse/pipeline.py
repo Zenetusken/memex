@@ -47,6 +47,7 @@ from memex.parse.chart_ocr_backend import (
     ChartOCRUnavailable,
     chart_ocr_extract,
 )
+from memex.parse.chart_ocr_cache import ChartOCRCache
 from memex.parse.docling_backend import (
     DoclingConversion,
     DoclingCrashed,
@@ -858,6 +859,29 @@ def _detect_scripts_dir() -> Path:
     return Path.cwd() / "scripts"
 
 
+def _figures_for_chart_ocr(
+    figures: list[FigureMetadata], decisions: list[PageDecision]
+) -> list[FigureMetadata]:
+    """Figures eligible for the chart-OCR stitch: those NOT on a VLM-escalated
+    page.
+
+    A VLM-escalated page's markdown is replaced WHOLESALE by the VLM
+    transcription, which carries no `<!-- image -->` placeholder (the prompt
+    transcribes figures as text + `_strip_image_links` removes any). So a figure
+    on an escalated page has no placeholder left to stitch into — extracting it
+    anyway makes the extraction count exceed the surviving-placeholder count and
+    trips `stitch_count_mismatch`, which aborts the WHOLE stitch and silently
+    drops EVERY chart block (observed on the chart guide: 18 figures vs 12
+    surviving placeholders → all chart content lost, chart-types 5→3 ANS). The
+    VLM already transcribed those pages, so skip their figures; the rest realign
+    1:1 with the surviving placeholders in document order. This is also what
+    makes the chart-exclusion escalation arm coherent — charts route to
+    chart-OCR, diagrams to the VLM, and the two passes no longer collide at
+    stitch time."""
+    escalated = {d.page for d in decisions if d.engine == "vlm"}
+    return [f for f in figures if f.page_no not in escalated]
+
+
 def _stitch_chart_extractions(
     conversion: DoclingConversion,
     extractions: list[ChartOCROutput | Exception],
@@ -997,16 +1021,27 @@ async def _parse_with_docling(
     # block of the pause context manager. Skips entirely when the
     # feature is disabled OR Docling reported no figures.
     chart_ocr_count = 0
-    if not settings.parse.disable_chart_ocr and conversion.figures:
+    # Skip figures on VLM-escalated pages — their `<!-- image -->` placeholders
+    # are gone (replaced by VLM prose), so chart-OCR'ing them would abort the
+    # whole stitch on a count mismatch. See `_figures_for_chart_ocr`.
+    chart_figures = _figures_for_chart_ocr(conversion.figures, pages)
+    if not settings.parse.disable_chart_ocr and chart_figures:
         log.info(
             "chart_ocr.start",
-            figure_count=len(conversion.figures),
+            figure_count=len(chart_figures),
+            skipped_on_escalated_pages=len(conversion.figures) - len(chart_figures),
         )
+        # Cache chart-OCR per (pdf, figure, model) so a re-parse replays the
+        # extraction byte-identically (chart-OCR is non-deterministic, like the
+        # VLM). Regenerable derived state (ADR-0003), dropped by reindex --force.
+        chart_cache = await ChartOCRCache.open(vault_path)
         try:
             async with _pause_vllm_for_gpu_parse():
                 extractions = await chart_ocr_extract(
                     source_pdf=source,
-                    figures=conversion.figures,
+                    figures=chart_figures,
+                    cache=chart_cache,
+                    extraction_samples=settings.parse.chart_ocr_extraction_samples,
                 )
                 # P3.3 v2 Session 2: unload the chart-OCR model BEFORE
                 # vLLM restarts (the pause context's `finally` block).
@@ -1035,6 +1070,8 @@ async def _parse_with_docling(
             # Missing transformers / pypdfium2 / torch — log and skip.
             # The parse still ships; just without chart-OCR enrichment.
             log.warning("chart_ocr.unavailable", error=str(e))
+        finally:
+            await chart_cache.close()
 
     # Table-RAG Phase 1: linearize GFM tables AFTER chart-OCR stitching (so the
     # `[chart-extracted]` blocks are already in place and the GFM tables seen
