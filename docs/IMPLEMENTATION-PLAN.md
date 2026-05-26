@@ -239,6 +239,8 @@ def reciprocal_rank_fusion(
 
 **Risk.** `Chunk` is currently defined inside `memex.agents.answering`. Move it to `memex.core.types` to break the implied cycle (the retrieve module imports from agents to satisfy the type checker today, which is wrong even though it's `TYPE_CHECKING`-guarded).
 
+*(Note: artifact-scoped retrieval shipped 2026-05-26 (#256). When a query NAMES a specific artifact ("le diagramme de coupe-feu"), the agent's `resolve_artifact_scope` node — between `retrieve` and `expand_graph` — resolves it to its document(s) via a pure regex+BM25 resolver (`agents/artifact_scope.py`, no LLM) and REPLACES the candidate pool with `hybrid_search_in_docs(query, scope_docs, k=50)`, so a question about a named artifact is answered from the right document or refuses naturally. The named artifact is an automatic doc-selection — the deterministic substrate the planned Notebook-LM-style doc-picker reuses. Conservative + fail-open + HARD-gate-safe; spec `docs/specs/artifact-scope.md`.)*
+
 ---
 
 ### 1.7 `memex.prompts` — versioned prompt library
