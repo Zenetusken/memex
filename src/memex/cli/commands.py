@@ -280,6 +280,47 @@ def register(app: typer.Typer) -> None:
 
         _print(asyncio.run(_run()))
 
+    @app.command(name="remove")
+    def remove_cmd(
+        doc_id: str,
+        yes: bool = _Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    ) -> None:
+        """Remove a document entirely — its Markdown, asset dir, manifest, and
+        ALL derived index state (vector, FTS, tables, graph).
+
+        Irreversible: the canonical Markdown is the source of truth, so once
+        removed the document is gone until you re-add the original source.
+        """
+        if not yes:
+            typer.confirm(
+                f"Permanently remove '{doc_id}' (Markdown + all derived index "
+                "state)? This cannot be undone.",
+                abort=True,
+            )
+
+        async def _run() -> dict[str, object]:
+            bootstrap()
+            from memex.core.config import get_settings
+            from memex.core.manifest import delete_manifest, read_manifest
+            from memex.index import remove_document
+            from memex.vault.store import delete_document
+
+            vault_path = get_settings().vault_path
+            manifest = await read_manifest(vault_path, doc_id)
+            md_exists = (vault_path / "documents" / f"{doc_id}.md").exists()
+            if manifest is None and not md_exists:
+                return {"doc_id": doc_id, "removed": False, "reason": "not found"}
+            # Derived index state FIRST, then the canonical Markdown + assets,
+            # then the manifest — so a crash mid-remove leaves the least-
+            # confusing remnant (orphaned Markdown re-indexes cleanly on the
+            # next reindex; orphaned index rows would surface a phantom doc).
+            await remove_document(doc_id)
+            await delete_document(vault_path, doc_id)
+            await delete_manifest(vault_path, doc_id)
+            return {"doc_id": doc_id, "removed": True}
+
+        _print(asyncio.run(_run()))
+
     @app.command()
     def reindex(
         force: bool = _Option(

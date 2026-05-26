@@ -164,6 +164,16 @@ async def write_manifest(vault_path: Path, manifest: Manifest) -> Path:
     return path
 
 
+async def delete_manifest(vault_path: Path, doc_id: str) -> None:
+    """Remove a document's manifest file (missing-ok).
+
+    Used by `memex remove` so that re-ingesting the same source later starts
+    from a clean parse/index state rather than inheriting the removed
+    document's stage record."""
+    path = _manifest_path(vault_path, doc_id)
+    await asyncio.to_thread(path.unlink, missing_ok=True)
+
+
 async def update_manifest(
     vault_path: Path,
     doc_id: str,

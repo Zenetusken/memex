@@ -217,6 +217,45 @@ async def _write_doc_via_vault(vault_path: Path, doc_id: str, body: str) -> None
 
 
 @pytest.mark.asyncio
+async def test_remove_document_clears_vault_index_and_manifest(
+    settings: MemexSettings, fake_stores: dict[str, Any]
+) -> None:
+    """The sequence `memex remove` runs drops a document from the vault
+    Markdown, the manifest, AND every derived index store. After it the doc is
+    fully gone — recoverable only by re-adding the source."""
+    from memex.core.manifest import delete_manifest, read_manifest
+    from memex.index.pipeline import index_document, remove_document
+    from memex.vault.store import delete_document
+
+    doc_id = await _seed_doc(
+        "# Doc\n\nAlpha paragraph.\n\nBeta paragraph.\n", source_stem="to_remove"
+    )
+    await index_document(doc_id)
+
+    vault_path = settings.vault_path
+    md_path = vault_path / "documents" / f"{doc_id}.md"
+    # Pre-conditions: indexed + on disk + manifested.
+    assert fake_stores["vec"].chunks
+    assert fake_stores["fts"].chunks
+    assert md_path.exists()
+    assert await read_manifest(vault_path, doc_id) is not None
+
+    # The exact ordering the command uses: index state, then Markdown, then manifest.
+    await remove_document(doc_id)
+    await delete_document(vault_path, doc_id)
+    await delete_manifest(vault_path, doc_id)
+
+    # Gone from every store + disk + manifest.
+    assert not fake_stores["vec"].chunks
+    assert not fake_stores["fts"].chunks
+    assert doc_id in fake_stores["fts"].delete_doc_calls
+    assert not md_path.exists()
+    assert await read_manifest(vault_path, doc_id) is None
+    # Idempotent: removing the already-gone manifest is a clean no-op.
+    await delete_manifest(vault_path, doc_id)
+
+
+@pytest.mark.asyncio
 async def test_first_index_writes_every_chunk(
     settings: MemexSettings, fake_stores: dict[str, Any]
 ) -> None:
