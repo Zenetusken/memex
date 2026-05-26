@@ -256,6 +256,65 @@ async def test_rerank_uses_qwen3_when_backend_flagged(
     assert out[1].rerank_score == pytest.approx(0.55, abs=0.05)
 
 
+class _OOMOnceCrossEncoder:
+    """predict() raises a CUDA-OOM RuntimeError at batch_size>1 and succeeds at
+    batch_size==1 — exercises the OOM-retry fallback."""
+
+    def __init__(self, scores_by_text: dict[str, float]) -> None:
+        self._scores = scores_by_text
+        self.batch_sizes: list[int] = []
+
+    def predict(self, pairs: Any, *, batch_size: int, **kwargs: Any) -> list[float]:
+        self.batch_sizes.append(batch_size)
+        if batch_size > 1:
+            raise RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB")
+        return [self._scores.get(text, 0.0) for _q, text in pairs]
+
+
+@pytest.mark.asyncio
+async def test_rerank_oom_falls_back_to_batch_1(
+    settings_cross_encoder: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A CUDA OOM at the default batch retries ONCE at batch_size=1 (the
+    documented safe floor) instead of crashing the answer path — so the webUI
+    no longer needs a manual MEMEX_RERANK_BATCH_SIZE=1."""
+    monkeypatch.setenv("MEMEX_RERANK_BATCH_SIZE", "8")
+    fake = _OOMOnceCrossEncoder({"alpha": 0.9, "beta": 0.5})
+
+    class _FakeRegistry:
+        def use(self, name: str) -> Any:
+            return _registry_with(fake)
+
+    monkeypatch.setattr("memex.retrieve.rerank.get_registry", lambda: _FakeRegistry())
+
+    out = await rerank("q", [_chunk("a", "alpha"), _chunk("b", "beta")], top_k=2)
+    # OOM at 8 → empty_cache → retry at 1 (success).
+    assert fake.batch_sizes == [8, 1]
+    assert [c.chunk_id for c in out] == ["a", "b"]
+    assert out[0].rerank_score == pytest.approx(0.9)
+
+
+@pytest.mark.asyncio
+async def test_rerank_non_oom_runtime_error_propagates(
+    settings_cross_encoder: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A non-OOM RuntimeError is NOT swallowed by the fallback — a real bug
+    surfaces rather than being masked by a silent batch-1 retry."""
+
+    class _Boom:
+        def predict(self, pairs: Any, **kwargs: Any) -> list[float]:
+            raise RuntimeError("shape mismatch in forward pass")
+
+    class _FakeRegistry:
+        def use(self, name: str) -> Any:
+            return _registry_with(_Boom())
+
+    monkeypatch.setattr("memex.retrieve.rerank.get_registry", lambda: _FakeRegistry())
+
+    with pytest.raises(RuntimeError, match="shape mismatch"):
+        await rerank("q", [_chunk("a", "alpha")], top_k=1)
+
+
 def test_qwen3_format_includes_template_anchors() -> None:
     """The prompt template wires the right system + user + assistant
     markers so the last-token logits sit at the right place for the

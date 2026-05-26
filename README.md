@@ -322,7 +322,7 @@ Every knob is set via environment variable or `~/.config/memex/config.toml`. Env
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `MEMEX_RERANK_BATCH_SIZE` | `8` | bge-reranker pair-batch size. Empirical 12 GB-rig floor; bump to 32–64 on bigger rigs / smaller orchestrators. |
+| `MEMEX_RERANK_BATCH_SIZE` | `8` | bge-reranker pair-batch size. Empirical 12 GB-rig floor; bump to 32–64 on bigger rigs / smaller orchestrators. On a CUDA OOM the reranker auto-retries once at batch 1, so a too-large value degrades gracefully instead of crashing mid-answer — set it low upfront on a constrained rig only to skip the wasted first attempt. |
 | `MEMEX_RERANK_TOP_K` | `5` | Reranked chunks fed to the agent. Sized to fit the answer prompt's chunk truncate (1800 chars) within `max-model-len=6144`. Drop to 4 if chunks are unusually dense; bump to 8+ with larger context windows. |
 | `MEMEX_MODELS__RERANKER_BACKEND` | `cross_encoder` | `qwen3` swaps in Qwen3-Reranker-0.6B. **Quality A/B verdict 2026-05-21**: `cross_encoder` (bge-reranker-v2-m3) wins clearly on the slide-decks benchmark (median ANS=4 vs qwen3's 0) — Qwen3-Reranker ranks thematically-general chunks above the literal-answer chunk. Stay on `cross_encoder` unless your corpus favours topical similarity over fact-extraction. |
 

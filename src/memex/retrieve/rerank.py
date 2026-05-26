@@ -59,6 +59,60 @@ def _read_batch_size() -> int:
     return max(1, bs)
 
 
+def _is_cuda_oom(e: BaseException) -> bool:
+    """True if `e` is a CUDA out-of-memory error — `torch.cuda.OutOfMemoryError`
+    (a `RuntimeError` subclass) on the modern path, or a bare `RuntimeError`
+    whose message carries 'out of memory'. torch is imported lazily so the
+    module stays importable without the [models] extra."""
+    try:
+        import torch
+
+        if isinstance(e, torch.cuda.OutOfMemoryError):
+            return True
+    except ImportError:
+        pass
+    return isinstance(e, RuntimeError) and "out of memory" in str(e).lower()
+
+
+def _empty_cuda_cache() -> None:
+    """Free the caching allocator's fragmented blocks before an OOM retry."""
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except ImportError:
+        pass
+
+
+async def _score_with_oom_fallback(
+    reranker: object, pairs: list[tuple[str, str]], batch_size: int
+) -> Any:
+    """Score `pairs`, retrying ONCE at batch_size=1 on a CUDA OOM.
+
+    On the 12 GB reference rig the reranker OOMs when an agent (or
+    `memex serve web`) is co-resident with vLLM at the default batch 8 — which
+    previously forced operators to set `MEMEX_RERANK_BATCH_SIZE=1` by hand or
+    eat a crash mid-answer. Catch the OOM, free the fragmented allocations, and
+    retry at batch 1 (the documented safe floor) so the answer path degrades
+    gracefully. Re-raises if already at batch 1 (can't reduce further) or if the
+    error isn't a CUDA OOM (a real bug should surface, not be swallowed)."""
+
+    def _run(bs: int) -> Any:
+        if isinstance(reranker, Qwen3RerankerHandle):
+            return _score_qwen3(reranker, pairs, bs)
+        return _score_cross_encoder(reranker, pairs, bs)
+
+    try:
+        return await asyncio.to_thread(_run, batch_size)
+    except RuntimeError as e:
+        if batch_size <= 1 or not _is_cuda_oom(e):
+            raise
+        logger.warning("rerank.oom_fallback", original_batch_size=batch_size, error=str(e)[:160])
+        _empty_cuda_cache()
+        return await asyncio.to_thread(_run, 1)
+
+
 async def cross_encoder_rerank(
     query: str,
     candidates: list[Chunk],
@@ -89,10 +143,7 @@ async def cross_encoder_rerank(
     registry = get_registry()
     async with registry.use("reranker") as reranker:
         pairs = [(query, c.text) for c in candidates]
-        if isinstance(reranker, Qwen3RerankerHandle):
-            scores = await asyncio.to_thread(_score_qwen3, reranker, pairs, batch_size)
-        else:
-            scores = await asyncio.to_thread(_score_cross_encoder, reranker, pairs, batch_size)
+        scores = await _score_with_oom_fallback(reranker, pairs, batch_size)
 
     ranked = sorted(
         zip(candidates, (float(s) for s in scores), strict=True),
