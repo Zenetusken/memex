@@ -1,5 +1,5 @@
 {
-  "_description": "French-language eval corpus — 8 queries against the CR350 'Réseautique et sécurité' course PDF (45 pages, 51 chunks via Docling). Mix mirrors the slide-decks corpus structure: ANS queries with one or more relevant_chunk_ids, REF queries with should_refuse=true and empty relevant_chunk_ids. Diagnostic _-prefixed fields are notes for future audits.",
+  "_description": "French-language eval corpus \u2014 8 queries against the CR350 'R\u00e9seautique et s\u00e9curit\u00e9' course PDF (45 pages, 51 chunks via Docling). Mix mirrors the slide-decks corpus structure: ANS queries with one or more relevant_chunk_ids, REF queries with should_refuse=true and empty relevant_chunk_ids. Diagnostic _-prefixed fields are notes for future audits.",
   "_doc_id": "5795b16a-pdf-cr350-cours-1",
   "_query_count": 8,
   "_mix": {
@@ -13,72 +13,76 @@
       "counterfactual": 3
     }
   },
-  "_labelling_rule": "ANS queries: relevant_chunk_ids enumerates every chunk that contains a piece of the literal answer (the agent's citation_precision counts hits against this whitelist). REF queries: relevant_chunk_ids=[] and should_refuse=true — content is intentionally NOT in the corpus.",
+  "_labelling_rule": "ANS queries: relevant_chunk_ids enumerates every chunk that contains a piece of the literal answer (the agent's citation_precision counts hits against this whitelist). REF queries: relevant_chunk_ids=[] and should_refuse=true \u2014 content is intentionally NOT in the corpus.",
   "_created": "2026-05-22",
-  "_purpose": "Phase 1 of the French support hardening sequence — baseline eval data to A/B prompt changes against. Pinned during the multilingual ship (commit e6f821b).",
+  "_purpose": "Phase 1 of the French support hardening sequence \u2014 baseline eval data to A/B prompt changes against. Pinned during the multilingual ship (commit e6f821b).",
   "queries": [
     {
       "qid": "french-course-01",
-      "question": "Qui est le chargé de cours du CR350 ?",
+      "question": "Qui est le charg\u00e9 de cours du CR350 ?",
       "relevant_chunk_ids": [
-        "5795b16a-pdf-cr350-cours-1#45cec0a97e"
+        "5795b16a-pdf-cr350-cours-1#9ef0e8b32b"
       ],
       "should_refuse": false,
-      "_expected_answer": "Charles Tounou (from the title-page slide listing 'Chargé de cours : Charles Tounou').",
+      "_expected_answer": "Charles Tounou (from the title-page slide listing 'Charg\u00e9 de cours : Charles Tounou').",
       "_answer_type": "single_fact",
-      "_note": "Validated working end-to-end during the multilingual ship; the agent answered with confidence=high and reranker score 0.98 on the title chunk."
+      "_note": "Validated working end-to-end during the multilingual ship; the agent answered with confidence=high and reranker score 0.98 on the title chunk.",
+      "_anchor_phrase": "Charles Tounou"
     },
     {
       "qid": "french-course-02",
-      "question": "Qu'est-ce qu'un réseau selon le cours CR350 ?",
+      "question": "Qu'est-ce qu'un r\u00e9seau selon le cours CR350 ?",
       "relevant_chunk_ids": [
-        "5795b16a-pdf-cr350-cours-1#3646a0ca0d"
+        "5795b16a-pdf-cr350-cours-1#a49b400ac0"
       ],
       "should_refuse": false,
-      "_expected_answer": "Une collection d'entités interconnectées telles que des ordinateurs, serveurs, mainframes, appareils et autres périphériques, capables de communiquer entre eux et de partager des ressources.",
+      "_expected_answer": "Une collection d'entit\u00e9s interconnect\u00e9es telles que des ordinateurs, serveurs, mainframes, appareils et autres p\u00e9riph\u00e9riques, capables de communiquer entre eux et de partager des ressources.",
       "_answer_type": "definitional",
-      "_note": "**THE TEST CASE FOR STEP 2.** Retrieval finds the definition chunk (rerank 0.78), but answer/v1 returned empty claims during validation — model refused conservatively on a multi-sentence French definition under the English prompt. Step 2's answer/v3 (language-mirror directive) should flip this from REF→ANS."
+      "_note": "**THE TEST CASE FOR STEP 2.** Retrieval finds the definition chunk (rerank 0.78), but answer/v1 returned empty claims during validation \u2014 model refused conservatively on a multi-sentence French definition under the English prompt. Step 2's answer/v3 (language-mirror directive) should flip this from REF\u2192ANS.",
+      "_anchor_phrase": "mainframes"
     },
     {
       "qid": "french-course-03",
-      "question": "Quels sont les protocoles sécurisés mentionnés dans le cours ?",
+      "question": "Quels sont les protocoles s\u00e9curis\u00e9s mentionn\u00e9s dans le cours ?",
       "relevant_chunk_ids": [
         "5795b16a-pdf-cr350-cours-1#e4fd69f614"
       ],
       "should_refuse": false,
-      "_expected_answer": "FTP sécurisé, SSH, HTTPS (listed under 'Contrôle et sécurité des flux de données').",
+      "_expected_answer": "FTP s\u00e9curis\u00e9, SSH, HTTPS (listed under 'Contr\u00f4le et s\u00e9curit\u00e9 des flux de donn\u00e9es').",
       "_answer_type": "listing",
-      "_note": "Listing query — the chunk has explicit '- ⚬ FTP sécurisé, SSH, HTTPS, etc.' Tests whether the model emits multiple claims from a single list-shaped chunk."
+      "_note": "Listing query \u2014 the chunk has explicit '- \u26ac FTP s\u00e9curis\u00e9, SSH, HTTPS, etc.' Tests whether the model emits multiple claims from a single list-shaped chunk.",
+      "_anchor_phrase": "FTP s\u00e9curis\u00e9 SSH HTTPS"
     },
     {
       "qid": "french-course-04",
-      "question": "Pourquoi ARPANET est-il à l'origine des problèmes de sécurité d'Internet ?",
+      "question": "Pourquoi ARPANET est-il \u00e0 l'origine des probl\u00e8mes de s\u00e9curit\u00e9 d'Internet ?",
       "relevant_chunk_ids": [
-        "5795b16a-pdf-cr350-cours-1#a9c4727e5c"
+        "5795b16a-pdf-cr350-cours-1#a49b400ac0"
       ],
       "should_refuse": false,
-      "_expected_answer": "ARPANET a privilégié l'établissement de connexions plutôt que la protection des données, créant des vulnérabilités lors du développement en réseau mondial. Les protocoles clés comme TCP/IP manquaient de robustesse en matière de sécurité.",
+      "_expected_answer": "ARPANET a privil\u00e9gi\u00e9 l'\u00e9tablissement de connexions plut\u00f4t que la protection des donn\u00e9es, cr\u00e9ant des vuln\u00e9rabilit\u00e9s lors du d\u00e9veloppement en r\u00e9seau mondial. Les protocoles cl\u00e9s comme TCP/IP manquaient de robustesse en mati\u00e8re de s\u00e9curit\u00e9.",
       "_answer_type": "multi_chunk_synthesis",
-      "_note": "Multi-sentence answer requiring synthesis from the bullet list on the 'Quel est le problème ?' slide. Tests longer answer construction in French."
+      "_note": "Multi-sentence answer requiring synthesis from the bullet list on the 'Quel est le probl\u00e8me ?' slide. Tests longer answer construction in French.",
+      "_anchor_phrase": "ARPANET"
     },
     {
       "qid": "french-course-05",
-      "question": "Qu'est-ce que la défense en profondeur en sécurité réseau ?",
+      "question": "Qu'est-ce que la d\u00e9fense en profondeur en s\u00e9curit\u00e9 r\u00e9seau ?",
       "relevant_chunk_ids": [
-        "5795b16a-pdf-cr350-cours-1#ad0d2c85af",
-        "5795b16a-pdf-cr350-cours-1#b2aeee8afe"
+        "5795b16a-pdf-cr350-cours-1#ec266a82f0"
       ],
       "should_refuse": false,
-      "_expected_answer": "Une stratégie qui repose sur plusieurs couches de défense pour protéger les réseaux informatiques (du chunk principal 'Défense en profondeur des réseaux informatiques'). L'application implique d'évaluer les risques et actifs critiques.",
+      "_expected_answer": "Une strat\u00e9gie qui repose sur plusieurs couches de d\u00e9fense pour prot\u00e9ger les r\u00e9seaux informatiques (du chunk principal 'D\u00e9fense en profondeur des r\u00e9seaux informatiques'). L'application implique d'\u00e9valuer les risques et actifs critiques.",
       "_answer_type": "concept",
-      "_note": "Two relevant chunks: ad0d2c85af defines the concept, b2aeee8afe describes its application. The agent should cite at least one; ideal answer uses both."
+      "_note": "Two relevant chunks: ad0d2c85af defines the concept, b2aeee8afe describes its application. The agent should cite at least one; ideal answer uses both.",
+      "_anchor_phrase": "Strat\u00e9gie qui repose sur plusieurs couches"
     },
     {
       "qid": "french-course-06",
-      "question": "Quel est le coût total du certificat CR350 en dollars ?",
+      "question": "Quel est le co\u00fbt total du certificat CR350 en dollars ?",
       "relevant_chunk_ids": [],
       "should_refuse": true,
-      "_expected_answer": "REFUSE — pricing information is not in the parsed slide deck.",
+      "_expected_answer": "REFUSE \u2014 pricing information is not in the parsed slide deck.",
       "_answer_type": "counterfactual",
       "_note": "HARD GATE counterfactual. The slide deck mentions 'Programme des certificats' but no dollar figures, no tuition data. Refusal must be the answer."
     },
@@ -87,18 +91,18 @@
       "question": "Comment configurer un pare-feu Cisco PIX selon le cours ?",
       "relevant_chunk_ids": [],
       "should_refuse": true,
-      "_expected_answer": "REFUSE — the deck discusses firewalls generically (Firewalls under 'Sécurité du périmètre') but never mentions Cisco PIX or any vendor-specific configuration.",
+      "_expected_answer": "REFUSE \u2014 the deck discusses firewalls generically (Firewalls under 'S\u00e9curit\u00e9 du p\u00e9rim\u00e8tre') but never mentions Cisco PIX or any vendor-specific configuration.",
       "_answer_type": "counterfactual",
-      "_note": "HARD GATE — vendor-specific hallucination bait. The model must not synthesize Cisco PIX details from the generic 'Firewalls' bullet."
+      "_note": "HARD GATE \u2014 vendor-specific hallucination bait. The model must not synthesize Cisco PIX details from the generic 'Firewalls' bullet."
     },
     {
       "qid": "french-course-08",
-      "question": "Combien d'étudiants sont inscrits au CR350 cette année ?",
+      "question": "Combien d'\u00e9tudiants sont inscrits au CR350 cette ann\u00e9e ?",
       "relevant_chunk_ids": [],
       "should_refuse": true,
-      "_expected_answer": "REFUSE — enrollment numbers are not in the slide deck.",
+      "_expected_answer": "REFUSE \u2014 enrollment numbers are not in the slide deck.",
       "_answer_type": "counterfactual",
-      "_note": "HARD GATE — administrative-fact counterfactual. The deck has course content, no roster data."
+      "_note": "HARD GATE \u2014 administrative-fact counterfactual. The deck has course content, no roster data."
     }
   ],
   "_baseline_2026_05_24_bf16_reranker": {
@@ -110,6 +114,18 @@
     "mean_citation_precision": 0.9,
     "mean_citation_precision_answered_only": 0.84,
     "conservative_false_refusals": [],
-    "note": "Run config: vLLM Qwen/Qwen3-8B-AWQ orchestrator + BAAI/bge-reranker-v2-m3 now loading in bf16 (ADR-0006 intent), restored by the CrossEncoder automodel_args->model_kwargs fix on 2026-05-24. HARD GATES held: refusal_rate_on_counterfactuals=1.0, zero hallucinations (every refusal_correct=False case is a conservative false-refusal on an answerable query, not a wrongly-answered REF). ANS/REF counts identical to the prior (fp32-reranker) baselines. Any citation-precision delta vs the fp32 baseline is a chunk-granularity shift — the bf16 reranker cites an equally-valid sibling chunk in the SAME correct document — not a quality regression (verified: doc disambiguation + answer correctness intact)."
+    "note": "Run config: vLLM Qwen/Qwen3-8B-AWQ orchestrator + BAAI/bge-reranker-v2-m3 now loading in bf16 (ADR-0006 intent), restored by the CrossEncoder automodel_args->model_kwargs fix on 2026-05-24. HARD GATES held: refusal_rate_on_counterfactuals=1.0, zero hallucinations (every refusal_correct=False case is a conservative false-refusal on an answerable query, not a wrongly-answered REF). ANS/REF counts identical to the prior (fp32-reranker) baselines. Any citation-precision delta vs the fp32 baseline is a chunk-granularity shift \u2014 the bf16 reranker cites an equally-valid sibling chunk in the SAME correct document \u2014 not a quality regression (verified: doc disambiguation + answer correctness intact)."
+  },
+  "_resolved_at": "2026-05-26T00:47:27Z",
+  "_baseline_2026_05_25_vlm": {
+    "query_count": 8,
+    "answered": 5,
+    "refused": 3,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "hallucinations": 0,
+    "mean_citation_precision": 0.9,
+    "mean_citation_precision_answered_only": 0.85,
+    "conservative_false_refusals": [],
+    "note": "Re-baselined after cours-1 (5795b16a) was re-parsed with the VLM enabled. HARD GATES held: refusal_cf=1.0, 0 hallucinations, 5/5 ANS still answer. Citation-precision steady (0.84 -> 0.85). The legacy queries lacked _anchor_phrase (hardcoded chunk-ids); added distinctive slide phrases + re-resolved via scripts/extend_corpus.py against the rebuilt FTS. NB the VLM re-parse merged the intro chunk: the reseau definition + ARPANET content now co-reside in 5795b16a#a49b400ac0 (french-course-02 and -04 both resolve there)."
   }
 }

@@ -53,6 +53,7 @@ from memex.parse.docling_backend import (
     DoclingPageOutput,
     DoclingTimeout,
     DoclingUnavailable,
+    FigureMetadata,
     SandboxLoadFailed,
 )
 from memex.parse.docling_backend import (
@@ -982,6 +983,8 @@ async def _parse_with_docling(
             log=log,
             cache=vlm_cache,
             refresh_vlm=refresh_vlm,
+            diagram_classes=settings.parse.vlm_diagram_classes,
+            diagram_min_confidence=settings.parse.vlm_diagram_min_confidence,
         )
     finally:
         if vlm_cache is not None:
@@ -1109,6 +1112,47 @@ async def _parse_with_docling(
     )
 
 
+# Minimum figure area (PDF user-space sq. points) for the diagram
+# classification arm — mirrors chart_ocr_backend's pre-filter so a tiny
+# mis-classified badge/watermark (a 50×50 "flow_chart") doesn't trigger a
+# VLM page transcription. ~140×140 pt ≈ the smallest real diagram observed.
+_MIN_DIAGRAM_AREA_SQPT = 20000.0
+
+
+def _diagram_pages(
+    figures: list[FigureMetadata],
+    *,
+    classes: frozenset[str],
+    min_confidence: float,
+    min_area: float = _MIN_DIAGRAM_AREA_SQPT,
+) -> set[int]:
+    """Page numbers carrying a sized, confidently-classified diagram figure.
+
+    These route to the VLM even when the page is not image-area-dominant:
+    Docling's chart-OCR pass excludes diagram classes (no extractable
+    rows+cols) and a small diagram on a text-heavy page falls under
+    `vlm_image_area_threshold`, so without this arm a flow chart /
+    engineering drawing / screenshot is transcribed by neither pass. The
+    confidence + area gates mirror the chart-OCR pre-filter so a low-trust
+    or badge-sized classification doesn't trigger a needless transcription.
+    Pure + synchronous — unit-tested directly with `FigureMetadata` fakes.
+    """
+    pages: set[int] = set()
+    if not classes:
+        return pages
+    for fig in figures:
+        cls = fig.classification
+        if cls is None or cls not in classes:
+            continue
+        if fig.classification_confidence < min_confidence:
+            continue
+        x0, y_bot, x1, y_top = fig.bbox
+        if (x1 - x0) * (y_top - y_bot) < min_area:
+            continue
+        pages.add(fig.page_no)
+    return pages
+
+
 async def _route_and_escalate(
     conversion: DoclingConversion,
     *,
@@ -1119,17 +1163,22 @@ async def _route_and_escalate(
     log: structlog.stdlib.BoundLogger,
     cache: VLMTranscriptionCache | None = None,
     refresh_vlm: bool = False,
+    diagram_classes: tuple[str, ...] = (),
+    diagram_min_confidence: float = 0.5,
 ) -> tuple[list[PageDecision], DoclingConversion]:
     """For each Docling page, decide engine routing. When `disable_vlm`
     is False AND the source is a PDF, batch every VLM-eligible page
     through a single VLM acquisition (`vlm_convert_pages`) so we pay the
     lock + future-eviction cost once per document, not once per page. A
-    page is VLM-eligible when its Docling confidence is below `threshold`
-    OR its figures cover at least `image_area_threshold` of the page —
-    the latter catches diagram/screenshot pages Docling reads
-    "confidently" while losing the figure content, and is the dominant
-    signal in practice since per-page Docling confidence is effectively
-    always 1.0 (it lives in a separate document-level ConfidenceReport).
+    page is VLM-eligible when ANY of three arms fire: (1) its Docling
+    confidence is below `threshold`; (2) its figures cover at least
+    `image_area_threshold` of the page (catches diagram/screenshot pages
+    Docling reads "confidently" while losing the figure content — the
+    dominant arm, since per-page confidence is effectively always 1.0);
+    or (3) it carries a figure the PictureClassifier labels as one of
+    `diagram_classes` above `diagram_min_confidence` (catches a small
+    flow chart / engineering drawing on a text-heavy page, which the
+    image-area arm misses and the chart-OCR pass excludes by design).
     Successfully escalated pages replace Docling's per-page markdown, and
     the document-level `conversion.markdown` is re-stitched so the
     canonical write picks up the corrections.
@@ -1138,12 +1187,18 @@ async def _route_and_escalate(
     escalated_pages: dict[int, DoclingPageOutput] = {}
 
     # First pass: classify pages, collect the ones to escalate.
+    diagram_arm_pages = _diagram_pages(
+        conversion.figures,
+        classes=frozenset(diagram_classes),
+        min_confidence=diagram_min_confidence,
+    )
     to_escalate: list[int] = []
     page_index = {p.page: p for p in conversion.pages}
     for p in conversion.pages:
         below_conf = p.confidence < threshold
         image_dominant = p.image_fraction >= image_area_threshold
-        wants_vlm = below_conf or image_dominant
+        has_diagram = p.page in diagram_arm_pages
+        wants_vlm = below_conf or image_dominant or has_diagram
         if not wants_vlm or disable_vlm or source.suffix.lower() != ".pdf":
             if wants_vlm and disable_vlm:
                 rationale = "VLM-eligible but VLM disabled — Docling output kept"
@@ -1186,12 +1241,20 @@ async def _route_and_escalate(
             original = page_index[page_no]
             if isinstance(result, DoclingPageOutput):
                 escalated_pages[page_no] = result
+                via_diagram = page_no in diagram_arm_pages and not (
+                    original.confidence < threshold
+                    or original.image_fraction >= image_area_threshold
+                )
                 decisions.append(
                     PageDecision(
                         page=page_no,
                         engine="vlm",
                         confidence=result.confidence,
-                        rationale="escalated to VLM (low-confidence or image-dominant page)",
+                        rationale=(
+                            "escalated to VLM (diagram-class figure)"
+                            if via_diagram
+                            else "escalated to VLM (low-confidence or image-dominant page)"
+                        ),
                     )
                 )
                 log.info(
@@ -1199,6 +1262,7 @@ async def _route_and_escalate(
                     page=page_no,
                     docling_confidence=original.confidence,
                     image_fraction=round(original.image_fraction, 3),
+                    diagram_arm=page_no in diagram_arm_pages,
                 )
             else:
                 err = result or VLMUnavailable("VLM call returned no result")

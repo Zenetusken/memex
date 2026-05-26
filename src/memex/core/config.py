@@ -154,6 +154,37 @@ class ParseSettings(BaseModel):
     # below it — while leaving prose pages that carry only a small
     # logo/icon (well under a fifth of the page) on the Docling path.
     vlm_image_area_threshold: float = Field(default=0.20, ge=0.0, le=1.0)
+    # Second VLM-escalation arm: route a page to the VLM when it carries a
+    # figure Docling's PictureClassifier labels as one of these DIAGRAM
+    # types, even if the page is not image-area-dominant. The chart-OCR pass
+    # handles data charts (bar/line/pie) but deliberately EXCLUDES diagrams
+    # (no extractable rows+cols); a flow chart or engineering drawing on a
+    # text-heavy slide then falls under vlm_image_area_threshold and is
+    # transcribed by NEITHER pass. Observed on the CR350 networking lectures:
+    # 28 engineering drawings + 25 flow charts stranded on sub-0.20 pages.
+    # Empty tuple disables this arm. snake_case values taken verbatim from
+    # docling_core's PictureClassificationLabel (NOT the prettified markdown
+    # rendering — "Screenshot from computer" is the label `screenshot_from_computer`).
+    # The diagram complement of parse/chart_ocr_backend._CHART_CLASS_NAMES:
+    # block/flow diagrams, schematics, and tool/manual screenshots — the
+    # figure types a VLM transcribes but the chart-OCR data-table extractor
+    # cannot. (`electrical_diagram`/`cad_drawing` included for engineering
+    # decks even though the CR350 set didn't exercise them.)
+    vlm_diagram_classes: tuple[str, ...] = (
+        "flow_chart",
+        "engineering_drawing",
+        "electrical_diagram",
+        "cad_drawing",
+        "screenshot_from_computer",
+        "screenshot_from_manual",
+        "screenshot",
+    )
+    # Minimum PictureClassifier confidence to trust a diagram label for the
+    # escalation arm above (mirrors the chart-OCR pre-filter's 0.50 gate).
+    # Below this the label is treated as unknown and the page is NOT
+    # escalated on the classification arm — the image_fraction arm still
+    # applies. Docling's v2.5 classifier is typically >0.85 when confident.
+    vlm_diagram_min_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     # The VLM's greedy decode is non-deterministic (BF16 mantissa + AWQ/SDPA
     # accumulation order — an early near-tied-logit flip cascades), so a
     # given transcription draw can silently DROP content (we observed a

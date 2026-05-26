@@ -1,5 +1,5 @@
 {
-  "_description": "French-language MULTI-DOC eval corpus — 15 cross-lecture queries spanning the 7 CR350 'Réseautique et sécurité' documents in the vault (Cours 1/2/3/6, Semaine 4/5, and the official syllabus). Unlike the single-doc french-course corpus, every ANS query's answer lives in exactly ONE specific lecture among the seven — so the agent must DISAMBIGUATE the correct document at retrieval time. Two queries are deliberate confusables (OSI layers appear in both Cours 2 and Cours 6; MAC addresses appear in both Cours 3 and Semaine 4) to test cross-document retrieval precision, not just recall.",
+  "_description": "French-language MULTI-DOC eval corpus \u2014 15 cross-lecture queries spanning the 7 CR350 'R\u00e9seautique et s\u00e9curit\u00e9' documents in the vault (Cours 1/2/3/6, Semaine 4/5, and the official syllabus). Unlike the single-doc french-course corpus, every ANS query's answer lives in exactly ONE specific lecture among the seven \u2014 so the agent must DISAMBIGUATE the correct document at retrieval time. Two queries are deliberate confusables (OSI layers appear in both Cours 2 and Cours 6; MAC addresses appear in both Cours 3 and Semaine 4) to test cross-document retrieval precision, not just recall.",
   "_doc_id": "<multi-doc: see per-query _doc_id>",
   "_multi_doc": true,
   "_doc_ids": {
@@ -11,10 +11,10 @@
     "semaine-5": "7e7cd59e-cr350-semaine-5-attaques-r-seau-et-cha-ne-d-atta",
     "syllabus": "050df0d9-cr350-plan-de-cours-officiel-20262"
   },
-  "_query_count": 15,
+  "_query_count": 19,
   "_mix": {
-    "ans": 11,
-    "ref": 4,
+    "ans": 14,
+    "ref": 5,
     "by_answer_type": {
       "definitional": 4,
       "single_fact": 3,
@@ -23,9 +23,9 @@
       "counterfactual": 4
     }
   },
-  "_labelling_rule": "ANS queries: per-query `_doc_id` names the lecture that owns the answer; `_anchor_phrase` is a distinctive substring of the answer-bearing chunk; `relevant_chunk_ids` is filled by `scripts/extend_corpus.py resolve` (multi-doc aware — resolves each query against ITS OWN _doc_id). REF queries: relevant_chunk_ids=[], should_refuse=true, content intentionally absent from ALL seven docs.",
+  "_labelling_rule": "ANS queries: per-query `_doc_id` names the lecture that owns the answer; `_anchor_phrase` is a distinctive substring of the answer-bearing chunk; `relevant_chunk_ids` is filled by `scripts/extend_corpus.py resolve` (multi-doc aware \u2014 resolves each query against ITS OWN _doc_id). REF queries: relevant_chunk_ids=[], should_refuse=true, content intentionally absent from ALL seven docs.",
   "_created": "2026-05-23",
-  "_purpose": "P0 multi-doc validation — the first eval set that exercises retrieval disambiguation across multiple related documents (the milestone P0 has needed since the 4→10 doc vault expansion). HARD GATES: refusal_cf=1.0 (every REF must refuse), zero hallucinations.",
+  "_purpose": "P0 multi-doc validation \u2014 the first eval set that exercises retrieval disambiguation across multiple related documents (the milestone P0 has needed since the 4\u219210 doc vault expansion). HARD GATES: refusal_cf=1.0 (every REF must refuse), zero hallucinations.",
   "queries": [
     {
       "qid": "cr350-xref-01",
@@ -33,12 +33,12 @@
       "_doc_id": "5c9f3e0e-cr350-cours-3",
       "_anchor_phrase": "Indique le serveur de messagerie responsable d'un domaine",
       "relevant_chunk_ids": [
-        "5c9f3e0e-cr350-cours-3#622df5075e"
+        "5c9f3e0e-cr350-cours-3#813a09e508"
       ],
       "should_refuse": false,
       "_expected_answer": "Un enregistrement MX (Mail Exchange Record) indique le serveur de messagerie responsable d'un domaine.",
       "_answer_type": "definitional",
-      "_note": "Owned by Cours 3 (DNS). DNS record types appear in no other lecture — clean single-doc ownership."
+      "_note": "Owned by Cours 3 (DNS). DNS record types appear in no other lecture \u2014 clean single-doc ownership."
     },
     {
       "qid": "cr350-xref-02",
@@ -46,132 +46,128 @@
       "_doc_id": "7e7cd59e-cr350-semaine-5-attaques-r-seau-et-cha-ne-d-atta",
       "_anchor_phrase": "collecter le maximum d'informations sur une cible sans l'alerter",
       "relevant_chunk_ids": [
-        "7e7cd59e-cr350-semaine-5-attaques-r-seau-et-cha-ne-d-atta#c641e00478"
+        "7e7cd59e-cr350-semaine-5-attaques-r-seau-et-cha-ne-d-atta#111337b387"
       ],
       "should_refuse": false,
-      "_expected_answer": "La phase de Reconnaissance (phase 1) consiste à collecter le maximum d'informations sur une cible sans l'alerter; elle se décline en reconnaissance passive (sans interaction directe) et active (interaction directe avec l'infrastructure).",
+      "_expected_answer": "La phase de Reconnaissance (phase 1) consiste \u00e0 collecter le maximum d'informations sur une cible sans l'alerter; elle se d\u00e9cline en reconnaissance passive (sans interaction directe) et active (interaction directe avec l'infrastructure).",
       "_answer_type": "definitional",
       "_note": "Owned by Semaine 5 (Cyber Kill Chain). The Kill Chain is exclusive to Semaine 5."
     },
     {
       "qid": "cr350-xref-03",
-      "question": "Quelle est la couche 4 du modèle TCP/IP présenté dans le cours ?",
+      "question": "Quelle est la couche 4 du mod\u00e8le TCP/IP pr\u00e9sent\u00e9 dans le cours ?",
       "_doc_id": "3973498d-cr350-cours-2",
       "_anchor_phrase": "Couche 4 : Transport",
       "relevant_chunk_ids": [
-        "3973498d-cr350-cours-2#733cdebe1f"
+        "3973498d-cr350-cours-2#1202fde176"
       ],
       "should_refuse": false,
-      "_expected_answer": "La couche 4 du modèle TCP/IP est la couche Transport.",
+      "_expected_answer": "La couche 4 du mod\u00e8le TCP/IP est la couche Transport.",
       "_answer_type": "single_fact",
-      "_note": "Owned by Cours 2 (modèle TCP/IP en couches). DISAMBIGUATION RISK: Cours 6 also discusses OSI layers (firewalls per layer) — retrieval must pick Cours 2 here."
+      "_note": "Owned by Cours 2 (mod\u00e8le TCP/IP en couches). DISAMBIGUATION RISK: Cours 6 also discusses OSI layers (firewalls per layer) \u2014 retrieval must pick Cours 2 here."
     },
     {
       "qid": "cr350-xref-04",
-      "question": "Qu'est-ce qu'un pare-feu à inspection avec état (stateful inspection) ?",
+      "question": "Qu'est-ce qu'un pare-feu \u00e0 inspection avec \u00e9tat (stateful inspection) ?",
       "_doc_id": "499c900d-cr350-cours-6-coupe-feu-serveurs-mandataires-d-t",
-      "_anchor_phrase": "Évaluent l'état ou le contexte du trafic réseau",
+      "_anchor_phrase": "\u00c9valuent l'\u00e9tat ou le contexte du trafic r\u00e9seau",
       "relevant_chunk_ids": [
-        "499c900d-cr350-cours-6-coupe-feu-serveurs-mandataires-d-t#c0af164e38",
-        "499c900d-cr350-cours-6-coupe-feu-serveurs-mandataires-d-t#fbaf6d4c53"
+        "499c900d-cr350-cours-6-coupe-feu-serveurs-mandataires-d-t#3736430bd2"
       ],
       "should_refuse": false,
-      "_expected_answer": "Un pare-feu à inspection avec état opère aux couches 3 et 4, évalue l'état ou le contexte du trafic réseau (adresses source/destination, origine de la connexion, relation entre paquets d'une même session); c'est un pare-feu dit de troisième génération.",
+      "_expected_answer": "Un pare-feu \u00e0 inspection avec \u00e9tat op\u00e8re aux couches 3 et 4, \u00e9value l'\u00e9tat ou le contexte du trafic r\u00e9seau (adresses source/destination, origine de la connexion, relation entre paquets d'une m\u00eame session); c'est un pare-feu dit de troisi\u00e8me g\u00e9n\u00e9ration.",
       "_answer_type": "definitional",
       "_note": "Owned by Cours 6 (coupe-feu). Firewall taxonomy is exclusive to Cours 6. [whitelist broadened 2026-05-23: added verified sibling chunk(s); this topic spans multiple chunks in the owning lecture.]"
     },
     {
       "qid": "cr350-xref-05",
-      "question": "Quelle est la différence entre un réseau LAN et un réseau WAN ?",
+      "question": "Quelle est la diff\u00e9rence entre un r\u00e9seau LAN et un r\u00e9seau WAN ?",
       "_doc_id": "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a",
-      "_anchor_phrase": "Couvre une petite zone géographique comme une maison",
+      "_anchor_phrase": "Couvre une petite zone g\u00e9ographique comme une maison",
       "relevant_chunk_ids": [
-        "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a#bfc5b7e89a",
-        "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a#f065ba3f5a"
+        "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a#ea4efb8b58"
       ],
       "should_refuse": false,
-      "_expected_answer": "Un LAN (Local Area Network) couvre une petite zone géographique (maison, bureau, étage); un WAN (Wide Area Network) couvre de très vastes zones, d'un pays à plusieurs continents.",
+      "_expected_answer": "Un LAN (Local Area Network) couvre une petite zone g\u00e9ographique (maison, bureau, \u00e9tage); un WAN (Wide Area Network) couvre de tr\u00e8s vastes zones, d'un pays \u00e0 plusieurs continents.",
       "_answer_type": "definitional",
-      "_note": "Owned by Semaine 4 (types de réseaux). LAN/MAN/WAN taxonomy is exclusive to Semaine 4. [whitelist broadened 2026-05-23: added verified sibling chunk(s); this topic spans multiple chunks in the owning lecture.]"
+      "_note": "Owned by Semaine 4 (types de r\u00e9seaux). LAN/MAN/WAN taxonomy is exclusive to Semaine 4. [whitelist broadened 2026-05-23: added verified sibling chunk(s); this topic spans multiple chunks in the owning lecture.]"
     },
     {
       "qid": "cr350-xref-06",
       "question": "Qu'est-ce que l'architecture Zero Trust selon le cours ?",
       "_doc_id": "5795b16a-pdf-cr350-cours-1",
-      "_anchor_phrase": "Ne fait pas confiance automatiquement à l'intérieur ou à l'extérieur du réseau",
+      "_anchor_phrase": "Ne fait pas confiance automatiquement \u00e0 l'int\u00e9rieur ou \u00e0 l'ext\u00e9rieur du r\u00e9seau",
       "relevant_chunk_ids": [
-        "5795b16a-pdf-cr350-cours-1#866bbfe083"
+        "5795b16a-pdf-cr350-cours-1#14559f06f6"
       ],
       "should_refuse": false,
-      "_expected_answer": "Une approche de sécurité informatique qui ne fait pas confiance automatiquement à l'intérieur ou à l'extérieur du réseau, et qui repose sur une vérification continue de l'authentification et de l'autorisation.",
+      "_expected_answer": "Une approche de s\u00e9curit\u00e9 informatique qui ne fait pas confiance automatiquement \u00e0 l'int\u00e9rieur ou \u00e0 l'ext\u00e9rieur du r\u00e9seau, et qui repose sur une v\u00e9rification continue de l'authentification et de l'autorisation.",
       "_answer_type": "definitional",
-      "_note": "Owned by Cours 1 (framework de sécurité). Zero Trust appears only in Cours 1."
+      "_note": "Owned by Cours 1 (framework de s\u00e9curit\u00e9). Zero Trust appears only in Cours 1."
     },
     {
       "qid": "cr350-xref-07",
-      "question": "À quoi sert le protocole ARP et entre quelles couches fonctionne-t-il ?",
+      "question": "\u00c0 quoi sert le protocole ARP et entre quelles couches fonctionne-t-il ?",
       "_doc_id": "5c9f3e0e-cr350-cours-3",
       "_anchor_phrase": "ARP fonctionne entre la couche 2 et la couche 3",
       "relevant_chunk_ids": [
-        "5c9f3e0e-cr350-cours-3#508099af73"
+        "5c9f3e0e-cr350-cours-3#90f3ea9375"
       ],
       "should_refuse": false,
-      "_expected_answer": "ARP (Address Resolution Protocol) associe une adresse IP (couche 3) à une adresse MAC (couche 2) sur un réseau local; il fonctionne entre la couche 2 et la couche 3.",
+      "_expected_answer": "ARP (Address Resolution Protocol) associe une adresse IP (couche 3) \u00e0 une adresse MAC (couche 2) sur un r\u00e9seau local; il fonctionne entre la couche 2 et la couche 3.",
       "_answer_type": "single_fact",
-      "_note": "Owned by Cours 3 (ARP). DISAMBIGUATION RISK: MAC addresses also appear in Semaine 4 (switch) — retrieval must pick Cours 3."
+      "_note": "Owned by Cours 3 (ARP). DISAMBIGUATION RISK: MAC addresses also appear in Semaine 4 (switch) \u2014 retrieval must pick Cours 3."
     },
     {
       "qid": "cr350-xref-08",
-      "question": "Quelle moyenne minimale faut-il obtenir pour réussir le cours CR350 ?",
+      "question": "Quelle moyenne minimale faut-il obtenir pour r\u00e9ussir le cours CR350 ?",
       "_doc_id": "050df0d9-cr350-plan-de-cours-officiel-20262",
-      "_anchor_phrase": "moyenne globale supérieure ou égale à 60%",
+      "_anchor_phrase": "moyenne globale sup\u00e9rieure ou \u00e9gale \u00e0 60%",
       "relevant_chunk_ids": [
         "050df0d9-cr350-plan-de-cours-officiel-20262#54e7b4ac10"
       ],
       "should_refuse": false,
-      "_expected_answer": "Il faut une moyenne arithmétique entre le contrôle périodique et l'examen final ≥ 60%, ET une moyenne globale ≥ 60%.",
+      "_expected_answer": "Il faut une moyenne arithm\u00e9tique entre le contr\u00f4le p\u00e9riodique et l'examen final \u2265 60%, ET une moyenne globale \u2265 60%.",
       "_answer_type": "single_fact",
-      "_note": "Owned by the syllabus (Conditions de Réussite). Administrative facts live only in the Plan de cours."
+      "_note": "Owned by the syllabus (Conditions de R\u00e9ussite). Administrative facts live only in the Plan de cours."
     },
     {
       "qid": "cr350-xref-09",
-      "question": "Quel est le rôle principal d'un routeur dans un réseau ?",
+      "question": "Quel est le r\u00f4le principal d'un routeur dans un r\u00e9seau ?",
       "_doc_id": "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a",
-      "_anchor_phrase": "Sert de passerelle entre le réseau local (LAN) et l'extérieur",
+      "_anchor_phrase": "Sert de passerelle entre le r\u00e9seau local (LAN) et l'ext\u00e9rieur",
       "relevant_chunk_ids": [
-        "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a#455ac9d894",
-        "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a#a07d0f0521",
-        "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a#05d07e3bd1"
+        "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a#d144399b11"
       ],
       "should_refuse": false,
-      "_expected_answer": "Le routeur sert de passerelle entre le réseau local (LAN) et l'extérieur (Internet) et oriente les paquets de données entre différents réseaux.",
+      "_expected_answer": "Le routeur sert de passerelle entre le r\u00e9seau local (LAN) et l'ext\u00e9rieur (Internet) et oriente les paquets de donn\u00e9es entre diff\u00e9rents r\u00e9seaux.",
       "_answer_type": "definitional",
-      "_note": "Owned by Semaine 4 (équipements réseau). [whitelist broadened 2026-05-23: added verified sibling chunk(s); this topic spans multiple chunks in the owning lecture.]"
+      "_note": "Owned by Semaine 4 (\u00e9quipements r\u00e9seau). [whitelist broadened 2026-05-23: added verified sibling chunk(s); this topic spans multiple chunks in the owning lecture.]"
     },
     {
       "qid": "cr350-xref-10",
-      "question": "À quelle couche du modèle OSI opère un pare-feu de type passerelle applicative (proxy) ?",
+      "question": "\u00c0 quelle couche du mod\u00e8le OSI op\u00e8re un pare-feu de type passerelle applicative (proxy) ?",
       "_doc_id": "499c900d-cr350-cours-6-coupe-feu-serveurs-mandataires-d-t",
-      "_anchor_phrase": "Opère à la couche 7 (couche Applicatif)",
+      "_anchor_phrase": "Op\u00e8re \u00e0 la couche 7 (couche Applicatif)",
       "relevant_chunk_ids": [
-        "499c900d-cr350-cours-6-coupe-feu-serveurs-mandataires-d-t#224eb9797c",
-        "499c900d-cr350-cours-6-coupe-feu-serveurs-mandataires-d-t#b2e2785ee4"
+        "499c900d-cr350-cours-6-coupe-feu-serveurs-mandataires-d-t#1bc49fc312",
+        "499c900d-cr350-cours-6-coupe-feu-serveurs-mandataires-d-t#4a27a407e5"
       ],
       "should_refuse": false,
-      "_expected_answer": "Une passerelle au niveau applicatif / proxy opère à la couche 7 (couche Applicatif) du modèle OSI.",
+      "_expected_answer": "Une passerelle au niveau applicatif / proxy op\u00e8re \u00e0 la couche 7 (couche Applicatif) du mod\u00e8le OSI.",
       "_answer_type": "disambiguation",
       "_note": "Owned by Cours 6. SHARP DISAMBIGUATION: both Cours 2 (TCP/IP layers) and Cours 6 (firewall-per-layer) discuss OSI layers; the answer is in Cours 6's firewall table, not Cours 2's model overview. [whitelist broadened 2026-05-23: added verified sibling chunk(s); this topic spans multiple chunks in the owning lecture.]"
     },
     {
       "qid": "cr350-xref-11",
-      "question": "Quel équipement réseau utilise les adresses MAC pour transmettre les données uniquement au bon destinataire dans un réseau local ?",
+      "question": "Quel \u00e9quipement r\u00e9seau utilise les adresses MAC pour transmettre les donn\u00e9es uniquement au bon destinataire dans un r\u00e9seau local ?",
       "_doc_id": "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a",
-      "_anchor_phrase": "Utilise les adresses MAC pour transmettre efficacement les données uniquement au bon destinataire",
+      "_anchor_phrase": "Utilise les adresses MAC pour transmettre efficacement les donn\u00e9es uniquement au bon destinataire",
       "relevant_chunk_ids": [
-        "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a#477ef1c285"
+        "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a#8933e8527f"
       ],
       "should_refuse": false,
-      "_expected_answer": "Le commutateur (switch) utilise les adresses MAC pour transmettre efficacement les données uniquement au bon destinataire dans un réseau local.",
+      "_expected_answer": "Le commutateur (switch) utilise les adresses MAC pour transmettre efficacement les donn\u00e9es uniquement au bon destinataire dans un r\u00e9seau local.",
       "_answer_type": "disambiguation",
       "_note": "Owned by Semaine 4 (Commutateur/Switch). SHARP DISAMBIGUATION: MAC addresses are central to Cours 3 (ARP) too; the answer about a switch forwarding by MAC is in Semaine 4."
     },
@@ -181,9 +177,9 @@
       "_doc_id": null,
       "relevant_chunk_ids": [],
       "should_refuse": true,
-      "_expected_answer": "REFUSE — no tuition or dollar amount appears in any of the seven CR350 documents, including the syllabus.",
+      "_expected_answer": "REFUSE \u2014 no tuition or dollar amount appears in any of the seven CR350 documents, including the syllabus.",
       "_answer_type": "counterfactual",
-      "_note": "HARD GATE. Verified absent: no $/coût/frais/dollar token in the Plan de cours."
+      "_note": "HARD GATE. Verified absent: no $/co\u00fbt/frais/dollar token in the Plan de cours."
     },
     {
       "qid": "cr350-xref-13",
@@ -191,32 +187,82 @@
       "_doc_id": null,
       "relevant_chunk_ids": [],
       "should_refuse": true,
-      "_expected_answer": "REFUSE — post-quantum cryptography is not covered in any CR350 lecture.",
+      "_expected_answer": "REFUSE \u2014 post-quantum cryptography is not covered in any CR350 lecture.",
       "_answer_type": "counterfactual",
-      "_note": "HARD GATE. Verified absent: 'post-quantique'/'quantique' appears in zero CR350 docs (only in the unrelated NVIDIA 10-K, about quantum computing business — not crypto)."
+      "_note": "HARD GATE. Verified absent: 'post-quantique'/'quantique' appears in zero CR350 docs (only in the unrelated NVIDIA 10-K, about quantum computing business \u2014 not crypto)."
     },
     {
       "qid": "cr350-xref-14",
-      "question": "Combien d'étudiants sont inscrits au cours CR350 ce trimestre ?",
+      "question": "Combien d'\u00e9tudiants sont inscrits au cours CR350 ce trimestre ?",
       "_doc_id": null,
       "relevant_chunk_ids": [],
       "should_refuse": true,
-      "_expected_answer": "REFUSE — no enrollment count appears anywhere; the syllabus mentions 'personnes étudiantes inscrites' only in the context of Moodle recordings, with no number.",
+      "_expected_answer": "REFUSE \u2014 no enrollment count appears anywhere; the syllabus mentions 'personnes \u00e9tudiantes inscrites' only in the context of Moodle recordings, with no number.",
       "_answer_type": "counterfactual",
-      "_note": "HARD GATE. Number-of-students bait — the syllabus references registered students but gives no count."
+      "_note": "HARD GATE. Number-of-students bait \u2014 the syllabus references registered students but gives no count."
     },
     {
       "qid": "cr350-xref-15",
-      "question": "En quoi consiste la huitième phase de la Cyber Kill Chain selon le cours ?",
+      "question": "En quoi consiste la huiti\u00e8me phase de la Cyber Kill Chain selon le cours ?",
       "_doc_id": null,
       "relevant_chunk_ids": [],
       "should_refuse": true,
-      "_expected_answer": "REFUSE — the Cyber Kill Chain taught in Semaine 5 has exactly seven phases (Reconnaissance, Weaponization, Delivery, Exploitation, Installation, Command & Control, Actions on Objectives). There is no eighth phase.",
+      "_expected_answer": "REFUSE \u2014 the Cyber Kill Chain taught in Semaine 5 has exactly seven phases (Reconnaissance, Weaponization, Delivery, Exploitation, Installation, Command & Control, Actions on Objectives). There is no eighth phase.",
       "_answer_type": "counterfactual",
-      "_note": "HARD GATE near-miss bait. Tests whether the model invents an 8th phase when the corpus stops at 7. The most adversarial REF in the set — the topic IS covered, only the specific (false) premise is not."
+      "_note": "HARD GATE near-miss bait. Tests whether the model invents an 8th phase when the corpus stops at 7. The most adversarial REF in the set \u2014 the topic IS covered, only the specific (false) premise is not."
+    },
+    {
+      "qid": "cr350-img-01",
+      "question": "Selon le diagramme de configuration VLAN du commutateur, quel port sert de port tronc et vers quels VLAN ?",
+      "_doc_id": "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a",
+      "_anchor_phrase": "Connect\u00e9 en tant que port tronc vers les VLAN",
+      "relevant_chunk_ids": [
+        "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a#e8480046ff"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "Le port Fa0/21 est le port tronc, connect\u00e9 aux VLAN 10, 20 et 30.",
+      "_answer_type": "diagram_single_fact",
+      "_note": "IMAGE QUERY. VLM-transcribed VLAN switch diagram (semaine-4). The port->VLAN mapping (Fa0/21 trunk -> VLAN 10/20/30) exists only in the figure, not the prose \u2014 answerable only via the VLM transcription."
+    },
+    {
+      "qid": "cr350-img-02",
+      "question": "D'apr\u00e8s le diagramme d'architecture r\u00e9seau, par quels \u00e9quipements le trafic passe-t-il entre Internet et l'ordinateur A ?",
+      "_doc_id": "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a",
+      "_anchor_phrase": "Ce diagramme illustre comment le routeur dirige le trafic",
+      "relevant_chunk_ids": [
+        "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a#01381ad744"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "Le trafic passe d'Internet au routeur, puis au commutateur (switch), avant d'atteindre l'ordinateur A (Internet -> Routeur -> Switch -> Ordinateur A).",
+      "_answer_type": "diagram_flow",
+      "_note": "IMAGE QUERY. VLM-transcribed routing diagram (semaine-4). The Internet->Routeur->Switch->Computer A path is figure content."
+    },
+    {
+      "qid": "cr350-img-03",
+      "question": "Selon le diagramme d'attaque du cours, quelles techniques l'attaquant combine-t-il pour perturber le r\u00e9assemblage des paquets ?",
+      "_doc_id": "7e7cd59e-cr350-semaine-5-attaques-r-seau-et-cha-ne-d-atta",
+      "_anchor_phrase": "fragmentation malveillante pour perturber le r\u00e9assemblage",
+      "relevant_chunk_ids": [
+        "7e7cd59e-cr350-semaine-5-attaques-r-seau-et-cha-ne-d-atta#559db8176d"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "L'attaquant falsifie l'adresse IP source (IP spoofing) et utilise une fragmentation malveillante pour perturber le r\u00e9assemblage des paquets.",
+      "_answer_type": "diagram_concept",
+      "_note": "IMAGE QUERY. VLM-transcribed attack diagram (semaine-5). IP spoofing + malicious fragmentation is figure content."
+    },
+    {
+      "qid": "cr350-img-ref-01",
+      "question": "Selon le diagramme de configuration VLAN du commutateur, quelle est l'adresse MAC du port Fa0/21 ?",
+      "_doc_id": "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a",
+      "_anchor_phrase": "",
+      "relevant_chunk_ids": [],
+      "should_refuse": true,
+      "_expected_answer": "REFUSE \u2014 le diagramme VLAN montre les affectations port->VLAN mais aucune adresse MAC.",
+      "_answer_type": "counterfactual_diagram",
+      "_note": "HARD GATE \u2014 image-query counterfactual. The VLAN diagram shows port->VLAN assignments, never MAC addresses. Tests refusal on an absent diagram detail (no fabrication from a transcribed figure)."
     }
   ],
-  "_resolved_at": "2026-05-24T02:18:18Z",
+  "_resolved_at": "2026-05-26T00:54:17Z",
   "_whitelist_note": "Multi-chunk topics carry >1 relevant_chunk_id: any chunk in the OWNING lecture that contains a piece of the literal answer counts. Broadened 2026-05-23 after the baseline eval showed the agent citing valid sibling chunks (correct doc, different chunk) that single-anchor whitelists had excluded.",
   "_baseline_2026_05_23": {
     "run": "vLLM Qwen3-8B-AWQ orchestrator, 10-doc vault",
@@ -228,7 +274,7 @@
     "mean_citation_precision_answered_only": 1.0,
     "disambiguation": "every ANS query cited the correct OWNING lecture among 7 docs; the two deliberate confusables (xref-10 OSI proxy->Cours6 not Cours2; xref-11 MAC switch->Semaine4 not Cours3) both resolved correctly.",
     "notes": "First pass scored 0.62 answered-only citation precision; root-caused to (a) single-chunk anchors on multi-chunk topics [fixed: whitelists broadened to verified sibling chunks] and (b) the answer LLM emitting corrupted source_chunk_ids - bare hashes (xref-05) and a single-char flip (xref-02) [fixed: agents.answering._repair_claim_chunk_ids snaps emitted ids back to real reranked chunk_ids; 1 fuzzy + 3 suffix repairs fired on the corrected run]. Both HARD GATES held throughout.",
-    "_superseded_note": "This run predates the 2026-05-24 CrossEncoder dtype fix, so the reranker ran in fp32 and citation precision was 1.0. With the reranker now in bf16 (ADR-0006), see _baseline_2026_05_24_bf16_reranker: mcp 0.933 — one query (xref-03) cites an equally-valid sibling chunk in the same correct doc (Cours 2). Disambiguation + answer correctness unchanged."
+    "_superseded_note": "This run predates the 2026-05-24 CrossEncoder dtype fix, so the reranker ran in fp32 and citation precision was 1.0. With the reranker now in bf16 (ADR-0006), see _baseline_2026_05_24_bf16_reranker: mcp 0.933 \u2014 one query (xref-03) cites an equally-valid sibling chunk in the same correct doc (Cours 2). Disambiguation + answer correctness unchanged."
   },
   "_baseline_2026_05_24_bf16_reranker": {
     "query_count": 15,
@@ -239,7 +285,17 @@
     "mean_citation_precision": 0.9333,
     "mean_citation_precision_answered_only": 0.9091,
     "conservative_false_refusals": [],
-    "note": "Run config: vLLM Qwen/Qwen3-8B-AWQ orchestrator + BAAI/bge-reranker-v2-m3 now loading in bf16 (ADR-0006 intent), restored by the CrossEncoder automodel_args->model_kwargs fix on 2026-05-24. HARD GATES held: refusal_rate_on_counterfactuals=1.0, zero hallucinations (every refusal_correct=False case is a conservative false-refusal on an answerable query, not a wrongly-answered REF). ANS/REF counts identical to the prior (fp32-reranker) baselines. Any citation-precision delta vs the fp32 baseline is a chunk-granularity shift — the bf16 reranker cites an equally-valid sibling chunk in the SAME correct document — not a quality regression (verified: doc disambiguation + answer correctness intact)."
+    "note": "Run config: vLLM Qwen/Qwen3-8B-AWQ orchestrator + BAAI/bge-reranker-v2-m3 now loading in bf16 (ADR-0006 intent), restored by the CrossEncoder automodel_args->model_kwargs fix on 2026-05-24. HARD GATES held: refusal_rate_on_counterfactuals=1.0, zero hallucinations (every refusal_correct=False case is a conservative false-refusal on an answerable query, not a wrongly-answered REF). ANS/REF counts identical to the prior (fp32-reranker) baselines. Any citation-precision delta vs the fp32 baseline is a chunk-granularity shift \u2014 the bf16 reranker cites an equally-valid sibling chunk in the SAME correct document \u2014 not a quality regression (verified: doc disambiguation + answer correctness intact)."
   },
-  "_p21_reranker_ab_2026_05_24": "Attempted the Qwen3-Reranker-0.6B (backend=qwen3) arm against the cross_encoder bf16 baseline (11/11 ANS, cp 0.933) on 2026-05-24. Result: CUDA OOM during the rerank node — the autoregressive Qwen3-Reranker needs more live VRAM than the ~2.4 GB free under the 8B-AWQ orchestrator on the 12 GB RTX 4070. Confirms the ROADMAP P2.1 'hardware-blocked on 12 GB rig' note: a clean run needs the 4B-orchestrator stack at MEMEX_VLLM_GPU_FRACTION=0.50 (which also swaps the orchestrator, so it's not a reranker-only A/B). The prior verdict (slide-decks, 4B stack) had cross_encoder winning 4-0; extending to multi-doc French remains gated on that stack swap."
+  "_p21_reranker_ab_2026_05_24": "Attempted the Qwen3-Reranker-0.6B (backend=qwen3) arm against the cross_encoder bf16 baseline (11/11 ANS, cp 0.933) on 2026-05-24. Result: CUDA OOM during the rerank node \u2014 the autoregressive Qwen3-Reranker needs more live VRAM than the ~2.4 GB free under the 8B-AWQ orchestrator on the 12 GB RTX 4070. Confirms the ROADMAP P2.1 'hardware-blocked on 12 GB rig' note: a clean run needs the 4B-orchestrator stack at MEMEX_VLLM_GPU_FRACTION=0.50 (which also swaps the orchestrator, so it's not a reranker-only A/B). The prior verdict (slide-decks, 4B stack) had cross_encoder winning 4-0; extending to multi-doc French remains gated on that stack swap.",
+  "_baseline_2026_05_25_vlm": {
+    "query_count": 19,
+    "answered": 14,
+    "refused": 5,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "hallucinations": 0,
+    "mean_citation_precision_answered_only": 0.702,
+    "image_queries_added": "cr350-img-01/02/03 (VLAN trunk port Fa0/21, Internet->routeur->switch->A traffic path, IP-spoofing+malicious-fragmentation attack) all ANSWERED at cite_prec=1.0 from VLM-transcribed diagrams; cr350-img-ref-01 (MAC address of Fa0/21 \u2014 absent from the VLAN diagram) correctly REFUSED. Proves the diagram transcriptions are answerable AND the refusal gate holds on an image-derived counterfactual.",
+    "note": "Re-baselined after the 6 CR350 lectures were re-parsed with the VLM enabled (3 escalation arms: image-area>=0.20, diagram-class[flow_chart/engineering_drawing/screenshot], + screenshot class-name fix; 110+ raw image blocks -> described content). HARD GATES held: refusal_cf=1.0, 0 hallucinations, all 14 ANS answered, 5/5 REF refused. Citation-precision on the 11 pre-existing TEXT queries fell 0.933 -> ~0.62 (overall 0.702 once the 3 perfect image Qs are included): a re-chunking artifact, not an answer-quality regression \u2014 the VLM added diagram-content chunks and re-bounded existing ones, so the agent grounds answers in valid sibling/new chunks differing from each query's single re-resolved anchor (xref-03/04/09 at 0.0). Anchors re-resolved via scripts/extend_corpus.py against the rebuilt FTS. Prior bf16-reranker baseline retained below."
+  }
 }
