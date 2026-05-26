@@ -1,0 +1,155 @@
+{
+  "_description": "CCNA cross-deck answer-eval over the ingested SRWE (Network Components I) + ENSA (Network Components II) PowerPoint library. Validates the Office(.pptx)->PDF->VLM diagram path at scale + cross-deck disambiguation. Each ANS query is answerable from exactly ONE module deck; ccna-05 is diagram-targeted (its answer lives only in a VLM-transcribed '## Diagram Description' block).",
+  "_doc_id": null,
+  "_multi_doc": true,
+  "_doc_ids": [
+    "812d8c84-srwe-module-2-2021wef",
+    "cbe4bab8-srwe-module-3-2021",
+    "753a17ed-srwe-module-5-2021",
+    "1c481d1a-srwe-module-10-2021",
+    "3e8de4e9-ensa-module-1-2021",
+    "d401e0bd-ensa-module-5-2021",
+    "bbef665b-ensa-module-6-2021",
+    "1306f455-ensa-module-9-2021"
+  ],
+  "_query_count": 10,
+  "_mix": "8 ANS across 8 decks (SRWE 2/3/5/10 + ENSA 1/5/6/9) + 2 REF (1 off-topic empty-retrieval + 1 in-domain CCNP near-miss). ccna-05 is diagram-targeted (VLM-transcribed QoS diagram).",
+  "_labelling_rule": "Per-query _doc_id pins the owning deck; relevant_chunk_ids resolved from _anchor_phrase via scripts/extend_corpus.py resolve. Source decks stay LOCAL (only this query set + the pinned baseline ship).",
+  "_created": "2026-05-26",
+  "_purpose": "Persistent regression artifact for the Office/.pptx + diagram ingest path; gives the P2.3 VLM-swap a diagram-rich discrimination set.",
+  "queries": [
+    {
+      "qid": "ccna-01",
+      "question": "How does a switch populate its MAC address table?",
+      "_doc_id": "812d8c84-srwe-module-2-2021wef",
+      "_anchor_phrase": "source MAC address",
+      "relevant_chunk_ids": [
+        "812d8c84-srwe-module-2-2021wef#215c024e79",
+        "812d8c84-srwe-module-2-2021wef#b9e0ccf5fb"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "By recording the source MAC address of incoming frames together with the ingress port.",
+      "_answer_type": "definitional"
+    },
+    {
+      "qid": "ccna-02",
+      "question": "What does a VLAN segment a switched network into?",
+      "_doc_id": "cbe4bab8-srwe-module-3-2021",
+      "_anchor_phrase": "broadcast domains",
+      "relevant_chunk_ids": [
+        "cbe4bab8-srwe-module-3-2021#7f08fabc2e",
+        "cbe4bab8-srwe-module-3-2021#5780842577"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "Separate broadcast domains (each VLAN is its own broadcast domain / logical network).",
+      "_answer_type": "definitional"
+    },
+    {
+      "qid": "ccna-03",
+      "question": "What kind of topology does Spanning Tree Protocol create in a switched network with redundant paths?",
+      "_doc_id": "753a17ed-srwe-module-5-2021",
+      "_anchor_phrase": "loop-free topology with a single path",
+      "relevant_chunk_ids": [
+        "753a17ed-srwe-module-5-2021#dc2cfd4dc9"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "A loop-free topology with a single active path between any two devices.",
+      "_answer_type": "concept"
+    },
+    {
+      "qid": "ccna-04",
+      "question": "According to the NAT module, what kind of address does NAT translate a private IPv4 address into?",
+      "_doc_id": "bbef665b-ensa-module-6-2021",
+      "_anchor_phrase": "private IPv4 address",
+      "relevant_chunk_ids": [
+        "bbef665b-ensa-module-6-2021#db6ee205c2",
+        "bbef665b-ensa-module-6-2021#aefbdfee8c"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "A public (globally routable) IPv4 address.",
+      "_answer_type": "concept"
+    },
+    {
+      "qid": "ccna-05",
+      "question": "In the traffic-prioritization diagram, what are the three priority queues?",
+      "_doc_id": "1306f455-ensa-module-9-2021",
+      "_anchor_phrase": "High Priority Queue, Medium Priority Queue, and Low Priority Queue",
+      "relevant_chunk_ids": [
+        "1306f455-ensa-module-9-2021#18c8c70606"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "High Priority Queue, Medium Priority Queue, and Low Priority Queue.",
+      "_answer_type": "chart_content",
+      "_note": "DIAGRAM-TARGETED: the answer exists only in the VLM-transcribed '## Diagram Description' block (Office->PDF->VLM path). Validates diagram transcription specifically."
+    },
+    {
+      "qid": "ccna-06",
+      "question": "What does OSPF use to uniquely identify each router in the routing domain?",
+      "_doc_id": "3e8de4e9-ensa-module-1-2021",
+      "_anchor_phrase": "Router ID of the sending router",
+      "relevant_chunk_ids": [
+        "3e8de4e9-ensa-module-1-2021#9a4cded0af"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "The OSPF router ID.",
+      "_answer_type": "definitional"
+    },
+    {
+      "qid": "ccna-07",
+      "question": "Which switch security feature mitigates DHCP spoofing attacks?",
+      "_doc_id": "1c481d1a-srwe-module-10-2021",
+      "_anchor_phrase": "Prevents DHCP starvation and DHCP spoofing attacks",
+      "relevant_chunk_ids": [
+        "1c481d1a-srwe-module-10-2021#03ebd15f93"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "DHCP snooping.",
+      "_answer_type": "single_fact"
+    },
+    {
+      "qid": "ccna-08",
+      "question": "What configuration command creates a numbered standard IPv4 ACL?",
+      "_doc_id": "d401e0bd-ensa-module-5-2021",
+      "_anchor_phrase": "access-list",
+      "relevant_chunk_ids": [
+        "d401e0bd-ensa-module-5-2021#51c5b28c92"
+      ],
+      "should_refuse": false,
+      "_expected_answer": "The global-config 'access-list {number} {deny|permit} {source} [wildcard]' command.",
+      "_answer_type": "single_fact"
+    },
+    {
+      "qid": "ccna-09",
+      "question": "What is the recommended torque specification for a Boeing 747 landing gear bolt?",
+      "_doc_id": null,
+      "_anchor_phrase": null,
+      "relevant_chunk_ids": [],
+      "should_refuse": true,
+      "_expected_answer": "REFUSE \u2014 entirely off-topic; nothing in the CCNA networking decks addresses aircraft maintenance.",
+      "_answer_type": "counterfactual",
+      "_note": "HARD GATE \u2014 empty-retrieval counterfactual."
+    },
+    {
+      "qid": "ccna-10",
+      "question": "How do these modules say to configure a BGP route reflector?",
+      "_doc_id": null,
+      "_anchor_phrase": null,
+      "relevant_chunk_ids": [],
+      "should_refuse": true,
+      "_expected_answer": "REFUSE \u2014 BGP route reflectors are a CCNP topic; 'route reflector' appears in no SRWE/ENSA deck (verified). BGP is named in passing but route-reflector configuration is absent.",
+      "_answer_type": "counterfactual",
+      "_note": "HARD GATE \u2014 in-domain NEAR-MISS (BGP mentioned, route reflectors absent). Tests the agent doesn't fabricate a plausible adjacent answer."
+    }
+  ],
+  "_resolved_at": "2026-05-26T14:54:54Z",
+  "_baseline_2026_05_26_vlm": {
+    "query_count": 10,
+    "answered": 8,
+    "refused": 2,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "hallucinations": 0,
+    "mean_citation_precision": 0.4,
+    "mean_citation_precision_answered_only": 0.25,
+    "note": "First baseline over the Office(.pptx)->PDF->VLM-ingested CCNA library (31 decks, this session). 8/8 grounded ANS across 8 decks INCL. ccna-05 diagram-targeted (answered from the VLM-transcribed QoS '## Diagram Description' — the headline Office->VLM path proven end-to-end); both counterfactuals REFUSE (ccna-09 off-topic empty-retrieval + ccna-10 BGP-route-reflector CCNP near-miss); refusal_cf=1.0, 0 hallucinations. cite-prec is sibling-chunk-DEFLATED: CCNA slide decks restate each concept across many slides, so the agent grounds on a valid sibling chunk rather than the single anchor-resolved one (answers verified correct — same artifact as scientific-gte pre-multi-chunk-relabel). A multi-chunk relabel would lift cite-prec without touching the HARD gates. Source decks stay LOCAL; only this query set + baseline ship."
+  }
+}
