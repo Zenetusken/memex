@@ -52,7 +52,7 @@ async def test_escalation_wraps_pause_and_unloads_vlm(monkeypatch) -> None:
         async def unload(self, name: str) -> None:
             unloaded.append(name)
 
-    monkeypatch.setattr(P, "_pause_vllm_for_gpu_parse", fake_pause)
+    monkeypatch.setattr(P, "pause_vllm_for_gpu", fake_pause)
     monkeypatch.setattr(P, "vlm_convert_pages", fake_vlm)
     monkeypatch.setattr("memex.models.registry.get_registry", lambda: _FakeRegistry())
 
@@ -84,7 +84,7 @@ async def test_disable_vlm_skips_escalation_pause_and_unload(monkeypatch) -> Non
     async def fake_vlm(*, source_pdf: Path, page_numbers: list[int], **_kw: object):
         raise AssertionError("vlm_convert_pages must not be called when disable_vlm=True")
 
-    monkeypatch.setattr(P, "_pause_vllm_for_gpu_parse", fake_pause)
+    monkeypatch.setattr(P, "pause_vllm_for_gpu", fake_pause)
     monkeypatch.setattr(P, "vlm_convert_pages", fake_vlm)
 
     decisions, conv = await P._route_and_escalate(
@@ -121,7 +121,7 @@ async def test_image_dominant_page_escalates_despite_high_confidence(monkeypatch
         async def unload(self, name: str) -> None:
             return None
 
-    monkeypatch.setattr(P, "_pause_vllm_for_gpu_parse", fake_pause)
+    monkeypatch.setattr(P, "pause_vllm_for_gpu", fake_pause)
     monkeypatch.setattr(P, "vlm_convert_pages", fake_vlm)
     monkeypatch.setattr("memex.models.registry.get_registry", lambda: _FakeRegistry())
 
@@ -224,7 +224,7 @@ async def test_diagram_class_page_escalates_despite_confidence_and_low_image_fra
         async def unload(self, name: str) -> None:
             return None
 
-    monkeypatch.setattr(P, "_pause_vllm_for_gpu_parse", fake_pause)
+    monkeypatch.setattr(P, "pause_vllm_for_gpu", fake_pause)
     monkeypatch.setattr(P, "vlm_convert_pages", fake_vlm)
     monkeypatch.setattr("memex.models.registry.get_registry", lambda: _FakeRegistry())
 
@@ -274,7 +274,7 @@ async def test_decorative_figure_does_not_escalate_via_diagram_arm(monkeypatch) 
     async def fake_vlm(*, source_pdf: Path, page_numbers: list[int], **_kw: object):
         raise AssertionError("no page should escalate (logo is not a diagram class)")
 
-    monkeypatch.setattr(P, "_pause_vllm_for_gpu_parse", fake_pause)
+    monkeypatch.setattr(P, "pause_vllm_for_gpu", fake_pause)
     monkeypatch.setattr(P, "vlm_convert_pages", fake_vlm)
 
     conversion = DoclingConversion(

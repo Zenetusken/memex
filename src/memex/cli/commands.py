@@ -41,7 +41,7 @@ from memex.ingest.pipeline import (
     ingest_markdown_passthrough,
 )
 from memex.ingest.watcher import default_reaction, run_watcher
-from memex.parse.pipeline import derive_title, parse_document
+from memex.parse.pipeline import derive_title, parse_document, pause_vllm_for_gpu
 
 # `typer.Option` / `typer.Argument` are typed as overloads whose signatures
 # embed `click.ParamType[Unknown]`, so a bare member access trips pyright's
@@ -124,33 +124,40 @@ async def _ingest_path_chain(
             await index_document(result.doc_id)
         return result
 
-    if p.is_dir():
-        # `ingest_directory` is a streaming iterator; route each accepted
-        # file back through `_process_one` so `--skip-parse` and the
-        # markdown-passthrough fast-path apply uniformly to directory
-        # inputs (per-file shape matches the single-file branch).
-        async for r in ingest_directory(p):
-            if not r.accepted or r.doc_id is None:
+    # Hold vLLM paused across the WHOLE ingest (parse + index). On the 12 GB
+    # rig the embedder can't run co-resident with vLLM (~8.5 GB), and the
+    # parse's own per-VLM pause restarts vLLM *before* the index embed runs,
+    # which then OOMs. With vLLM down for the duration the inner pause is a
+    # no-op and the embed has the GPU; vLLM restarts once at the end. No-op
+    # when vLLM isn't running (e.g. ingest with the daemon already stopped).
+    async with pause_vllm_for_gpu():
+        if p.is_dir():
+            # `ingest_directory` is a streaming iterator; route each accepted
+            # file back through `_process_one` so `--skip-parse` and the
+            # markdown-passthrough fast-path apply uniformly to directory
+            # inputs (per-file shape matches the single-file branch).
+            async for r in ingest_directory(p):
+                if not r.accepted or r.doc_id is None:
+                    results.append(r)
+                    continue
+                if ingest_only:
+                    results.append(r)
+                    continue
+                # `ingest_directory` has already done the file-level work;
+                # we just need parse + (optional) index for each accepted doc.
+                # Markdown sources that came in via `ingest_directory` were
+                # processed as bytes — when `--skip-parse` is set we still
+                # need to honour it.
+                if skip_parse and r.is_markdown:
+                    # Honour --skip-parse for directory items too.
+                    results.append(r)
+                    continue
+                await parse_document(r.doc_id, force_docling=force_docling)
+                if do_index:
+                    await index_document(r.doc_id)
                 results.append(r)
-                continue
-            if ingest_only:
-                results.append(r)
-                continue
-            # `ingest_directory` has already done the file-level work;
-            # we just need parse + (optional) index for each accepted doc.
-            # Markdown sources that came in via `ingest_directory` were
-            # processed as bytes — when `--skip-parse` is set we still
-            # need to honour it.
-            if skip_parse and r.is_markdown:
-                # Honour --skip-parse for directory items too.
-                results.append(r)
-                continue
-            await parse_document(r.doc_id, force_docling=force_docling)
-            if do_index:
-                await index_document(r.doc_id)
-            results.append(r)
-    else:
-        results.append(await _process_one(p))
+        else:
+            results.append(await _process_one(p))
 
     return results
 
@@ -243,7 +250,10 @@ def register(app: typer.Typer) -> None:
 
         async def _run():
             bootstrap()
-            return await index_document(doc_id)
+            # Pause vLLM around the embed — the embedder OOMs co-resident with
+            # vLLM (~8.5 GB) on the 12 GB rig; no-op when vLLM isn't running.
+            async with pause_vllm_for_gpu():
+                return await index_document(doc_id)
 
         _print(asyncio.run(_run()))
 
@@ -331,7 +341,8 @@ def register(app: typer.Typer) -> None:
 
         async def _run():
             bootstrap()
-            return await reindex_vault(force=force)
+            async with pause_vllm_for_gpu():
+                return await reindex_vault(force=force)
 
         _print(asyncio.run(_run()))
 

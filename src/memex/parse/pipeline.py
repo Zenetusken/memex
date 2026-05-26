@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import asyncio
 import re
+import shutil
+import tempfile
 import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -60,6 +62,7 @@ from memex.parse.docling_backend import (
 from memex.parse.docling_backend import (
     convert as docling_convert,
 )
+from memex.parse.office_convert import OFFICE_SUFFIXES, convert_to_pdf
 from memex.parse.pymupdf_backend import (
     PdfSignals,
     PyMuPDFConversion,
@@ -770,18 +773,21 @@ async def _vllm_restart(scripts_dir: Path) -> None:
 
 
 @asynccontextmanager
-async def _pause_vllm_for_gpu_parse() -> AsyncGenerator[None]:
-    """Pause-and-restart vLLM around a GPU-heavy parse pass.
+async def pause_vllm_for_gpu() -> AsyncGenerator[None]:
+    """Pause-and-restart vLLM around a GPU-heavy parse OR index pass.
 
-    Two callers share it: the chart-OCR pass (P3.3) and the VLM
-    escalation path (low-confidence/scanned pages → Qwen2.5-VL). Both
-    load a multi-GB model in-process via the registry; on the 12 GB
-    reference rig vLLM's ~8.5 GB resident footprint plus the embedder +
-    reranker + that model doesn't fit. Stopping vLLM during parse frees
-    the budget; restarting after keeps the user-facing inference daemon
-    alive in the long run. The caller MUST `registry.unload(...)` its
-    model inside the context (before the `finally` restart) so the VRAM
-    is actually free when vLLM comes back.
+    Callers: the chart-OCR pass (P3.3), the VLM escalation path
+    (low-confidence/scanned/diagram pages → Qwen2.5-VL), and the CLI
+    `ingest` chain — which holds it across parse + index so the embedder
+    isn't starved by a co-resident vLLM. On the 12 GB reference rig
+    vLLM's ~8.5 GB resident footprint plus the embedder/reranker/parse
+    model doesn't fit. Stopping vLLM frees the budget; restarting after
+    keeps the user-facing inference daemon alive in the long run. A
+    GPU-model caller MUST `registry.unload(...)` its model inside the
+    context (before the `finally` restart) so the VRAM is actually free
+    when vLLM comes back. Nests safely: an inner use is a no-op when an
+    outer one already paused vLLM (it sees vLLM unreachable, yields
+    without pausing, and skips the restart).
 
     The restart is in `finally` so a parse crash doesn't strand the
     user without inference. The restart failure (rare) logs at ERROR
@@ -1036,7 +1042,7 @@ async def _parse_with_docling(
         # VLM). Regenerable derived state (ADR-0003), dropped by reindex --force.
         chart_cache = await ChartOCRCache.open(vault_path)
         try:
-            async with _pause_vllm_for_gpu_parse():
+            async with pause_vllm_for_gpu():
                 extractions = await chart_ocr_extract(
                     source_pdf=source,
                     figures=chart_figures,
@@ -1260,7 +1266,7 @@ async def _route_and_escalate(
     # restart — else it OOMs against the ~8.5 GB resident vLLM. The pause
     # is a no-op when vLLM isn't running.
     if to_escalate:
-        async with _pause_vllm_for_gpu_parse():
+        async with pause_vllm_for_gpu():
             results = await vlm_convert_pages(
                 source_pdf=source,
                 page_numbers=to_escalate,
@@ -1560,6 +1566,27 @@ async def _parse_pdf(
     )
 
 
+async def _ensure_converted_pdf(vault_path: Path, doc_id: str, source: Path) -> Path:
+    """Return a cached PDF rendering of an Office/ODF source, converting on the
+    first parse via headless LibreOffice (`office_convert.convert_to_pdf`).
+
+    Cached at `documents/{doc_id}/converted.pdf` — deliberately NOT a `source.*`
+    name, so `_source_file` still resolves the ORIGINAL Office file as the
+    provenance source — and reused on re-parse so the PDF bytes (hence the
+    content-addressed VLM / chart-OCR cache keys) stay byte-stable across runs
+    (LibreOffice stamps a fresh CreationDate per conversion, so re-converting
+    every parse would churn those caches).
+    """
+    converted = source.parent / "converted.pdf"
+    if converted.is_file():
+        return converted
+    with tempfile.TemporaryDirectory(prefix="memex-office-") as tmp:
+        produced = await convert_to_pdf(source, Path(tmp))
+        shutil.move(str(produced), str(converted))
+    logger.bind(doc_id=doc_id).info("office.converted_cached", path=str(converted))
+    return converted
+
+
 async def parse_document(
     doc_id: str, *, force_docling: bool | None = None, refresh_vlm: bool = False
 ) -> ParseResult:
@@ -1571,6 +1598,10 @@ async def parse_document(
     overrides the setting for this call. `refresh_vlm` busts this
     document's cached VLM transcriptions first, forcing a fresh draw
     (the VLM is non-deterministic; transcriptions are cached by default).
+
+    Office/ODF sources (pptx/docx/xlsx/…) are converted to a cached PDF first
+    and run through the full PDF pipeline, so their figures + diagrams flow
+    through the VLM / chart-OCR passes like any PDF.
     """
     settings = get_settings()
     effective_force = force_docling if force_docling is not None else settings.parse.force_docling
@@ -1578,6 +1609,17 @@ async def parse_document(
 
     if source.suffix.lower() in {".md", ".markdown"}:
         return await _passthrough_markdown(settings.vault_path, doc_id, source)
+
+    # Office/ODF sources can't be rasterised by pypdfium2 (the VLM + chart-OCR
+    # figure renderers are PDF-only), so convert to a cached PDF and run the
+    # full PDF pipeline on it. force_docling=True so a slide-deck export reaches
+    # the Docling VLM/chart-OCR diagram pass rather than the classifier routing
+    # it to PyMuPDF (which has no figure-transcription stage).
+    if source.suffix.lower() in OFFICE_SUFFIXES:
+        source = await _ensure_converted_pdf(settings.vault_path, doc_id, source)
+        return await _parse_pdf(
+            settings.vault_path, doc_id, source, force_docling=True, refresh_vlm=refresh_vlm
+        )
 
     if source.suffix.lower() == ".pdf":
         return await _parse_pdf(
