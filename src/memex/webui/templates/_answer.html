@@ -62,6 +62,13 @@
 </div>
 {% endif %}
 
+{% if response and response.artifact_scope_doc_ids %}
+<p class="ans-scope" role="note">
+  <span class="ans-scope-label">Scoped to the document{{ "s" if response.artifact_scope_doc_ids|length > 1 else "" }} you named:</span>
+  {% for doc_id in response.artifact_scope_doc_ids %}<code class="chunk-id">{{ doc_id }}</code>{% endfor %}
+</p>
+{% endif %}
+
 {% if response %}
 <p class="ans-footer">
   <span>correlation_id <code>{{ response.correlation_id }}</code></span>

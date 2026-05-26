@@ -470,3 +470,18 @@ html { scroll-behavior: smooth; }
   font-size: 0.6875rem;
   color: rgb(82 82 91);                    /* zinc-600 */
 }
+
+/* #256 artifact-scope note — when a query NAMED an artifact, retrieval was
+   re-scoped to its document(s); surface that quietly so the narrowing (and,
+   on a refusal, the reason for it) is auditable. Same restraint as the footer. */
+.ans-scope {
+  margin-top: 0.9rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem 0.5rem;
+  font-size: 0.75rem;
+  color: rgb(113 113 122);                 /* zinc-500 */
+}
+.ans-scope-label { color: rgb(82 82 91); } /* zinc-600 */
+.ans-scope .chunk-id { font-size: 0.6875rem; }

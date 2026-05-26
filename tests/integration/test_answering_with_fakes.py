@@ -802,6 +802,9 @@ async def test_artifact_scope_rescopes_and_refuses_wrong_source(
     # Determinism: the VLAN chunk never reached the reranker; only the scoped
     # firewall chunk did — the LLM had no VLAN evidence to (mis)answer from.
     assert rerank_saw == [["fw-diagram#fw1"]]
+    # Observability (#256): the refusal SURFACES the scope so a caller can see
+    # WHY the pool was narrowed (it refused because the firewall docs lack VLAN).
+    assert set(response.artifact_scope_doc_ids) == {"fw-diagram", "cours-6"}
 
 
 @pytest.mark.asyncio
@@ -886,6 +889,8 @@ async def test_artifact_scope_near_twin_answers_from_scoped_doc(
     assert response.answered is True
     assert in_docs_calls == [["semaine-4"]]
     assert [c.source_chunk_id for c in response.claims] == ["semaine-4#v1"]
+    # The answered response surfaces the scope too (auditability).
+    assert response.artifact_scope_doc_ids == ["semaine-4"]
 
 
 @pytest.mark.asyncio
@@ -929,6 +934,8 @@ async def test_artifact_scope_noop_when_no_artifact_named(
 
     response = await answer_query("What does Smith say about reflexivity?")
     assert response.answered is True
+    # No artifact named → no re-scope → the surfaced scope is empty (full corpus).
+    assert response.artifact_scope_doc_ids == []
 
 
 @pytest.mark.asyncio
@@ -993,6 +1000,7 @@ async def test_artifact_scope_fails_open_on_store_error(
         set_settings(None)
 
     assert response.answered is True  # fell back to full retrieval, did not refuse
+    assert response.artifact_scope_doc_ids == []  # fail-open → no scope surfaced
 
 
 @pytest.mark.asyncio
@@ -1059,6 +1067,7 @@ async def test_artifact_scope_kill_switch_disables_rescope(
         set_settings(None)
 
     assert response.answered is True
+    assert response.artifact_scope_doc_ids == []  # kill-switch → no scope surfaced
 
 
 def test_answer_state_artifact_scope_defaults_empty() -> None:

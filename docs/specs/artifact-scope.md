@@ -118,15 +118,31 @@ mis-resolved ANS query (HARD-gate-safe: never a hallucination, never a
 wrongly-answered counterfactual). The existing assess/verify/relevance gates still
 decide answer-vs-refuse on the narrowed pool.
 
+## Observability (ADR-0004)
+
+The re-scope is silent by default — a user just gets the right answer or a refusal.
+To make the narrowing auditable, the resolved scope is surfaced on
+`FinalResponse.artifact_scope_doc_ids` (populated in `compose` + the `refuse` node
+from `state.artifact_scope_doc_ids`; `[]` on the full-corpus path). It's most useful
+on a REFUSAL — it explains WHY the pool was narrowed (e.g. "scoped to the firewall
+doc, which has no VLAN range" → refuse). MCP `ask` + the CLI auto-serialize the field
+(it's part of the `FinalResponse` model); the webui answer panel renders a quiet
+`.ans-scope` note ("Scoped to the document(s) you named: …"). HARD-gate-neutral — a
+derived field, never alters answered/claims/refusal. GPU-validated end-to-end:
+diag-12 surfaces the firewall lecture, img-01 surfaces the VLAN deck, a no-artifact
+query surfaces `[]`.
+
 ## Files
 
 | File | Change |
 |---|---|
 | `agents/artifact_scope.py` (NEW) | `detect_artifact_reference` + `resolve_scope` + the two dataclasses; pure, imports only `re` + `core/types` |
-| `agents/answering.py` | `resolve_artifact_scope` node + `_resolve_artifact_scope_via_corpus` (lazy `FTSStore.open`, fail-open); `AnswerState.artifact_scope_doc_ids`; the `expand_graph` scope-active skip; graph wiring |
+| `agents/answering.py` | `resolve_artifact_scope` node + `_resolve_artifact_scope_via_corpus` (lazy `FTSStore.open`, fail-open); `AnswerState.artifact_scope_doc_ids`; `FinalResponse.artifact_scope_doc_ids` (surfaced in `compose`/`refuse`); the `expand_graph` scope-active skip; graph wiring |
 | `core/config.py` | `AgentsSettings(artifact_scope_enabled=True)` + `MemexSettings.agents` |
+| `webui/templates/_answer.html` + `static/style.css` | `.ans-scope` note surfacing the resolved scope |
 | `tests/unit/test_artifact_scope.py` (NEW) | detection + resolution tables, edge cases, the diag-12-vs-img-01 discriminator, single-token gate, N=50 determinism |
-| `tests/integration/test_answering_with_fakes.py` | re-scope scenarios: wrong-source refuses, near-twin answers, no-artifact no-op, fail-open, kill-switch, state field, expand_graph skip |
+| `tests/integration/test_answering_with_fakes.py` | re-scope scenarios: wrong-source refuses, near-twin answers, no-artifact no-op, fail-open, kill-switch, scope surfaced, expand_graph skip |
+| `tests/integration/test_webui.py` | the `.ans-scope` note renders on a scoped refusal + is absent otherwise |
 
 ## Validation
 

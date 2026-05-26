@@ -276,6 +276,14 @@ class FinalResponse(BaseModel):
     # nothing). Surfaces a navigable "Sources" list to MCP/webui/CLI.
     wikilinks: list[str] = []
 
+    # Documents retrieval was deterministically RE-SCOPED to because the query
+    # named a specific artifact (#256). Empty = the full-corpus path (the common
+    # case). Surfaced so the re-scope is auditable: on a refusal it explains WHY
+    # the pool was narrowed (e.g. "scoped to the firewall doc, which has no VLAN
+    # range" → refuse). HARD-gate-neutral — derived from state, never alters
+    # answered/claims/refusal. (ADR-0004: observable at every layer.)
+    artifact_scope_doc_ids: list[str] = []
+
     # Observability fields — always populated, useful for trace correlation.
     correlation_id: str
     tokens_used: int
@@ -1314,6 +1322,7 @@ async def refuse(state: AnswerState) -> AnswerStateUpdate:
         answered=False,
         refusal_reason=reason,
         used_chunks=state.reranked,
+        artifact_scope_doc_ids=state.artifact_scope_doc_ids,
         correlation_id=state.correlation_id,
         tokens_used=state.tokens_used,
         nodes_traversed=new_nodes,
@@ -1400,6 +1409,7 @@ async def compose(state: AnswerState) -> AnswerStateUpdate:
                 "summary without citations to back it."
             ),
             used_chunks=state.reranked,
+            artifact_scope_doc_ids=state.artifact_scope_doc_ids,
             correlation_id=state.correlation_id,
             tokens_used=state.tokens_used,
             nodes_traversed=new_nodes,
@@ -1430,6 +1440,7 @@ async def compose(state: AnswerState) -> AnswerStateUpdate:
         claims=surviving_claims,
         used_chunks=used_chunks,
         wikilinks=wikilinks,
+        artifact_scope_doc_ids=state.artifact_scope_doc_ids,
         correlation_id=state.correlation_id,
         tokens_used=state.tokens_used,
         nodes_traversed=new_nodes,

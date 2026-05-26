@@ -90,6 +90,26 @@ def fake_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("memex.webui.app.answer_query", _fake)
 
 
+@pytest.fixture
+def fake_scoped_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#256: a refusal where the query named an artifact, so retrieval was
+    re-scoped to its document(s). The panel must surface that scope so the
+    user can see WHY the pool was narrowed."""
+
+    async def _fake(question: str, **_kw: Any) -> FinalResponse:
+        return FinalResponse(
+            answered=False,
+            refusal_reason="The firewall diagram document has no VLAN address range.",
+            artifact_scope_doc_ids=["ccd09479-cr350-network-diagrams", "499c900d-cr350-cours-6"],
+            correlation_id="01HZTESTSCOPE00000000000000",
+            tokens_used=20,
+            nodes_traversed=6,
+            regenerate_attempts=0,
+        )
+
+    monkeypatch.setattr("memex.webui.app.answer_query", _fake)
+
+
 # ----- Tests -----
 
 
@@ -138,6 +158,19 @@ def test_ask_renders_refusal(client: TestClient, fake_refused: None) -> None:
     assert "vault doesn&#39;t contain" in r.text or "vault doesn't contain" in r.text
     # P4.1: no Sources section on a refusal (wikilinks default to []).
     assert "Sources" not in r.text
+    # #256: no scope note when retrieval wasn't re-scoped (artifact_scope_doc_ids=[]).
+    assert "Scoped to" not in r.text
+
+
+def test_ask_refusal_surfaces_artifact_scope(client: TestClient, fake_scoped_refusal: None) -> None:
+    """#256 observability: a refusal caused by a re-scope shows which document(s)
+    the query was narrowed to, so the narrowing is auditable."""
+    r = client.post("/ask", data={"question": "Quelle plage VLAN dans le diagramme de coupe-feu ?"})
+    assert r.status_code == 200
+    assert "Refused" in r.text
+    assert "Scoped to the documents you named" in r.text
+    assert "ccd09479-cr350-network-diagrams" in r.text
+    assert "499c900d-cr350-cours-6" in r.text
 
 
 def test_ask_rejects_empty_question(client: TestClient, fake_answered: None) -> None:

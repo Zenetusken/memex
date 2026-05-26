@@ -49,6 +49,8 @@ Plus the **audit footer** (`.ans-footer`): monospace `correlation_id` + `.tabula
 
 All styling is **semantic classes in `style.css`** (`.ans-*`, `.claim-*`, `.conf-*`), NOT Tailwind utilities — so the answer component stays cohesive and adds nothing to the vendored `tailwind.css` subset. Eyebrow labels (`.ans-eyebrow`) mirror `.toc-sidebar-title` / `.pane-header`. Tests in `test_webui.py` assert on the rendered TEXT (summary, claim, "Sources", wikilink href, "Refused", correlation_id) — keep those strings present when restyling.
 
+**Artifact-scope note (`.ans-scope`, #256, 2026-05-26).** When `response.artifact_scope_doc_ids` is non-empty (the query NAMED an artifact, so retrieval was re-scoped to its doc(s) — see `agents/artifact_scope.py`), a quiet `.ans-scope` line renders just above `.ans-footer` on BOTH the answered and refused paths: "Scoped to the document(s) you named:" + the doc-ids as monospace `.chunk-id` chips. It's most valuable on a REFUSAL — it explains WHY the pool was narrowed (e.g. scoped to the firewall doc, which lacks the asked-about VLAN range). Empty `artifact_scope_doc_ids` → no note (the full-corpus path). Pinned by `test_webui.py::test_ask_refusal_surfaces_artifact_scope` (+ the absence assertion in `test_ask_renders_refusal`).
+
 ## Adding a route
 
 1. Define it in `webui/app.py:create_app` (the factory pattern is what `test_webui.py` depends on).
