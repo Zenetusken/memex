@@ -1,9 +1,10 @@
 """MCP server — the public API of Memex (see IMPLEMENTATION-PLAN §1.9).
 
-Six tools, all backed by code that Phases 0–4 shipped:
+Seven tools, all backed by code that Phases 0–4 shipped:
 
 - `search(query, k)` → hybrid retrieval + rerank
 - `ask(question, scope_doc_ids?, scope_set?)` → the full answering agent (Langfuse-traced)
+- `summarize(doc_id, instruction?, detail?)` → structured grounded document summary
 - `get_document(doc_id)` → canonical markdown + frontmatter
 - `list_documents()` → every DocumentRef in the vault (no bodies)
 - `list_scope_sets()` → every saved document scope set (name + doc ids)
@@ -24,6 +25,7 @@ import structlog
 from mcp.server.fastmcp import FastMCP
 
 from memex.agents.answering import FinalResponse, answer_query
+from memex.agents.document_summarizer import SummaryDetail, summarize_document
 from memex.core.config import get_settings
 from memex.core.errors import ConfigurationError
 from memex.core.scope_sets import ScopeSet, get_scope_set, list_scope_sets
@@ -115,6 +117,25 @@ async def ask(
     return response
 
 
+async def summarize(
+    doc_id: str, instruction: str | None = None, detail: str = "standard"
+) -> FinalResponse:
+    """Summarise a document — a structured, GROUNDED summary (ADR-0008): an
+    `summary` abstract + cited `claims` (key-points) + per-section `sections`
+    digests, every point grounded to a source chunk (it refuses rather than
+    fabricate). `detail` tunes length: "brief" | "standard" | "detailed". Same
+    quality regardless of the server's co-residence mode.
+
+    Use this for "summarize this doc"; use `ask` for a specific question.
+    """
+    log = logger.bind(tool="summarize", doc_id=doc_id)
+    log.info("mcp.tool.start", detail=detail)
+    level: SummaryDetail = detail if detail in ("brief", "standard", "detailed") else "standard"
+    response = await summarize_document(doc_id, instruction=instruction, detail=level)
+    log.info("mcp.tool.done", answered=response.answered, correlation_id=response.correlation_id)
+    return response
+
+
 async def list_scope_sets_tool() -> list[ScopeSet]:
     """List every saved scope set in the vault — name, document ids, and
     timestamps. A scope set is a named document collection; pass its `name` to
@@ -199,6 +220,7 @@ async def get_graph_neighbors(doc_id: str, limit: int = 50) -> list[GraphNeighbo
 # above docstrings show up verbatim in MCP tool-introspection responses.
 server.tool()(search)
 server.tool()(ask)
+server.tool()(summarize)
 server.tool()(get_document)
 server.tool(name="list_documents")(list_documents_tool)
 server.tool(name="list_scope_sets")(list_scope_sets_tool)

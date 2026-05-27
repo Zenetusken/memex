@@ -40,6 +40,21 @@
   </div>
   <nav class="flex items-center gap-1.5 shrink-0">
     <a href="/graph/{{ document.ref.doc_id }}" class="btn-quiet">graph</a>
+    {# Summarize: a structured, grounded summary (ADR-0008). The detail select
+       tunes length; HTMX swaps the result into #summary-pane. No JS. #}
+    <form class="flex items-center gap-1.5"
+          hx-post="/documents/{{ document.ref.doc_id }}/summarize"
+          hx-target="#summary-pane"
+          hx-swap="innerHTML"
+          hx-disabled-elt="button[name='go']"
+          hx-indicator="#summary-loading">
+      <select name="detail" class="summary-detail" title="Summary length / detail">
+        <option value="brief">brief</option>
+        <option value="standard" selected>standard</option>
+        <option value="detailed">detailed</option>
+      </select>
+      <button name="go" type="submit" class="btn-quiet">summarize</button>
+    </form>
     <button type="button"
             class="btn-quiet"
             hx-get="/documents/{{ document.ref.doc_id }}/edit"
@@ -49,6 +64,9 @@
     </button>
   </nav>
 </header>
+
+<span id="summary-loading" class="htmx-indicator text-sm text-zinc-500">summarizing… (this can take a moment)</span>
+<section id="summary-pane" class="mb-5"></section>
 
 {% if has_source and source_kind == 'pdf' %}
 <div class="pane-split">

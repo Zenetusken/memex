@@ -108,14 +108,49 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
-def _pid_owns_script(pid: int, script: Path) -> bool:
-    """Verify the running PID's command line still references our script.
+def _argv_matches_daemon(args: list[bytes], script: Path, port: int | None) -> bool:
+    """Pure PID-identity check over a parsed `/proc/<pid>/cmdline` argv (NUL-split).
 
-    Guards against PID-reuse: the daemon may have crashed and a new
-    process may have inherited the PID. `stop()` reads `/proc/<pid>/cmdline`
-    (Linux) and confirms the script path appears there before signalling.
-    On non-Linux systems (or if /proc isn't mounted) we skip the check
-    and return True — preserving prior behaviour for those platforms.
+    Accepts EITHER signal:
+      (a) the serve script's name appears in argv, OR
+      (b) the exec'd vLLM signature — a `vllm` executable token + the `serve`
+          subcommand, and (when known) our `--port <PORT>` value.
+
+    (b) is load-bearing: `serve-vllm.sh` ends in `exec uv run … vllm serve …`,
+    which REPLACES the script's process image, so the tracked PID's cmdline shows
+    the `vllm serve` invocation and NOT the script path — (a) alone never matches a
+    properly-started daemon, which silently broke `stop()`/`restart()` (hence
+    `mode set` / `daemon restart`). The port pins identity so a recycled PID running
+    an *unrelated* `vllm serve` (or a second daemon on another port) is not signalled.
+    """
+    needle = str(script).encode("utf-8")
+    needle_basename = script.name.encode("utf-8")
+    if any(needle in a or needle_basename in a for a in args):
+        return True
+    has_vllm = any(a == b"vllm" or a.endswith(b"/vllm") for a in args)
+    has_serve = any(a == b"serve" for a in args)
+    if has_vllm and has_serve:
+        return port is None or any(a == str(port).encode("utf-8") for a in args)
+    return False
+
+
+def _daemon_port(settings: MemexSettings) -> int | None:
+    """The orchestrator port parsed from `inference.base_url` — pins PID identity."""
+    from urllib.parse import urlsplit
+
+    try:
+        return urlsplit(str(settings.inference.base_url)).port
+    except ValueError:
+        return None
+
+
+def _pid_is_our_daemon(pid: int, script: Path, port: int | None) -> bool:
+    """Verify the running PID is our vLLM daemon before signalling — a PID-reuse
+    guard (default Linux `pid_max=32768` recycles fast on long-uptime hosts).
+
+    Reads `/proc/<pid>/cmdline` (Linux) and delegates to `_argv_matches_daemon`.
+    On a host without procfs we skip the check (return True), preserving prior
+    behaviour for those platforms.
     """
     cmdline_path = Path(f"/proc/{pid}/cmdline")
     if not cmdline_path.exists():
@@ -124,11 +159,7 @@ def _pid_owns_script(pid: int, script: Path) -> bool:
         raw = cmdline_path.read_bytes()
     except OSError:
         return True
-    # /proc/PID/cmdline is NUL-separated argv. Look for the script name.
-    args = raw.split(b"\x00")
-    needle = str(script).encode("utf-8")
-    needle_basename = script.name.encode("utf-8")
-    return any(needle in a or needle_basename in a for a in args)
+    return _argv_matches_daemon(raw.split(b"\x00"), script, port)
 
 
 def _resolve_script(settings: MemexSettings) -> Path:
@@ -335,7 +366,7 @@ def stop(settings: MemexSettings) -> DaemonStatus:
     # PID has been recycled (common with default Linux pid_max=32768
     # on long-uptime hosts) would have us SIGKILL an unrelated process.
     script = _resolve_script(settings)
-    if not _pid_owns_script(pid, script):
+    if not _pid_is_our_daemon(pid, script, _daemon_port(settings)):
         log.warning(
             "daemon.stop.pid_reused_clearing_file",
             pid=pid,

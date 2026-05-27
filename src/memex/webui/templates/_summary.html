@@ -1,0 +1,79 @@
+{# Structured document summary (ADR-0008). HTMX swap target of the Summarize
+   action on document.html. Reuses the answer panel's .ans-/.claim-/.conf- zones
+   for cohesion; adds a collapsible per-section breakdown. #}
+{% if error %}
+<div class="ans-flash ans-flash-error" role="alert">
+  <p class="ans-eyebrow">Error</p>
+  <p class="ans-flash-msg">{{ error }}</p>
+</div>
+{% elif response.answered %}
+<article class="ans">
+  <section>
+    <p class="ans-eyebrow">Summary</p>
+    <p class="ans-answer">{{ response.summary }}</p>
+  </section>
+
+  {% if response.claims %}
+  <section>
+    <p class="ans-eyebrow">Key points <span class="count">· {{ response.claims|length }}</span></p>
+    <ul class="claim-list">
+      {% for claim in response.claims %}
+      <li class="claim">
+        <p class="claim-text">{{ claim.claim }}</p>
+        <p class="claim-meta">
+          <span class="conf conf-{{ claim.confidence }}">{{ claim.confidence }} confidence</span>
+          <span class="claim-src">source</span>
+          <code class="chunk-id">{{ claim.source_chunk_id }}</code>
+        </p>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  {% if response.sections %}
+  <details class="summary-sections">
+    <summary class="summary-sections-toggle">By section <span class="count">· {{ response.sections|length }}</span></summary>
+    <ul class="summary-section-list">
+      {% for s in response.sections %}
+      <li class="summary-section">
+        <p class="summary-section-title">{{ s.section_title }}</p>
+        <p class="summary-section-digest">{{ s.digest }}</p>
+        {% if s.key_points %}
+        <ul class="summary-section-points">
+          {% for kp in s.key_points %}
+          <li><span>{{ kp.claim }}</span> <code class="chunk-id">{{ kp.source_chunk_id }}</code></li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+
+  {% if response.wikilinks %}
+  <section>
+    <p class="ans-eyebrow">Sources</p>
+    <ul class="ans-sources">
+      {% for wikilink in response.wikilinks %}
+      <li>{{ wikilink | render_wikilink }}</li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+</article>
+{% else %}
+<div class="ans-flash ans-flash-refused" role="status">
+  <p class="ans-eyebrow">No summary</p>
+  <p class="ans-flash-msg">{{ response.refusal_reason }}</p>
+</div>
+{% endif %}
+
+{% if response %}
+<p class="ans-footer">
+  <span>correlation_id <code>{{ response.correlation_id }}</code></span>
+  <span class="tabular">tokens {{ response.tokens_used }}</span>
+  <span class="tabular">sections {{ response.sections|length }}</span>
+</p>
+{% endif %}

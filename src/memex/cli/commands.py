@@ -402,54 +402,43 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     def summarize(
-        doc: list[str] = _Argument(  # noqa: B008
-            ..., help="Document id(s) to summarise (whole-document synthesis)."
-        ),
+        doc_id: str = _Argument(..., help="Document id to summarise."),
         instruction: str = _Option("", "--instruction", "-i", help="Optionally focus the summary."),
-        max_tokens: int = _Option(4096, "--max-tokens", help="Max output tokens for the summary."),
-        max_input_chars: int = _Option(
-            0,
-            "--max-input-chars",
-            help="Input char budget; 0 = derive from the active mode's context window.",
+        detail: str = _Option(
+            "standard", "--detail", help="Length/detail: brief | standard | detailed."
+        ),
+        max_tokens: int = _Option(
+            2048, "--max-tokens", help="Max output tokens per map/reduce call."
+        ),
+        token_budget: int = _Option(
+            120_000,
+            "--token-budget",
+            help="Total token budget across the whole map-reduce (a long doc stops early).",
         ),
     ) -> None:
-        """Summarise whole document(s) in one long-context pass (the `full` mode path).
+        """Summarise a document — a structured, GROUNDED summary (ADR-0008).
 
-        Feeds the FULL document text into the orchestrator's context window
-        (raise it first with `memex mode set full`) and returns a long-form
-        summary — NOT top-k retrieval. Free-form output for now; the
-        structured/grounded version is forthcoming (ADR-0007).
+        Doc-type-aware map-reduce over the document's sections: an abstract +
+        cited key-points + per-section digests, every point grounded to a source
+        chunk (refuses rather than fabricate). `--detail` tunes length
+        (brief/standard/detailed). Quality is identical in `fast` or `full` mode.
         """
+        valid = ("brief", "standard", "detailed")
+        if detail not in valid:
+            err.print(f"[red]Unknown --detail {detail!r}.[/red] Choose: {', '.join(valid)}")
+            raise typer.Exit(code=2)
 
         async def _run():
             bootstrap()
-            from memex.agents.synthesize import SourceDoc, synthesize_documents
-            from memex.core.config import get_settings
-            from memex.core.resources import resolve_profile
-            from memex.vault.store import read_document
+            from memex.agents.document_summarizer import summarize_document
 
-            s = get_settings()
-            sources: list[SourceDoc] = []
-            for d in doc:
-                vdoc = await read_document(s.vault_path, d)
-                sources.append(
-                    SourceDoc(doc_id=d, title=vdoc.frontmatter.title or d, text=vdoc.body)
-                )
-            budget = max_input_chars
-            if budget <= 0:
-                profile = resolve_profile(
-                    s.models.co_residence_mode,
-                    embedder_device=s.models.embedder_device,
-                    reranker_device=s.models.reranker_device,
-                )
-                window = profile.orchestrator_max_model_len or 6144
-                # ~3.3 chars/token, conservative; leave room for output + scaffolding.
-                budget = max(4000, int((window - max_tokens - 1024) * 3.3))
-            return await synthesize_documents(
-                sources,
+            # `detail` is narrowed to the SummaryDetail literal by the guard above.
+            return await summarize_document(
+                doc_id,
                 instruction=instruction or None,
-                max_input_chars=budget,
+                detail=detail,
                 max_output_tokens=max_tokens,
+                token_budget=token_budget,
             )
 
         _print(asyncio.run(_run()))

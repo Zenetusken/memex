@@ -713,4 +713,32 @@ html { scroll-behavior: smooth; }
   color: rgb(113 113 122);                 /* zinc-500 */
 }
 .mode-howto { margin-top: 1.25rem; font-size: 0.8125rem; color: rgb(113 113 122); line-height: 1.5; }
-.mode-howto code { color: rgb(161 161 170); }  /* zinc-400 */  /* blue-600 */
+.mode-howto code { color: rgb(161 161 170); }  /* zinc-400 */
+
+/* ── Document summary (ADR-0008) — the Summarize action + per-section panel ── */
+.summary-detail {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.35rem;
+  color: rgb(212 212 216);                 /* zinc-300 */
+  background: rgb(24 24 27);               /* zinc-900 */
+  border: 1px solid rgb(63 63 70);         /* zinc-700 */
+  border-radius: 0.25rem;
+}
+.summary-detail:focus { outline: none; border-color: rgb(37 99 235); }  /* blue-600 */
+.summary-sections { margin-top: 0.5rem; border-top: 1px solid rgb(39 39 42); padding-top: 0.6rem; }
+.summary-sections-toggle {
+  cursor: pointer;
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgb(113 113 122);                 /* zinc-500 — mirrors .ans-eyebrow */
+  user-select: none;
+}
+.summary-sections-toggle:hover { color: rgb(212 212 216); }   /* zinc-300 */
+.summary-section-list { list-style: none; margin: 0.6rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.7rem; }
+.summary-section { border-left: 1px solid rgb(39 39 42); padding-left: 0.75rem; }   /* zinc-800 */
+.summary-section-title { font-size: 0.8125rem; font-weight: 600; color: rgb(212 212 216); margin: 0; }  /* zinc-300 */
+.summary-section-digest { font-size: 0.8125rem; color: rgb(161 161 170); margin: 0.2rem 0 0.35rem; }  /* zinc-400 */
+.summary-section-points { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.25rem; }
+.summary-section-points li { font-size: 0.78rem; color: rgb(161 161 170); display: flex; gap: 0.5rem; align-items: baseline; }
+.summary-section-points .chunk-id { color: rgb(82 82 91); font-size: 0.6875rem; white-space: nowrap; }  /* zinc-600 */  /* blue-600 */

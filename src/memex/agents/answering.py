@@ -192,6 +192,36 @@ class DraftAnswer(BaseModel):
     )
 
 
+class SectionSummary(BaseModel):
+    """A grounded digest of one heading-section — the MAP step's output and an
+    element of a document summary (ADR-0008). `key_points` are bounded
+    `CitedClaim`s grounded against the section's own chunks; `digest` is a
+    faithful synthesis (the no-hallucination gate is on the cited points)."""
+
+    section_title: str = Field(
+        description="The section's heading (or the document title for a flat doc).",
+        max_length=200,
+    )
+    digest: str = Field(
+        description="A faithful 1-3 sentence synthesis of the section.",
+        max_length=600,
+    )
+    key_points: list[CitedClaim] = Field(
+        description="The section's key points, each cited to a chunk in this section.",
+        max_length=8,
+    )
+
+
+class DocAbstract(BaseModel):
+    """The REDUCE step's output: a whole-document overview synthesized from the
+    (already grounded) section digests (ADR-0008)."""
+
+    abstract: str = Field(
+        description="A 2-4 sentence overview of the entire document.",
+        max_length=800,
+    )
+
+
 class SufficiencyAssessment(BaseModel):
     """Did retrieval surface enough material to answer the query?"""
 
@@ -275,6 +305,13 @@ class FinalResponse(BaseModel):
     # used_chunks (NOT LLM-emitted). Empty on a refusal (a refusal cited
     # nothing). Surfaces a navigable "Sources" list to MCP/webui/CLI.
     wikilinks: list[str] = []
+
+    # Per-section grounded digests for a document SUMMARY (ADR-0008,
+    # `agents/document_summarizer.py`). Empty `[]` on the answer path (the
+    # common case) — only `summarize_document` populates it. HARD-gate-neutral:
+    # each section's `key_points` are grounded `CitedClaim`s, surfaced for the
+    # webui's collapsible per-section view.
+    sections: list[SectionSummary] = []
 
     # Documents retrieval was deterministically RE-SCOPED to because the query
     # named a specific artifact (#256). Empty = the full-corpus path (the common

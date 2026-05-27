@@ -64,6 +64,31 @@ The Notebook-LM-style picker: the Ask page lets the user tick documents to scope
 3. If it's an HTMX target, name the partial `_name.html` and **omit** `{% extends %}`.
 4. Add a test in `tests/integration/test_webui.py` using `TestClient(create_app())`, or unit-test pure render helpers in `tests/unit/test_webui_rendering.py`.
 
+## Summarize action (`document.html` + `_summary.html`, ADR-0008, 2026-05-27)
+
+The document view has a **Summarize** control in the header: a `detail` `<select>`
+(brief/standard/detailed) + a button in one `<form>` that `hx-post`s to
+`POST /documents/{id}/summarize` (`hx-target="#summary-pane"`, `hx-swap="innerHTML"`,
+`hx-indicator="#summary-loading"`, `hx-disabled-elt="button[name='go']"`). The route
+reads the `detail` Form field, calls `agents.document_summarizer.summarize_document`
+(NOT the agent — summaries are their own path; see `src/memex/CLAUDE.md`), and renders
+the partial `_summary.html`; a `MemexError` becomes a 503 `.ans-flash-error` banner.
+No JS (native `<select>` + HTMX). The summary can take a moment (sequential
+per-section map-reduce) — the `#summary-loading` `.htmx-indicator` covers it.
+
+`_summary.html` **reuses the answer panel's zones** for cohesion: the abstract in
+`.ans-answer` (the blue left-rule "Summary"), the grounded key-points as `.claim`
+cards with `.conf-{high,medium,low}` chips (colour **and** label, WCAG 1.4.1) + the
+monospace source `.chunk-id`, the Sources via the `render_wikilink` filter, and the
+`.ans-footer` audit line (correlation_id + token/section counts). It adds a
+collapsible **`.summary-sections`** `<details>` ("By section · N") whose
+`.summary-section` items each show the section title, digest, and per-section cited
+points — semantic `.summary-*` CSS in `style.css` (zinc + the one action-blue,
+mirrors `.ans-*`/`.toc-*`), NOT new Tailwind. A zero-grounded summary renders the
+`.ans-flash-refused` "No summary" partial (the HARD gate, surfaced). Chrome-extension
+e2e'd (the button → a grounded render). Tests in `test_webui.py` assert the rendered
+zones; keep "Summary"/"Key points"/"Sources"/refusal strings present when restyling.
+
 ## Two inline-edit flows (both HTMX view/edit toggles)
 
 - **Body**: the `edit` button swaps `#md-pane` (`/documents/{id}/edit` → form; `/documents/{id}/review` POST writes through `vault.write_document` with optimistic-CAS conflict handling; `/documents/{id}/body` is the view partial).

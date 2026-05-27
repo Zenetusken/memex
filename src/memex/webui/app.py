@@ -51,6 +51,7 @@ from fastapi.templating import Jinja2Templates
 from jinja2 import Environment, FileSystemLoader
 
 from memex.agents.answering import answer_query
+from memex.agents.document_summarizer import summarize_document
 from memex.core.config import get_settings
 from memex.core.errors import ScopeSetError, StaleDocumentError, VaultIntegrityError
 from memex.core.manifest import update_manifest
@@ -431,6 +432,37 @@ def create_app() -> FastAPI:
                 "has_source": has_source,
                 "source_kind": source_kind,
             },
+        )
+
+    @app.post("/documents/{doc_id}/summarize", response_class=HTMLResponse)
+    async def document_summarize(
+        request: Request,
+        doc_id: str,
+        detail: str = Form("standard"),
+    ) -> HTMLResponse:
+        """Generate a structured, grounded summary of the document (ADR-0008) and
+        render the `_summary.html` partial (HTMX swap target on the doc view).
+        `detail` (brief/standard/detailed) tunes length; quality is the same in
+        any co-residence mode. A MemexError renders as a banner, not a 500."""
+        from memex.core.errors import MemexError
+
+        doc_id = _validate_doc_id(doc_id)
+        level = detail if detail in ("brief", "standard", "detailed") else "standard"
+        try:
+            response = await summarize_document(doc_id, detail=level)
+        except MemexError as e:
+            logger.warning("summarize.failed", error_type=type(e).__name__, error=str(e)[:200])
+            return templates.TemplateResponse(
+                request,
+                "_summary.html",
+                {
+                    "response": None,
+                    "error": f"Couldn't summarise: {type(e).__name__}. {str(e)[:160]}",
+                },
+                status_code=503,
+            )
+        return templates.TemplateResponse(
+            request, "_summary.html", {"response": response, "error": None}
         )
 
     @app.get("/documents/{doc_id}/source")

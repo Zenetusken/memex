@@ -274,6 +274,45 @@ class FTSStore:
 
         return await asyncio.to_thread(_read)
 
+    async def chunks_for_document(self, doc_id: str) -> list[Chunk]:
+        """Every chunk of a document, in READING ORDER (char_start ascending).
+
+        The whole-document primitive for summarization (ADR-0008): unlike
+        `search`, there is NO query — it returns the FULL ordered set so a
+        map-reduce summarizer can walk the document section by section
+        (grouping by `heading_path`). Joins `chunks_fts` (text) with
+        `chunks_meta` (offsets + heading_path), like `search` but unfiltered.
+        """
+
+        def _read() -> list[Chunk]:
+            rows = self._db.execute(
+                """
+                SELECT
+                  f.chunk_id, f.document_id, f.document_title, f.text,
+                  m.page, m.char_start, m.char_end, m.heading_path
+                FROM chunks_fts f
+                JOIN chunks_meta m ON m.chunk_id = f.chunk_id
+                WHERE f.document_id = ?
+                ORDER BY m.char_start
+                """,
+                (doc_id,),
+            ).fetchall()
+            return [
+                Chunk(
+                    chunk_id=r[0],
+                    document_id=r[1],
+                    document_title=r[2],
+                    text=r[3],
+                    page=r[4],
+                    char_start=r[5],
+                    char_end=r[6],
+                    heading_path=r[7].split(" > ") if r[7] else [],
+                )
+                for r in rows
+            ]
+
+        return await asyncio.to_thread(_read)
+
     async def search(self, query: str, *, k: int) -> list[Chunk]:
         """BM25 phrase-match search over chunks_fts; returns top `k`
         results joined with chunks_meta. The query is treated as a
