@@ -111,9 +111,10 @@ dynamic VRAM manager is delivered by **replacing the resolver's body** — compu
 the profile from live free-VRAM + current load (+ card tier) — leaving every
 caller (registry, bootstrap, daemon, CLI, webui) untouched. A user-triggered
 *live hot-switch* (quiesce answering → swap retrieval device via
-`registry.unload` → restart the orchestrator via the daemon → poll readiness) is
-the next increment built on this same seam; the auto-deciding policy is the one
-after.
+`registry.unload` → restart the orchestrator via the daemon → poll readiness)
+**shipped 2026-05-27** (webui `POST /resources/mode` + `_apply_mode`; Chrome-e2e'd:
+Apply `fast` restarted the daemon 24,576→6,144 live) on this same seam; the
+auto-deciding policy is the increment after.
 
 ## Expanding the mode system
 
@@ -137,11 +138,14 @@ lives behind it:
    dtype, orchestrator quant tier, embedder device independent of reranker) are
    added to the model + set per mode + consumed where relevant. Additive: an
    unset field defaults to today's behaviour.
-4. **Runtime transitions.** A coordinator that applies a profile *live* (the
-   hot-switch) is a vertical deepening of "apply a profile," reusing
-   `registry.unload` (per-model `asyncio.Lock` makes use-vs-unload safe) +
-   `daemon.restart`. It needs a process-wide quiesce of answering; it does NOT
-   change the resolver or the profile shape.
+4. **Runtime transitions (SHIPPED 2026-05-27).** The coordinator that applies a
+   profile *live* (the hot-switch) is the webui's `_apply_mode` / `POST
+   /resources/mode`: it mutates `settings.models.co_residence_mode` (the registry
+   shares that object), `registry.unload`s the embedder + reranker (per-model
+   `asyncio.Lock` makes use-vs-unload safe — the quiesce), and `daemon.restart`s the
+   orchestrator. It did NOT change the resolver or the profile shape — a pure
+   vertical deepening of "apply a profile." (Adds the documented `webui → daemon`
+   + `webui → models.registry` edges.)
 
 ### Horizontally — add new modes / capabilities / resource axes
 

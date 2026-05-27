@@ -4,49 +4,9 @@
 <h1 class="text-2xl font-semibold mb-2">Resource mode</h1>
 <p class="text-zinc-400 text-sm mb-6">
   How the GPU is shared between the orchestrator's context window and on-GPU
-  retrieval (ADR-0007). The active mode is fixed for this session; switching is a
-  CLI operation plus a restart.
+  retrieval (ADR-0007). <b>Apply</b> a mode to switch live — it swaps the retrieval
+  device and restarts the orchestrator at the mode's util + context window.
 </p>
 
-<section class="mode-active">
-  <span class="mode-eyebrow">Active mode</span>
-  <div class="mode-active-head">
-    <span class="mode-active-name">{{ active.label }}</span>
-    <code class="mode-active-id">{{ active.mode }}</code>
-  </div>
-  <p class="mode-active-summary">{{ active.summary }}</p>
-  <dl class="mode-facts">
-    <div class="mode-fact"><dt>Retrieval</dt><dd>embedder <b>{{ active.embedder_device }}</b> · reranker <b>{{ active.reranker_device }}</b></dd></div>
-    <div class="mode-fact"><dt>Context window</dt><dd>{{ active.context_window }}</dd></div>
-    <div class="mode-fact"><dt>Latency</dt><dd>{{ active.expected_latency }}</dd></div>
-    {% if active.orchestrator_gpu_fraction is not none %}
-    <div class="mode-fact"><dt>Orchestrator</dt><dd>util {{ active.orchestrator_gpu_fraction }} · max-model-len {{ active.orchestrator_max_model_len }}</dd></div>
-    {% endif %}
-  </dl>
-</section>
-
-<span class="mode-eyebrow mode-eyebrow-block">All modes</span>
-<table class="mode-table">
-  <thead>
-    <tr><th>Mode</th><th>Retrieval</th><th>Context</th><th>Latency</th><th>Switch</th></tr>
-  </thead>
-  <tbody>
-    {% for m in modes %}
-    <tr class="{% if m.mode == active.mode %}mode-row-active{% endif %}">
-      <td><span class="mode-table-name">{{ m.label }}</span> <code class="mode-table-id">{{ m.mode }}</code></td>
-      <td>emb {{ m.embedder_device }} · rr {{ m.reranker_device }}</td>
-      <td>{{ m.context_window }}</td>
-      <td>{{ m.expected_latency }}</td>
-      <td><code class="mode-switch-cmd">memex mode set {{ m.mode }}</code></td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-
-<p class="mode-howto">
-  Switching needs a restart: <code>memex mode set &lt;mode&gt;</code> applies the
-  orchestrator posture and prints the env line
-  (<code>MEMEX_MODELS__CO_RESIDENCE_MODE</code>) to set + restart the web UI for
-  the retrieval-device change. A live in-UI switch is forthcoming.
-</p>
+{% include "_resources.html" %}
 {% endblock %}

@@ -723,8 +723,11 @@ def test_resources_page_compares_all_modes(client: TestClient) -> None:
     r = client.get("/resources")
     assert r.status_code == 200
     assert "Active mode" in r.text
-    for cmd in ("memex mode set fast", "memex mode set full", "memex mode set gpu_only"):
-        assert cmd in r.text
+    for mode_id in ("fast", "full", "gpu_only"):
+        assert mode_id in r.text  # every mode listed
+    # the live per-mode Apply switch is wired (replaced the old `memex mode set` cmd)
+    assert 'hx-post="/resources/mode"' in r.text
+    assert "mode-apply" in r.text
 
 
 def test_resources_page_highlights_active_curated_mode(
@@ -744,3 +747,73 @@ def test_resources_page_highlights_active_curated_mode(
         assert "Full context" in client.get("/").text  # chip label
     finally:
         set_settings(None)
+
+
+# ── live mode hot-switch (ADR-0007) — POST /resources/mode ──
+
+
+class _FakeState:
+    def __init__(self, *, alive: bool = True, reachable: bool = True) -> None:
+        self.alive = alive
+        self.reachable = reachable
+
+
+class _FakeRegistry:
+    """Records which models were unloaded (the app-side device swap)."""
+
+    def __init__(self) -> None:
+        self.unloaded: list[str] = []
+
+    async def unload(self, name: str) -> None:
+        self.unloaded.append(name)
+
+
+def _fake_daemon(monkeypatch: pytest.MonkeyPatch, restarts: list[dict[str, Any]]) -> _FakeRegistry:
+    reg = _FakeRegistry()
+
+    async def _status(_s: Any) -> _FakeState:
+        return _FakeState(alive=True)
+
+    async def _restart(_s: Any, *, gpu_fraction: Any = None, max_model_len: Any = None) -> _FakeState:
+        restarts.append({"gpu_fraction": gpu_fraction, "max_model_len": max_model_len})
+        return _FakeState(reachable=True)
+
+    monkeypatch.setattr("memex.webui.app.daemon_status", _status)
+    monkeypatch.setattr("memex.webui.app.daemon_restart", _restart)
+    monkeypatch.setattr("memex.webui.app.get_registry", lambda: reg)
+    return reg
+
+
+def test_resources_mode_hot_switch_restarts_and_swaps(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch, client: TestClient
+) -> None:
+    restarts: list[dict[str, Any]] = []
+    reg = _fake_daemon(monkeypatch, restarts)
+
+    r = client.post("/resources/mode", data={"mode": "full"})
+
+    assert r.status_code == 200
+    assert "Switched to Full context" in r.text  # flash + new active label rendered
+    assert settings.models.co_residence_mode == "full"  # settings mutated (registry shares it)
+    assert reg.unloaded == ["embedder", "reranker"]  # retrieval models dropped for reload
+    assert restarts == [{"gpu_fraction": 0.8, "max_model_len": 24576}]  # full posture applied
+
+
+def test_resources_mode_manual_skips_daemon_restart(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch, client: TestClient
+) -> None:
+    restarts: list[dict[str, Any]] = []
+    reg = _fake_daemon(monkeypatch, restarts)
+
+    r = client.post("/resources/mode", data={"mode": "manual"})
+
+    assert r.status_code == 200
+    assert restarts == []  # manual prescribes no orchestrator posture → no restart
+    assert reg.unloaded == ["embedder", "reranker"]  # but the device swap still happens
+    assert settings.models.co_residence_mode == "manual"
+
+
+def test_resources_mode_unknown_flashes_error(client: TestClient) -> None:
+    r = client.post("/resources/mode", data={"mode": "turbo"})
+    assert r.status_code == 400
+    assert "Unknown mode" in r.text

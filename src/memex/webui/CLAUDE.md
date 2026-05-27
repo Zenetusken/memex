@@ -89,6 +89,36 @@ mirrors `.ans-*`/`.toc-*`), NOT new Tailwind. A zero-grounded summary renders th
 e2e'd (the button → a grounded render). Tests in `test_webui.py` assert the rendered
 zones; keep "Summary"/"Key points"/"Sources"/refusal strings present when restyling.
 
+## Live co-residence mode hot-switch (`/resources` + `_resources.html`, ADR-0007, 2026-05-27)
+
+`/resources` shows the active co-residence mode + a comparison table; each non-active
+row has an **Apply** button (`POST /resources/mode`, `hx-target="#resources-pane"`,
+`hx-swap="outerHTML"`, `hx-indicator="#mode-loading"`, `hx-disabled-elt="this"`) that
+switches the mode **live** — the realization of ADR-0007's runtime transition.
+`_apply_mode(mode)` (in `app.py`) does both halves: **(1) app-side** — flips
+`get_settings().models.co_residence_mode` (the registry shares that exact
+`ModelSettings` object — see `src/memex/CLAUDE.md`) and `await registry.unload(
+"embedder"/"reranker")` so the next retrieval reloads on the new device (the unload
+takes the per-model lock, so an in-flight `/ask` finishes first — the quiesce);
+**(2) orchestrator-side** — when the mode prescribes a posture, `daemon.restart(
+gpu_fraction, max_model_len)` (blocks ~40 s; the `#mode-loading` indicator covers it).
+
+This adds two **documented boundary exceptions**: `webui → daemon` and `webui →
+models.registry` (the hot-switch inherently orchestrates the daemon + the registry;
+imported at module top so `test_webui.py` monkeypatches `memex.webui.app.{daemon_status,
+daemon_restart,get_registry}`). Switches are serialized by a per-app `asyncio.Lock`.
+A daemon failure (`MemexError`) → a 503 `.mode-flash-error`; an unknown mode → 400.
+
+The route returns the `_resources.html` partial (the swap target `#resources-pane`)
+reflecting the new active profile + a `.mode-flash`. The **header chip** (`base.html`,
+a static `active_mode_label` jinja global) is kept current two ways: `env.globals` is
+updated (so the next full page load is right) AND the partial emits an
+**`hx-swap-oob`** `#mode-chip-v` fragment (gated on an `oob_chip` flag — POST only, so
+the GET full page has no duplicate id) so the chip updates live without a reload.
+Validated live (Chrome e2e): Apply `fast` → the daemon restarted 24,576→6,144, the
+panel + chip flipped to Fast. Pinned by `test_webui.py` (restart args + device unload +
+manual-skips-restart + unknown-mode error).
+
 ## Two inline-edit flows (both HTMX view/edit toggles)
 
 - **Body**: the `edit` button swaps `#md-pane` (`/documents/{id}/edit` → form; `/documents/{id}/review` POST writes through `vault.write_document` with optimistic-CAS conflict handling; `/documents/{id}/body` is the view partial).

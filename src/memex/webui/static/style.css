@@ -715,6 +715,29 @@ html { scroll-behavior: smooth; }
 .mode-howto { margin-top: 1.25rem; font-size: 0.8125rem; color: rgb(113 113 122); line-height: 1.5; }
 .mode-howto code { color: rgb(161 161 170); }  /* zinc-400 */
 
+/* ── Live mode hot-switch (ADR-0007) — per-mode Apply + flash + indicator ── */
+.mode-eyebrow-row { display: flex; align-items: baseline; gap: 0.75rem; flex-wrap: wrap; }
+.mode-loading { font-size: 0.75rem; color: rgb(113 113 122); }  /* zinc-500 */
+.mode-apply {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.6rem;
+  color: rgb(212 212 216);                 /* zinc-300 */
+  background: rgb(24 24 27);               /* zinc-900 */
+  border: 1px solid rgb(63 63 70);         /* zinc-700 */
+  border-radius: 0.25rem;
+  cursor: pointer;
+}
+.mode-apply:hover { border-color: rgb(37 99 235); color: rgb(96 165 250); }  /* blue */
+.mode-apply:disabled { opacity: 0.5; cursor: progress; }
+.mode-active-tag {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgb(82 82 91);                     /* zinc-600 */
+}
+.mode-flash { margin-bottom: 1rem; font-size: 0.8125rem; color: rgb(96 165 250); }  /* blue-400 */
+.mode-flash-error { color: rgb(248 113 113); }  /* red-400 */
+
 /* ── Document summary (ADR-0008) — the Summarize action + per-section panel ── */
 .summary-detail {
   font-size: 0.75rem;

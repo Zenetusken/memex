@@ -1,0 +1,68 @@
+{# Resource-mode panel (ADR-0007). HTMX swap target of the live per-mode Apply
+   switch: POST /resources/mode returns this partial (outerHTML-swapping
+   #resources-pane) with the new active profile + a flash. #}
+{# Out-of-band: refresh the header mode chip live (only on a POST switch, so the
+   GET full page has no duplicate id). #}
+{% if oob_chip %}<span class="mode-chip-v" id="mode-chip-v" hx-swap-oob="true">{{ active.label }}</span>{% endif %}
+<div id="resources-pane">
+  {% if flash %}
+  <p class="mode-flash{% if flash_error %} mode-flash-error{% endif %}" role="status">{{ flash }}</p>
+  {% endif %}
+
+  <section class="mode-active">
+    <span class="mode-eyebrow">Active mode</span>
+    <div class="mode-active-head">
+      <span class="mode-active-name">{{ active.label }}</span>
+      <code class="mode-active-id">{{ active.mode }}</code>
+    </div>
+    <p class="mode-active-summary">{{ active.summary }}</p>
+    <dl class="mode-facts">
+      <div class="mode-fact"><dt>Retrieval</dt><dd>embedder <b>{{ active.embedder_device }}</b> · reranker <b>{{ active.reranker_device }}</b></dd></div>
+      <div class="mode-fact"><dt>Context window</dt><dd>{{ active.context_window }}</dd></div>
+      <div class="mode-fact"><dt>Latency</dt><dd>{{ active.expected_latency }}</dd></div>
+      {% if active.orchestrator_gpu_fraction is not none %}
+      <div class="mode-fact"><dt>Orchestrator</dt><dd>util {{ active.orchestrator_gpu_fraction }} · max-model-len {{ active.orchestrator_max_model_len }}</dd></div>
+      {% endif %}
+    </dl>
+  </section>
+
+  <div class="mode-eyebrow-row">
+    <span class="mode-eyebrow mode-eyebrow-block">All modes</span>
+    <span id="mode-loading" class="htmx-indicator mode-loading">switching… (restarting the orchestrator can take ~40s)</span>
+  </div>
+  <table class="mode-table">
+    <thead>
+      <tr><th>Mode</th><th>Retrieval</th><th>Context</th><th>Latency</th><th>Switch</th></tr>
+    </thead>
+    <tbody>
+      {% for m in modes %}
+      <tr class="{% if m.mode == active.mode %}mode-row-active{% endif %}">
+        <td><span class="mode-table-name">{{ m.label }}</span> <code class="mode-table-id">{{ m.mode }}</code></td>
+        <td>emb {{ m.embedder_device }} · rr {{ m.reranker_device }}</td>
+        <td>{{ m.context_window }}</td>
+        <td>{{ m.expected_latency }}</td>
+        <td>
+          {% if m.mode == active.mode %}
+          <span class="mode-active-tag">active</span>
+          {% else %}
+          <button type="button" class="mode-apply"
+                  hx-post="/resources/mode"
+                  hx-vals='{"mode": "{{ m.mode }}"}'
+                  hx-target="#resources-pane"
+                  hx-swap="outerHTML"
+                  hx-disabled-elt="this"
+                  hx-indicator="#mode-loading">apply</button>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <p class="mode-howto">
+    Applying a mode swaps the retrieval device (embedder/reranker reload on the new
+    device) and, when the mode prescribes a posture, restarts the daemon-managed
+    orchestrator at its util + context window. To make a mode durable across
+    restarts, also set <code>MEMEX_MODELS__CO_RESIDENCE_MODE</code>.
+  </p>
+</div>

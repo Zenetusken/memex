@@ -36,6 +36,7 @@ Routes:
 
 from __future__ import annotations
 
+import asyncio
 import mimetypes
 import re
 from collections.abc import Callable
@@ -53,17 +54,25 @@ from jinja2 import Environment, FileSystemLoader
 from memex.agents.answering import answer_query
 from memex.agents.document_summarizer import summarize_document
 from memex.core.config import get_settings
-from memex.core.errors import ScopeSetError, StaleDocumentError, VaultIntegrityError
+from memex.core.errors import (
+    MemexError,
+    ScopeSetError,
+    StaleDocumentError,
+    VaultIntegrityError,
+)
 from memex.core.manifest import update_manifest
-from memex.core.resources import ResourceProfile, all_modes, resolve_profile
+from memex.core.resources import CoResidenceMode, ResourceProfile, all_modes, resolve_profile
 from memex.core.scope_sets import (
     delete_scope_set,
     get_scope_set,
     list_scope_sets,
     save_scope_set,
 )
+from memex.daemon import restart as daemon_restart
+from memex.daemon import status as daemon_status
 from memex.index.graph_store import GraphStore
 from memex.index.pipeline import retitle_document
+from memex.models.registry import ModelNotConfigured, get_registry
 from memex.vault.store import (
     VaultDocument,
     hash_bytes,
@@ -143,6 +152,57 @@ def _active_profile() -> ResourceProfile:
         s.models.co_residence_mode,
         embedder_device=s.models.embedder_device,
         reranker_device=s.models.reranker_device,
+    )
+
+
+async def _apply_mode(mode: CoResidenceMode) -> tuple[ResourceProfile, str]:
+    """Live co-residence mode switch (ADR-0007's runtime-transition). Two halves:
+
+    1. **App-side (this process):** flip `settings.models.co_residence_mode` — the
+       registry shares that exact `ModelSettings` object (`bootstrap` built it with
+       `get_settings().models`), so the change is visible to it — then `unload` the
+       embedder + reranker so the next retrieval reloads them on the new mode's
+       device. `registry.unload` takes the per-model lock, so an in-flight `/ask`
+       finishes on the old model before the swap (the quiesce).
+    2. **Orchestrator-side (the daemon):** if the mode prescribes a posture
+       (`orchestrator_gpu_fraction is not None`) and the daemon is alive, restart
+       vLLM at the mode's util + context window (blocks ~40 s).
+
+    Returns the new profile + a human note. Raises `MemexError` on a daemon failure
+    (the route flashes it)."""
+    s = get_settings()
+    s.models.co_residence_mode = mode
+    profile = resolve_profile(
+        mode,
+        embedder_device=s.models.embedder_device,
+        reranker_device=s.models.reranker_device,
+    )
+    # Drop the retrieval models so the next use reloads them on the new device. The
+    # registry may not be initialised (e.g. nothing loaded yet) — that's a no-op.
+    try:
+        registry = get_registry()
+        await registry.unload("embedder")
+        await registry.unload("reranker")
+    except ModelNotConfigured:
+        logger.info("resources.mode.registry_absent")
+
+    if profile.orchestrator_gpu_fraction is None:
+        return profile, "retrieval device applied; this mode leaves the orchestrator as launched."
+    state = await daemon_status(s)
+    if not state.alive:
+        return profile, (
+            "retrieval device applied; the orchestrator isn't daemon-managed here — "
+            "run `memex daemon start` to apply its util/context window."
+        )
+    new_state = await daemon_restart(
+        s,
+        gpu_fraction=profile.orchestrator_gpu_fraction,
+        max_model_len=profile.orchestrator_max_model_len,
+    )
+    return profile, (
+        f"orchestrator restarted at util {profile.orchestrator_gpu_fraction} / "
+        f"context {profile.orchestrator_max_model_len} "
+        f"(reachable={new_state.reachable})."
     )
 
 
@@ -370,16 +430,62 @@ def create_app() -> FastAPI:
 
     # ----- Resource mode (ADR-0007) -----
 
+    # Serialize live mode switches — two concurrent daemon restarts would race.
+    mode_switch_lock = asyncio.Lock()
+
+    def _resources_ctx(
+        *, flash: str | None = None, flash_error: bool = False, oob_chip: bool = False
+    ) -> dict[str, object]:
+        # `oob_chip` emits an out-of-band swap for the header mode chip — only on the
+        # POST (a live switch), so the GET full-page render has no duplicate id.
+        return {
+            "active": _active_profile(),
+            "modes": all_modes(),
+            "flash": flash,
+            "flash_error": flash_error,
+            "oob_chip": oob_chip,
+        }
+
     @app.get("/resources", response_class=HTMLResponse)
     async def resources(request: Request) -> HTMLResponse:
-        """Read-only view of the active co-residence resource mode + the full
-        mode comparison (ADR-0007). Switching is a CLI op (`memex mode set`)
-        plus a restart — there is no live switch here yet."""
-        return templates.TemplateResponse(
-            request,
-            "resources.html",
-            {"active": _active_profile(), "modes": all_modes()},
-        )
+        """The active co-residence mode + the full mode comparison (ADR-0007), with
+        a live per-mode Apply switch (POST /resources/mode)."""
+        return templates.TemplateResponse(request, "resources.html", _resources_ctx())
+
+    @app.post("/resources/mode", response_class=HTMLResponse)
+    async def resources_set_mode(request: Request, mode: str = Form(...)) -> HTMLResponse:
+        """Live co-residence mode switch (ADR-0007 runtime transition) — swaps the
+        retrieval device (unload → lazy reload on the new device) and restarts the
+        orchestrator at the mode's util/context window. Serialized; the daemon
+        restart blocks ~40 s (the form shows an indicator). Returns the
+        `_resources.html` partial (HTMX swap) reflecting the new active profile."""
+        valid = ("fast", "full", "gpu_only", "manual")
+        if mode not in valid:
+            return templates.TemplateResponse(
+                request,
+                "_resources.html",
+                _resources_ctx(flash=f"Unknown mode {mode!r}.", flash_error=True),
+                status_code=400,
+            )
+        async with mode_switch_lock:
+            try:
+                profile, note = await _apply_mode(mode)
+            except MemexError as exc:
+                logger.warning("resources.mode.failed", mode=mode, error=str(exc)[:200])
+                return templates.TemplateResponse(
+                    request,
+                    "_resources.html",
+                    _resources_ctx(flash=f"Switch to {mode!r} failed: {exc}", flash_error=True),
+                    status_code=503,
+                )
+            # Keep the header chip (a static jinja global, set once at startup) current.
+            env.globals["active_mode_label"] = profile.label  # type: ignore[reportUnknownMemberType]  # reason: jinja2 leaves Environment.globals unannotated
+            logger.info("resources.mode.switched", mode=mode)
+            return templates.TemplateResponse(
+                request,
+                "_resources.html",
+                _resources_ctx(flash=f"Switched to {profile.label}. {note}", oob_chip=True),
+            )
 
     # ----- Documents -----
 
