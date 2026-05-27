@@ -165,4 +165,8 @@ construction.
   metric/period (table-parse quality, not a hallucination). `deck` (section-packing,
   step 3c) shipped. `scan` (over VLM text) route remains.
 - Section sub-splitting (no content dropped on an oversized section).
-- A grounded-summary eval suite (`eval_suite: agent.summarize` is already tagged).
+- ~~A grounded-summary eval suite~~ **SHIPPED** (`memex eval-summary` →
+  `eval/runner.py::run_summary_eval`; cases at `tests/eval-data/summary/queries.json`;
+  scorers `mention_recall` (soft) + `absent_assertion_violations` (the no-leak HARD
+  gate); baseline 2026-05-27: 4 cases, 0 hallucinations, summarize_correct 4/4,
+  mean_recall 1.0). Section sub-splitting + the `scan` route remain.

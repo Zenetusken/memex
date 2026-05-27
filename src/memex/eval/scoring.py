@@ -424,3 +424,26 @@ def citation_precision(input_: CitationPrecisionInput) -> float:
         return 1.0  # no citations to be wrong about
     correct = sum(1 for cid in input_.cited_chunk_ids if cid in input_.relevant_chunk_ids)
     return correct / len(input_.cited_chunk_ids)
+
+
+# ----- Summary eval (ADR-0008) — recall of expected facts + an absence (no-leak) gate -----
+
+
+def mention_recall(summary_text: str, must_mention: list[str]) -> float:
+    """Fraction of the `must_mention` terms present in the (normalized) summary text —
+    a SOFT coverage signal (did the summary surface the doc's key topics/facts?).
+    `1.0` when nothing is required. Substring match on normalized text, so a term is
+    "mentioned" if it appears anywhere in the abstract / claims / section digests."""
+    if not must_mention:
+        return 1.0
+    norm = _normalize(summary_text)
+    hits = sum(1 for m in must_mention if _normalize(m) in norm)
+    return hits / len(must_mention)
+
+
+def absent_assertion_violations(summary_text: str, must_not_assert: list[str]) -> list[str]:
+    """The `must_not_assert` terms that DO appear in the summary — each is a leaked
+    assertion the document does not support (the no-hallucination gate; the list MUST
+    be empty). Returns the offending terms (verbatim, for the report)."""
+    norm = _normalize(summary_text)
+    return [m for m in must_not_assert if _normalize(m) in norm]

@@ -238,6 +238,27 @@ The unanswerable and out-of-corpus questions are the most important — they tes
 
 **Chart-content sub-class (added 2026-05-23 with the P3.3 v7 fix arc).** Some answerable queries target content that exists ONLY in chart-extracted markdown blocks emitted by the chart-OCR backend (e.g. a Gantt chart's `On Time 22 / Late 8` status, an architecture figure's 4 design principles). These have an `_answer_type: "chart_content"` annotation and an empty `relevant_chunk_ids` array (the chart-extracted-block chunks aren't FTS-discoverable — they're stripped from BM25 per the P3.3 v3 defense, and live only in dense embeddings). The interesting metric for them is `answered_count` + `refusal_correct` per query, not citation_precision against canonical labels. The current corpora ship 7 chart-content queries across 3 docs (chart-types-08, annual-report-09/10, slide-decks-31/32/33, plus slide-decks-18 which the v7 chunker reflow promoted from REF to ANS via prose+chart-block-in-same-chunk).
 
+### Summary quality (per document, ADR-0008 — added 2026-05-27)
+
+`memex eval-summary <cases.json>` is the third eval type (beside `eval` and
+`eval-parse`). Each case names a vault document + the terms its summary SHOULD
+surface (`must_mention`) and terms it must NOT assert (`must_not_assert`); the
+runner calls `summarize_document` and scores:
+
+- **mention-recall** (soft) — fraction of `must_mention` terms present in the
+  summary (abstract + claims + section digests). Did it surface the key topics?
+- **`must_not_assert` violations** (the **no-leak HARD gate**) — any such term that
+  appears is a leaked assertion the doc doesn't support; the count MUST be 0 (the
+  no-hallucination gate, extended to summaries).
+- **summarize/refuse correctness** — `should_summarize` vs `answered` (a sparse /
+  unknown doc must refuse).
+
+Cases live at `tests/eval-data/summary/queries.json` (source docs stay local, as
+elsewhere); each case may set `detail` + a bounded `token_budget`. Baseline
+2026-05-27 (gte / 10-K / cuda + a refuse case — the long-prose, tabular, and deck
+routes): 0 hallucinations, summarize_correct 4/4, mean_recall 1.0. HARD gates:
+`hallucination_count == 0` ∧ `summarize_correct_count == case_count`.
+
 ### Per-PR delta reporting
 
 `memex eval` produces a JSON report. The CI diff against the last successful main-branch run highlights:

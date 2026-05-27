@@ -19,12 +19,15 @@ from typing import Any, cast
 import structlog
 from pydantic import BaseModel, Field
 
-from memex.agents.answering import answer_query
+from memex.agents.answering import FinalResponse, answer_query
+from memex.agents.document_summarizer import SummaryDetail, summarize_document
 from memex.core.config import get_settings
 from memex.eval.scoring import (
     CitationPrecisionInput,
     ParseQualityScores,
+    absent_assertion_violations,
     citation_precision,
+    mention_recall,
     score_parse_quality,
 )
 
@@ -161,6 +164,130 @@ async def run_eval(
         query_count=report.query_count,
         mean_citation_precision=report.mean_citation_precision,
         mean_citation_precision_answered_only=report.mean_citation_precision_answered_only,
+    )
+    return report
+
+
+# ----- Summary eval (ADR-0008): score `summarize_document` per doc -----
+
+
+class SummaryEvalCase(BaseModel):
+    """One summary-eval entry: a document to summarize, the terms its summary SHOULD
+    surface (`must_mention`, soft recall) and terms it must NOT assert
+    (`must_not_assert`, the no-leak HARD gate), and whether the doc should summarize
+    at all (`should_summarize=False` for an empty/ungroundable scope → expect refuse)."""
+
+    doc_id: str
+    detail: str = "standard"
+    token_budget: int = 40_000  # bounded for a tractable eval; the tabular pass runs first regardless
+    must_mention: list[str] = Field(default_factory=list)
+    must_not_assert: list[str] = Field(default_factory=list)
+    should_summarize: bool = True
+
+
+class SummaryEvalResult(BaseModel):
+    """Per-doc verdict: did it summarize (vs the `should_summarize` label), the
+    mention-recall, any `must_not_assert` leaks (HARD — should be empty), and the
+    claim/section counts."""
+
+    doc_id: str
+    summarized: bool
+    summarize_correct: bool
+    mention_recall: float
+    violations: list[str] = Field(default_factory=list[str])
+    claims: int
+    sections: int
+
+
+class SummaryEvalReport(BaseModel):
+    """Aggregate summary-eval report. The HARD gates: `hallucination_count == 0`
+    (no `must_not_assert` leak) and `summarize_correct_count == case_count` (every
+    doc summarized-or-refused as labeled). `mean_mention_recall` is the soft
+    coverage signal (answered-only; NaN when none answered)."""
+
+    run_id: str
+    started_at: datetime
+    finished_at: datetime
+    case_count: int
+    summarized_count: int
+    summarize_correct_count: int
+    hallucination_count: int
+    mean_mention_recall: float
+    per_doc: list[SummaryEvalResult] = Field(default_factory=list[SummaryEvalResult])
+
+
+def _load_summary_cases(query_set_path: Path) -> list[SummaryEvalCase]:
+    payload = json.loads(query_set_path.read_text(encoding="utf-8"))
+    return [SummaryEvalCase(**c) for c in payload["cases"]]
+
+
+def _coerce_detail(detail: str) -> SummaryDetail:
+    return detail if detail in ("brief", "standard", "detailed") else "standard"
+
+
+def _summary_text(resp: FinalResponse) -> str:
+    """All the prose a summary emitted — abstract + claims + section digests +
+    per-section key-points — joined for substring scoring."""
+    parts: list[str] = [resp.summary or ""]
+    parts.extend(c.claim for c in resp.claims)
+    for s in resp.sections:
+        parts.append(s.digest)
+        parts.extend(kp.claim for kp in s.key_points)
+    return " ".join(parts)
+
+
+async def run_summary_eval(query_set: Path) -> SummaryEvalReport:
+    """Run `summarize_document` over every case in `query_set` and score it: recall
+    of the `must_mention` terms (soft) and any `must_not_assert` leak (the no-leak
+    HARD gate), plus summarize-vs-refuse correctness against `should_summarize`."""
+    import ulid
+
+    cases = _load_summary_cases(query_set)
+    started = datetime.now(UTC)
+    log = logger.bind(case_count=len(cases))
+    log.info("summary_eval.start")
+
+    results: list[SummaryEvalResult] = []
+    for c in cases:
+        resp = await summarize_document(
+            c.doc_id, detail=_coerce_detail(c.detail), token_budget=c.token_budget
+        )
+        text = _summary_text(resp)
+        results.append(
+            SummaryEvalResult(
+                doc_id=c.doc_id,
+                summarized=resp.answered,
+                summarize_correct=(c.should_summarize == resp.answered),
+                mention_recall=mention_recall(text, c.must_mention) if resp.answered else 0.0,
+                violations=absent_assertion_violations(text, c.must_not_assert),
+                claims=len(resp.claims),
+                sections=len(resp.sections),
+            )
+        )
+
+    finished = datetime.now(UTC)
+    answered = [r for r in results if r.summarized]
+    report = SummaryEvalReport(
+        run_id=str(ulid.ULID()),
+        started_at=started,
+        finished_at=finished,
+        case_count=len(results),
+        summarized_count=len(answered),
+        summarize_correct_count=sum(1 for r in results if r.summarize_correct),
+        hallucination_count=sum(len(r.violations) for r in results),
+        mean_mention_recall=(
+            sum(r.mention_recall for r in answered) / len(answered)
+            if answered
+            else float("nan")
+        ),
+        per_doc=results,
+    )
+    log.info(
+        "summary_eval.done",
+        case_count=report.case_count,
+        summarize_correct_count=report.summarize_correct_count,
+        hallucination_count=report.hallucination_count,
+        mean_mention_recall=report.mean_mention_recall,
     )
     return report
 

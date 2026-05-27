@@ -30,7 +30,7 @@ from rich.table import Table
 from memex.agents.answering import answer_query
 from memex.cli.bootstrap import bootstrap
 from memex.enrich.pipeline import enrich_document
-from memex.eval.runner import run_eval, run_parse_eval
+from memex.eval.runner import run_eval, run_parse_eval, run_summary_eval
 from memex.index.graph_store import GraphStore
 from memex.index.pipeline import index_document, reindex_vault, retitle_document
 from memex.ingest.pipeline import (
@@ -552,6 +552,26 @@ def register(app: typer.Typer) -> None:
         async def _run():
             bootstrap()
             return await run_parse_eval(corpus_dir)
+
+        _print(asyncio.run(_run()))
+
+    @app.command(name="eval-summary")
+    def eval_summary_cmd(
+        query_set: Path = _Argument(  # noqa: B008
+            ...,
+            exists=True,
+            dir_okay=False,
+            help="JSON of summary-eval cases: per-doc must_mention / must_not_assert "
+            "/ should_summarize. Runs `summarize_document` and scores recall + the "
+            "no-leak HARD gate. See docs/eval-corpus-plan.md.",
+        ),
+    ) -> None:
+        """Score grounded document summaries (ADR-0008): mention-recall + the
+        no-hallucination (must_not_assert) gate + summarize/refuse correctness."""
+
+        async def _run():
+            bootstrap()
+            return await run_summary_eval(query_set)
 
         _print(asyncio.run(_run()))
 

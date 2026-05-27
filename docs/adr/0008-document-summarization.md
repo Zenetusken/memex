@@ -244,8 +244,10 @@ thematic groups. HARD-gate-neutral (grouping only — grounding/refusal unchange
 
 - A doc-type route is specialised (fold its MAP contract in here).
 - Section sub-splitting lands (the §4 truncation trade-off goes away).
-- A grounded-summary eval suite is added to the harness (`eval_suite:
-  agent.summarize` is already tagged on the prompts).
+- The grounded-summary eval suite (`memex eval-summary`, shipped 2026-05-27 —
+  `eval/runner.py::run_summary_eval`, `tests/eval-data/summary/queries.json`,
+  HARD gates `hallucination_count==0` ∧ `summarize_correct_count==case_count`)
+  grows or its baseline shifts.
 
 ## References
 
