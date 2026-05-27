@@ -108,6 +108,33 @@ _VRAM_GB: dict[tuple[str, str | None], float] = {
 _OVERHEAD_GB = 2.5
 
 
+def _estimated_vram_gb(settings: MemexSettings) -> float:
+    """The co-residence GPU VRAM estimate (GB) for the answering stack:
+    orchestrator + the GPU-placed retrieval models + overhead, plus the
+    in-process VLM and chart-OCR when those apply.
+
+    Pure (no torch) so it's unit-testable. A retrieval model placed on the CPU
+    (`embedder_device`/`reranker_device == "cpu"`) is EXCLUDED — it holds RAM,
+    not GPU VRAM — mirroring how the vLLM-served VLM is excluded.
+    """
+    estimated = _VRAM_GB[("orchestrator", settings.models.orchestrator_quantization)] + _OVERHEAD_GB
+    if settings.models.embedder_device == "cuda":
+        estimated += _VRAM_GB[("embedder", None)]
+    if settings.models.reranker_device == "cuda":
+        estimated += _VRAM_GB[("reranker", settings.models.reranker_backend)]
+    # Only count the VLM if it's loaded IN-PROCESS. With vlm_serving="vllm" it
+    # runs as a separate short-lived vLLM process on the GPU freed by
+    # pause_vllm_for_gpu — never co-resident with answering.
+    if (not settings.parse.disable_vlm) and settings.models.vlm_serving == "transformers":
+        estimated += _VRAM_GB[("vlm", settings.models.vlm_quantization)]
+    # chart-OCR loads at parse time (vLLM paused), so the orchestrator's ~5 GB
+    # doesn't compete for the same window; the parse-time peak is what governs
+    # whether the parse pass OOMs.
+    if not settings.parse.disable_chart_ocr:
+        estimated += _VRAM_GB[("chart_ocr", "bf16")]
+    return estimated
+
+
 def _device_total_memory_bytes() -> int:
     """Total VRAM of CUDA device 0, in bytes.
 
@@ -153,31 +180,12 @@ def _verify_vram_fit(settings: MemexSettings) -> None:
     budget_gb = total_gb * settings.hardware.gpu_memory_fraction
     gpu_name = torch.cuda.get_device_name(0)
 
-    estimated = (
-        _VRAM_GB[("orchestrator", settings.models.orchestrator_quantization)]
-        + _VRAM_GB[("embedder", None)]
-        + _VRAM_GB[("reranker", settings.models.reranker_backend)]
-        + _OVERHEAD_GB
-    )
-    # Only count the VLM if it's actually loaded IN-PROCESS. With
-    # vlm_serving="vllm" the VLM runs as a separate, short-lived vLLM
-    # process on the GPU freed by pause_vllm_for_gpu (orchestrator down) —
-    # it never co-resides with the answering stack, so it doesn't belong in
-    # this co-residence estimate (its own footprint is governed by
-    # ModelSettings.vlm_serve.gpu_memory_utilization).
+    estimated = _estimated_vram_gb(settings)
+    # Recomputed only for the log field below (the estimate itself lives in
+    # the pure helper).
     vlm_in_process = (not settings.parse.disable_vlm) and (
         settings.models.vlm_serving == "transformers"
     )
-    if vlm_in_process:
-        estimated += _VRAM_GB[("vlm", settings.models.vlm_quantization)]
-    # P3.3 chart-OCR is opt-in via disable_chart_ocr. When enabled, it
-    # loads alongside the other parse-stage models BUT vLLM is paused
-    # during parse — so the orchestrator's ~5 GB doesn't compete for
-    # the same window. The estimate added here reflects the parse-time
-    # peak (without vLLM resident) which is what governs whether the
-    # parse pass OOMs.
-    if not settings.parse.disable_chart_ocr:
-        estimated += _VRAM_GB[("chart_ocr", "bf16")]
 
     if estimated > budget_gb:
         log.warning(
@@ -187,9 +195,12 @@ def _verify_vram_fit(settings: MemexSettings) -> None:
             total_gb=round(total_gb, 1),
             gpu=gpu_name,
             vlm_counted=vlm_in_process,
+            embedder_device=settings.models.embedder_device,
+            reranker_device=settings.models.reranker_device,
             fix=(
-                "lower hardware.gpu_memory_fraction, switch to a smaller "
-                "VLM variant (vlm_quantization=awq_int4), or reduce the "
+                "lower hardware.gpu_memory_fraction, place the reranker (and/or "
+                "embedder) on CPU (MEMEX_MODELS__RERANKER_DEVICE=cpu), switch to a "
+                "smaller VLM variant (vlm_quantization=awq_int4), or reduce the "
                 "orchestrator quant tier"
             ),
         )
@@ -201,6 +212,8 @@ def _verify_vram_fit(settings: MemexSettings) -> None:
             total_gb=round(total_gb, 1),
             gpu=gpu_name,
             vlm_counted=vlm_in_process,
+            embedder_device=settings.models.embedder_device,
+            reranker_device=settings.models.reranker_device,
         )
 
 

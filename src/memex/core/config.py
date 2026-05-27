@@ -118,6 +118,18 @@ class ModelSettings(BaseModel):
     # eval corpus (P0); memory wins of ~1.4 GB on a 12 GB rig are
     # available today.
     reranker_backend: Literal["cross_encoder", "qwen3"] = "cross_encoder"
+    # Device placement for the two retrieval models. Default "cuda" (bf16,
+    # per ADR-0006). Set either to "cpu" (loads fp32 on CPU) to free GPU VRAM
+    # for a fuller orchestrator KV cache when co-residing on a single 12 GB
+    # card — e.g. run `memex serve web` with the orchestrator at its full
+    # gpu_memory_utilization by pushing the reranker (the ~2 GB bf16
+    # load-time OOM culprit) and/or the embedder onto the CPU. The retrieval
+    # path follows each model's own device, so this is the only switch.
+    # Trade-off: CPU rerank of ~50 candidates adds a few seconds of latency
+    # (NOT per-token, unlike a vLLM weight offload) — acceptable for
+    # single-user interactive asks. `MEMEX_MODELS__RERANKER_DEVICE=cpu`.
+    embedder_device: Literal["cuda", "cpu"] = "cuda"
+    reranker_device: Literal["cuda", "cpu"] = "cuda"
 
 
 class HardwareSettings(BaseModel):

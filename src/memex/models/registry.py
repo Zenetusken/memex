@@ -55,6 +55,24 @@ def _bf16() -> Any:
     return torch.bfloat16  # type: ignore[reportPrivateImportUsage]  # torch star-exports dtypes from _C; stub omits them from __all__
 
 
+def _float32() -> Any:
+    """Return `torch.float32` — the dtype for a CPU-placed retrieval model.
+
+    bf16 is the GPU dtype (ADR-0006), but on CPU bf16 kernels are slow and
+    incomplete; fp32 is the correct, well-supported CPU dtype. Used when
+    `embedder_device`/`reranker_device` is `"cpu"`. Same `Any`/private-import
+    rationale as `_bf16`.
+    """
+    import torch
+
+    return torch.float32  # type: ignore[reportPrivateImportUsage]  # torch star-exports dtypes from _C; stub omits them from __all__
+
+
+def _retrieval_dtype(device: str) -> Any:
+    """The load dtype for a retrieval model on `device`: bf16 on cuda, fp32 on cpu."""
+    return _bf16() if device == "cuda" else _float32()
+
+
 def _vlm_attn_implementation() -> str:
     """Pick the VLM attention backend, FA2 when available else `sdpa`.
 
@@ -301,16 +319,18 @@ class ModelRegistry:
         async def _do_load() -> None:
             if name == "embedder":
                 self._models[name] = await asyncio.to_thread(
-                    self._load_embedder, self._settings.embedder
+                    self._load_embedder, self._settings.embedder, self._settings.embedder_device
                 )
             elif name == "reranker":
                 if self._settings.reranker_backend == "qwen3":
                     self._models[name] = await asyncio.to_thread(
-                        self._load_reranker_qwen3, self._settings.reranker
+                        self._load_reranker_qwen3,
+                        self._settings.reranker,
+                        self._settings.reranker_device,
                     )
                 else:
                     self._models[name] = await asyncio.to_thread(
-                        self._load_reranker, self._settings.reranker
+                        self._load_reranker, self._settings.reranker, self._settings.reranker_device
                     )
             elif name == "vlm":
                 self._models[name] = await asyncio.to_thread(self._load_vlm, self._settings.vlm)
@@ -377,12 +397,13 @@ class ModelRegistry:
         self._oom_breaker.reset()
 
     @staticmethod
-    def _load_embedder(model_id: str) -> SentenceTransformer:
+    def _load_embedder(model_id: str, device: str = "cuda") -> SentenceTransformer:
         """Load the dense embedder.
 
-        ADR-0006: BF16 + explicit `device="cuda"`. EmbeddingGemma 300M's
-        official model card states its activations DO NOT support FP16
-        — must be FP32 or BF16. Memex picks BF16 globally on Ada.
+        ADR-0006: BF16 on `device="cuda"`. EmbeddingGemma 300M's official
+        model card states its activations DO NOT support FP16 — must be FP32
+        or BF16. Memex picks BF16 globally on Ada; on a CPU placement
+        (`embedder_device="cpu"`) it loads FP32 (`_retrieval_dtype`).
 
         Imported lazily so the agent layer can be imported without
         torch installed (`[models]` extra brings it in).
@@ -391,31 +412,32 @@ class ModelRegistry:
 
         return SentenceTransformer(
             model_id,
-            device="cuda",
-            model_kwargs={"torch_dtype": _bf16()},
+            device=device,
+            model_kwargs={"torch_dtype": _retrieval_dtype(device)},
         )
 
     @staticmethod
-    def _load_reranker(model_id: str) -> CrossEncoder:
+    def _load_reranker(model_id: str, device: str = "cuda") -> CrossEncoder:
         """Load the cross-encoder reranker (default backend).
 
-        ADR-0006: BF16 + explicit `device="cuda"`.
+        ADR-0006: BF16 on `device="cuda"`; FP32 on a CPU placement
+        (`reranker_device="cpu"`, to free GPU VRAM for the orchestrator).
         """
         from sentence_transformers import CrossEncoder
 
         return CrossEncoder(
             model_id,
-            device="cuda",
+            device=device,
             # dtype passthrough to the underlying AutoModel. The param is
             # `model_kwargs` in sentence-transformers 5.x (matches
             # `_load_embedder` above); an earlier `automodel_args` name
             # would TypeError at load time — a latent bug the 2026-05-23
             # typing pass surfaced (the reranker is faked in tests).
-            model_kwargs={"torch_dtype": _bf16()},
+            model_kwargs={"torch_dtype": _retrieval_dtype(device)},
         )
 
     @staticmethod
-    def _load_reranker_qwen3(model_id: str) -> Qwen3RerankerHandle:
+    def _load_reranker_qwen3(model_id: str, device: str = "cuda") -> Qwen3RerankerHandle:
         """Load the Qwen3-Reranker autoregressive backend (P2.1).
 
         Decoder-only LLM fine-tuned to answer "yes"/"no" given a (query,
@@ -423,9 +445,10 @@ class ModelRegistry:
         format → forward pass → last-token logits → softmax over the
         cached yes/no ids.
 
-        ADR-0006 conventions: explicit `torch_dtype=torch.bfloat16` and
-        `device_map={"": "cuda:0"}` (no `"auto"`; we'd rather OOM cleanly
-        than silently CPU-offload).
+        ADR-0006 conventions: explicit `torch_dtype` (bf16 on cuda, fp32 on a
+        CPU placement) and an explicit single-device `device_map` (no
+        `"auto"` — an unrequested CPU offload should never happen silently;
+        a CPU placement here is the EXPLICIT `reranker_device="cpu"` choice).
         """
         from transformers import (
             AutoModelForCausalLM,
@@ -445,8 +468,8 @@ class ModelRegistry:
             AutoModelForCausalLM,
             PreTrainedModel,
             model_id,
-            torch_dtype=_bf16(),
-            device_map={"": "cuda:0"},
+            torch_dtype=_retrieval_dtype(device),
+            device_map={"": "cuda:0" if device == "cuda" else "cpu"},
             low_cpu_mem_usage=True,
         )
         model.eval()

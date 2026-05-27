@@ -58,6 +58,15 @@ Live VRAM usage observed on RTX 4070 12 GB (cold start, single eval pass):
 - **Total live usage**: ~11.5 GB
 - Headroom: ~0.5 GB (tight; back-to-back evals can OOM intermittently — see Operational notes below)
 
+**Co-residence modes (2026-05-27) — when answering shares the card with a full orchestrator.** The ~0.5 GB headroom above is too tight to also run the orchestrator at full `gpu_memory_utilization`; pick one of two non-arbitrating modes (declarative, no auto-management):
+
+| Mode | How | Orchestrator KV | Latency/ask | Use when |
+|---|---|---|---|---|
+| **GPU retrieval, lower util** | `MEMEX_VLLM_GPU_FRACTION=0.60` (embedder+reranker stay on GPU) | ~7.6k tok (1.24×) | ~14 s | you want fast answers; single-user; short contexts |
+| **CPU retrieval, full util** | `MEMEX_MODELS__EMBEDDER_DEVICE=cpu MEMEX_MODELS__RERANKER_DEVICE=cpu` + `MEMEX_VLLM_GPU_FRACTION=0.72` | ~27.8k tok (4.53×) | ~33 s | you want full KV / longer contexts / future batching; tolerate slower retrieval |
+
+The CPU-retrieval cost is the rerank of ~50 candidates on the CPU (a per-*query* cost, ~20 s, not per-token). `embedder_device`/`reranker_device` can be set independently (e.g. reranker→CPU only frees the ~2 GB load-time-OOM culprit while keeping the fast GPU embed). The default is all-GPU at `gpu_fraction=0.72`, which assumes answering does NOT co-reside with a separate webui process holding its own model copies — run only one answering surface at a time, or pick a mode above. See ADR-0006 §2 amendment.
+
 **Parse-time only** (when `MEMEX_PARSE__DISABLE_VLM=false`): the diagram VLM is **Qwen3-VL-8B-AWQ served by a short-lived vLLM process**, *not* co-resident with answering — the orchestrator vLLM is paused (`pause_vllm_for_gpu`) to free the GPU, the VLM vLLM runs at `gpu_memory_utilization=0.80` (~7.4 GB weights + KV cache; 0.80 leaves headroom for the **variable desktop graphics load** — 0.89 intermittently fails startup when the desktop's GPU use rises, e.g. a Zoom call), then it's torn down *before* the in-process chart-OCR pass (the two can't co-reside: 7.4 + ~3 GB > 12 GB). Recipe + rationale: [`../specs/vlm-vllm-serving.md`](../specs/vlm-vllm-serving.md).
 
 ---

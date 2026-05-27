@@ -80,6 +80,7 @@ ADR-0006 settles it. The summary:
 - **bf16** is the dtype across the stack on Ada. Embedder, reranker, VLM, and chart-OCR all use explicit `torch_dtype=torch.bfloat16`. (FP16 is forbidden for EmbeddingGemma — its activations don't support it.)
 - **FA2** for the VLM (`attn_implementation="flash_attention_2"`). FA3 is unavailable on sm_89.
 - **`device_map={"": "cuda:0"}`** — deterministic single-GPU placement, not `"auto"`.
+- **Retrieval device override (2026-05-27):** `ModelSettings.{embedder,reranker}_device` (`"cuda"` default, or `"cpu"`) places the embedder/reranker on CPU (fp32 via `registry._retrieval_dtype`) to free GPU VRAM for a full-util orchestrator KV cache on a single 12 GB card. `_do_load` passes the device to `_load_embedder`/`_load_reranker`/`_load_reranker_qwen3`; the retrieval path already follows each model's own device (`rerank.py` reads `next(model.parameters()).device`), so no other change. `bootstrap._estimated_vram_gb` (the now-pure, testable VRAM estimate) excludes a CPU-placed model. Trade-off = ~20 s CPU rerank latency vs a squeezed KV at lower util (ADR-0006 §2 amendment). Pinned by `tests/unit/test_retrieval_device.py`.
 - **`AutoModelForImageTextToText`** for the VLM, not `AutoModelForCausalLM`.
 - **`cli/bootstrap.py:_configure_cuda`** runs once at startup: CUDA assert + TF32 + `cudnn.benchmark` + `set_per_process_memory_fraction`. Tests bypass it.
 
