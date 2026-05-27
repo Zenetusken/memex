@@ -27,6 +27,7 @@ from memex.mcp.server import (
     ask,
     get_document,
     list_documents_tool,
+    list_scope_sets_tool,
     search,
 )
 
@@ -172,6 +173,54 @@ async def test_ask_forwards_scope_doc_ids(
     result = await ask("What does d2 say?", scope_doc_ids=["d1"])
     assert captured["scope_doc_ids"] == ["d1"]
     assert result.artifact_scope_doc_ids == ["d1"]
+
+
+@pytest.mark.asyncio
+async def test_ask_with_scope_set_unions_doc_ids(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`ask(scope_set=NAME)` resolves the saved set and unions its docs with any
+    explicit `scope_doc_ids` (ordered de-dup)."""
+    from memex.core.scope_sets import save_scope_set
+
+    await save_scope_set(settings.vault_path, "net", ["d1", "d2"])
+    captured: dict[str, Any] = {}
+
+    async def _fake(question: str, **kw: Any) -> FinalResponse:
+        captured["scope_doc_ids"] = kw.get("scope_doc_ids")
+        return FinalResponse(
+            answered=True,
+            summary="ok",
+            correlation_id="01HZTESTMCPSET00000000000000",
+            tokens_used=8,
+            nodes_traversed=6,
+            regenerate_attempts=0,
+        )
+
+    monkeypatch.setattr("memex.mcp.server.answer_query", _fake)
+
+    await ask("q", scope_doc_ids=["d3"], scope_set="NET")  # case-insensitive
+    assert captured["scope_doc_ids"] == ["d3", "d1", "d2"]
+
+
+@pytest.mark.asyncio
+async def test_ask_unknown_scope_set_raises(settings: MemexSettings) -> None:
+    from memex.core.errors import ConfigurationError
+
+    with pytest.raises(ConfigurationError):
+        await ask("q", scope_set="does-not-exist")
+
+
+@pytest.mark.asyncio
+async def test_list_scope_sets_tool_returns_saved_sets(settings: MemexSettings) -> None:
+    from memex.core.scope_sets import save_scope_set
+
+    await save_scope_set(settings.vault_path, "Alpha", ["d1"])
+    await save_scope_set(settings.vault_path, "Beta", ["d2", "d3"])
+    sets = await list_scope_sets_tool()
+    by_name = {s.name: s for s in sets}
+    assert set(by_name) == {"Alpha", "Beta"}
+    assert by_name["Beta"].doc_ids == ["d2", "d3"]
 
 
 @pytest.mark.asyncio

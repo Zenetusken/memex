@@ -1,11 +1,12 @@
 """MCP server — the public API of Memex (see IMPLEMENTATION-PLAN §1.9).
 
-Five tools, all backed by code that Phases 0–4 shipped:
+Six tools, all backed by code that Phases 0–4 shipped:
 
 - `search(query, k)` → hybrid retrieval + rerank
-- `ask(question)` → the full answering agent (Langfuse-traced)
+- `ask(question, scope_doc_ids?, scope_set?)` → the full answering agent (Langfuse-traced)
 - `get_document(doc_id)` → canonical markdown + frontmatter
 - `list_documents()` → every DocumentRef in the vault (no bodies)
+- `list_scope_sets()` → every saved document scope set (name + doc ids)
 - `get_graph_neighbors(doc_id, limit)` → one-hop graph neighbours
 
 Transports: stdio for desktop MCP clients (Claude Code, Cursor, ...) and
@@ -25,6 +26,7 @@ from mcp.server.fastmcp import FastMCP
 from memex.agents.answering import FinalResponse, answer_query
 from memex.core.config import get_settings
 from memex.core.errors import ConfigurationError
+from memex.core.scope_sets import ScopeSet, get_scope_set, list_scope_sets
 from memex.core.types import Chunk
 from memex.index.graph_store import GraphNeighbor
 from memex.mcp.auth import BearerAuthMiddleware, validate_bind
@@ -67,7 +69,11 @@ async def search(query: str, k: int = 10) -> list[Chunk]:
     return reranked
 
 
-async def ask(question: str, scope_doc_ids: list[str] | None = None) -> FinalResponse:
+async def ask(
+    question: str,
+    scope_doc_ids: list[str] | None = None,
+    scope_set: str | None = None,
+) -> FinalResponse:
     """Answer `question` using the full agent: retrieve → rerank →
     assess → answer → verify, with mandatory grounding before any
     claim is returned. A refusal is a first-class outcome.
@@ -77,20 +83,52 @@ async def ask(question: str, scope_doc_ids: list[str] | None = None) -> FinalRes
     contain it). Omit for the full-corpus search. The applied scope is echoed on
     `FinalResponse.artifact_scope_doc_ids`.
 
+    `scope_set` (optional): the name of a saved scope set (see `list_scope_sets`)
+    whose documents are added to the scope. An unknown name raises rather than
+    silently searching the whole corpus.
+
     The returned `FinalResponse` includes `correlation_id`, which is
     also the Langfuse trace id — paste it into the Langfuse UI to see
     every chunk retrieved, every model call made, and every claim
     verified.
     """
     log = logger.bind(tool="ask")
-    log.info("mcp.tool.start", scope_doc_ids=scope_doc_ids or [])
-    response = await answer_query(question, scope_doc_ids=scope_doc_ids)
+    scope_ids = list(scope_doc_ids or [])
+    if scope_set and scope_set.strip():
+        settings = get_settings()
+        found = await get_scope_set(settings.vault_path, scope_set)
+        if found is None:
+            available = [s.name for s in await list_scope_sets(settings.vault_path)]
+            raise ConfigurationError(
+                f"no scope set named {scope_set!r}",
+                context={"requested": scope_set, "available": available},
+            )
+        scope_ids.extend(found.doc_ids)
+    merged = list(dict.fromkeys(scope_ids))  # ordered de-dup of doc + set overlap
+    log.info("mcp.tool.start", scope_doc_ids=merged, scope_set=scope_set or "")
+    response = await answer_query(question, scope_doc_ids=merged or None)
     log.info(
         "mcp.tool.done",
         answered=response.answered,
         correlation_id=response.correlation_id,
     )
     return response
+
+
+async def list_scope_sets_tool() -> list[ScopeSet]:
+    """List every saved scope set in the vault — name, document ids, and
+    timestamps. A scope set is a named document collection; pass its `name` to
+    `ask(scope_set=...)` to scope an answer to those documents.
+
+    Exposed as `list_scope_sets` over MCP; the suffix on the Python name avoids
+    shadowing the import from `memex.core.scope_sets`.
+    """
+    settings = get_settings()
+    log = logger.bind(tool="list_scope_sets")
+    log.info("mcp.tool.start")
+    sets = await list_scope_sets(settings.vault_path)
+    log.info("mcp.tool.done", count=len(sets))
+    return sets
 
 
 async def get_document(doc_id: str) -> VaultDocument:
@@ -163,6 +201,7 @@ server.tool()(search)
 server.tool()(ask)
 server.tool()(get_document)
 server.tool(name="list_documents")(list_documents_tool)
+server.tool(name="list_scope_sets")(list_scope_sets_tool)
 server.tool()(get_graph_neighbors)
 
 

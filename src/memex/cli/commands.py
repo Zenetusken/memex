@@ -57,6 +57,10 @@ err = Console(stderr=True)
 daemon_app = typer.Typer(help="Manage the local vLLM inference daemon.")
 serve_app = typer.Typer(help="Serve Memex as an MCP server or local web UI.")
 mcp_app = typer.Typer(help="MCP server utilities (token generation, ...).")
+scope_set_app = typer.Typer(
+    help="Manage saved document scope sets — named collections you reapply with "
+    "`memex ask --scope-set NAME`."
+)
 
 
 def _print(payload: object) -> None:
@@ -355,16 +359,40 @@ def register(app: typer.Typer) -> None:
             "--doc",
             help="Scope retrieval to this document id (repeatable). Omit = whole vault.",
         ),
+        scope_set: str = _Option(
+            "",
+            "--scope-set",
+            help="Scope retrieval to a saved scope set by name (see `memex scope-set`). "
+            "Combines with any --doc ids.",
+        ),
     ) -> None:
         """Run the answering agent over the vault.
 
         `--doc <id>` (repeatable) scopes the answer to only those documents — it
-        is grounded in them or refuses. Omit to search the whole vault.
+        is grounded in them or refuses. `--scope-set NAME` adds a saved set's
+        documents to that scope. Omit both to search the whole vault.
         """
 
         async def _run():
             bootstrap()
-            return await answer_query(query, token_budget=token_budget, scope_doc_ids=doc or None)
+            scope_ids = list(doc)
+            if scope_set.strip():
+                from memex.core.config import get_settings
+                from memex.core.scope_sets import get_scope_set, list_scope_sets
+
+                vault_path = get_settings().vault_path
+                found = await get_scope_set(vault_path, scope_set)
+                if found is None:
+                    available = [s.name for s in await list_scope_sets(vault_path)]
+                    hint = ", ".join(available) if available else "(none saved yet)"
+                    err.print(f"[red]No scope set named {scope_set!r}.[/red] Available: {hint}")
+                    raise typer.Exit(code=2)
+                scope_ids.extend(found.doc_ids)
+            # Ordered de-dup so --doc + --scope-set overlap collapses cleanly.
+            merged = list(dict.fromkeys(scope_ids))
+            return await answer_query(
+                query, token_budget=token_budget, scope_doc_ids=merged or None
+            )
 
         _print(asyncio.run(_run()))
 
@@ -578,6 +606,7 @@ def register(app: typer.Typer) -> None:
     app.add_typer(daemon_app, name="daemon")
     app.add_typer(serve_app, name="serve")
     app.add_typer(mcp_app, name="mcp")
+    app.add_typer(scope_set_app, name="scope-set")
 
 
 def _find_repo_root() -> Path:
@@ -682,6 +711,108 @@ def mcp_generate_token(
     import secrets
 
     typer.echo(secrets.token_urlsafe(length))
+
+
+@scope_set_app.command("create")
+def scope_set_create(
+    name: str = _Argument(..., help="A human label for the set (case-insensitive)."),
+    doc: list[str] = _Option(  # noqa: B008  # typer Option default sentinel
+        [],
+        "--doc",
+        help="A document id to include (repeatable). Run `memex search` or open the web "
+        "UI to find ids.",
+    ),
+) -> None:
+    """Create or update a saved scope set.
+
+    Reapply it later with `memex ask --scope-set NAME`. Document ids are
+    validated against the vault — an unknown id is rejected so a typo can't
+    create a set that silently scopes to nothing.
+    """
+
+    async def _run() -> dict[str, object]:
+        bootstrap()
+        from memex.core.config import get_settings
+        from memex.core.scope_sets import save_scope_set
+        from memex.vault.store import list_documents
+
+        vault_path = get_settings().vault_path
+        known: set[str] = set()
+        async for ref in list_documents(vault_path):
+            known.add(ref.doc_id)
+        requested = [d.strip() for d in doc if d.strip()]
+        unknown = [d for d in requested if d not in known]
+        if unknown:
+            err.print(f"[red]Unknown document id(s):[/red] {', '.join(unknown)}")
+            raise typer.Exit(code=2)
+        record = await save_scope_set(vault_path, name, requested)
+        return {"name": record.name, "doc_ids": record.doc_ids, "count": len(record.doc_ids)}
+
+    _print(asyncio.run(_run()))
+
+
+@scope_set_app.command("list")
+def scope_set_list() -> None:
+    """List every saved scope set (name + document count)."""
+
+    async def _run() -> list[dict[str, object]]:
+        bootstrap()
+        from memex.core.config import get_settings
+        from memex.core.scope_sets import list_scope_sets
+
+        vault_path = get_settings().vault_path
+        return [
+            {"name": s.name, "count": len(s.doc_ids), "updated_at": s.updated_at.isoformat()}
+            for s in await list_scope_sets(vault_path)
+        ]
+
+    _print(asyncio.run(_run()))
+
+
+@scope_set_app.command("show")
+def scope_set_show(
+    name: str = _Argument(..., help="The set name (case-insensitive)."),
+) -> None:
+    """Show a scope set's documents (id + title)."""
+
+    async def _run() -> dict[str, object]:
+        bootstrap()
+        from memex.core.config import get_settings
+        from memex.core.scope_sets import get_scope_set
+        from memex.vault.store import read_document_title
+
+        vault_path = get_settings().vault_path
+        found = await get_scope_set(vault_path, name)
+        if found is None:
+            return {"name": name, "found": False}
+        docs = [
+            {"doc_id": d, "title": await read_document_title(vault_path, d)} for d in found.doc_ids
+        ]
+        return {"name": found.name, "found": True, "documents": docs}
+
+    _print(asyncio.run(_run()))
+
+
+@scope_set_app.command("delete")
+def scope_set_delete(
+    name: str = _Argument(..., help="The set name (case-insensitive)."),
+    yes: bool = _Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+) -> None:
+    """Delete a saved scope set. Removes only the named collection — no document
+    is touched."""
+    if not yes:
+        typer.confirm(f"Delete the saved scope set {name!r}?", abort=True)
+
+    async def _run() -> dict[str, object]:
+        bootstrap()
+        from memex.core.config import get_settings
+        from memex.core.scope_sets import delete_scope_set
+
+        vault_path = get_settings().vault_path
+        removed = await delete_scope_set(vault_path, name)
+        return {"name": name, "deleted": removed}
+
+    _print(asyncio.run(_run()))
 
 
 @serve_app.command("mcp")

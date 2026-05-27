@@ -263,6 +263,8 @@ async def test_convert_pages_vllm_backend_caches_and_skips_server_when_cached(
         r2 = await vlm_backend.convert_pages(source_pdf=pdf, page_numbers=[1, 2], cache=cache)
         assert calls == []
         assert server_starts == []  # no misses → no vLLM boot
-        assert isinstance(r2[2], DoclingPageOutput) and r2[2].markdown == r1[2].markdown
+        assert isinstance(r2[2], DoclingPageOutput)
+        assert isinstance(r1[2], DoclingPageOutput)
+        assert r2[2].markdown == r1[2].markdown
     finally:
         await cache.close()

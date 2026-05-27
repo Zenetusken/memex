@@ -166,6 +166,11 @@ surfaces `[]`.
   the automatic artifact→doc selection share this one node + its surfacing +
   `expand_graph` short-circuit; worst case is an empty scoped pool → clean refuse
   (HARD-gate-safe). Tests + contract: `src/memex/CLAUDE.md`, `src/memex/webui/CLAUDE.md`.
+  **Saved scope sets (2026-05-27, `core/scope_sets.py`, `docs/specs/scope-sets.md`)**
+  add a persistence layer on top: a named `doc_ids` collection (CLI `scope-set` +
+  `ask --scope-set`, MCP `ask(scope_set=)` + `list_scope_sets`, the webui saved-set
+  bar) that resolves to `doc_ids` at the surface and feeds this same node — no new
+  agent coupling.
 - NOT an LLM resolver or synonym model (determinism mandate).
 - The FTS chart-strip blind spot is handled defensively (single-token gate), not
   solved — an EN cross-doc single-token artifact whose content is chart-stripped takes

@@ -543,3 +543,103 @@ html { scroll-behavior: smooth; }
   font-size: 0.6875rem;
   white-space: nowrap;
 }
+
+/* ── Saved scope sets (persist + reapply a selection, 2026-05-27) ─────────────
+   The saved-set bar (apply/delete chips) sits above the doc checklist; the
+   save-as control below it. Same zinc + action-blue language as the picker. */
+.scope-flash {
+  margin: 0;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.75rem;
+  border-top: 1px solid rgb(39 39 42);     /* zinc-800 */
+}
+.scope-flash-ok { color: rgb(147 197 253); }     /* blue-300 — the action accent, quiet */
+.scope-flash-error { color: rgb(252 165 165); }  /* red-300 — only error state uses red */
+.scope-set-bar {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.45rem 0.6rem;
+  border-top: 1px solid rgb(39 39 42);     /* zinc-800 */
+}
+.scope-set-bar-label {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgb(113 113 122);                 /* zinc-500 */
+}
+.scope-set-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.scope-set-chip {
+  display: inline-flex;
+  align-items: stretch;
+  margin: 0;
+  border: 1px solid rgb(63 63 70);         /* zinc-700 */
+  border-radius: 0.3rem;
+  overflow: hidden;
+}
+.scope-set-apply {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.18rem 0.5rem;
+  font-size: 0.75rem;
+  color: rgb(212 212 216);                 /* zinc-300 */
+  background: rgb(24 24 27);               /* zinc-900 */
+  border: none;
+  cursor: pointer;
+}
+.scope-set-apply:hover { background: rgb(37 99 235); color: rgb(255 255 255); }  /* blue-600 */
+.scope-set-count {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.6875rem;
+  color: rgb(113 113 122);                 /* zinc-500 */
+}
+.scope-set-apply:hover .scope-set-count { color: rgb(191 219 254); }  /* blue-200 */
+.scope-set-del {
+  padding: 0.18rem 0.45rem;
+  font-size: 0.75rem;
+  line-height: 1;
+  color: rgb(113 113 122);                 /* zinc-500 */
+  background: rgb(24 24 27);               /* zinc-900 */
+  border: none;
+  border-left: 1px solid rgb(63 63 70);    /* zinc-700 */
+  cursor: pointer;
+}
+.scope-set-del:hover { background: rgb(127 29 29); color: rgb(254 226 226); }  /* red-900 / red-100 */
+.scope-set-save {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.5rem 0.6rem;
+  border-top: 1px solid rgb(39 39 42);     /* zinc-800 */
+}
+.scope-set-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.75rem;
+  color: rgb(228 228 231);                 /* zinc-200 */
+  background: rgb(9 9 11);                 /* zinc-950 */
+  border: 1px solid rgb(63 63 70);         /* zinc-700 */
+  border-radius: 0.25rem;
+}
+.scope-set-name:focus { outline: none; border-color: rgb(37 99 235); }  /* blue-600 */
+.scope-set-name::placeholder { color: rgb(82 82 91); }  /* zinc-600 */
+.scope-set-savebtn {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  color: rgb(212 212 216);                 /* zinc-300 */
+  background: rgb(39 39 42);               /* zinc-800 */
+  border: 1px solid rgb(63 63 70);         /* zinc-700 */
+  border-radius: 0.25rem;
+  cursor: pointer;
+}
+.scope-set-savebtn:hover { background: rgb(37 99 235); color: rgb(255 255 255); border-color: rgb(37 99 235); }  /* blue-600 */

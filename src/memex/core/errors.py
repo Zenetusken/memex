@@ -84,3 +84,10 @@ class ModelCallError(MemexError):
     """A model call (vLLM completion, embed, rerank) failed or returned
     malformed output that could not be coerced to the requested schema.
     """
+
+
+class ScopeSetError(MemexError):
+    """A saved scope set is invalid — empty/over-long name, no documents,
+    or a duplicate. Raised by `core.scope_sets` on a malformed mutation; the
+    CLI / webui / MCP surfaces render it as a user-facing validation message.
+    """

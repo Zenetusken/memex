@@ -482,6 +482,8 @@ async def reindex_vault(*, force: bool = False) -> ReindexReport:
     if force:
         # Bypass any persistence checks; recursively drop the .memex/{embeddings,search,graph}.*
         # We don't touch traces/ or manifests/ — they're independent derived state.
+        # scope_sets.json is deliberately NOT here either: it's USER-authored (not
+        # regenerable from the markdown), so a full rebuild must preserve it.
         derived = settings.vault_path / ".memex"
         for target in (
             "embeddings.lance",

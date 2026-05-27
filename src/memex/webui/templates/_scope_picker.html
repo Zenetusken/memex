@@ -1,0 +1,56 @@
+{# Document scope-picker — saved-set bar + doc checklist + save-as control.
+   Lives INSIDE the ask <form> (in index.html, and as the HTMX swap target for
+   the /scope-sets{,/apply,/delete} routes). No JS: native <details> + checkboxes
+   + HTMX type="button" controls. #}
+<details id="scope-picker" class="scope-picker"{% if picker_open %} open{% endif %}>
+  <summary class="scope-picker-summary">Scope to documents
+    <span class="scope-picker-hint">— optional; leave all unchecked to search the whole vault</span>
+  </summary>
+
+  {% if scope_flash %}
+  <p class="scope-flash scope-flash-{{ scope_flash.kind }}" role="status">{{ scope_flash.text }}</p>
+  {% endif %}
+
+  {% if scope_sets %}
+  <div class="scope-set-bar">
+    <span class="scope-set-bar-label">Saved sets</span>
+    <ul class="scope-set-chips">
+      {% for s in scope_sets %}
+      <li class="scope-set-chip">
+        <button type="button" class="scope-set-apply"
+                hx-post="/scope-sets/apply"
+                hx-vals='{"name": {{ s.name | tojson }}}'
+                hx-target="#scope-picker" hx-swap="outerHTML"
+                title="Tick this set's {{ s.count }} document(s)">{{ s.name }}<span class="scope-set-count">{{ s.count }}</span></button>
+        <button type="button" class="scope-set-del"
+                hx-post="/scope-sets/delete"
+                hx-vals='{"name": {{ s.name | tojson }}}'
+                hx-target="#scope-picker" hx-swap="outerHTML"
+                aria-label="Delete set {{ s.name }}" title="Delete this saved set">✕</button>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <ul class="scope-picker-list">
+    {% for d in documents %}
+    <li class="scope-picker-item">
+      <label class="scope-picker-label">
+        <input type="checkbox" name="scope_doc_ids" value="{{ d.doc_id }}"{% if d.doc_id in checked_ids %} checked{% endif %}>
+        <span class="scope-picker-title">{{ d.title }}</span>
+        <code class="scope-picker-id">{{ d.doc_id }}</code>
+      </label>
+    </li>
+    {% endfor %}
+  </ul>
+
+  <div class="scope-set-save">
+    <input type="text" name="set_name" class="scope-set-name"
+           placeholder="Name this selection…" maxlength="100" autocomplete="off">
+    <button type="button" class="scope-set-savebtn"
+            hx-post="/scope-sets"
+            hx-target="#scope-picker" hx-swap="outerHTML"
+            title="Save the ticked documents as a reusable set">Save as set</button>
+  </div>
+</details>

@@ -240,6 +240,75 @@ async def test_ask_scopes_to_selected_docs_and_labels_note(
     assert "CR350 Cours 5 STP" in r.text  # scoped doc shown by title
 
 
+# ----- saved scope sets (persist + reapply a selection) -----
+
+
+@pytest.mark.asyncio
+async def test_scope_set_save_apply_delete_round_trip(
+    settings: MemexSettings, client: TestClient
+) -> None:
+    """Save the ticked docs as a named set; it shows on the landing page; applying
+    it re-ticks its docs server-side; deleting it removes it."""
+    a = await ingest_markdown_passthrough("# A\n\nAlpha.\n", source_stem="alpha doc")
+    b = await ingest_markdown_passthrough("# B\n\nBeta.\n", source_stem="beta doc")
+
+    r = client.post(
+        "/scope-sets",
+        data={"set_name": "My Set", "scope_doc_ids": [a.doc_id, b.doc_id]},
+    )
+    assert r.status_code == 200
+    assert "Saved" in r.text and "My Set" in r.text
+
+    # Persisted — shows on the landing page's saved-set bar.
+    r = client.get("/")
+    assert "Saved sets" in r.text
+    assert "My Set" in r.text
+
+    # Applying ticks both docs (case-insensitive name match).
+    r = client.post("/scope-sets/apply", data={"name": "my set"})
+    assert "Applied" in r.text
+    assert f'value="{a.doc_id}" checked>' in r.text
+    assert f'value="{b.doc_id}" checked>' in r.text
+
+    # Deleting removes it.
+    r = client.post("/scope-sets/delete", data={"name": "My Set"})
+    assert "Deleted" in r.text
+    r = client.get("/")
+    assert "My Set" not in r.text
+
+
+@pytest.mark.asyncio
+async def test_scope_set_save_empty_name_flashes_error(
+    settings: MemexSettings, client: TestClient
+) -> None:
+    a = await ingest_markdown_passthrough("# A\n\nAlpha.\n", source_stem="alpha")
+    r = client.post("/scope-sets", data={"set_name": "   ", "scope_doc_ids": [a.doc_id]})
+    assert r.status_code == 200
+    assert "scope-flash-error" in r.text  # error flash, not a 500
+    # Nothing persisted.
+    assert "Saved sets" not in client.get("/").text
+
+
+@pytest.mark.asyncio
+async def test_scope_set_save_no_docs_flashes_error(
+    settings: MemexSettings, client: TestClient
+) -> None:
+    r = client.post("/scope-sets", data={"set_name": "Empty", "scope_doc_ids": []})
+    assert r.status_code == 200
+    assert "scope-flash-error" in r.text
+
+
+@pytest.mark.asyncio
+async def test_scope_set_apply_unknown_flashes_error(
+    settings: MemexSettings, client: TestClient
+) -> None:
+    await ingest_markdown_passthrough("# A\n\nAlpha.\n", source_stem="alpha")
+    r = client.post("/scope-sets/apply", data={"name": "nope"})
+    assert r.status_code == 200
+    assert "No saved set" in r.text
+    assert "checked>" not in r.text  # nothing ticked
+
+
 def test_ask_rejects_empty_question(client: TestClient, fake_answered: None) -> None:
     r = client.post("/ask", data={"question": "   "})
     assert r.status_code == 400

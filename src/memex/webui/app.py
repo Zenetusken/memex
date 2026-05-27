@@ -15,6 +15,9 @@ Routes:
 
 - `GET  /`                              — landing page with the `ask` form
 - `POST /ask`                           — runs the answering agent
+- `POST /scope-sets`                    — save the ticked docs as a named set
+- `POST /scope-sets/apply`              — tick a saved set's docs (re-render)
+- `POST /scope-sets/delete`             — delete a saved set (re-render)
 - `GET  /documents`                     — document list
 - `GET  /documents/{id}`                — markdown render (with PDF
                                           side-by-side when a source is
@@ -48,8 +51,14 @@ from jinja2 import Environment, FileSystemLoader
 
 from memex.agents.answering import answer_query
 from memex.core.config import get_settings
-from memex.core.errors import StaleDocumentError, VaultIntegrityError
+from memex.core.errors import ScopeSetError, StaleDocumentError, VaultIntegrityError
 from memex.core.manifest import update_manifest
+from memex.core.scope_sets import (
+    delete_scope_set,
+    get_scope_set,
+    list_scope_sets,
+    save_scope_set,
+)
 from memex.index.graph_store import GraphStore
 from memex.index.pipeline import retitle_document
 from memex.vault.store import (
@@ -190,18 +199,91 @@ def create_app() -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request) -> HTMLResponse:
         """Landing page — the ask form + the optional document scope-picker
-        (Notebook-LM-style: tick documents to scope the question to them)."""
+        (Notebook-LM-style: tick documents to scope the question to them, or
+        apply a saved scope set)."""
         settings = get_settings()
-        docs: list[dict[str, str]] = []
-        async for ref in list_documents(settings.vault_path):
-            docs.append(
-                {
-                    "doc_id": ref.doc_id,
-                    "title": await read_document_title(settings.vault_path, ref.doc_id),
+        ctx = await _scope_picker_context(
+            settings.vault_path, checked_ids=[], flash=None, picker_open=False
+        )
+        return templates.TemplateResponse(request, "index.html", ctx)
+
+    # ----- Saved scope sets (persist + reapply a document selection) -----
+    # Each route re-renders the `_scope_picker.html` partial (the HTMX swap
+    # target #scope-picker) so the saved-set bar + ticked boxes update in place
+    # without a page reload. `/ask` is unchanged — it still reads `scope_doc_ids`
+    # from the ticked checkboxes; "apply" just pre-ticks them server-side.
+
+    @app.post("/scope-sets", response_class=HTMLResponse)
+    async def scope_set_save(
+        request: Request,
+        set_name: str = Form(""),
+        scope_doc_ids: list[str] = Form([]),  # noqa: B008  # FastAPI Form default sentinel
+    ) -> HTMLResponse:
+        """Save the currently-ticked documents as a named scope set."""
+        settings = get_settings()
+        checked = scope_doc_ids
+        try:
+            record = await save_scope_set(settings.vault_path, set_name, scope_doc_ids)
+            n = len(record.doc_ids)
+            flash = {
+                "kind": "ok",
+                "text": f"Saved “{record.name}” ({n} document{'' if n == 1 else 's'}).",
+            }
+            checked = record.doc_ids
+        except (ScopeSetError, VaultIntegrityError) as e:
+            flash = {"kind": "error", "text": str(e)}
+        ctx = await _scope_picker_context(
+            settings.vault_path, checked_ids=checked, flash=flash, picker_open=True
+        )
+        return templates.TemplateResponse(request, "_scope_picker.html", ctx)
+
+    @app.post("/scope-sets/apply", response_class=HTMLResponse)
+    async def scope_set_apply(
+        request: Request,
+        name: str = Form(""),
+    ) -> HTMLResponse:
+        """Tick a saved set's documents (server-side) so a normal Ask submit
+        scopes to them. Replaces the current selection."""
+        settings = get_settings()
+        checked: list[str] = []
+        try:
+            found = await get_scope_set(settings.vault_path, name)
+        except VaultIntegrityError as e:
+            flash = {"kind": "error", "text": str(e)}
+        else:
+            if found is None:
+                flash = {"kind": "error", "text": f"No saved set named “{name}”."}
+            else:
+                n = len(found.doc_ids)
+                flash = {
+                    "kind": "ok",
+                    "text": f"Applied “{found.name}” — {n} document{'' if n == 1 else 's'} ticked.",
                 }
-            )
-        docs.sort(key=lambda d: d["title"].lower())
-        return templates.TemplateResponse(request, "index.html", {"documents": docs})
+                checked = found.doc_ids
+        ctx = await _scope_picker_context(
+            settings.vault_path, checked_ids=checked, flash=flash, picker_open=True
+        )
+        return templates.TemplateResponse(request, "_scope_picker.html", ctx)
+
+    @app.post("/scope-sets/delete", response_class=HTMLResponse)
+    async def scope_set_remove(
+        request: Request,
+        name: str = Form(""),
+    ) -> HTMLResponse:
+        """Delete a saved scope set. Removes only the named collection."""
+        settings = get_settings()
+        try:
+            removed = await delete_scope_set(settings.vault_path, name)
+            flash = {
+                "kind": "ok" if removed else "error",
+                "text": (f"Deleted “{name}”." if removed else f"No saved set named “{name}”."),
+            }
+        except VaultIntegrityError as e:
+            flash = {"kind": "error", "text": str(e)}
+        ctx = await _scope_picker_context(
+            settings.vault_path, checked_ids=[], flash=flash, picker_open=True
+        )
+        return templates.TemplateResponse(request, "_scope_picker.html", ctx)
 
     @app.post("/ask", response_class=HTMLResponse)
     async def ask(
@@ -641,6 +723,43 @@ def create_app() -> FastAPI:
         }
 
     return app
+
+
+async def _scope_picker_context(
+    vault_path: Path,
+    *,
+    checked_ids: list[str],
+    flash: dict[str, str] | None,
+    picker_open: bool,
+) -> dict[str, Any]:
+    """Build the context the scope-picker renders from: title-sorted vault docs,
+    the saved scope sets, the ticked checkboxes, an optional flash, and whether
+    the `<details>` opens. Shared by the index page and the three `/scope-sets`
+    HTMX routes.
+
+    A corrupt `scope_sets.json` would raise `VaultIntegrityError` from
+    `list_scope_sets`; we swallow it to an empty list (+ a warning) so a damaged
+    file never 500s the Ask page — `memex scope-set list` surfaces it loudly.
+    """
+    docs: list[dict[str, str]] = []
+    async for ref in list_documents(vault_path):
+        docs.append(
+            {"doc_id": ref.doc_id, "title": await read_document_title(vault_path, ref.doc_id)}
+        )
+    docs.sort(key=lambda d: d["title"].lower())
+    try:
+        saved = await list_scope_sets(vault_path)
+    except VaultIntegrityError as e:
+        logger.warning("webui.scope_sets_unreadable", error=str(e)[:200])
+        saved = []
+    scope_sets: list[dict[str, object]] = [{"name": s.name, "count": len(s.doc_ids)} for s in saved]
+    return {
+        "documents": docs,
+        "scope_sets": scope_sets,
+        "checked_ids": checked_ids,
+        "scope_flash": flash,
+        "picker_open": picker_open,
+    }
 
 
 def _render_conflict(
