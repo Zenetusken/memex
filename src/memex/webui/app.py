@@ -189,13 +189,25 @@ def create_app() -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request) -> HTMLResponse:
-        """Landing page — renders the ask form."""
-        return templates.TemplateResponse(request, "index.html", {})
+        """Landing page — the ask form + the optional document scope-picker
+        (Notebook-LM-style: tick documents to scope the question to them)."""
+        settings = get_settings()
+        docs: list[dict[str, str]] = []
+        async for ref in list_documents(settings.vault_path):
+            docs.append(
+                {
+                    "doc_id": ref.doc_id,
+                    "title": await read_document_title(settings.vault_path, ref.doc_id),
+                }
+            )
+        docs.sort(key=lambda d: d["title"].lower())
+        return templates.TemplateResponse(request, "index.html", {"documents": docs})
 
     @app.post("/ask", response_class=HTMLResponse)
     async def ask(
         request: Request,
         question: str = Form(..., max_length=_QUESTION_MAX_BYTES),
+        scope_doc_ids: list[str] = Form([]),  # noqa: B008  # FastAPI Form default sentinel
     ) -> HTMLResponse:
         """Run the answering agent against `question` and render the
         HTMX `_answer.html` partial. Typed MemexError subclasses render
@@ -211,7 +223,7 @@ def create_app() -> FastAPI:
                 status_code=400,
             )
         try:
-            response = await answer_query(question)
+            response = await answer_query(question, scope_doc_ids=scope_doc_ids)
         except MemexError as e:
             # The agent surfaces typed MemexError subclasses (ModelCallError
             # from a schema-violating LLM output, InsufficientVRAMError on
@@ -245,7 +257,14 @@ def create_app() -> FastAPI:
         return templates.TemplateResponse(
             request,
             "_answer.html",
-            {"response": response, "error": None, "scope_docs": scope_docs},
+            {
+                "response": response,
+                "error": None,
+                "scope_docs": scope_docs,
+                # The route knows the scope SOURCE (it passed the user selection);
+                # the template uses it to phrase the ".ans-scope" note correctly.
+                "scope_source": "selected" if scope_doc_ids else "named",
+            },
         )
 
     # ----- Documents -----

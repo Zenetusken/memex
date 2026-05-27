@@ -67,10 +67,15 @@ async def search(query: str, k: int = 10) -> list[Chunk]:
     return reranked
 
 
-async def ask(question: str) -> FinalResponse:
+async def ask(question: str, scope_doc_ids: list[str] | None = None) -> FinalResponse:
     """Answer `question` using the full agent: retrieve → rerank →
     assess → answer → verify, with mandatory grounding before any
     claim is returned. A refusal is a first-class outcome.
+
+    `scope_doc_ids` (optional): restrict retrieval to these document ids — the
+    answer is grounded ONLY in the named docs (a refusal results if they don't
+    contain it). Omit for the full-corpus search. The applied scope is echoed on
+    `FinalResponse.artifact_scope_doc_ids`.
 
     The returned `FinalResponse` includes `correlation_id`, which is
     also the Langfuse trace id — paste it into the Langfuse UI to see
@@ -78,8 +83,8 @@ async def ask(question: str) -> FinalResponse:
     verified.
     """
     log = logger.bind(tool="ask")
-    log.info("mcp.tool.start")
-    response = await answer_query(question)
+    log.info("mcp.tool.start", scope_doc_ids=scope_doc_ids or [])
+    response = await answer_query(question, scope_doc_ids=scope_doc_ids)
     log.info(
         "mcp.tool.done",
         answered=response.answered,

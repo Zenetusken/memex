@@ -148,6 +148,33 @@ async def test_ask_returns_grounded_response(settings: MemexSettings, patch_agen
 
 
 @pytest.mark.asyncio
+async def test_ask_forwards_scope_doc_ids(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The MCP `ask` tool forwards an explicit doc-scope to the agent + echoes the
+    applied scope on the FinalResponse — the composable surface for the picker."""
+    captured: dict[str, Any] = {}
+
+    async def _fake(question: str, **kw: Any) -> FinalResponse:
+        captured["scope_doc_ids"] = kw.get("scope_doc_ids")
+        return FinalResponse(
+            answered=False,
+            refusal_reason="Not in the selected document.",
+            artifact_scope_doc_ids=["d1"],
+            correlation_id="01HZTESTMCPSCOPE0000000000",
+            tokens_used=8,
+            nodes_traversed=6,
+            regenerate_attempts=0,
+        )
+
+    monkeypatch.setattr("memex.mcp.server.answer_query", _fake)
+
+    result = await ask("What does d2 say?", scope_doc_ids=["d1"])
+    assert captured["scope_doc_ids"] == ["d1"]
+    assert result.artifact_scope_doc_ids == ["d1"]
+
+
+@pytest.mark.asyncio
 async def test_get_document_returns_canonical_markdown(
     settings: MemexSettings,
 ) -> None:

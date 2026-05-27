@@ -16,6 +16,26 @@
             required
             rows="3"
             class="w-full p-3 bg-zinc-900 border border-zinc-700 rounded-md text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-blue-600"></textarea>
+
+  {% if documents %}
+  <details class="scope-picker">
+    <summary class="scope-picker-summary">Scope to documents
+      <span class="scope-picker-hint">— optional; leave all unchecked to search the whole vault</span>
+    </summary>
+    <ul class="scope-picker-list">
+      {% for d in documents %}
+      <li class="scope-picker-item">
+        <label class="scope-picker-label">
+          <input type="checkbox" name="scope_doc_ids" value="{{ d.doc_id }}">
+          <span class="scope-picker-title">{{ d.title }}</span>
+          <code class="scope-picker-id">{{ d.doc_id }}</code>
+        </label>
+      </li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+
   <div class="flex items-center gap-3">
     <button type="submit"
             class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-md font-medium text-sm transition">

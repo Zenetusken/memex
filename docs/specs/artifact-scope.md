@@ -157,8 +157,15 @@ surfaces `[]`.
 
 ## Anti-scope (deferred)
 
-- NOT a full Notebook-LM doc-picker UI (this is the *automatic* artifact→doc selection;
-  the manual picker reuses `resolve_scope` + `hybrid_search_in_docs` later).
+- ~~NOT a full Notebook-LM doc-picker UI~~ — **the manual picker SHIPPED 2026-05-27.**
+  `answer_query(scope_doc_ids=[...])` (the webui `<details>` checklist → `/ask` Form list;
+  MCP `ask`'s `scope_doc_ids`; CLI `--doc`) sets `AnswerState.scope_doc_ids`, which
+  `resolve_artifact_scope` honors FIRST — explicit selection WINS over inference (no
+  `detect_artifact_reference`, no FTS resolver), scoping to exactly those docs (dedup +
+  blank-strip) and writing the same `artifact_scope_doc_ids`. So the manual picker and
+  the automatic artifact→doc selection share this one node + its surfacing +
+  `expand_graph` short-circuit; worst case is an empty scoped pool → clean refuse
+  (HARD-gate-safe). Tests + contract: `src/memex/CLAUDE.md`, `src/memex/webui/CLAUDE.md`.
 - NOT an LLM resolver or synonym model (determinism mandate).
 - The FTS chart-strip blind spot is handled defensively (single-token gate), not
   solved — an EN cross-doc single-token artifact whose content is chart-stripped takes

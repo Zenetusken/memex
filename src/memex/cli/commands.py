@@ -350,12 +350,21 @@ def register(app: typer.Typer) -> None:
     def ask(
         query: str = _Argument(..., help="The question to answer."),
         token_budget: int = _Option(8000, help="Max tokens across the agent loop."),
+        doc: list[str] = _Option(  # noqa: B008  # typer Option default sentinel
+            [],
+            "--doc",
+            help="Scope retrieval to this document id (repeatable). Omit = whole vault.",
+        ),
     ) -> None:
-        """Run the answering agent over the vault."""
+        """Run the answering agent over the vault.
+
+        `--doc <id>` (repeatable) scopes the answer to only those documents — it
+        is grounded in them or refuses. Omit to search the whole vault.
+        """
 
         async def _run():
             bootstrap()
-            return await answer_query(query, token_budget=token_budget)
+            return await answer_query(query, token_budget=token_budget, scope_doc_ids=doc or None)
 
         _print(asyncio.run(_run()))
 

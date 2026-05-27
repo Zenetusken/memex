@@ -305,11 +305,18 @@ class AnswerState(BaseModel):
     # state so the trace + `FinalResponse.used_chunks` consumers can
     # tell graph-expanded chunks from lexically-retrieved ones.
     graph_expanded_doc_ids: list[str] = []
-    # Documents the candidate pool was RE-SCOPED to by `resolve_artifact_scope`
-    # (#256): when the query NAMES a specific artifact, retrieval is narrowed to
-    # the document(s) it lives in. Empty = the full-corpus path (the common case
-    # — most queries name no artifact). Kept on state for the trace.
+    # Documents the candidate pool was RE-SCOPED to by `resolve_artifact_scope`.
+    # Two sources: (#256) the query NAMED a specific artifact → inferred scope, OR
+    # the user EXPLICITLY selected docs (the doc-picker → `scope_doc_ids` below).
+    # Empty = the full-corpus path (the common case). Surfaced on `FinalResponse`
+    # for the trace + the webui "Scoped to …" note.
     artifact_scope_doc_ids: list[str] = []
+    # EXPLICIT user-selected document scope (the Notebook-LM-style doc-picker).
+    # When non-empty, `resolve_artifact_scope` scopes retrieval to exactly these
+    # docs — no inference, no qualifier/single-token gates — and it TAKES
+    # PRECEDENCE over an inferred artifact reference (the user said which docs).
+    # Empty = fall back to artifact inference / the full-corpus path. Input only.
+    scope_doc_ids: list[str] = []
 
     # --- Graph-expansion budgets ---
     # Toggle the whole expansion step off (e.g. when the graph store
@@ -405,6 +412,28 @@ async def resolve_artifact_scope(state: AnswerState) -> AnswerStateUpdate:
 
     log = logger.bind(node="resolve_artifact_scope")
     bump = state.nodes_traversed + 1
+
+    # EXPLICIT user doc-selection (the doc-picker) WINS over inference: scope
+    # retrieval to exactly the selected docs (dedup, preserve order, drop blanks).
+    # No detection, no gates — the user said which docs. Worst case is an empty
+    # scoped pool (all-bogus ids, or selected docs with no chunk matching the
+    # query) → the downstream gates refuse cleanly: HARD-gate-safe by construction
+    # (only narrows; never adds a chunk, never relaxes a gate), exactly like #256.
+    user_scope = [d for d in dict.fromkeys(state.scope_doc_ids) if d.strip()]
+    if user_scope:
+        scoped = await hybrid_search_in_docs(state.query, user_scope, k=50)
+        log.info(
+            "scoped",
+            via="user-selected",
+            doc_ids=user_scope,
+            scoped_count=len(scoped),
+            replaced_from=len(state.candidates),
+        )
+        return {
+            "candidates": scoped,
+            "artifact_scope_doc_ids": user_scope,
+            "nodes_traversed": bump,
+        }
 
     # Detection is pure + cheap and needs no settings — run it FIRST so the
     # common no-artifact query (the overwhelming majority) takes a path
@@ -1691,6 +1720,7 @@ async def answer_query(
     graph_expansion_enabled: bool = True,
     graph_expansion_budget: int = 3,
     chunks_per_neighbor: int = 2,
+    scope_doc_ids: list[str] | None = None,
 ) -> FinalResponse:
     """Run the answering graph for a single query.
 
@@ -1711,6 +1741,11 @@ async def answer_query(
     `graph_expansion_budget` is the number of source documents whose
     neighbours are explored; `chunks_per_neighbor` is the max chunks
     pulled from each neighbour. See `expand_graph` for the design.
+
+    `scope_doc_ids` (the doc-picker): an EXPLICIT list of document ids to scope
+    retrieval to — takes precedence over inferred artifact-scope (#256). Empty /
+    None = the full-corpus path. The applied scope is surfaced on
+    `FinalResponse.artifact_scope_doc_ids`.
     """
     # Partial-grounded ship is a settings policy toggle (default on). Read it
     # fail-open so a non-bootstrapped fixture keeps the default behaviour.
@@ -1730,6 +1765,7 @@ async def answer_query(
         graph_expansion_budget=graph_expansion_budget,
         chunks_per_neighbor=chunks_per_neighbor,
         allow_partial_grounded=allow_partial_grounded,
+        scope_doc_ids=scope_doc_ids or [],
     )
 
     clear_run_context()  # belt-and-suspenders: a missed clear elsewhere

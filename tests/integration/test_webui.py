@@ -181,6 +181,65 @@ async def test_ask_refusal_surfaces_artifact_scope_titles(
     assert f'title="{fw.doc_id}"' in r.text
 
 
+@pytest.mark.asyncio
+async def test_index_renders_doc_picker(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch, client: TestClient
+) -> None:
+    """The doc-picker: the landing page offers each vault document as a tickable
+    scope (title shown, doc-id the checkbox value)."""
+    lec = await ingest_markdown_passthrough(
+        "# STP\n\nSpanning Tree Protocol.\n", source_stem="CR350 Cours 5 STP"
+    )
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "Scope to documents" in r.text
+    assert 'name="scope_doc_ids"' in r.text
+    assert f'value="{lec.doc_id}"' in r.text
+    assert "CR350 Cours 5 STP" in r.text  # offered by human title
+
+
+@pytest.mark.asyncio
+async def test_ask_scopes_to_selected_docs_and_labels_note(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch, client: TestClient
+) -> None:
+    """Ticking docs forwards `scope_doc_ids` to the agent, and the answer panel's
+    scope note reads 'your selected document(s)' (not 'you named')."""
+    lec = await ingest_markdown_passthrough(
+        "# Cours 5\n\nSpanning Tree.\n", source_stem="CR350 Cours 5 STP"
+    )
+    captured: dict[str, Any] = {}
+
+    async def _fake(question: str, **kw: Any) -> FinalResponse:
+        captured["scope_doc_ids"] = kw.get("scope_doc_ids")
+        return FinalResponse(
+            answered=True,
+            summary="STP elects a root bridge by lowest bridge ID.",
+            claims=[
+                CitedClaim(
+                    claim="The lowest BID wins.",
+                    source_chunk_id=f"{lec.doc_id}#c1",
+                    confidence="high",
+                )
+            ],
+            artifact_scope_doc_ids=[lec.doc_id],
+            correlation_id="01HZTESTPICKER0000000000000",
+            tokens_used=15,
+            nodes_traversed=6,
+            regenerate_attempts=0,
+        )
+
+    monkeypatch.setattr("memex.webui.app.answer_query", _fake)
+
+    r = client.post(
+        "/ask",
+        data={"question": "How is the root bridge elected?", "scope_doc_ids": [lec.doc_id]},
+    )
+    assert r.status_code == 200
+    assert captured["scope_doc_ids"] == [lec.doc_id]  # the route forwarded the selection
+    assert "Scoped to your selected document" in r.text  # picker phrasing, not "you named"
+    assert "CR350 Cours 5 STP" in r.text  # scoped doc shown by title
+
+
 def test_ask_rejects_empty_question(client: TestClient, fake_answered: None) -> None:
     r = client.post("/ask", data={"question": "   "})
     assert r.status_code == 400

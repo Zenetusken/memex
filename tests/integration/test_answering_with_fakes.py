@@ -1274,3 +1274,213 @@ async def test_expand_graph_skips_when_artifact_scope_active(
     )
     update = await expand_graph(state)
     assert update == {"nodes_traversed": 1}
+
+
+# ── Explicit document scope (the Notebook-LM doc-picker) ──────────────────────
+# answer_query(scope_doc_ids=[...]) scopes retrieval to exactly those docs via the
+# same resolve_artifact_scope node, TAKING PRECEDENCE over any inferred artifact
+# reference (the node short-circuits before detection, so no FTS resolver runs).
+# These harden the pipeline against the edge cases a manual picker introduces:
+# bogus ids, empty pools, dedup/blanks, precedence. The scope sets
+# artifact_scope_doc_ids, so expand_graph short-circuits (pinned just above) —
+# hence each scoped test sees hybrid_search_in_docs called EXACTLY once.
+
+
+def _scope_chunk(doc: str, cid: str = "s1", text: str = "scoped content") -> Chunk:
+    return Chunk(
+        chunk_id=f"{doc}#{cid}",
+        document_id=doc,
+        document_title=f"Doc {doc}",
+        text=text,
+        page=1,
+        score=0.9,
+    )
+
+
+def _patch_scope_retrieve(
+    monkeypatch: pytest.MonkeyPatch, *, full: list[Chunk], scoped: list[Chunk]
+) -> tuple[list[list[str]], list[list[str]]]:
+    """Fake full-corpus `hybrid_search` (→ `full`) + scoped `hybrid_search_in_docs`
+    (→ `scoped`, recording the doc_ids of every call) + a passthrough rerank
+    (recording what reached it). Returns (in_docs_calls, rerank_saw)."""
+    in_docs_calls: list[list[str]] = []
+    rerank_saw: list[list[str]] = []
+
+    async def _hybrid(query: str, k: int = 50) -> list[Chunk]:
+        return list(full)
+
+    async def _hybrid_in_docs(query: str, doc_ids: list[str], *, k: int) -> list[Chunk]:
+        in_docs_calls.append(list(doc_ids))
+        return list(scoped)
+
+    async def _rerank(query: str, cands: list[Chunk], top_k: int = 10) -> list[Chunk]:
+        rerank_saw.append([c.chunk_id for c in cands])
+        return list(cands[:top_k])
+
+    monkeypatch.setattr("memex.agents.answering.hybrid_search", _hybrid)
+    monkeypatch.setattr("memex.agents.answering.hybrid_search_in_docs", _hybrid_in_docs)
+    monkeypatch.setattr("memex.agents.answering.cross_encoder_rerank", _rerank)
+    return in_docs_calls, rerank_saw
+
+
+def _can_answer(fake_llm: FakeLLM, *, chunk_id: str) -> None:
+    """Can the LLM to produce a grounded one-claim answer citing `chunk_id`."""
+    fake_llm.respond(
+        "assess_sufficiency",
+        SufficiencyAssessment,
+        SufficiencyAssessment(sufficient=True, reason="ok"),
+    )
+    fake_llm.respond(
+        "answer",
+        DraftAnswer,
+        DraftAnswer(
+            summary="Answer from the scoped doc.",
+            claims=[
+                CitedClaim(claim="The scoped fact.", source_chunk_id=chunk_id, confidence="high")
+            ],
+        ),
+    )
+    fake_llm.respond(
+        "verify_grounding", VerificationResult, VerificationResult(grounded=[0], ungrounded=[])
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_prompt")
+async def test_explicit_scope_answers_from_selected_doc(
+    monkeypatch: pytest.MonkeyPatch, fake_llm: FakeLLM
+) -> None:
+    """Scope to one doc → retrieval scoped there → answered from it; the DIFFERENT
+    full-corpus chunk is bypassed and never reaches the reranker (graph-skip too)."""
+    in_docs_calls, rerank_saw = _patch_scope_retrieve(
+        monkeypatch,
+        full=[_scope_chunk("other-doc", text="unrelated")],
+        scoped=[_scope_chunk("lecture-5")],
+    )
+    _can_answer(fake_llm, chunk_id="lecture-5#s1")
+
+    response = await answer_query(
+        "How does STP elect the root bridge?", scope_doc_ids=["lecture-5"]
+    )
+
+    assert response.answered is True
+    assert in_docs_calls == [
+        ["lecture-5"]
+    ]  # scoped to exactly the pick, ONCE (expand_graph skipped)
+    assert rerank_saw == [["lecture-5#s1"]]  # the wrong-doc full-corpus chunk never reached rerank
+    assert response.artifact_scope_doc_ids == ["lecture-5"]
+    assert {c.source_chunk_id for c in response.claims} == {"lecture-5#s1"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_prompt")
+async def test_explicit_scope_takes_precedence_over_named_artifact(
+    monkeypatch: pytest.MonkeyPatch, fake_llm: FakeLLM
+) -> None:
+    """A query that NAMES an artifact ('le diagramme de coupe-feu') is OVERRIDDEN
+    by the user's explicit pick — the artifact inference (FTS resolver) is never
+    even consulted (the node short-circuits on the explicit scope)."""
+    from memex.index.fts_store import FTSStore
+
+    async def _boom(_vault_path: object) -> Any:
+        raise AssertionError("artifact inference must not run under an explicit scope")
+
+    monkeypatch.setattr(FTSStore, "open", _boom)
+    in_docs_calls, _ = _patch_scope_retrieve(
+        monkeypatch, full=[_scope_chunk("fw-diagram")], scoped=[_scope_chunk("my-pick")]
+    )
+    _can_answer(fake_llm, chunk_id="my-pick#s1")
+
+    response = await answer_query(_DIAG12, scope_doc_ids=["my-pick"])
+
+    assert response.answered is True
+    assert in_docs_calls == [["my-pick"]]  # the PICK, not the inferred firewall docs
+    assert response.artifact_scope_doc_ids == ["my-pick"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_prompt")
+async def test_explicit_scope_dedups_and_strips_blanks(
+    monkeypatch: pytest.MonkeyPatch, fake_llm: FakeLLM
+) -> None:
+    """Bogus shapes from a caller (dupes, empty/whitespace ids) are normalised."""
+    in_docs_calls, _ = _patch_scope_retrieve(monkeypatch, full=[], scoped=[_scope_chunk("a")])
+    _can_answer(fake_llm, chunk_id="a#s1")
+
+    await answer_query("q", scope_doc_ids=["a", "a", "", "  ", "b"])
+
+    assert in_docs_calls == [["a", "b"]]  # deduped, order preserved, blanks dropped
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_prompt")
+async def test_empty_scope_uses_full_corpus(
+    monkeypatch: pytest.MonkeyPatch, fake_llm: FakeLLM
+) -> None:
+    """Empty selection = the full-corpus path: the scope node never re-scopes."""
+    in_docs_calls, rerank_saw = _patch_scope_retrieve(
+        monkeypatch, full=[_scope_chunk("d1")], scoped=[]
+    )
+    _can_answer(fake_llm, chunk_id="d1#s1")
+
+    # graph_expansion off so the only possible hybrid_search_in_docs caller is the
+    # scope node — proving it did NOT scope.
+    response = await answer_query(
+        "a plain open question", scope_doc_ids=[], graph_expansion_enabled=False
+    )
+
+    assert in_docs_calls == []  # never scoped
+    assert response.artifact_scope_doc_ids == []
+    assert response.answered is True
+    assert rerank_saw == [["d1#s1"]]  # answered from the full-corpus pool
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_prompt")
+async def test_explicit_scope_refuses_when_selected_doc_cannot_answer(
+    monkeypatch: pytest.MonkeyPatch, fake_llm: FakeLLM
+) -> None:
+    """The point of the picker: if the answer ISN'T in the selected docs, refuse —
+    deterministically, like diag-12. The scope is surfaced on the refusal."""
+    in_docs_calls, _ = _patch_scope_retrieve(
+        monkeypatch,
+        full=[_scope_chunk("has-answer", text="the answer lives here")],
+        scoped=[_scope_chunk("wrong-pick", text="off-topic content")],
+    )
+    fake_llm.respond(
+        "assess_sufficiency",
+        SufficiencyAssessment,
+        SufficiencyAssessment(sufficient=False, reason="Not in the selected document."),
+    )
+
+    response = await answer_query("the answer?", scope_doc_ids=["wrong-pick"])
+
+    assert response.answered is False
+    assert response.claims == []
+    assert in_docs_calls == [["wrong-pick"]]
+    assert response.artifact_scope_doc_ids == ["wrong-pick"]  # surfaced on the refusal
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_prompt")
+async def test_explicit_scope_empty_pool_refuses_cleanly(
+    monkeypatch: pytest.MonkeyPatch, fake_llm: FakeLLM
+) -> None:
+    """Edge: a bogus/nonexistent id (or a doc with no matching chunk) → an empty
+    scoped pool → a clean refusal (never a crash, never a hallucination)."""
+    in_docs_calls, rerank_saw = _patch_scope_retrieve(
+        monkeypatch, full=[_scope_chunk("real-doc")], scoped=[]
+    )
+    fake_llm.respond(
+        "assess_sufficiency",
+        SufficiencyAssessment,
+        SufficiencyAssessment(sufficient=False, reason="No retrieved context."),
+    )
+
+    response = await answer_query("anything", scope_doc_ids=["does-not-exist"])
+
+    assert response.answered is False
+    assert response.claims == []
+    assert in_docs_calls == [["does-not-exist"]]
+    assert rerank_saw == [[]]  # the empty scoped pool reached rerank, not the full corpus
+    assert response.artifact_scope_doc_ids == ["does-not-exist"]
