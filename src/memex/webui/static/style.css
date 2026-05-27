@@ -69,7 +69,7 @@ summary:focus-visible {
   line-height: 1.45;
 }
 .dl-row > dt {
-  color: rgb(113 113 122);              /* zinc-500 */
+  color: rgb(161 161 170);              /* zinc-400 — AA on zinc-950 */
   letter-spacing: 0.02em;
 }
 .dl-row > dd {
@@ -107,7 +107,7 @@ summary:focus-visible {
   font-size: 0.625rem;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: rgb(113 113 122);
+  color: rgb(161 161 170);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -290,7 +290,7 @@ html { scroll-behavior: smooth; }
   font-size: 0.625rem;
   letter-spacing: 0.10em;
   text-transform: uppercase;
-  color: rgb(113 113 122);                 /* zinc-500 */
+  color: rgb(161 161 170);                 /* zinc-400 — AA on zinc-950 */
   margin-bottom: 0.6rem;
 }
 .toc-sidebar nav a {
@@ -334,7 +334,7 @@ html { scroll-behavior: smooth; }
   font-size: 0.625rem;
   letter-spacing: 0.10em;
   text-transform: uppercase;
-  color: rgb(113 113 122);                 /* zinc-500 */
+  color: rgb(161 161 170);                 /* zinc-400 — AA on zinc-950 */
   user-select: none;
   list-style-position: inside;
 }
@@ -378,10 +378,10 @@ html { scroll-behavior: smooth; }
   font-size: 0.625rem;
   letter-spacing: 0.10em;
   text-transform: uppercase;
-  color: rgb(113 113 122);                 /* zinc-500 */
+  color: rgb(161 161 170);                 /* zinc-400 — AA on zinc-950 */
   margin-bottom: 0.45rem;
 }
-.ans-eyebrow .count { color: rgb(82 82 91); }   /* zinc-600 — the "· N" */
+.ans-eyebrow .count { color: rgb(161 161 170); }   /* zinc-400 (AA) — the "· N" */
 
 /* The synthesized answer — the prominent zone. A blue left-rule marks it
    as THE result, reusing the single action accent (focus rings, wikilinks,
@@ -419,7 +419,7 @@ html { scroll-behavior: smooth; }
   font-size: 0.6875rem;
 }
 .claim-src {
-  color: rgb(113 113 122);                 /* zinc-500 */
+  color: rgb(161 161 170);                 /* zinc-400 — AA on zinc-950 */
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -481,7 +481,7 @@ html { scroll-behavior: smooth; }
   flex-wrap: wrap;
   gap: 0.25rem 1rem;
   font-size: 0.6875rem;
-  color: rgb(82 82 91);                    /* zinc-600 */
+  color: rgb(161 161 170);                    /* zinc-400 (AA) */
 }
 
 /* #256 artifact-scope note — when a query NAMED an artifact, retrieval was
@@ -494,9 +494,9 @@ html { scroll-behavior: smooth; }
   align-items: baseline;
   gap: 0.3rem 0.4rem;
   font-size: 0.75rem;
-  color: rgb(113 113 122);                 /* zinc-500 */
+  color: rgb(161 161 170);                 /* zinc-400 — AA on zinc-950 */
 }
-.ans-scope-label { color: rgb(82 82 91); } /* zinc-600 */
+.ans-scope-label { color: rgb(161 161 170); } /* zinc-400 (AA) */
 /* Each re-scoped document as a quiet bordered tag linking to its detail view;
    the human title shows, the stable doc-id is the hover tooltip. Deliberately
    NOT the loud action-blue of `.wikilink` — the note stays restrained. */
@@ -529,7 +529,7 @@ html { scroll-behavior: smooth; }
   user-select: none;
 }
 .scope-picker-summary:hover { color: rgb(244 244 245); }   /* zinc-100 */
-.scope-picker-hint { color: rgb(82 82 91); font-size: 0.75rem; }  /* zinc-600 */
+.scope-picker-hint { color: rgb(161 161 170); font-size: 0.75rem; }  /* zinc-400 (AA) */
 .scope-picker-list {
   list-style: none;
   margin: 0;
@@ -552,7 +552,7 @@ html { scroll-behavior: smooth; }
 .scope-picker-label input { accent-color: rgb(37 99 235); } /* blue-600 — the action accent */
 .scope-picker-title { color: rgb(212 212 216); flex: 1 1 auto; }  /* zinc-300 */
 .scope-picker-id {
-  color: rgb(113 113 122);                 /* zinc-500 */
+  color: rgb(161 161 170);                 /* zinc-400 — AA on zinc-950 */
   font-size: 0.6875rem;
   white-space: nowrap;
 }
@@ -580,7 +580,7 @@ html { scroll-behavior: smooth; }
   font-size: 0.6875rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: rgb(113 113 122);                 /* zinc-500 */
+  color: rgb(161 161 170);                 /* zinc-400 — AA on zinc-950 */
 }
 .scope-set-chips {
   display: flex;
@@ -613,14 +613,14 @@ html { scroll-behavior: smooth; }
 .scope-set-count {
   font-variant-numeric: tabular-nums;
   font-size: 0.6875rem;
-  color: rgb(113 113 122);                 /* zinc-500 */
+  color: rgb(161 161 170);                 /* zinc-400 — AA on zinc-950 */
 }
 .scope-set-apply:hover .scope-set-count { color: rgb(191 219 254); }  /* blue-200 */
 .scope-set-del {
   padding: 0.18rem 0.45rem;
   font-size: 0.75rem;
   line-height: 1;
-  color: rgb(113 113 122);                 /* zinc-500 */
+  color: rgb(161 161 170);                 /* zinc-400 — AA on zinc-950 */
   background: rgb(24 24 27);               /* zinc-900 */
   border: none;
   border-left: 1px solid rgb(63 63 70);    /* zinc-700 */
@@ -644,7 +644,7 @@ html { scroll-behavior: smooth; }
   border-radius: 0.25rem;
 }
 .scope-set-name:focus { outline: none; border-color: rgb(37 99 235); }  /* blue-600 */
-.scope-set-name::placeholder { color: rgb(82 82 91); }  /* zinc-600 */
+.scope-set-name::placeholder { color: rgb(161 161 170); }  /* zinc-400 (AA) */
 .scope-set-savebtn {
   padding: 0.3rem 0.7rem;
   font-size: 0.75rem;
@@ -673,7 +673,7 @@ html { scroll-behavior: smooth; }
 .mode-chip-k {
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: rgb(82 82 91);                    /* zinc-600 */
+  color: rgb(161 161 170);                    /* zinc-400 (AA) */
 }
 .mode-chip-v { color: rgb(147 197 253); }  /* blue-300 — the action accent */
 
@@ -681,7 +681,7 @@ html { scroll-behavior: smooth; }
   font-size: 0.6875rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: rgb(113 113 122);                 /* zinc-500 */
+  color: rgb(161 161 170);                 /* zinc-400 — AA on zinc-950 */
 }
 .mode-eyebrow-block { display: block; margin: 1.75rem 0 0.6rem; }
 
@@ -697,11 +697,11 @@ html { scroll-behavior: smooth; }
 .mode-active-id, .mode-table-id {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.7rem;
-  color: rgb(113 113 122);                 /* zinc-500 */
+  color: rgb(161 161 170);                 /* zinc-400 — AA on zinc-950 */
 }
 .mode-active-summary { color: rgb(212 212 216); font-size: 0.85rem; margin: 0 0 0.7rem; }  /* zinc-300 */
 .mode-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem 1.5rem; margin: 0; }
-.mode-fact dt { font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.04em; color: rgb(113 113 122); }
+.mode-fact dt { font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.04em; color: rgb(161 161 170); }
 .mode-fact dd { margin: 0; font-size: 0.8125rem; color: rgb(212 212 216); }  /* zinc-300 */
 .mode-fact b { color: rgb(228 228 231); font-weight: 600; }  /* zinc-200 */
 
@@ -711,7 +711,7 @@ html { scroll-behavior: smooth; }
   font-size: 0.6875rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: rgb(113 113 122);                 /* zinc-500 */
+  color: rgb(161 161 170);                 /* zinc-400 — AA on zinc-950 */
   font-weight: 500;
   padding: 0.3rem 0.6rem;
   border-bottom: 1px solid rgb(39 39 42);  /* zinc-800 */
@@ -723,14 +723,14 @@ html { scroll-behavior: smooth; }
 .mode-switch-cmd {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.7rem;
-  color: rgb(113 113 122);                 /* zinc-500 */
+  color: rgb(161 161 170);                 /* zinc-400 — AA on zinc-950 */
 }
-.mode-howto { margin-top: 1.25rem; font-size: 0.8125rem; color: rgb(113 113 122); line-height: 1.5; }
+.mode-howto { margin-top: 1.25rem; font-size: 0.8125rem; color: rgb(161 161 170); line-height: 1.5; }
 .mode-howto code { color: rgb(161 161 170); }  /* zinc-400 */
 
 /* ── Live mode hot-switch (ADR-0007) — per-mode Apply + flash + indicator ── */
 .mode-eyebrow-row { display: flex; align-items: baseline; gap: 0.75rem; flex-wrap: wrap; }
-.mode-loading { font-size: 0.75rem; color: rgb(113 113 122); }  /* zinc-500 */
+.mode-loading { font-size: 0.75rem; color: rgb(161 161 170); }  /* zinc-400 — AA on zinc-950 */
 .mode-apply {
   font-size: 0.75rem;
   padding: 0.2rem 0.6rem;
@@ -746,7 +746,7 @@ html { scroll-behavior: smooth; }
   font-size: 0.6875rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: rgb(82 82 91);                     /* zinc-600 */
+  color: rgb(161 161 170);                     /* zinc-400 (AA) */
 }
 .mode-flash { margin-bottom: 1rem; font-size: 0.8125rem; color: rgb(96 165 250); }  /* blue-400 */
 .mode-flash-error { color: rgb(248 113 113); }  /* red-400 */
@@ -767,7 +767,7 @@ html { scroll-behavior: smooth; }
   font-size: 0.6875rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: rgb(113 113 122);                 /* zinc-500 — mirrors .ans-eyebrow */
+  color: rgb(161 161 170);                 /* zinc-500 — mirrors .ans-eyebrow */
   user-select: none;
 }
 .summary-sections-toggle:hover { color: rgb(212 212 216); }   /* zinc-300 */
@@ -777,4 +777,4 @@ html { scroll-behavior: smooth; }
 .summary-section-digest { font-size: 0.8125rem; color: rgb(161 161 170); margin: 0.2rem 0 0.35rem; }  /* zinc-400 */
 .summary-section-points { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.25rem; }
 .summary-section-points li { font-size: 0.78rem; color: rgb(161 161 170); display: flex; gap: 0.5rem; align-items: baseline; }
-.summary-section-points .chunk-id { color: rgb(82 82 91); font-size: 0.6875rem; white-space: nowrap; }  /* zinc-600 */  /* blue-600 */
+.summary-section-points .chunk-id { color: rgb(161 161 170); font-size: 0.6875rem; white-space: nowrap; }  /* zinc-400 (AA) */  /* blue-600 */

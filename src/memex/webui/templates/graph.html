@@ -5,7 +5,7 @@
 <style>main { max-width: 100% !important; }</style>
 <link rel="stylesheet" href="/static/graph.css">
 
-<nav class="text-sm text-zinc-500 mb-3">
+<nav class="text-sm text-zinc-400 mb-3">
   <a href="/documents" class="hover:text-zinc-300">Documents</a>
   <span class="mx-2 text-zinc-700">/</span>
   <a href="/documents/{{ document.ref.doc_id }}"
@@ -16,14 +16,14 @@
 
 <header class="flex items-end justify-between gap-6 mb-4">
   <div class="min-w-0">
-    <p class="text-[0.625rem] uppercase tracking-widest text-zinc-500 mb-1">
+    <p class="text-[0.625rem] uppercase tracking-widest text-zinc-400 mb-1">
       one-hop entity graph
     </p>
     <h1 class="text-xl font-semibold truncate">
       {{ document.frontmatter.title or document.ref.doc_id }}
     </h1>
   </div>
-  <div class="text-xs text-zinc-500 shrink-0">
+  <div class="text-xs text-zinc-400 shrink-0">
     {% if graph_available %}
       <a href="/documents/{{ document.ref.doc_id }}" class="btn-quiet">back to document</a>
     {% else %}
@@ -39,10 +39,10 @@
   <aside class="inspector-panel" aria-label="node inspector">
     <div class="inspector-header">
       <span>inspector</span>
-      <span class="tabular text-zinc-600">{{ neighbor_count }} neighbor{{ '' if neighbor_count == 1 else 's' }}</span>
+      <span class="tabular text-zinc-400">{{ neighbor_count }} neighbor{{ '' if neighbor_count == 1 else 's' }}</span>
     </div>
     <div id="inspector-body" class="inspector-body">
-      <p class="text-xs text-zinc-500 italic">select a node to inspect.</p>
+      <p class="text-xs text-zinc-400 italic">select a node to inspect.</p>
     </div>
   </aside>
 </div>

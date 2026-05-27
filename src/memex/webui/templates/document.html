@@ -14,7 +14,7 @@
 <style>main { max-width: 100% !important; }</style>
 {% endif %}
 
-<nav class="text-sm text-zinc-500 mb-3">
+<nav class="text-sm text-zinc-400 mb-3">
   <a href="/documents" class="hover:text-zinc-300">Documents</a>
   <span class="mx-2 text-zinc-700">/</span>
   <span class="text-zinc-300 font-mono">{{ document.ref.doc_id }}</span>
@@ -23,7 +23,7 @@
 <header class="flex items-end justify-between gap-6 mb-5">
   <div class="min-w-0">
     <div id="doc-title">{% include "_document_title.html" %}</div>
-    <p class="text-xs text-zinc-500 tabular mt-1.5">
+    <p class="text-xs text-zinc-400 tabular mt-1.5">
       {%- if document.frontmatter.authors -%}
         {{ document.frontmatter.authors|join(', ') }}
         {% if document.frontmatter.date %} · {% endif %}
@@ -66,7 +66,7 @@
   </nav>
 </header>
 
-<span id="summary-loading" class="htmx-indicator text-sm text-zinc-500">summarizing… (this can take a moment)</span>
+<span id="summary-loading" class="htmx-indicator text-sm text-zinc-400">summarizing… (this can take a moment)</span>
 <section id="summary-pane" class="mb-5"></section>
 
 {% if has_preview %}
@@ -124,7 +124,7 @@
   {% if show_toc %}{% include "_document_toc.html" %}{% endif %}
 </div>
 {% if has_source %}
-<p class="text-xs text-zinc-500 mt-2">
+<p class="text-xs text-zinc-400 mt-2">
   Original source available as
   <a href="/documents/{{ document.ref.doc_id }}/source"
      download
@@ -133,7 +133,7 @@
 {% endif %}
 {% endif %}
 
-<details class="mt-5 text-xs text-zinc-500">
+<details class="mt-5 text-xs text-zinc-400">
   <summary class="cursor-pointer hover:text-zinc-300">document ref</summary>
   <dl class="mt-3">
     <div class="dl-row"><dt>doc_id</dt><dd>{{ document.ref.doc_id }}</dd></div>
