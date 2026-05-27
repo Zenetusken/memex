@@ -33,21 +33,29 @@ class VLMServeSettings(BaseModel):
 
     Validated 2026-05-26 on the 12 GB RTX 4070 for
     `cyankiwi/Qwen3-VL-8B-Instruct-AWQ-4bit` (POC, see ADR-0006
-    §VLM-via-vLLM): the desktop display holds ~1.1 GB so
-    `gpu_memory_utilization` can't exceed ~0.89; the vision encoder
-    cache reserves for the MAX image unless `max_pixels` is capped (else
-    KV starves to ~0.25 GB and vLLM refuses to start); `enforce_eager`
-    skips CUDA-graph capture (faster startup, frees memory). Runs on a
-    port DISTINCT from the orchestrator so the parse pause's reachability
-    check (against the orchestrator base_url) never targets it; the
-    process is started + torn down inside `vlm_backend.convert_pages`, so
-    it phase-separates from the in-process chart-OCR pass that follows
-    (the two can't co-reside: ~7.4 GB + ~3 GB > 12 GB)."""
+    §VLM-via-vLLM): the desktop display holds a VARIABLE ~1–2 GB (Xorg +
+    compositor + whatever apps the user has open — a Zoom call or browser
+    tab swings it by hundreds of MB), so `gpu_memory_utilization` is kept
+    at **0.80** for headroom. 0.89 worked on an idle desktop but
+    intermittently failed startup ("Free memory < desired GPU memory
+    utilization") mid-bulk-reingest once the desktop's GPU use rose — a
+    one-time startup gate, so the margin must absorb the desktop's peak,
+    not its idle. The vision encoder cache reserves for the MAX image
+    unless `max_pixels` is capped (else KV starves and vLLM refuses to
+    start); `max_model_len` 3072 fits a page transcription (image
+    ~1280 visual tokens + <800 output) with KV headroom even at the lower
+    util; `enforce_eager` skips CUDA-graph capture (faster startup, frees
+    memory). Runs on a port DISTINCT from the orchestrator so the parse
+    pause's reachability check (against the orchestrator base_url) never
+    targets it; the process is started + torn down inside
+    `vlm_backend.convert_pages`, so it phase-separates from the in-process
+    chart-OCR pass that follows (the two can't co-reside: ~7.4 + ~3 GB >
+    12 GB)."""
 
     host: str = "127.0.0.1"
     port: int = Field(default=8001, ge=1, le=65535)
-    gpu_memory_utilization: float = Field(default=0.89, ge=0.1, le=1.0)
-    max_model_len: int = Field(default=4096, ge=512)
+    gpu_memory_utilization: float = Field(default=0.80, ge=0.1, le=1.0)
+    max_model_len: int = Field(default=3072, ge=512)
     # Cap the visual-token budget so the vLLM vision encoder cache doesn't
     # reserve for the model's max image (~16384 tokens). 1280*28*28 mirrors
     # the rasteriser cap in parse/vlm_backend._render_page_to_image.

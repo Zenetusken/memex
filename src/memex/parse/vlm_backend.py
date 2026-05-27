@@ -231,15 +231,22 @@ async def _vlm_vllm_reachable(url: str, timeout_s: float = 2.0) -> bool:
 @asynccontextmanager
 async def _serve_vlm_vllm(model_id: str) -> AsyncGenerator[str]:
     """Start a short-lived vLLM serving `model_id`, yield its base_url, and tear
-    it down (process group + GPU release) on exit.
+    it down (full process-group reap + GPU-release wait) on exit.
 
     The recipe is `VLMServeSettings` (validated on the 12 GB rig). The process
-    gets its own session group so teardown's `killpg` reaps the EngineCore
-    children too; readiness + GPU-release are gated on `/v1/models`. Raises
-    `VLMUnavailable` if the process exits or never becomes ready.
+    runs in its OWN session group (`start_new_session`); the group id is
+    **captured at spawn** and teardown `killpg`s that captured gid — NOT a
+    re-`getpgid` of a possibly-dead launcher (the bug that orphaned a
+    GPU-holding EngineCore on a failed startup and cascaded the bulk re-ingest
+    2026-05-26). Teardown then polls `killpg(gid, 0)` until the group is EMPTY,
+    so the EngineCore's CUDA context is fully released before the next caller (a
+    subsequent doc's VLM-vLLM, or chart-OCR) touches the GPU. Startup is retried
+    once after a GPU settle to ride out a transient "free memory < desired" on a
+    tight card. Raises `VLMUnavailable` only if it repeatedly fails; the failed
+    subprocess's stderr tail is surfaced in the log + error context.
     """
     import os
-    import signal
+    import tempfile
 
     serve = get_settings().models.vlm_serve
     base_url = f"http://{serve.host}:{serve.port}/v1"
@@ -273,58 +280,94 @@ async def _serve_vlm_vllm(model_id: str) -> AsyncGenerator[str]:
         json.dumps({"image": 1, "video": 0}),
     ]
     env = {**os.environ, "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"}
-    log.info("vlm.vllm.start")
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.DEVNULL,
-        stdin=asyncio.subprocess.DEVNULL,
-        start_new_session=True,
-        env=env,
-    )
-    try:
+    errlog_path = Path(tempfile.gettempdir()) / "memex_vlm_vllm_serve.log"
+    proc: asyncio.subprocess.Process | None = None
+    gid = 0
+    attempts = 2
+    for attempt in range(1, attempts + 1):
+        errlog = errlog_path.open("wb")
+        log.info("vlm.vllm.start", attempt=attempt)
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=errlog,
+            stderr=errlog,
+            stdin=asyncio.subprocess.DEVNULL,
+            start_new_session=True,
+            env=env,
+        )
+        # Capture the group id NOW, while the launcher is alive — a failed
+        # startup exits the launcher, after which os.getpgid(pid) raises and the
+        # EngineCore child would orphan (holding VRAM → cascade across docs).
+        gid = os.getpgid(proc.pid)
         ready = False
+        exited = False
         for _ in range(serve.startup_timeout_s):
             if await _vlm_vllm_reachable(f"{base_url}/models"):
                 ready = True
                 break
             if proc.returncode is not None:
-                raise VLMUnavailable(
-                    "VLM vLLM process exited during startup",
-                    context={"model": model_id, "returncode": proc.returncode},
-                )
+                exited = True
+                break
             await asyncio.sleep(1.0)
-        if not ready:
-            raise VLMUnavailable(
-                "VLM vLLM did not become ready in time",
-                context={"model": model_id, "timeout_s": serve.startup_timeout_s},
-            )
+        errlog.close()
+        if ready:
+            break
+        tail = _tail_file(errlog_path, 1500)
+        await _reap_vlm_vllm(proc, gid)  # kills any orphaned EngineCore + waits for VRAM release
+        proc = None
+        log.warning("vlm.vllm.start_failed", attempt=attempt, exited_early=exited, stderr_tail=tail)
+        if attempt < attempts:
+            await asyncio.sleep(5.0)  # let the GPU settle, then retry once
+            continue
+        raise VLMUnavailable(
+            "VLM vLLM failed to start",
+            context={"model": model_id, "attempts": attempts, "stderr_tail": tail},
+        )
+
+    if proc is None:  # for the type checker: the loop either broke ready or raised
+        raise VLMUnavailable("VLM vLLM failed to start", context={"model": model_id})
+    try:
         log.info("vlm.vllm.ready")
         yield base_url
     finally:
         log.info("vlm.vllm.stop")
+        await _reap_vlm_vllm(proc, gid)
+
+
+async def _reap_vlm_vllm(proc: asyncio.subprocess.Process, gid: int) -> None:
+    """SIGTERM→SIGKILL the captured process group, then wait until the group is
+    EMPTY (`killpg(gid, 0)` raises `ProcessLookupError`) so the EngineCore
+    child's CUDA context is fully released before the GPU is handed to the next
+    caller. The port going quiet does NOT guarantee VRAM release — group
+    emptiness does."""
+    import os
+    import signal
+    from contextlib import suppress
+
+    with suppress(ProcessLookupError):
+        os.killpg(gid, signal.SIGTERM)
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=30.0)
+    except TimeoutError:
+        with suppress(ProcessLookupError):
+            os.killpg(gid, signal.SIGKILL)
+    for _ in range(45):
         try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            os.killpg(gid, 0)  # signal 0 = existence check for the whole group
         except ProcessLookupError:
-            pass
-        try:
-            await asyncio.wait_for(proc.wait(), timeout=30.0)
-        except TimeoutError:
-            with _suppress_proc_lookup():
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        # Settle: wait for the port to stop answering so the GPU is actually
-        # freed before the caller (chart-OCR) loads its in-process model.
-        for _ in range(15):
-            if not await _vlm_vllm_reachable(f"{base_url}/models", timeout_s=1.0):
-                break
-            await asyncio.sleep(1.0)
+            return
+        await asyncio.sleep(1.0)
+    with suppress(ProcessLookupError):
+        os.killpg(gid, signal.SIGKILL)
 
 
-def _suppress_proc_lookup() -> Any:
-    """`contextlib.suppress(ProcessLookupError)` without the top-level import."""
-    import contextlib
-
-    return contextlib.suppress(ProcessLookupError)
+def _tail_file(path: Path, n_chars: int) -> str:
+    """Last `n_chars` of a file (surfaces a failed subprocess's stderr)."""
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return ""
+    return data[-n_chars:].decode("utf-8", errors="replace")
 
 
 async def _vllm_transcribe(
