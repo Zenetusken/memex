@@ -32,8 +32,17 @@ Returns the same `FinalResponse` as the answering agent, plus the new optional
 2. **Group** — `_group_sections`: bucket chunks by deepest `heading_path` entry
    (fallback: document title), first-seen order → `[(section_title, [chunks])]`.
 3. **Route** — `_classify_route` (v1): `short` if total chunk text ≤
-   `_SHORT_DOC_CHARS` (14k) **or** ≤1 section; else `long`. (`tabular`/`deck`/
-   `scan` route as `long` for now.)
+   `_SHORT_DOC_CHARS` (14k) **or** ≤1 section; else `long`. Orthogonally,
+   `is_tabular = len(_load_doc_tables(...)) >= _TABULAR_MIN_TABLES` (4) turns on the
+   Key-figures pass (step 3b). (`deck`/`scan` route as `long` for now.)
+3b. **Key figures** (tabular, runs FIRST when `is_tabular`) — `_table_chunks`
+   renders each `StoredTable` from `tables.sqlite` as a synthetic bounded
+   table-chunk (`chunk_id={doc_id}#tblN`, header-paired `col=cell` verbatim rows);
+   `_key_figures_section` MAPs `summarize_tabular/v1` over them (bounded to the fast
+   window) → a "Key figures" `SectionSummary`, GROUNDED against those same chunks
+   (verbatim cell grounds; computed/fabricated drops — the Table-RAG row-verbatim
+   boundary). It leads `section_summaries` so the figures head the summary; an
+   empty/ungrounded result is skipped. Fail-open: no `tables.sqlite` → skipped.
 4. **MAP** (`_map_section`) — render `summarize_section/v1` over the section's
    (bounded) chunks → `SectionSummary`. A failed call returns `(None, …)`; one bad
    section never sinks the summary.
@@ -43,8 +52,9 @@ Returns the same `FinalResponse` as the answering agent, plus the new optional
    `n=len(key_points)`, keep only the confirmed-grounded indices. Conservative —
    missing index → dropped.
 6. **REDUCE** (`_reduce`) — render `summarize_reduce/v1` over the grounded section
-   digests → `DocAbstract.abstract`. Short route skips this: the single section's
-   digest IS the abstract.
+   digests → `DocAbstract.abstract`. The short **non-tabular** route skips this
+   (the single section's digest IS the abstract); `long` OR `tabular` reduces so the
+   abstract reflects both the prose digests and the Key-figures section.
 7. **Compose** — `FinalResponse(summary=abstract, claims=grounded doc points
    [≤12], sections=…, used_chunks, wikilinks via core.wikilinks.format_wikilink,
    artifact_scope_doc_ids=[doc_id])`. Empty grounded set → refusal (sections still
@@ -121,15 +131,22 @@ construction.
 
 - `tests/unit/test_doc_type.py` — `_group_sections` (heading grouping + doc-title
   fallback), `_classify_route` (short/long), `_bound_section_chunks` (fast-window
-  budget cap / always-keep-one / keep-all-when-small).
-- `tests/integration/test_document_summarizer.py` — faked `FTSStore` +
-  schema-dispatched `complete_structured`: long-route map-reduce, short-route
-  single-pass (no REDUCE), grounding drops ungrounded → zero-grounded refuses,
-  no-indexed-chunks refusal, the detail knob threading, token-budget early stop.
+  budget cap / always-keep-one / keep-all-when-small), `_render_table`
+  (header-paired verbatim cells / row-cap / ragged-row fallback) + `_table_chunks`
+  (id format / section / cap).
+- `tests/integration/test_document_summarizer.py` — faked `FTSStore` + (for the
+  tabular route) faked `TableStore` + schema-dispatched `complete_structured`:
+  long-route map-reduce, short-route single-pass (no REDUCE), grounding drops
+  ungrounded → zero-grounded refuses, no-indexed-chunks refusal, the detail knob
+  threading, token-budget early stop, **tabular** (Key-figures section leads +
+  cites a synthetic table chunk, an unsupported figure is dropped, a sub-threshold
+  doc skips the pass).
 
 ## Deferred
 
-- `tabular` route (key figures from `tables.sqlite`, cited not copied), `deck`
-  (figure-aware digests), `scan` (over VLM text).
+- `tabular` route **shipped** (key figures from `tables.sqlite`, cited not copied —
+  step 3b); its **figure-salience** selection (which tables on a many-table doc) is
+  deferred (currently document order up to the window budget). `deck`
+  (figure-aware digests) + `scan` (over VLM text) routes remain.
 - Section sub-splitting (no content dropped on an oversized section).
 - A grounded-summary eval suite (`eval_suite: agent.summarize` is already tagged).

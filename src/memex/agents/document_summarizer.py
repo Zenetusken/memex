@@ -23,6 +23,8 @@ so it can't run away the way a single free-form summary did.
 
 from __future__ import annotations
 
+import sqlite3
+from pathlib import Path
 from typing import Annotated, Literal
 
 import structlog
@@ -39,9 +41,10 @@ from memex.agents.answering import (
 )
 from memex.core.config import get_settings
 from memex.core.errors import MemexError, ModelCallError
-from memex.core.types import Chunk
+from memex.core.types import Chunk, StoredTable
 from memex.core.wikilinks import format_wikilink
 from memex.index.fts_store import FTSStore
+from memex.index.table_store import TableStore
 from memex.models.client import complete_structured
 from memex.observability import bind_run_context, clear_run_context
 from memex.prompts import render_prompt
@@ -98,6 +101,14 @@ _REDUCE_MAX_SECTIONS = 24
 # a short abstract) — kept tight so prompt + output clears the fast window.
 _VERIFY_MAX_TOKENS = 768
 _REDUCE_MAX_TOKENS = 1024
+# Tabular route (ADR-0008): a doc with at least this many well-formed stored tables
+# gets an extra grounded "Key figures" pass over `tables.sqlite`. Table chunks are
+# built up to `_MAX_TABLES_FOR_FIGURES` (then `_bound_section_chunks` keeps only the
+# leading subset that fits the fast window — a doc-order sample; figure-salience
+# selection is a deferred refinement), each rendered with up to `_MAX_TABLE_ROWS`.
+_TABULAR_MIN_TABLES = 4
+_MAX_TABLES_FOR_FIGURES = 24
+_MAX_TABLE_ROWS = 12
 
 
 def _group_sections(chunks: list[Chunk]) -> list[tuple[str, list[Chunk]]]:
@@ -249,6 +260,102 @@ async def _reduce(
     return overview.abstract, tokens
 
 
+def _render_table(table: StoredTable) -> str:
+    """Render a `StoredTable` as compact, self-contained text for the MAP/GROUND
+    calls: a section label + each row as header-paired `col=cell` pairs (verbatim
+    cells, the Phase-1 linearization shape), capped at `_MAX_TABLE_ROWS`. Pairing
+    the header with each cell lets the model read AND ground a figure with its
+    label without seeing the whole grid."""
+    lines = [f"Table — {table.section}" if table.section else "Table"]
+    if table.header:
+        lines.append(" | ".join(table.header))
+    for row in table.rows[:_MAX_TABLE_ROWS]:
+        if table.header and len(row) == len(table.header):
+            lines.append("; ".join(f"{h}={c}" for h, c in zip(table.header, row, strict=True) if c))
+        else:
+            lines.append(" | ".join(row))
+    # The prompt also truncates to ~1700; cap here so a giant table can't dominate.
+    return "\n".join(lines)[: _CHUNK_TRUNCATE_CHARS]
+
+
+def _table_chunks(doc_id: str, tables: list[StoredTable], document_title: str) -> list[Chunk]:
+    """Synthetic chunks (one per stored table, capped) carrying the verbatim cells —
+    the grounding anchors for the key-figure points. `chunk_id` is `{doc_id}#tblN`
+    (short, ≤80 for `CitedClaim.source_chunk_id`); `heading_path` is the table's
+    section so the composed wikilink anchors there."""
+    out: list[Chunk] = []
+    for i, table in enumerate(tables[:_MAX_TABLES_FOR_FIGURES]):
+        out.append(
+            Chunk(
+                chunk_id=f"{doc_id}#tbl{i}",
+                document_id=doc_id,
+                document_title=document_title,
+                text=_render_table(table),
+                heading_path=[table.section] if table.section else [],
+                char_start=table.char_start,
+                char_end=table.char_end,
+            )
+        )
+    return out
+
+
+async def _load_doc_tables(vault_path: Path, doc_id: str) -> list[StoredTable]:
+    """The doc's well-formed stored tables (`tables.sqlite`), or `[]` — fail-open
+    so a missing/corrupt table store never breaks summarization (it just skips the
+    tabular route). Lazy `TableStore.open` per the documented `agents/ → index/`
+    edge (same as `query_tables`)."""
+    try:
+        store = await TableStore.open(vault_path)
+    except (MemexError, OSError, sqlite3.Error) as exc:
+        logger.warning("summarize.table_store_unavailable", error=str(exc)[:160])
+        return []
+    try:
+        return await store.tables_for_document(doc_id)
+    except (MemexError, OSError, sqlite3.Error) as exc:
+        logger.warning("summarize.table_read_failed", error=str(exc)[:160])
+        return []
+    finally:
+        await store.close()
+
+
+async def _key_figures_section(
+    table_chunks: list[Chunk],
+    instruction: str | None,
+    max_output_tokens: int,
+    digest_guidance: str,
+) -> tuple[SectionSummary | None, int]:
+    """Extract the document's KEY FIGURES from its tables into a grounded
+    `SectionSummary` (ADR-0008 tabular route). MAPs `summarize_tabular/v1` over the
+    table chunks (bounded to fit the fast window, like every other call), then
+    GROUNDS the figures against those same chunks — a verbatim cell value grounds, a
+    computed/fabricated one is dropped (the row-verbatim fabrication boundary,
+    enforced by the existing verifier). Returns `(None, tokens)` on a failed map."""
+    if not table_chunks:
+        return None, 0
+    shown = _bound_section_chunks(table_chunks)
+    prompt = render_prompt(
+        "summarize_tabular",
+        chunks=shown,
+        instruction=instruction or "",
+        digest_guidance=digest_guidance,
+    )
+    try:
+        mapped, t_map = await complete_structured(
+            prompt=prompt,
+            schema=SectionSummary,
+            max_tokens=max_output_tokens,
+            prompt_tag="summarize_tabular@v1",
+        )
+    except ModelCallError as e:
+        logger.warning("summarize.tabular_map_failed", error=str(e)[:160])
+        return None, 0
+    grounded, t_g = await _ground_points(mapped.digest, mapped.key_points, shown)
+    return (
+        SectionSummary(section_title="Key figures", digest=mapped.digest, key_points=grounded),
+        t_map + t_g,
+    )
+
+
 async def summarize_document(
     doc_id: str,
     *,
@@ -293,9 +400,15 @@ async def summarize_document(
                 regenerate_attempts=0,
             )
 
+        # Tabular route (ADR-0008): a table-heavy doc also gets a grounded
+        # "Key figures" pass over its stored tables (fail-open → [] skips it).
+        tables = await _load_doc_tables(settings.vault_path, doc_id)
+        is_tabular = len(tables) >= _TABULAR_MIN_TABLES
+
         sections = _group_sections(chunks)
         route = _classify_route(chunks, sections)
         doc_title = chunks[0].document_title or doc_id
+        table_chunks = _table_chunks(doc_id, tables, doc_title) if is_tabular else []
         groups = [(doc_title, chunks)] if route == "short" else sections[:_MAX_SECTIONS]
         guidance = _DETAIL_GUIDANCE[detail]
         # Short route: the single MAP pass IS the whole-doc summary, so its digest
@@ -308,10 +421,27 @@ async def summarize_document(
             sections=len(sections),
             route=route,
             detail=detail,
+            is_tabular=is_tabular,
+            tables=len(tables),
         )
 
         tokens_total = 0
         section_summaries: list[SectionSummary] = []
+
+        # Tabular: produce the grounded "Key figures" section FIRST — the headline
+        # numbers are the point of summarizing a data-heavy doc, so a long doc's
+        # prose budget must not starve them. It leads `section_summaries` (hence the
+        # doc-level key-points); the prose sections append after. Bounded + grounded
+        # like every other call; an empty/ungrounded result is simply skipped.
+        if is_tabular:
+            kf, t_kf = await _key_figures_section(
+                table_chunks, instruction, max_output_tokens, guidance["digest"]
+            )
+            tokens_total += t_kf
+            if kf is not None and kf.key_points:
+                section_summaries.append(kf)
+                log.info("summarize.key_figures", figures=len(kf.key_points))
+
         for title, sec_chunks in groups:
             if tokens_total > token_budget:
                 log.info("summarize.budget_exhausted", done=len(section_summaries))
@@ -355,8 +485,10 @@ async def summarize_document(
                 regenerate_attempts=0,
             )
 
-        # REDUCE → abstract (short route: the single section digest IS the abstract).
-        if route == "short":
+        # REDUCE → abstract. Short non-tabular route: the single section digest IS
+        # the abstract (no second call). Long OR tabular: synthesize across the
+        # (prose + key-figures) digests so the abstract reflects both.
+        if route == "short" and not is_tabular:
             abstract = section_summaries[0].digest if section_summaries else ""
         else:
             abstract, t_r = await _reduce(
@@ -368,7 +500,9 @@ async def summarize_document(
             abstract = " ".join(kp.claim for kp in doc_points[:3])
 
         used_ids = {kp.source_chunk_id for kp in doc_points}
-        used_chunks = [c for c in chunks if c.chunk_id in used_ids]
+        # Include the synthetic table-chunks so a key-figure's source resolves for
+        # Sources/wikilinks (its chunk_id is `{doc_id}#tblN`, not an FTS chunk).
+        used_chunks = [c for c in (chunks + table_chunks) if c.chunk_id in used_ids]
         wikilinks: list[str] = []
         seen: set[str] = set()
         for c in used_chunks:

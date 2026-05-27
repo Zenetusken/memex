@@ -59,8 +59,10 @@ HARD-gate-neutral, the answer path leaves it empty).
 2. **Group** chunks into heading-sections (deepest `heading_path`, else doc
    title), first-seen order.
 3. **Route** (`_classify_route`, v1): `short` (≤ ~14k chars total OR ≤1 section →
-   one structured pass) vs `long` (map-reduce). `tabular`/`deck`/`scan` route as
-   `long` for now — the router + schema accommodate them; specialised later.
+   one structured pass) vs `long` (map-reduce). Orthogonally, a doc with ≥
+   `_TABULAR_MIN_TABLES` stored tables is **`tabular`** and additionally gets a
+   grounded Key-figures pass (§7, shipped). `deck`/`scan` route as `long` for now —
+   the router + schema accommodate them; specialised later.
 4. **MAP** each section → a `SectionSummary` (digest + cited key-points), bounded
    structured output.
 5. **GROUND** each section's key-points by **reusing `verify_grounding/v2`
@@ -128,6 +130,37 @@ grounded key-points with confidence chips + source ids, a collapsible
 per-section breakdown, Sources). Quality is identical across all three and across
 modes (§4).
 
+### 7. The tabular route — a grounded "Key figures" pass (shipped 2026-05-27)
+
+The first doc-type specialisation. A data-heavy document's headline numbers
+(revenues, totals, rates, named maxima) live in tables that the prose map-reduce
+either never reaches (deep in reading order, starved by the token budget) or
+describes rather than quotes — so a generic-`long` 10-K summary surfaced the CEO
+letter and **zero financial figures** (validated live). The `tabular` route adds a
+dedicated pass that runs **first** (the figures are the point; the prose budget
+must not starve them):
+
+- **Detect**: `_load_doc_tables` reads the doc's `tables.sqlite` (`TableStore`,
+  fail-open to `[]` — a missing/corrupt store just skips the route, fully
+  backward-compatible); `is_tabular = len(tables) >= _TABULAR_MIN_TABLES`.
+- **Render** each `StoredTable` as a synthetic, bounded **table-chunk**
+  (`_table_chunks`, `chunk_id={doc_id}#tblN`): header-paired `col=cell` rows
+  (verbatim cells, the Phase-1 linearization shape), row- and char-capped.
+- **MAP** `prompts/summarize_tabular/v1` over the table-chunks (bounded to the
+  fast window like every call) → a "Key figures" `SectionSummary` whose key-points
+  quote figures VERBATIM (the prompt forbids computing/summing).
+- **GROUND** those figures against the same table-chunks via `verify_grounding/v2`
+  — a verbatim cell value grounds; a computed/fabricated one drops. This is the
+  Table-RAG **row-verbatim fabrication boundary** (ADR / `agents/table_sql.py`)
+  reused: no new grounding path, HARD-gate-safe by construction.
+
+The Key-figures section leads `sections` + the doc-level `claims`; its synthetic
+table-chunks join `used_chunks` so Sources/wikilinks resolve. Validated live on
+the 10-K: 6 grounded figures (TSR 1/3/5-yr, dividends, buybacks) where the generic
+route surfaced none. **Known v1 limit**: tables are taken in document order up to
+the window budget — figure *salience* (pick the P&L / balance-sheet tables on a
+74-table 10-K, not just the first few) is a deferred refinement.
+
 ## Consequences
 
 ### Positive
@@ -147,9 +180,9 @@ modes (§4).
   deferred refinement, chosen so quality stays mode-independent today.
 - A long document is heavier than a single RAG answer (sequential per-section
   MAP+GROUND); the token budget bounds it but a very long doc is partial.
-- `tabular`/`deck`/`scan` route as generic `long` until specialised — figures /
-  tables are summarized from their transcribed/linearized text, not yet via the
-  structured table store.
+- `deck`/`scan` route as generic `long` until specialised; the `tabular` route
+  (§7) is shipped but takes tables in document order (figure *salience* selection
+  on a many-table doc is deferred).
 
 ### Neutral
 
@@ -159,10 +192,12 @@ modes (§4).
 
 ## Expanding
 
-- **Doc-type routes** (`tabular` → key figures from `tables.sqlite` cited not
-  copied; `deck` → figure-aware digests; `scan` → over VLM text) slot into
-  `_classify_route` + a per-route MAP prompt — the GROUND/REDUCE/compose spine is
-  unchanged.
+- **Doc-type routes**: `tabular` (key figures from `tables.sqlite`, cited not
+  copied) **shipped** (§7); `deck` → figure-aware digests; `scan` → over VLM text
+  remain. Each slots into `_classify_route` + a per-route MAP prompt — the
+  GROUND/REDUCE/compose spine is unchanged. **Figure-salience** selection (which
+  tables to surface on a many-table doc) is the obvious deepening of the tabular
+  route.
 - **Section sub-splitting** (no content dropped on a huge section) is the obvious
   vertical deepening of `_bound_section_chunks`.
 - This is the structured-summary **capability tier** ADR-0007 §"Expanding

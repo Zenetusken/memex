@@ -21,7 +21,7 @@ import pytest
 from memex.agents import document_summarizer as ds
 from memex.agents.answering import CitedClaim, DocAbstract, SectionSummary
 from memex.core.config import MemexSettings, set_settings
-from memex.core.types import Chunk
+from memex.core.types import Chunk, StoredTable
 
 
 @pytest.fixture
@@ -57,6 +57,34 @@ class _FakeFTS:
 
     async def close(self) -> None:
         return None
+
+
+class _FakeTableStore:
+    """Stand-in for TableStore: serves a fixed StoredTable list (the tabular route)."""
+
+    tables: ClassVar[list[StoredTable]] = []
+
+    @classmethod
+    async def open(cls, vault_path: Any) -> _FakeTableStore:
+        return cls()
+
+    async def tables_for_document(self, doc_id: str) -> list[StoredTable]:
+        return list(_FakeTableStore.tables)
+
+    async def close(self) -> None:
+        return None
+
+
+def _stored_table(i: int) -> StoredTable:
+    return StoredTable(
+        doc_id="docA",
+        table_id=f"t{i}",
+        section=f"Segment {i}",
+        header=["Segment", "Revenue"],
+        rows=[["Gaming", "$16,042M"], ["Data Center", "$30,000M"]],
+        char_start=0,
+        char_end=20,
+    )
 
 
 def _fake_complete(*, ground: bool, capture: list[str] | None = None):
@@ -219,3 +247,102 @@ async def test_token_budget_stops_map_reduce_early(
 
     assert resp.answered  # the first section's point still grounds
     assert len(resp.sections) == 1  # the second section was skipped by the budget
+
+
+def _fake_complete_drop_tabular():
+    """Grounds prose key-points but NOT the tabular ones (the GROUND verify prompt
+    for the tabular pass shows the table text — `Table —`). Models a key figure the
+    LLM computed/invented that isn't a verbatim cell → must be dropped."""
+
+    async def _complete(
+        prompt: str, schema: type, max_tokens: int = 0, prompt_tag: str = "", **_kw: object
+    ) -> tuple[Any, int]:
+        name = schema.__name__
+        if name == "SectionSummary":
+            m = re.search(r"\[([^\]]*#[^\]]*)\]", prompt)
+            cid = m.group(1) if m else "docA#x"
+            return (
+                SectionSummary(
+                    section_title="",
+                    digest="A digest.",
+                    key_points=[
+                        CitedClaim(claim="A figure.", source_chunk_id=cid, confidence="high")
+                    ],
+                ),
+                10,
+            )
+        if name == "VerificationResult":
+            tabular = "Table —" in prompt  # the table-chunk text only appears in tabular GROUND
+            return (
+                schema(
+                    grounded=[] if tabular else [0],
+                    ungrounded=[0] if tabular else [],
+                    ungrounded_reasons=["not a verbatim cell"] if tabular else [],
+                ),
+                5,
+            )
+        if name == "DocAbstract":
+            return DocAbstract(abstract="The abstract."), 8
+        raise AssertionError(f"unexpected schema {name!r}")
+
+    return _complete
+
+
+@pytest.mark.asyncio
+async def test_tabular_route_surfaces_grounded_key_figures(
+    _settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    chunks = [_chunk("docA#1", "Intro", "prose body")]
+    monkeypatch.setattr(ds, "FTSStore", _FakeFTS)
+    monkeypatch.setattr(_FakeFTS, "chunks", chunks)
+    monkeypatch.setattr(ds, "TableStore", _FakeTableStore)
+    monkeypatch.setattr(_FakeTableStore, "tables", [_stored_table(i) for i in range(4)])
+    monkeypatch.setattr(ds, "complete_structured", _fake_complete(ground=True))
+
+    resp = await ds.summarize_document("docA")
+
+    assert resp.answered
+    # The "Key figures" section leads, and a figure cites a synthetic table chunk.
+    assert resp.sections[0].section_title == "Key figures"
+    assert any("#tbl" in c.source_chunk_id for c in resp.claims)
+    # The synthetic table-chunk is surfaced for Sources (so the wikilink resolves).
+    assert any("#tbl" in c.chunk_id for c in resp.used_chunks)
+    assert resp.wikilinks
+
+
+@pytest.mark.asyncio
+async def test_tabular_unsupported_figure_dropped(
+    _settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    chunks = [_chunk("docA#1", "Intro", "prose body")]
+    monkeypatch.setattr(ds, "FTSStore", _FakeFTS)
+    monkeypatch.setattr(_FakeFTS, "chunks", chunks)
+    monkeypatch.setattr(ds, "TableStore", _FakeTableStore)
+    monkeypatch.setattr(_FakeTableStore, "tables", [_stored_table(i) for i in range(4)])
+    monkeypatch.setattr(ds, "complete_structured", _fake_complete_drop_tabular())
+
+    resp = await ds.summarize_document("docA")
+
+    assert resp.answered  # the prose half still grounds
+    # No ungrounded figure shipped; the empty key-figures section is not inserted.
+    assert not any("#tbl" in c.source_chunk_id for c in resp.claims)
+    assert all(s.section_title != "Key figures" for s in resp.sections)
+
+
+@pytest.mark.asyncio
+async def test_non_tabular_doc_skips_table_pass(
+    _settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Fewer than the threshold of tables → no tabular route, behaves like prose.
+    chunks = [_chunk("docA#1", "Intro", "prose body")]
+    monkeypatch.setattr(ds, "FTSStore", _FakeFTS)
+    monkeypatch.setattr(_FakeFTS, "chunks", chunks)
+    monkeypatch.setattr(ds, "TableStore", _FakeTableStore)
+    monkeypatch.setattr(_FakeTableStore, "tables", [_stored_table(0)])  # 1 < _TABULAR_MIN_TABLES
+    monkeypatch.setattr(ds, "complete_structured", _fake_complete(ground=True))
+
+    resp = await ds.summarize_document("docA")
+
+    assert resp.answered
+    assert all(s.section_title != "Key figures" for s in resp.sections)
+    assert not any("#tbl" in c.source_chunk_id for c in resp.claims)
