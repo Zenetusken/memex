@@ -707,3 +707,40 @@ async def test_title_save_blank_is_noop(settings: MemexSettings, client: TestCli
 def test_title_save_404s_on_unknown_doc(client: TestClient) -> None:
     r = client.post("/documents/nonexistent-doc/title", data={"title": "X"})
     assert r.status_code == 404
+
+
+# ----- co-residence resource mode UI (ADR-0007) -----
+
+
+def test_header_shows_mode_chip(client: TestClient) -> None:
+    # Default mode is "manual"; the chip renders on every page.
+    body = client.get("/").text
+    assert "mode-chip" in body
+    assert "Manual" in body  # the active label
+
+
+def test_resources_page_compares_all_modes(client: TestClient) -> None:
+    r = client.get("/resources")
+    assert r.status_code == 200
+    assert "Active mode" in r.text
+    for cmd in ("memex mode set fast", "memex mode set full", "memex mode set gpu_only"):
+        assert cmd in r.text
+
+
+def test_resources_page_highlights_active_curated_mode(
+    tmp_vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # With a curated mode active, its row is highlighted + the chip shows it.
+    monkeypatch.setenv("MEMEX_VAULT_PATH", str(tmp_vault))
+    monkeypatch.setenv("MEMEX_OBSERVABILITY__LANGFUSE_ENABLED", "false")
+    monkeypatch.setenv("MEMEX_MODELS__CO_RESIDENCE_MODE", "full")
+    set_settings(MemexSettings())  # type: ignore[call-arg]
+    try:
+        client = TestClient(create_app())
+        r = client.get("/resources")
+        assert r.status_code == 200
+        assert "mode-row-active" in r.text  # the `full` row is the active one
+        assert "~24,576 tokens (whole document)" in r.text
+        assert "Full context" in client.get("/").text  # chip label
+    finally:
+        set_settings(None)

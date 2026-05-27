@@ -26,6 +26,8 @@ from pydantic_settings import (
     TomlConfigSettingsSource,
 )
 
+from memex.core.resources import CoResidenceMode
+
 
 class VLMServeSettings(BaseModel):
     """Recipe for the short-lived VLM vLLM process (parse-time only),
@@ -118,6 +120,17 @@ class ModelSettings(BaseModel):
     # eval corpus (P0); memory wins of ~1.4 GB on a 12 GB rig are
     # available today.
     reranker_backend: Literal["cross_encoder", "qwen3"] = "cross_encoder"
+    # Co-residence MODE — the high-level VRAM-tradeoff knob (ADR-0007). A named
+    # bundle that resolves (via core/resources.py::resolve_profile) to a
+    # concrete posture: the retrieval device placement here PLUS the
+    # orchestrator's gpu-fraction + max-model-len (applied by the daemon). When
+    # set to anything other than "manual" it OVERRIDES the explicit
+    # embedder_device / reranker_device fields below. Default "manual" keeps the
+    # raw device knobs authoritative (backward-compatible). `fast` = low-latency
+    # top-k RAG; `full` = whole-document context for long-form synthesis
+    # (reranker→CPU); `gpu_only` = all-GPU at full util (>12 GB cards).
+    # `MEMEX_MODELS__CO_RESIDENCE_MODE=full`.
+    co_residence_mode: CoResidenceMode = "manual"
     # Device placement for the two retrieval models. Default "cuda" (bf16,
     # per ADR-0006). Set either to "cpu" (loads fp32 on CPU) to free GPU VRAM
     # for a fuller orchestrator KV cache when co-residing on a single 12 GB
@@ -594,3 +607,13 @@ def set_settings(settings: MemexSettings | None) -> None:
     """Install the process settings. Tests pass None to detach."""
     global _SETTINGS
     _SETTINGS = settings
+
+
+def config_toml_path() -> Path:
+    """The `config.toml` path `MemexSettings` loads from (the `toml_file` in
+    `model_config`). Used by `memex mode set` to tell the user where to persist
+    a chosen mode."""
+    raw = MemexSettings.model_config.get("toml_file")
+    if isinstance(raw, str):
+        return Path(raw)
+    return Path.home() / ".config" / "memex" / "config.toml"

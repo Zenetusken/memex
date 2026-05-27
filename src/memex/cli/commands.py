@@ -61,6 +61,10 @@ scope_set_app = typer.Typer(
     help="Manage saved document scope sets — named collections you reapply with "
     "`memex ask --scope-set NAME`."
 )
+mode_app = typer.Typer(
+    help="Co-residence resource modes (ADR-0007): the VRAM tradeoff between the "
+    "orchestrator's context window and GPU-resident retrieval."
+)
 
 
 def _print(payload: object) -> None:
@@ -396,6 +400,60 @@ def register(app: typer.Typer) -> None:
 
         _print(asyncio.run(_run()))
 
+    @app.command()
+    def summarize(
+        doc: list[str] = _Argument(  # noqa: B008
+            ..., help="Document id(s) to summarise (whole-document synthesis)."
+        ),
+        instruction: str = _Option("", "--instruction", "-i", help="Optionally focus the summary."),
+        max_tokens: int = _Option(4096, "--max-tokens", help="Max output tokens for the summary."),
+        max_input_chars: int = _Option(
+            0,
+            "--max-input-chars",
+            help="Input char budget; 0 = derive from the active mode's context window.",
+        ),
+    ) -> None:
+        """Summarise whole document(s) in one long-context pass (the `full` mode path).
+
+        Feeds the FULL document text into the orchestrator's context window
+        (raise it first with `memex mode set full`) and returns a long-form
+        summary — NOT top-k retrieval. Free-form output for now; the
+        structured/grounded version is forthcoming (ADR-0007).
+        """
+
+        async def _run():
+            bootstrap()
+            from memex.agents.synthesize import SourceDoc, synthesize_documents
+            from memex.core.config import get_settings
+            from memex.core.resources import resolve_profile
+            from memex.vault.store import read_document
+
+            s = get_settings()
+            sources: list[SourceDoc] = []
+            for d in doc:
+                vdoc = await read_document(s.vault_path, d)
+                sources.append(
+                    SourceDoc(doc_id=d, title=vdoc.frontmatter.title or d, text=vdoc.body)
+                )
+            budget = max_input_chars
+            if budget <= 0:
+                profile = resolve_profile(
+                    s.models.co_residence_mode,
+                    embedder_device=s.models.embedder_device,
+                    reranker_device=s.models.reranker_device,
+                )
+                window = profile.orchestrator_max_model_len or 6144
+                # ~3.3 chars/token, conservative; leave room for output + scaffolding.
+                budget = max(4000, int((window - max_tokens - 1024) * 3.3))
+            return await synthesize_documents(
+                sources,
+                instruction=instruction or None,
+                max_input_chars=budget,
+                max_output_tokens=max_tokens,
+            )
+
+        _print(asyncio.run(_run()))
+
     @app.command(name="enrich")
     def enrich_cmd(doc_id: str) -> None:
         """Run entity extraction + graph linking for one document."""
@@ -607,6 +665,7 @@ def register(app: typer.Typer) -> None:
     app.add_typer(serve_app, name="serve")
     app.add_typer(mcp_app, name="mcp")
     app.add_typer(scope_set_app, name="scope-set")
+    app.add_typer(mode_app, name="mode")
 
 
 def _find_repo_root() -> Path:
@@ -994,3 +1053,114 @@ def daemon_status() -> None:
 
     settings = _boot()
     _print(asyncio.run(_status(settings)))
+
+
+@daemon_app.command("restart")
+def daemon_restart(
+    gpu_fraction: float | None = _Option(
+        None, "--gpu-fraction", min=0.1, max=1.0, help="New vLLM gpu-memory-utilization."
+    ),
+    max_model_len: int | None = _Option(
+        None, "--max-model-len", min=512, help="New vLLM max-model-len (context window)."
+    ),
+) -> None:
+    """Stop + restart the vLLM daemon, optionally re-pointing the GPU fraction
+    and context window (the orchestrator half of a co-residence mode)."""
+    from memex.cli.bootstrap import bootstrap as _boot
+    from memex.daemon import DaemonStartTimeout
+    from memex.daemon import restart as _restart
+
+    settings = _boot()
+    err.print("[dim]restarting vLLM daemon…[/dim]")
+    try:
+        status = asyncio.run(
+            _restart(settings, gpu_fraction=gpu_fraction, max_model_len=max_model_len)
+        )
+    except DaemonStartTimeout as e:
+        err.print(f"[red]{e}[/red]")
+        err.print(f"[red]see log: {e.context.get('log_file')}[/red]")
+        raise typer.Exit(code=1) from e
+    _print(status)
+
+
+@mode_app.command("show")
+def mode_show() -> None:
+    """Print the active co-residence resource profile (ADR-0007)."""
+    from memex.cli.bootstrap import bootstrap as _boot
+    from memex.core.config import get_settings
+    from memex.core.resources import resolve_profile
+
+    _boot()
+    s = get_settings()
+    profile = resolve_profile(
+        s.models.co_residence_mode,
+        embedder_device=s.models.embedder_device,
+        reranker_device=s.models.reranker_device,
+    )
+    _print(profile.model_dump())
+
+
+@mode_app.command("set")
+def mode_set(
+    mode: str = _Argument(..., help="fast | full | gpu_only | manual"),
+) -> None:
+    """Apply a co-residence mode (ADR-0007).
+
+    If the orchestrator daemon is running and the mode prescribes a posture,
+    restarts the daemon with the mode's GPU fraction + context window (applies
+    NOW). Prints the env/config line to make the mode durable — set
+    `MEMEX_MODELS__CO_RESIDENCE_MODE` and restart `memex serve web` for the
+    retrieval-device change to take effect.
+    """
+    valid = ("fast", "full", "gpu_only", "manual")
+    if mode not in valid:
+        err.print(f"[red]Unknown mode {mode!r}.[/red] Choose one of: {', '.join(valid)}")
+        raise typer.Exit(code=2)
+
+    async def _run() -> dict[str, object]:
+        bootstrap()
+        from memex.core.config import config_toml_path, get_settings
+        from memex.core.resources import resolve_profile
+        from memex.daemon import restart as _restart
+        from memex.daemon import status as _status
+
+        s = get_settings()
+        # `mode` is narrowed to the CoResidenceMode literal union by the guard above.
+        profile = resolve_profile(
+            mode,
+            embedder_device=s.models.embedder_device,
+            reranker_device=s.models.reranker_device,
+        )
+        result: dict[str, object] = {
+            "mode": mode,
+            "embedder_device": profile.embedder_device,
+            "reranker_device": profile.reranker_device,
+            "orchestrator_gpu_fraction": profile.orchestrator_gpu_fraction,
+            "orchestrator_max_model_len": profile.orchestrator_max_model_len,
+        }
+        daemon_state = await _status(s)
+        if profile.orchestrator_gpu_fraction is not None and daemon_state.alive:
+            err.print("[dim]applying orchestrator posture (restarting daemon)…[/dim]")
+            new_state = await _restart(
+                s,
+                gpu_fraction=profile.orchestrator_gpu_fraction,
+                max_model_len=profile.orchestrator_max_model_len,
+            )
+            result["orchestrator_restarted"] = new_state.reachable
+        else:
+            result["orchestrator_restarted"] = False
+            if profile.orchestrator_gpu_fraction is not None:
+                err.print(
+                    "[dim]orchestrator not daemon-managed/running; `memex daemon start` "
+                    "to apply its util/context.[/dim]"
+                )
+        # Durable: this CLI applies the posture transiently; persist the mode so
+        # the next `memex serve web` picks up the retrieval-device placement.
+        result["persist"] = (
+            f"set MEMEX_MODELS__CO_RESIDENCE_MODE={mode} (env) or add "
+            f'`co_residence_mode = "{mode}"` under [models] in {config_toml_path()}, '
+            "then restart `memex serve web`"
+        )
+        return result
+
+    _print(asyncio.run(_run()))

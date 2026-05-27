@@ -416,3 +416,31 @@ async def status(settings: MemexSettings) -> DaemonStatus:
         pid_file=str(pid_file),
         log_file=str(log_file),
     )
+
+
+async def restart(
+    settings: MemexSettings,
+    *,
+    gpu_fraction: float | None = None,
+    max_model_len: int | None = None,
+) -> DaemonStatus:
+    """Stop the daemon (if running), optionally re-point the orchestrator's
+    GPU-utilization / context window, then start a fresh one.
+
+    `gpu_fraction` → `MEMEX_VLLM_GPU_FRACTION`, `max_model_len` →
+    `MEMEX_VLLM_MAX_MODEL_LEN`; both are read by `scripts/serve-vllm.sh` at
+    launch and the spawned child inherits THIS process's environment. This is
+    how a co-residence mode's orchestrator posture is applied (ADR-0007).
+
+    Precondition: the daemon must be ours (a PID file under
+    `vault/.memex/daemon/`). A hand-launched `serve-vllm.sh` has no PID file,
+    so `stop` is a no-op and `start` would then refuse on the still-bound port
+    — launch the orchestrator via `memex daemon start` for restart to work.
+    `stop` runs in a thread (it blocks up to the SIGTERM grace window).
+    """
+    await asyncio.to_thread(stop, settings)
+    if gpu_fraction is not None:
+        os.environ["MEMEX_VLLM_GPU_FRACTION"] = f"{gpu_fraction:g}"
+    if max_model_len is not None:
+        os.environ["MEMEX_VLLM_MAX_MODEL_LEN"] = str(max_model_len)
+    return await start(settings)

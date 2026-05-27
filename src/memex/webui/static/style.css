@@ -642,4 +642,75 @@ html { scroll-behavior: smooth; }
   border-radius: 0.25rem;
   cursor: pointer;
 }
-.scope-set-savebtn:hover { background: rgb(37 99 235); color: rgb(255 255 255); border-color: rgb(37 99 235); }  /* blue-600 */
+.scope-set-savebtn:hover { background: rgb(37 99 235); color: rgb(255 255 255); border-color: rgb(37 99 235); }
+
+/* ── Co-residence resource mode (ADR-0007) ───────────────────────────────────
+   The header chip + the /resources page. Same zinc + single action-blue. */
+.mode-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.7rem;
+  border: 1px solid rgb(39 39 42);         /* zinc-800 */
+  border-radius: 0.3rem;
+  text-decoration: none;
+}
+.mode-chip:hover { border-color: rgb(63 63 70); }   /* zinc-700 */
+.mode-chip-k {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgb(82 82 91);                    /* zinc-600 */
+}
+.mode-chip-v { color: rgb(147 197 253); }  /* blue-300 — the action accent */
+
+.mode-eyebrow {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgb(113 113 122);                 /* zinc-500 */
+}
+.mode-eyebrow-block { display: block; margin: 1.75rem 0 0.6rem; }
+
+.mode-active {
+  border: 1px solid rgb(39 39 42);         /* zinc-800 */
+  border-left: 2px solid rgb(37 99 235);   /* blue-600 — marks the active one */
+  border-radius: 0.375rem;
+  background: rgb(24 24 27);               /* zinc-900 */
+  padding: 0.9rem 1rem;
+}
+.mode-active-head { display: flex; align-items: baseline; gap: 0.6rem; margin: 0.25rem 0 0.4rem; }
+.mode-active-name { font-size: 1.05rem; font-weight: 600; color: rgb(244 244 245); }  /* zinc-100 */
+.mode-active-id, .mode-table-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  color: rgb(113 113 122);                 /* zinc-500 */
+}
+.mode-active-summary { color: rgb(212 212 216); font-size: 0.85rem; margin: 0 0 0.7rem; }  /* zinc-300 */
+.mode-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem 1.5rem; margin: 0; }
+.mode-fact dt { font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.04em; color: rgb(113 113 122); }
+.mode-fact dd { margin: 0; font-size: 0.8125rem; color: rgb(212 212 216); }  /* zinc-300 */
+.mode-fact b { color: rgb(228 228 231); font-weight: 600; }  /* zinc-200 */
+
+.mode-table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+.mode-table th {
+  text-align: left;
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgb(113 113 122);                 /* zinc-500 */
+  font-weight: 500;
+  padding: 0.3rem 0.6rem;
+  border-bottom: 1px solid rgb(39 39 42);  /* zinc-800 */
+}
+.mode-table td { padding: 0.4rem 0.6rem; border-bottom: 1px solid rgb(24 24 27); color: rgb(161 161 170); }  /* zinc-400 */
+.mode-table-name { color: rgb(212 212 216); }   /* zinc-300 */
+.mode-row-active td { background: rgb(37 99 235 / 0.07); }   /* blue-600 tint */
+.mode-row-active .mode-table-name { color: rgb(147 197 253); font-weight: 600; }  /* blue-300 */
+.mode-switch-cmd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  color: rgb(113 113 122);                 /* zinc-500 */
+}
+.mode-howto { margin-top: 1.25rem; font-size: 0.8125rem; color: rgb(113 113 122); line-height: 1.5; }
+.mode-howto code { color: rgb(161 161 170); }  /* zinc-400 */  /* blue-600 */

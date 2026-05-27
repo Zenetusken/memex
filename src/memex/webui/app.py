@@ -18,6 +18,7 @@ Routes:
 - `POST /scope-sets`                    — save the ticked docs as a named set
 - `POST /scope-sets/apply`              — tick a saved set's docs (re-render)
 - `POST /scope-sets/delete`             — delete a saved set (re-render)
+- `GET  /resources`                     — active co-residence mode + comparison
 - `GET  /documents`                     — document list
 - `GET  /documents/{id}`                — markdown render (with PDF
                                           side-by-side when a source is
@@ -53,6 +54,7 @@ from memex.agents.answering import answer_query
 from memex.core.config import get_settings
 from memex.core.errors import ScopeSetError, StaleDocumentError, VaultIntegrityError
 from memex.core.manifest import update_manifest
+from memex.core.resources import ResourceProfile, all_modes, resolve_profile
 from memex.core.scope_sets import (
     delete_scope_set,
     get_scope_set,
@@ -132,6 +134,17 @@ _SOURCE_KINDS: dict[str, tuple[str, str]] = {
 logger = structlog.get_logger(__name__)
 
 
+def _active_profile() -> ResourceProfile:
+    """The active co-residence ResourceProfile (ADR-0007), resolved from the
+    current settings (mode + the manual device knobs)."""
+    s = get_settings()
+    return resolve_profile(
+        s.models.co_residence_mode,
+        embedder_device=s.models.embedder_device,
+        reranker_device=s.models.reranker_device,
+    )
+
+
 def _find_source(vault_path: Path, doc_id: str) -> Path | None:
     """Locate the original `source.<ext>` for a doc, if one was copied
     in by the ingest stage. Markdown-passthrough docs have no source
@@ -184,6 +197,11 @@ def create_app() -> FastAPI:
     # don't shadow it with a competing stub (per src/memex/CLAUDE.md) —
     # `register_template_filter` localises the one unavoidable ignore.
     register_template_filter(env, "render_wikilink", render_wikilink)
+    # The active co-residence mode (ADR-0007) is fixed for the process lifetime
+    # (set at launch; switching needs a restart), so expose its label as a
+    # template global for the header chip — every page can show it without each
+    # route threading it through its context.
+    env.globals["active_mode_label"] = _active_profile().label  # type: ignore[reportUnknownMemberType]  # reason: jinja2 leaves Environment.globals unannotated
     templates = Jinja2Templates(env=env)
     app = FastAPI(title="Memex", docs_url=None, redoc_url=None)
 
@@ -347,6 +365,19 @@ def create_app() -> FastAPI:
                 # the template uses it to phrase the ".ans-scope" note correctly.
                 "scope_source": "selected" if scope_doc_ids else "named",
             },
+        )
+
+    # ----- Resource mode (ADR-0007) -----
+
+    @app.get("/resources", response_class=HTMLResponse)
+    async def resources(request: Request) -> HTMLResponse:
+        """Read-only view of the active co-residence resource mode + the full
+        mode comparison (ADR-0007). Switching is a CLI op (`memex mode set`)
+        plus a restart — there is no live switch here yet."""
+        return templates.TemplateResponse(
+            request,
+            "resources.html",
+            {"active": _active_profile(), "modes": all_modes()},
         )
 
     # ----- Documents -----

@@ -18,6 +18,7 @@ import structlog
 from memex.core.bus import EventBus, set_bus
 from memex.core.config import MemexSettings, set_settings
 from memex.core.errors import InsufficientVRAMError
+from memex.core.resources import effective_devices
 from memex.models.client import configure_client
 from memex.models.registry import ModelRegistry, set_registry
 from memex.observability.logging import configure_logging
@@ -117,10 +118,17 @@ def _estimated_vram_gb(settings: MemexSettings) -> float:
     (`embedder_device`/`reranker_device == "cpu"`) is EXCLUDED — it holds RAM,
     not GPU VRAM — mirroring how the vLLM-served VLM is excluded.
     """
+    # The co-residence mode (ADR-0007) resolves the effective device of each
+    # retrieval model; a CPU-placed model holds RAM, not GPU VRAM.
+    emb_device, rr_device = effective_devices(
+        settings.models.co_residence_mode,
+        settings.models.embedder_device,
+        settings.models.reranker_device,
+    )
     estimated = _VRAM_GB[("orchestrator", settings.models.orchestrator_quantization)] + _OVERHEAD_GB
-    if settings.models.embedder_device == "cuda":
+    if emb_device == "cuda":
         estimated += _VRAM_GB[("embedder", None)]
-    if settings.models.reranker_device == "cuda":
+    if rr_device == "cuda":
         estimated += _VRAM_GB[("reranker", settings.models.reranker_backend)]
     # Only count the VLM if it's loaded IN-PROCESS. With vlm_serving="vllm" it
     # runs as a separate short-lived vLLM process on the GPU freed by
@@ -181,10 +189,15 @@ def _verify_vram_fit(settings: MemexSettings) -> None:
     gpu_name = torch.cuda.get_device_name(0)
 
     estimated = _estimated_vram_gb(settings)
-    # Recomputed only for the log field below (the estimate itself lives in
-    # the pure helper).
+    # Recomputed only for the log fields below (the estimate itself lives in
+    # the pure helper). The mode (ADR-0007) resolves the effective devices.
     vlm_in_process = (not settings.parse.disable_vlm) and (
         settings.models.vlm_serving == "transformers"
+    )
+    emb_device, rr_device = effective_devices(
+        settings.models.co_residence_mode,
+        settings.models.embedder_device,
+        settings.models.reranker_device,
     )
 
     if estimated > budget_gb:
@@ -195,13 +208,14 @@ def _verify_vram_fit(settings: MemexSettings) -> None:
             total_gb=round(total_gb, 1),
             gpu=gpu_name,
             vlm_counted=vlm_in_process,
-            embedder_device=settings.models.embedder_device,
-            reranker_device=settings.models.reranker_device,
+            co_residence_mode=settings.models.co_residence_mode,
+            embedder_device=emb_device,
+            reranker_device=rr_device,
             fix=(
-                "lower hardware.gpu_memory_fraction, place the reranker (and/or "
-                "embedder) on CPU (MEMEX_MODELS__RERANKER_DEVICE=cpu), switch to a "
-                "smaller VLM variant (vlm_quantization=awq_int4), or reduce the "
-                "orchestrator quant tier"
+                "lower hardware.gpu_memory_fraction, switch to a lighter co-residence "
+                "mode (MEMEX_MODELS__CO_RESIDENCE_MODE=full puts the reranker on CPU), "
+                "switch to a smaller VLM variant (vlm_quantization=awq_int4), or reduce "
+                "the orchestrator quant tier"
             ),
         )
     else:
@@ -212,8 +226,9 @@ def _verify_vram_fit(settings: MemexSettings) -> None:
             total_gb=round(total_gb, 1),
             gpu=gpu_name,
             vlm_counted=vlm_in_process,
-            embedder_device=settings.models.embedder_device,
-            reranker_device=settings.models.reranker_device,
+            co_residence_mode=settings.models.co_residence_mode,
+            embedder_device=emb_device,
+            reranker_device=rr_device,
         )
 
 

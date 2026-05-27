@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from memex.core.breakers import CircuitBreaker, CircuitBreakerOpen
 from memex.core.config import ModelSettings
 from memex.core.errors import InsufficientVRAMError, MemexError
+from memex.core.resources import effective_devices
 
 if TYPE_CHECKING:
     from sentence_transformers import CrossEncoder, SentenceTransformer
@@ -316,21 +317,29 @@ class ModelRegistry:
         log = logger.bind(name=name)
         log.info("model.load.start")
 
+        # The co-residence mode (ADR-0007) resolves the effective device for
+        # each retrieval model; `manual` falls back to the explicit knobs.
+        emb_device, rr_device = effective_devices(
+            self._settings.co_residence_mode,
+            self._settings.embedder_device,
+            self._settings.reranker_device,
+        )
+
         async def _do_load() -> None:
             if name == "embedder":
                 self._models[name] = await asyncio.to_thread(
-                    self._load_embedder, self._settings.embedder, self._settings.embedder_device
+                    self._load_embedder, self._settings.embedder, emb_device
                 )
             elif name == "reranker":
                 if self._settings.reranker_backend == "qwen3":
                     self._models[name] = await asyncio.to_thread(
                         self._load_reranker_qwen3,
                         self._settings.reranker,
-                        self._settings.reranker_device,
+                        rr_device,
                     )
                 else:
                     self._models[name] = await asyncio.to_thread(
-                        self._load_reranker, self._settings.reranker, self._settings.reranker_device
+                        self._load_reranker, self._settings.reranker, rr_device
                     )
             elif name == "vlm":
                 self._models[name] = await asyncio.to_thread(self._load_vlm, self._settings.vlm)

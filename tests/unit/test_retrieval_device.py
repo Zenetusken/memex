@@ -97,3 +97,29 @@ def test_estimated_vram_excludes_cpu_placed_retrieval_models(
     assert both_cpu == pytest.approx(all_gpu - reranker_gb - embedder_gb)
     # The orchestrator + overhead never leave the GPU estimate.
     assert both_cpu < all_gpu
+
+
+@pytest.mark.asyncio
+async def test_registry_loads_reranker_on_mode_resolved_device(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The `full` co-residence mode (ADR-0007) overrides the explicit device
+    knobs: `_do_load` must load the reranker on CPU via `effective_devices`."""
+    from memex.core.config import ModelSettings
+    from memex.models.registry import ModelRegistry
+
+    captured: dict[str, object] = {}
+
+    def _fake_load_reranker(model_id: str, device: str = "cuda") -> object:
+        captured["device"] = device
+        return object()  # a stand-in for the loaded CrossEncoder
+
+    monkeypatch.setattr(
+        ModelRegistry, "_load_reranker", staticmethod(_fake_load_reranker)
+    )
+    # co_residence_mode="full" with the explicit knobs still at cuda — the mode
+    # must win (→ reranker on cpu).
+    reg = ModelRegistry(ModelSettings(co_residence_mode="full"))
+    async with reg.use("reranker"):
+        pass
+    assert captured["device"] == "cpu"
