@@ -487,6 +487,8 @@ The OOM circuit breaker is a wrapper around `_ensure_loaded`: catch `torch.cuda.
 
 Hot tip for tests: the registry's `_ensure_loaded` accepts a swappable model factory. Tests inject a `FakeEmbedder` that returns deterministic vectors — see §2.6.
 
+> **Update (2026-05-27): the VRAM tradeoff is now a named-mode policy layer.** Rather than the auto-eviction sketch above, the shipped design ([ADR-0007](adr/0007-co-residence-resource-modes.md)) encodes the embedder/reranker placement + the orchestrator's util/context-window as named *modes* (`fast`/`full`/`gpu_only`/`manual`) resolved by one pure seam, `core/resources.py::resolve_profile`. The registry reads it via `effective_devices(...)`; bootstrap, the daemon, the CLI (`memex mode show|set`), and the webui all consume the same `ResourceProfile`. The *dynamic* VRAM manager this section anticipated is delivered later by replacing that resolver's body (compute the profile from live free-VRAM) — callers untouched. `full` mode's ~24 K window is what the document summarizer ([ADR-0008](adr/0008-document-summarization.md)) was built against, though the summarizer is mode-independent by construction.
+
 ### 2.3 Vault file watcher
 
 Watchdog observes `vault/documents/**/*.md`. The watcher class debounces fs events on a per-path 500 ms window (`asyncio.TimerHandle`) — typical editors emit several events per save. Atomic-write semantics dovetail: we only re-enrich on a `modified` event whose post-debounce stat shows mtime > last-known and content-sha256 ≠ last-known.

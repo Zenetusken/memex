@@ -42,6 +42,8 @@ The full set of ADRs lives under [`adr/`](adr/0001-vllm-as-sole-inference-engine
 - **[ADR-0004](adr/0004-observability-structlog-langfuse.md)** — structlog + Langfuse, joined by correlation_id
 - **[ADR-0005](adr/0005-ryugraph-replaces-kuzu.md)** — RyuGraph replaces Kuzu after upstream archival
 - **[ADR-0006](adr/0006-cuda-dispatch-and-dtype.md)** — CUDA toolkit pin, dtype dispatch, attention implementation
+- **[ADR-0007](adr/0007-co-residence-resource-modes.md)** — Co-residence resource modes (the VRAM-tradeoff policy layer; dynamic-VRAM-manager precursor)
+- **[ADR-0008](adr/0008-document-summarization.md)** — Document summarization (doc-type-aware, structured, grounded map-reduce)
 
 ## Building this site locally
 

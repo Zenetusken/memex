@@ -184,6 +184,28 @@ uv run memex ask "Has anyone discussed CUDA-graph capture overhead?"
 
 Output is JSON on a pipe, rich tables in a terminal. Every `claim` carries a `source_chunk_id`; the agent **refuses** when chunks don't ground the answer (returns `answered: false` + `refusal_reason`).
 
+### Summarize a whole document
+
+```sh
+uv run memex summarize 2f96ae1c-some-paper                       # standard detail
+uv run memex summarize 2f96ae1c-some-paper --detail detailed     # longer
+uv run memex summarize 2f96ae1c-some-paper -i "focus on the method"
+```
+
+Produces a **structured, grounded** summary (ADR-0008): an abstract + cited key-points + per-section digests, built by a map-reduce over the document's indexed chunks. Every key-point is grounded to a source chunk or dropped, and a document with nothing groundable **refuses** — the same no-hallucination gate the answering agent uses, extended to summaries. `--detail` (`brief`/`standard`/`detailed`) tunes length; `--token-budget` caps the work on very long docs. Quality is identical whether you're in `fast` or `full` co-residence mode (the strategy is chosen by the document, not the mode). Also available as the **Summarize** button on the web UI document view, and the MCP `summarize` tool.
+
+### Switch the co-residence mode (speed vs. context)
+
+On a 12 GB card the orchestrator's context window and the GPU-resident reranker compete for ~3 GB of swing VRAM. A *mode* is a named bundle of that tradeoff (ADR-0007):
+
+```sh
+uv run memex mode show              # the active profile + VRAM estimate
+uv run memex mode set fast          # GPU reranker, 6 K context, ~14 s/ask
+uv run memex mode set full          # reranker→CPU, 24 K context, slower rerank
+```
+
+`fast` is low-latency top-k RAG; `full` frees the GPU into a ~24 K orchestrator window (the reranker moves to CPU, ~20 s/query). `memex mode set` restarts the daemon-managed orchestrator; set `MEMEX_MODELS__CO_RESIDENCE_MODE` + restart `memex serve web` to also move the retrieval models. The full matrix + the eval numbers are in [`docs/deploy/hardware-tiers.md`](docs/deploy/hardware-tiers.md); the design is [ADR-0007](docs/adr/0007-co-residence-resource-modes.md).
+
 ### Browse the vault
 
 ```sh
@@ -267,11 +289,13 @@ For remote / network access, point at the HTTP transport with the bearer token f
 }
 ```
 
-Five tools are exposed:
+Seven tools are exposed:
 - 🔎 `search(query, k)` — hybrid retrieval over the vault
-- ❓ `ask(question)` — full grounded answering agent
+- ❓ `ask(question, scope_doc_ids?, scope_set?)` — full grounded answering agent
+- 📝 `summarize(doc_id, instruction?, detail?)` — structured grounded document summary
 - 📄 `get_document(doc_id)` — canonical markdown + frontmatter
 - 📚 `list_documents()` — every doc in the vault
+- 📌 `list_scope_sets()` — every saved document scope set
 - 🌐 `get_graph_neighbors(doc_id)` — one-hop entity neighbors
 
 ### Inspect health + breakers
@@ -396,7 +420,7 @@ The only thing that talks to the network is the *initial model download* (one-ti
 ## 🧪 Run the tests
 
 ```sh
-uv run pytest                  # 739 tests, ~11 seconds, no GPU needed
+uv run pytest                  # 837 tests, ~13 seconds, no GPU needed
 uv run pytest tests/unit       # just the pure-function tests
 uv run pytest tests/integration  # full ingest→parse→index→ask flow with faked I/O
 ```
@@ -413,7 +437,7 @@ Integration tests fake the heavy I/O (vLLM, Docling, PyMuPDF worker, LanceDB, se
 | 🔧 The how (engineering rules + stack) | [`docs/GUIDELINES.md`](docs/GUIDELINES.md) |
 | 🗺️ What's done & what's queued | [`docs/ROADMAP.md`](docs/ROADMAP.md) |
 | 🏗️ The architecture blueprint | [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) |
-| 📐 Why we picked what we picked | [`docs/adr/`](docs/adr/) (ADRs 0001–0006) |
+| 📐 Why we picked what we picked | [`docs/adr/`](docs/adr/) (ADRs 0001–0008) |
 | 🚀 Network-facing MCP setup | [`docs/deploy/mcp-http.md`](docs/deploy/mcp-http.md) |
 | 🖥️ systemd deployment (Linux) | [`docs/deploy/systemd.md`](docs/deploy/systemd.md) |
 | 🍎 launchd deployment (macOS dev) | [`docs/deploy/launchd.md`](docs/deploy/launchd.md) |
