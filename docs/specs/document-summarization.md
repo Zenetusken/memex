@@ -35,14 +35,18 @@ Returns the same `FinalResponse` as the answering agent, plus the new optional
    `_SHORT_DOC_CHARS` (14k) **or** ≤1 section; else `long`. Orthogonally,
    `is_tabular = len(_load_doc_tables(...)) >= _TABULAR_MIN_TABLES` (4) turns on the
    Key-figures pass (step 3b). (`deck`/`scan` route as `long` for now.)
-3b. **Key figures** (tabular, runs FIRST when `is_tabular`) — `_table_chunks`
-   renders each `StoredTable` from `tables.sqlite` as a synthetic bounded
-   table-chunk (`chunk_id={doc_id}#tblN`, header-paired `col=cell` verbatim rows);
-   `_key_figures_section` MAPs `summarize_tabular/v1` over them (bounded to the fast
-   window) → a "Key figures" `SectionSummary`, GROUNDED against those same chunks
-   (verbatim cell grounds; computed/fabricated drops — the Table-RAG row-verbatim
-   boundary). It leads `section_summaries` so the figures head the summary; an
-   empty/ungrounded result is skipped. Fail-open: no `tables.sqlite` → skipped.
+3b. **Key figures** (tabular, runs FIRST when `is_tabular`) — `_rank_tables` orders
+   the doc's tables by `_table_salience` (PURE, no LLM: numeric density via
+   `coerce_number` dominates, monetary/% + headline-section keyword break ties, a
+   multiplicative width factor halves a framing-risky wide grid), so the headline
+   data tables win the window budget. `_table_chunks` renders the top-ranked
+   `StoredTable`s as synthetic bounded table-chunks (`chunk_id={doc_id}#tblN`,
+   header-paired `col=cell` verbatim rows); `_key_figures_section` MAPs
+   `summarize_tabular/v1` over them (bounded to the fast window) → a "Key figures"
+   `SectionSummary`, GROUNDED against those same chunks (verbatim cell grounds;
+   computed/fabricated drops — the Table-RAG row-verbatim boundary). It leads
+   `section_summaries` so the figures head the summary; empty/ungrounded → skipped.
+   Fail-open: no `tables.sqlite` → skipped.
 4. **MAP** (`_map_section`) — render `summarize_section/v1` over the section's
    (bounded) chunks → `SectionSummary`. A failed call returns `(None, …)`; one bad
    section never sinks the summary.
@@ -133,7 +137,8 @@ construction.
   fallback), `_classify_route` (short/long), `_bound_section_chunks` (fast-window
   budget cap / always-keep-one / keep-all-when-small), `_render_table`
   (header-paired verbatim cells / row-cap / ragged-row fallback) + `_table_chunks`
-  (id format / section / cap).
+  (id format / section / cap) + `_table_salience`/`_rank_tables` (numeric>text,
+  fragment→0, keyword tiebreak, wide-grid multiplicative penalty, stable order).
 - `tests/integration/test_document_summarizer.py` — faked `FTSStore` + (for the
   tabular route) faked `TableStore` + schema-dispatched `complete_structured`:
   long-route map-reduce, short-route single-pass (no REDUCE), grounding drops
@@ -145,8 +150,9 @@ construction.
 ## Deferred
 
 - `tabular` route **shipped** (key figures from `tables.sqlite`, cited not copied —
-  step 3b); its **figure-salience** selection (which tables on a many-table doc) is
-  deferred (currently document order up to the window budget). `deck`
-  (figure-aware digests) + `scan` (over VLM text) routes remain.
+  step 3b) **with figure-salience ranking** (`_table_salience`). Residual: figure
+  *framing* on a complex/mis-bounded table can mis-attribute a grounded value's
+  metric/period (table-parse quality, not a hallucination). `deck` (figure-aware
+  digests) + `scan` (over VLM text) routes remain.
 - Section sub-splitting (no content dropped on an oversized section).
 - A grounded-summary eval suite (`eval_suite: agent.summarize` is already tagged).

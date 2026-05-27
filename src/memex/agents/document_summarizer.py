@@ -23,6 +23,7 @@ so it can't run away the way a single free-form summary did.
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from pathlib import Path
 from typing import Annotated, Literal
@@ -39,6 +40,7 @@ from memex.agents.answering import (
     SectionSummary,
     VerificationResult,
 )
+from memex.agents.table_sql import coerce_number
 from memex.core.config import get_settings
 from memex.core.errors import MemexError, ModelCallError
 from memex.core.types import Chunk, StoredTable
@@ -109,6 +111,27 @@ _REDUCE_MAX_TOKENS = 1024
 _TABULAR_MIN_TABLES = 4
 _MAX_TABLES_FOR_FIGURES = 24
 _MAX_TABLE_ROWS = 12
+# Figure-salience (ADR-0008 §7): tables are RANKED, not taken in document order, so
+# the headline data tables (income statement, segment revenue, balance sheet) win
+# over a front-matter fragment on a many-table doc. The score is PURE + deterministic
+# (no LLM — the determinism mandate): numeric density dominates, a monetary/percent
+# signal and a headline-section keyword break ties. A monetary cell already parses as
+# numeric (coerce_number handles $, %, scale words), so `_MONEY_RE` is the extra
+# "this is a money/rate figure, not a bare count" weight.
+_MONEY_RE = re.compile(r"[$€£%]|\b(?:thousand|million|billion|trillion)\b", re.IGNORECASE)
+# Substring match against the (lowercased) table section/caption — financial-leaning
+# but only a tie-breaker (weight 0.6 vs numeric density's 2.0), so a non-financial
+# tabular doc still ranks correctly by numeric density.
+# A table wider than this is treated as a framing-risky time-series/scenario grid.
+_WIDE_TABLE_COLS = 6
+_SALIENT_SECTION_TERMS: frozenset[str] = frozenset(
+    {
+        "revenue", "income", "sales", "earnings", "profit", "margin", "expense",
+        "cost", "asset", "liabilit", "equity", "cash flow", "dividend", "repurchase",
+        "compensation", "balance sheet", "segment", "operations", "financial",
+        "statement", "results", "performance",
+    }
+)
 
 
 def _group_sections(chunks: list[Chunk]) -> list[tuple[str, list[Chunk]]]:
@@ -260,6 +283,40 @@ async def _reduce(
     return overview.abstract, tokens
 
 
+def _table_salience(table: StoredTable) -> float:
+    """A PURE, deterministic salience score for a stored table — how likely it is to
+    hold the document's headline figures. Numeric density dominates (a key-figures
+    table is mostly numbers); a monetary/percent signal and a headline-section
+    keyword break ties. A degenerate ≤1-row / cell-less table scores 0 (a parse
+    fragment is not a figures source). Higher = more salient."""
+    cells = [c.strip() for row in table.rows for c in row if c.strip()]
+    if len(table.rows) < 2 or len(cells) < 2:
+        return 0.0
+    numeric = sum(1 for c in cells if coerce_number(c) is not None)
+    money = sum(1 for c in cells if _MONEY_RE.search(c))
+    density = numeric / len(cells)
+    money_density = money / len(cells)
+    section = (table.section or "").lower()
+    keyword = 1.0 if any(term in section for term in _SALIENT_SECTION_TERMS) else 0.0
+    base = 2.0 * density + 1.5 * money_density + 0.6 * keyword
+    # Width factor (MULTIPLICATIVE — a subtractive penalty is swamped by the high
+    # numeric density of a dense grid): a narrow `metric: value` table (income
+    # statement, opex) yields unambiguous figures, while a WIDE grid (a performance
+    # graph, a multi-year / multi-scenario projection) is framing-risky — the MAP can
+    # attach a value to the wrong column/period. Validated on the 10-K: the wide
+    # perf-graph + projection tables produced the noisy figures, so halve them.
+    ncols = len(table.header) or (len(table.rows[0]) if table.rows else 0)
+    return base * (0.5 if ncols > _WIDE_TABLE_COLS else 1.0)
+
+
+def _rank_tables(tables: list[StoredTable]) -> list[StoredTable]:
+    """Order a doc's tables by `_table_salience` (descending). Python's sort is
+    stable, so equal-salience tables keep document order — deterministic + tie-stable.
+    The window budget in `_key_figures_section` then keeps the leading (most-salient)
+    subset that fits, so the headline tables are summarized even on a many-table doc."""
+    return sorted(tables, key=_table_salience, reverse=True)
+
+
 def _render_table(table: StoredTable) -> str:
     """Render a `StoredTable` as compact, self-contained text for the MAP/GROUND
     calls: a section label + each row as header-paired `col=cell` pairs (verbatim
@@ -408,7 +465,9 @@ async def summarize_document(
         sections = _group_sections(chunks)
         route = _classify_route(chunks, sections)
         doc_title = chunks[0].document_title or doc_id
-        table_chunks = _table_chunks(doc_id, tables, doc_title) if is_tabular else []
+        # Rank tables by salience (not document order) so the headline data tables
+        # win the window budget on a many-table doc.
+        table_chunks = _table_chunks(doc_id, _rank_tables(tables), doc_title) if is_tabular else []
         groups = [(doc_title, chunks)] if route == "short" else sections[:_MAX_SECTIONS]
         guidance = _DETAIL_GUIDANCE[detail]
         # Short route: the single MAP pass IS the whole-doc summary, so its digest

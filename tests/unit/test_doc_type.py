@@ -13,8 +13,10 @@ from memex.agents.document_summarizer import (
     _bound_section_chunks,
     _classify_route,
     _group_sections,
+    _rank_tables,
     _render_table,
     _table_chunks,
+    _table_salience,
 )
 from memex.core.types import Chunk, StoredTable
 
@@ -119,10 +121,70 @@ def test_render_table_falls_back_when_row_width_mismatches_header() -> None:
 
 
 def test_table_chunks_ids_sections_and_cap() -> None:
-    tables = [_table(f"S{i}", ["A"], [["v"]]) for i in range(30)]
+    tables = [_table(f"S{i}", ["A"], [["v"], ["w"]]) for i in range(30)]
     chunks = _table_chunks("docA", tables, "Doc A")
     assert chunks[0].chunk_id == "docA#tbl0"
     assert chunks[0].heading_path == ["S0"]
     assert chunks[0].document_id == "docA"
     assert len(chunks) <= 24  # _MAX_TABLES_FOR_FIGURES
     assert all(c.chunk_id.startswith("docA#tbl") for c in chunks)
+
+
+# ── figure-salience (ADR-0008 §7) — rank tables by figure-richness, not doc order ──
+
+_FINANCIAL = _table(
+    "Consolidated Statements of Income",
+    ["Item", "FY2026"],
+    [["Revenue", "$130,000M"], ["Net income", "$72,500M"], ["Diluted EPS", "$2.94"]],
+)
+_GLOSSARY = _table(
+    "Definitions",
+    ["Term", "Meaning"],
+    [["VLAN", "a virtual local area network"], ["OSPF", "a link-state routing protocol"]],
+)
+
+
+def test_salience_prefers_numeric_money_table_over_text() -> None:
+    assert _table_salience(_FINANCIAL) > _table_salience(_GLOSSARY)
+
+
+def test_salience_zero_for_single_row_fragment() -> None:
+    assert _table_salience(_table("X", ["A", "B"], [["only one row", "$5M"]])) == 0.0
+
+
+def test_salience_keyword_breaks_ties_between_equally_numeric_tables() -> None:
+    # Same numeric content; only the section keyword differs → headline section wins.
+    numbers = [["a", "10"], ["b", "20"], ["c", "30"]]
+    headline = _table("Revenue by segment", ["k", "v"], numbers)
+    bland = _table("Appendix A", ["k", "v"], numbers)
+    assert _table_salience(headline) > _table_salience(bland)
+
+
+def test_salience_penalizes_wide_framing_risky_grids() -> None:
+    # A wide, dense time-series grid (a performance graph) is framing-risky → it
+    # ranks below a narrow income statement even though it's MORE numeric-dense.
+    narrow = _table(
+        "Consolidated Statements of Income",
+        ["Item", "FY2026"],
+        [["Revenue", "$130,000M"], ["Operating income", "$80,000M"], ["Net income", "$72,000M"]],
+    )
+    wide = _table(
+        "Stock Performance Graph",
+        ["Company", "2020", "2021", "2022", "2023", "2024", "2025"],
+        [
+            ["NVIDIA", "$100", "$220", "$180", "$340", "$900", "$1,448"],
+            ["S&P 500", "$100", "$120", "$110", "$130", "$150", "$170"],
+        ],
+    )
+    # The wide grid is MORE numeric-dense, so only the multiplicative width factor
+    # (not a subtractive penalty) makes the focused income statement rank higher.
+    assert _table_salience(narrow) > _table_salience(wide)
+
+
+def test_rank_tables_orders_by_salience_then_stable_doc_order() -> None:
+    # Two equally-salient financial tables keep document order; glossary sinks last.
+    a = _table("Income statement", ["k", "v"], [["Revenue", "$1M"], ["Profit", "$0.5M"]])
+    b = _table("Cash flow", ["k", "v"], [["Operating", "$2M"], ["Investing", "$1M"]])
+    ranked = _rank_tables([_GLOSSARY, a, b])
+    assert ranked[-1] is _GLOSSARY  # text table is least salient
+    assert ranked.index(a) < ranked.index(b)  # tie → original (input) order preserved

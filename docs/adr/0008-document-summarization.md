@@ -155,11 +155,26 @@ must not starve them):
   reused: no new grounding path, HARD-gate-safe by construction.
 
 The Key-figures section leads `sections` + the doc-level `claims`; its synthetic
-table-chunks join `used_chunks` so Sources/wikilinks resolve. Validated live on
-the 10-K: 6 grounded figures (TSR 1/3/5-yr, dividends, buybacks) where the generic
-route surfaced none. **Known v1 limit**: tables are taken in document order up to
-the window budget — figure *salience* (pick the P&L / balance-sheet tables on a
-74-table 10-K, not just the first few) is a deferred refinement.
+table-chunks join `used_chunks` so Sources/wikilinks resolve.
+
+**Figure-salience (shipped 2026-05-27).** Tables are **ranked** before the window
+budget is applied (`_rank_tables` / `_table_salience`, PURE + deterministic — no
+LLM), so the headline data tables win on a many-table doc rather than whatever
+comes first in reading order. The score: numeric density (via `coerce_number`)
+dominates, a monetary/percent signal + a headline-section keyword break ties, and a
+**multiplicative width factor halves a wide grid** — a performance graph or a
+multi-year/scenario projection is framing-risky (the MAP can attach a value to the
+wrong column/period), while a narrow `metric: value` table yields unambiguous
+figures. Validated live on the 10-K: salience surfaced the income-statement /
+operating figures (revenue, operating income, other income, deferred revenue,
+stock-based comp) the document-order v1 missed entirely.
+
+**Residual (not a hallucination).** Grounding guarantees each value is a verbatim
+cell; it does NOT guarantee the metric *label* the MAP attaches is the right one
+for a complex/mis-bounded table — so a figure can be mis-framed (wrong period or
+metric) while still being a real cell. The width factor + the prompt's
+period/column rule cut the worst of this, but the deeper fix is table-PARSING
+quality (Docling's 10-K bounding), a separate concern.
 
 ## Consequences
 
@@ -181,8 +196,9 @@ the window budget — figure *salience* (pick the P&L / balance-sheet tables on 
 - A long document is heavier than a single RAG answer (sequential per-section
   MAP+GROUND); the token budget bounds it but a very long doc is partial.
 - `deck`/`scan` route as generic `long` until specialised; the `tabular` route
-  (§7) is shipped but takes tables in document order (figure *salience* selection
-  on a many-table doc is deferred).
+  (§7, with figure-salience) is shipped, but its figure *framing* on a
+  complex/mis-bounded table can mis-attribute a (grounded) value's metric/period —
+  bounded by table-parse quality, not a hallucination.
 
 ### Neutral
 
@@ -193,11 +209,11 @@ the window budget — figure *salience* (pick the P&L / balance-sheet tables on 
 ## Expanding
 
 - **Doc-type routes**: `tabular` (key figures from `tables.sqlite`, cited not
-  copied) **shipped** (§7); `deck` → figure-aware digests; `scan` → over VLM text
-  remain. Each slots into `_classify_route` + a per-route MAP prompt — the
-  GROUND/REDUCE/compose spine is unchanged. **Figure-salience** selection (which
-  tables to surface on a many-table doc) is the obvious deepening of the tabular
-  route.
+  copied, **with figure-salience ranking**) **shipped** (§7); `deck` → figure-aware
+  digests; `scan` → over VLM text remain. Each slots into `_classify_route` + a
+  per-route MAP prompt — the GROUND/REDUCE/compose spine is unchanged. The tabular
+  route's next deepening is **figure-framing** robustness on complex/mis-bounded
+  tables (better table parsing + label-attribution), not selection.
 - **Section sub-splitting** (no content dropped on a huge section) is the obvious
   vertical deepening of `_bound_section_chunks`.
 - This is the structured-summary **capability tier** ADR-0007 §"Expanding
