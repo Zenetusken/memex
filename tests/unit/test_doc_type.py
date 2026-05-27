@@ -9,12 +9,15 @@ from __future__ import annotations
 
 from memex.agents.document_summarizer import (
     _MAX_SECTION_INPUT_CHARS,
+    _MAX_SECTIONS,
     _MAX_TABLE_ROWS,
     _bound_section_chunks,
     _classify_route,
     _group_sections,
+    _pack_sections,
     _rank_tables,
     _render_table,
+    _should_pack_sections,
     _table_chunks,
     _table_salience,
 )
@@ -128,6 +131,39 @@ def test_table_chunks_ids_sections_and_cap() -> None:
     assert chunks[0].document_id == "docA"
     assert len(chunks) <= 24  # _MAX_TABLES_FOR_FIGURES
     assert all(c.chunk_id.startswith("docA#tbl") for c in chunks)
+
+
+# ── deck route (ADR-0008) — pack tiny slide-sections into substantive MAP units ──
+
+
+def _sec(i: int, chars: int) -> tuple[str, list[Chunk]]:
+    return (f"S{i}", [_c(f"docA#{i}", f"S{i}", "x" * chars)])
+
+
+def test_should_pack_true_for_many_tiny_sections() -> None:
+    # 15 slide-sized sections → thin per-section digests → pack.
+    assert _should_pack_sections([_sec(i, 200) for i in range(15)]) is True
+
+
+def test_should_pack_false_below_min_sections() -> None:
+    assert _should_pack_sections([_sec(i, 200) for i in range(8)]) is False  # < _PACK_MIN_SECTIONS
+
+
+def test_should_pack_false_when_sections_are_substantive() -> None:
+    # Enough sections, but they're paper-sized (none tiny) → keep per-section digests.
+    assert _should_pack_sections([_sec(i, 3000) for i in range(14)]) is False
+
+
+def test_pack_sections_merges_to_budget_titled_by_first_in_order() -> None:
+    # 6 sections, each measured at 1,800 (truncate cap); budget 5,000 → 2 per group.
+    groups = _pack_sections([_sec(i, 4000) for i in range(6)], 5_000)
+    assert [t for t, _ in groups] == ["S0", "S2", "S4"]  # titled by first, order kept
+    assert all(len(cs) == 2 for _, cs in groups)
+
+
+def test_pack_sections_caps_at_max_sections() -> None:
+    groups = _pack_sections([_sec(i, 4000) for i in range(100)], 1)  # budget 1 → 1 section/group
+    assert len(groups) <= _MAX_SECTIONS
 
 
 # ── figure-salience (ADR-0008 §7) — rank tables by figure-richness, not doc order ──

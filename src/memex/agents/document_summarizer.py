@@ -75,6 +75,17 @@ _DETAIL_GUIDANCE: dict[SummaryDetail, dict[str, str]] = {
 # tokenizer); ~14k chars ≈ ~4k tokens, well inside even the fast-mode 6,144 window
 # alongside the prompt + bounded output.
 _SHORT_DOC_CHARS = 14_000
+# Deck route (ADR-0008), realized as SECTION-PACKING: a slide deck makes MANY TINY
+# heading-sections (one per slide), so per-section MAP digests come out thin (echoing
+# the slide title). When a doc has many sections AND most are slide-sized, the long
+# route PACKS adjacent sections up to the window budget so each MAP call digests a
+# substantive span (any VLM-transcribed figure text rides along inline → figure-aware
+# for free). This is doc-type-agnostic: it fires on slide decks AND bullet-heavy
+# technical docs (both have thin sections), while a paper / standard with substantive
+# sections (median well above the tiny threshold) keeps its own per-section digests.
+_PACK_MIN_SECTIONS = 12
+_PACK_TINY_SECTION_CHARS = 900
+_PACK_TINY_FRACTION = 0.6
 # Cap per-section chunks shown to the MAP call (a pathologically large section is
 # an edge case; the prompt also truncates each chunk to 1,800 chars).
 _MAX_SECTION_CHUNKS = 16
@@ -159,6 +170,46 @@ def _classify_route(chunks: list[Chunk], sections: list[tuple[str, list[Chunk]]]
     if total_chars <= _SHORT_DOC_CHARS or len(sections) <= 1:
         return "short"
     return "long"
+
+
+def _should_pack_sections(sections: list[tuple[str, list[Chunk]]]) -> bool:
+    """True when a doc has many heading-sections, MOST of them slide-sized — its
+    per-section MAP digests would be thin (one slide / one short subsection each), so
+    the long route packs adjacent sections (`_pack_sections`). Fires on slide decks
+    AND bullet-heavy technical docs; a paper/standard with substantive sections (few
+    tiny ones) returns False, keeping its own per-section digests."""
+    if len(sections) < _PACK_MIN_SECTIONS:
+        return False
+    tiny = sum(
+        1 for _t, cs in sections if sum(len(c.text) for c in cs) <= _PACK_TINY_SECTION_CHARS
+    )
+    return tiny / len(sections) >= _PACK_TINY_FRACTION
+
+
+def _pack_sections(
+    sections: list[tuple[str, list[Chunk]]], max_chars: int
+) -> list[tuple[str, list[Chunk]]]:
+    """Greedily merge CONSECUTIVE sections into groups whose combined chunk-text fits
+    `max_chars` (the fast-window budget, measured like `_bound_section_chunks`), so a
+    deck's tiny slide-sections become substantive MAP units. Each group is titled by
+    its first section (the digest synthesizes the span); reading order is preserved.
+    A lone oversized section forms its own group (trimmed later by the window bound)."""
+    groups: list[tuple[str, list[Chunk]]] = []
+    buf_title = ""
+    buf_chunks: list[Chunk] = []
+    buf_total = 0
+    for sec_title, sec_chunks in sections:
+        sec_chars = sum(min(len(c.text), _CHUNK_TRUNCATE_CHARS) for c in sec_chunks)
+        if buf_chunks and buf_total + sec_chars > max_chars:
+            groups.append((buf_title, buf_chunks))
+            buf_title, buf_chunks, buf_total = "", [], 0
+        if not buf_chunks:
+            buf_title = sec_title
+        buf_chunks.extend(sec_chunks)
+        buf_total += sec_chars
+    if buf_chunks:
+        groups.append((buf_title, buf_chunks))
+    return groups[:_MAX_SECTIONS]
 
 
 def _bound_section_chunks(chunks: list[Chunk]) -> list[Chunk]:
@@ -468,7 +519,14 @@ async def summarize_document(
         # Rank tables by salience (not document order) so the headline data tables
         # win the window budget on a many-table doc.
         table_chunks = _table_chunks(doc_id, _rank_tables(tables), doc_title) if is_tabular else []
-        groups = [(doc_title, chunks)] if route == "short" else sections[:_MAX_SECTIONS]
+        # Deck/tiny-sectioned: pack thin slide-sections into substantive MAP units.
+        should_pack = route == "long" and _should_pack_sections(sections)
+        if route == "short":
+            groups = [(doc_title, chunks)]
+        elif should_pack:
+            groups = _pack_sections(sections, _MAX_SECTION_INPUT_CHARS)
+        else:
+            groups = sections[:_MAX_SECTIONS]
         guidance = _DETAIL_GUIDANCE[detail]
         # Short route: the single MAP pass IS the whole-doc summary, so its digest
         # carries the (longer) abstract guidance; long route: sections get the
@@ -481,7 +539,9 @@ async def summarize_document(
             route=route,
             detail=detail,
             is_tabular=is_tabular,
+            packed=should_pack,
             tables=len(tables),
+            groups=len(groups),
         )
 
         tokens_total = 0

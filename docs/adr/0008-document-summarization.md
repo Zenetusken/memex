@@ -61,8 +61,9 @@ HARD-gate-neutral, the answer path leaves it empty).
 3. **Route** (`_classify_route`, v1): `short` (≤ ~14k chars total OR ≤1 section →
    one structured pass) vs `long` (map-reduce). Orthogonally, a doc with ≥
    `_TABULAR_MIN_TABLES` stored tables is **`tabular`** and additionally gets a
-   grounded Key-figures pass (§7, shipped). `deck`/`scan` route as `long` for now —
-   the router + schema accommodate them; specialised later.
+   grounded Key-figures pass (§7, shipped); a many-tiny-section doc is **deck-like**
+   and packs sections (§8, shipped). `scan` routes as `long` for now — the router +
+   schema accommodate it; specialised later.
 4. **MAP** each section → a `SectionSummary` (digest + cited key-points), bounded
    structured output.
 5. **GROUND** each section's key-points by **reusing `verify_grounding/v2`
@@ -176,6 +177,24 @@ metric) while still being a real cell. The width factor + the prompt's
 period/column rule cut the worst of this, but the deeper fix is table-PARSING
 quality (Docling's 10-K bounding), a separate concern.
 
+### 8. The deck route — section-packing (shipped 2026-05-27)
+
+A slide deck makes one tiny heading-section per slide, so the per-section MAP
+produces thin digests that just echo the slide title (validated: the CUDA deck's
+"introduces new CUDA features", "efficiency is a key consideration"). The deck
+route is realized as **section-packing**: when `_should_pack_sections` finds many
+sections of which most are slide-sized (`≥ _PACK_MIN_SECTIONS` and `≥
+_PACK_TINY_FRACTION` under `_PACK_TINY_SECTION_CHARS`), the long route replaces
+per-heading grouping with `_pack_sections` — greedily merging adjacent sections up
+to the fast-window budget so each MAP call digests a substantive span (the VLM
+transcribes diagrams inline, so the figure text rides along → figure-aware for
+free, no separate marker). It's **doc-type-agnostic**: it fires on slide decks AND
+bullet-heavy technical docs (both have thin sections) while a paper/standard with
+substantive sections keeps its own per-section digests (calibrated on real docs —
+CUDA deck 89% tiny → pack, GUIDELINES 77% → pack, GTE paper 31% / NIST 21% → no).
+Validated live: the CUDA deck's shallow per-slide digests became 6 substantive
+thematic groups. HARD-gate-neutral (grouping only — grounding/refusal unchanged).
+
 ## Consequences
 
 ### Positive
@@ -195,10 +214,11 @@ quality (Docling's 10-K bounding), a separate concern.
   deferred refinement, chosen so quality stays mode-independent today.
 - A long document is heavier than a single RAG answer (sequential per-section
   MAP+GROUND); the token budget bounds it but a very long doc is partial.
-- `deck`/`scan` route as generic `long` until specialised; the `tabular` route
-  (§7, with figure-salience) is shipped, but its figure *framing* on a
-  complex/mis-bounded table can mis-attribute a (grounded) value's metric/period —
-  bounded by table-parse quality, not a hallucination.
+- `scan` routes as generic `long` until specialised; the `tabular` (§7, with
+  figure-salience) and `deck`/section-packing (§8) routes are shipped. The tabular
+  route's figure *framing* on a complex/mis-bounded table can mis-attribute a
+  (grounded) value's metric/period — bounded by table-parse quality, not a
+  hallucination.
 
 ### Neutral
 
@@ -209,11 +229,11 @@ quality (Docling's 10-K bounding), a separate concern.
 ## Expanding
 
 - **Doc-type routes**: `tabular` (key figures from `tables.sqlite`, cited not
-  copied, **with figure-salience ranking**) **shipped** (§7); `deck` → figure-aware
-  digests; `scan` → over VLM text remain. Each slots into `_classify_route` + a
-  per-route MAP prompt — the GROUND/REDUCE/compose spine is unchanged. The tabular
-  route's next deepening is **figure-framing** robustness on complex/mis-bounded
-  tables (better table parsing + label-attribution), not selection.
+  copied, **with figure-salience ranking**) **shipped** (§7); `deck` (section-packing
+  for tiny-sectioned docs) **shipped** (§8); `scan` → over VLM text remains. Each
+  slots into `_classify_route` + grouping/MAP — the GROUND/REDUCE/compose spine is
+  unchanged. The tabular route's next deepening is **figure-framing** robustness on
+  complex/mis-bounded tables (better table parsing + label-attribution).
 - **Section sub-splitting** (no content dropped on a huge section) is the obvious
   vertical deepening of `_bound_section_chunks`.
 - This is the structured-summary **capability tier** ADR-0007 §"Expanding

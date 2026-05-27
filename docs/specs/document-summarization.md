@@ -34,7 +34,16 @@ Returns the same `FinalResponse` as the answering agent, plus the new optional
 3. **Route** — `_classify_route` (v1): `short` if total chunk text ≤
    `_SHORT_DOC_CHARS` (14k) **or** ≤1 section; else `long`. Orthogonally,
    `is_tabular = len(_load_doc_tables(...)) >= _TABULAR_MIN_TABLES` (4) turns on the
-   Key-figures pass (step 3b). (`deck`/`scan` route as `long` for now.)
+   Key-figures pass (step 3b). A many-tiny-section doc (`_should_pack_sections`:
+   ≥`_PACK_MIN_SECTIONS`, most under `_PACK_TINY_SECTION_CHARS`) is **deck-like** —
+   the long route packs adjacent sections via `_pack_sections` (step 3c). (`scan`
+   routes as `long` for now.)
+3c. **Section-packing** (deck-like, long route) — `_pack_sections` greedily merges
+   consecutive sections up to the fast-window budget so each MAP digests a
+   substantive span (a slide deck's per-slide sections, or a bullet-heavy doc's
+   subsections, instead of one thin digest each). Titled by the first section;
+   reading order preserved; capped at `_MAX_SECTIONS`. A paper/standard with
+   substantive sections is NOT packed (per-section digests preserved).
 3b. **Key figures** (tabular, runs FIRST when `is_tabular`) — `_rank_tables` orders
    the doc's tables by `_table_salience` (PURE, no LLM: numeric density via
    `coerce_number` dominates, monetary/% + headline-section keyword break ties, a
@@ -134,7 +143,8 @@ construction.
 ## Testing
 
 - `tests/unit/test_doc_type.py` — `_group_sections` (heading grouping + doc-title
-  fallback), `_classify_route` (short/long), `_bound_section_chunks` (fast-window
+  fallback), `_classify_route` (short/long), `_should_pack_sections` (deck detection)
+  + `_pack_sections` (merge-to-budget / title-by-first / cap), `_bound_section_chunks` (fast-window
   budget cap / always-keep-one / keep-all-when-small), `_render_table`
   (header-paired verbatim cells / row-cap / ragged-row fallback) + `_table_chunks`
   (id format / section / cap) + `_table_salience`/`_rank_tables` (numeric>text,
@@ -152,7 +162,7 @@ construction.
 - `tabular` route **shipped** (key figures from `tables.sqlite`, cited not copied —
   step 3b) **with figure-salience ranking** (`_table_salience`). Residual: figure
   *framing* on a complex/mis-bounded table can mis-attribute a grounded value's
-  metric/period (table-parse quality, not a hallucination). `deck` (figure-aware
-  digests) + `scan` (over VLM text) routes remain.
+  metric/period (table-parse quality, not a hallucination). `deck` (section-packing,
+  step 3c) shipped. `scan` (over VLM text) route remains.
 - Section sub-splitting (no content dropped on an oversized section).
 - A grounded-summary eval suite (`eval_suite: agent.summarize` is already tagged).
