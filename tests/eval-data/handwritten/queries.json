@@ -1,0 +1,148 @@
+{
+  "_description": "Hand-labelled answer-quality eval corpus for a HANDWRITTEN note (cs-notes-1: a single handwritten C++ introduction/history page). New category for the P0 multi-category extension: HANDWRITTEN CONTENT \u2014 the first corpus exercising the scan\u2192VLM parse route (parse/pipeline.py::_parse_scan_with_vlm, spec docs/specs/scan-vlm-parse.md). The note is image-only (no text layer): Docling's printed-text OCR can't read cursive and crashed on it, so the doc reaches the index ONLY via the whole-doc Qwen3-VL-8B transcription. This corpus proves the full handwritten path end-to-end: handwriting \u2192 faithful VLM transcription \u2192 retrieval \u2192 grounded answer / counterfactual refusal.",
+  "_doc_id": "6cf677b7-cs-notes-1",
+  "_query_count": 10,
+  "_mix": {
+    "ans": 6,
+    "ref": 4,
+    "ref_in_corpus_unanswerable": 4,
+    "ref_out_of_corpus": 0
+  },
+  "_labelling_rule": "ANS queries: `_anchor_phrase` is a distinctive verbatim substring from the transcribed chunk holding the answer; resolve via FTS. REF: should_refuse=true, relevant_chunk_ids=[]. All 4 REFs are IN-CORPUS-UNANSWERABLE C++ counterfactuals \u2014 facts a reader of THIS note might ask but the note does NOT state (++ etymology, the latest C++ standard, recommended IDE/compiler software, memory-management model). Each is a training-known C++ fact, so they specifically test that the agent suppresses model knowledge and refuses when the SOURCE is silent (the same discipline as the BGP-timers counterfactual). They are C++-topic so retrieval surfaces the note's chunks \u2014 the gate is 'the fact isn't here', not 'nothing retrieved'.",
+  "_created": "2026-05-27",
+  "_purpose": "Validate the scan\u2192VLM handwritten path under the answer-quality HARD GATES: refusal_rate_on_counterfactuals == 1.0, zero hallucinations. First handwritten-content corpus; closes the long-standing P2.3 scan-corpus gap.",
+  "_source_note": "A CC-BY handwritten C++ note (HumynLabs CS-Notes set; the source PDF stays LOCAL at ~/memex_eval_logs/handwritten/cs-notes-1.pdf - only this query set ships). Image-only PDF (image_area_fraction 0.85, chars_per_page_avg 0) -> ingested with MEMEX_PARSE__DISABLE_VLM=false -> the scan route fired (parse.scan.start/done) -> Qwen3-VL-8B transcribed the page. The scan route strips the whole-page ```markdown fence the VLM wraps its full-page output in (_strip_markdown_fence_wrapper), so the note indexes as real markdown, not a code block (3 chunks; pre-strip it was 4, incl. a junk ```markdown fence chunk that degraded grounding). The transcription preserved 'Bjorne' (the note's handwritten spelling of Bjarne Stroustrup) - answers cite it verbatim.",
+  "_resolved_at": "2026-05-27T22:36:01Z",
+  "_baseline_2026_05_27": {
+    "stack": "Qwen3-8B-AWQ orchestrator + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3 (cross_encoder, bf16; reranker on CPU for 12 GB co-residence), top_k=5",
+    "doc_id": "6cf677b7-cs-notes-1",
+    "index": "3 chunks via the scan->VLM route (Qwen3-VL-8B whole-page transcription; Docling-OCR crashed on this image-only PDF, worker exit 5). The ```markdown fence wrapper is stripped at parse.",
+    "run": "2026-05-27, full vault (cs-notes-1 alongside CCNA/CR350/CUDA/10-K/etc.), reranker on CPU (MEMEX_MODELS__RERANKER_DEVICE=cpu)",
+    "answered_count": 4,
+    "answerable_count": 6,
+    "refused_count": 6,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "hallucinations": 0,
+    "mean_citation_precision": 1.0,
+    "mean_citation_precision_answered_only": 1.0,
+    "false_refusals": [
+      "handwritten-05",
+      "handwritten-06"
+    ],
+    "notes": "HARD GATES hold: refusal_cf=1.0 (all 4 in-corpus-unanswerable C++ counterfactuals refused without fabricating training-known facts - ++ etymology, latest standard, IDE, memory model), 0 hallucinations, citation precision 1.0. ANS 4/6 - the headline facts answer FROM the transcribed handwriting: developer/year/org (Stroustrup/1979/Bell Labs), original name 'C with Classes', 'middle-level' + the reasoning, and the supported paradigms. The 2 false-refusals are NON-fabrication misses, not quality failures: (05 'compiled or interpreted?') verify returned no grounded claims - the note says 'It is an imperative and a compiled language' and the grounder won't bridge the pronoun 'It'->C++ (the same conservatism that prevents hallucination); (06 'compilation stages?') retrieval dilution - the tiny note's compilation chunk lost the rerank competition to the large mixed vault's CUDA/networking chunks. Both are small-doc-in-large-vault / pronoun-grounding limits orthogonal to the handwritten path; scoping to the doc (the doc-picker) recovers 04 and the path itself is proven. The fence-strip recovered +1 (handwritten-04 paradigms: 3/6 -> 4/6). FIRST corpus to exercise the scan->VLM parse route end-to-end (handwriting -> faithful transcription -> retrieval -> grounded answer / counterfactual refusal)."
+  },
+  "queries": [
+    {
+      "qid": "handwritten-01",
+      "question": "According to the notes, who developed C++, and in what year and at what organization?",
+      "_anchor_phrase": "Stroustrup",
+      "_expected_answer": "C++ was developed by Bjarne (the note spells it 'Bj\u00f8rne') Stroustrup in 1979 at Bell Labs.",
+      "_answer_type": "single_fact",
+      "_note": "The validated end-to-end fact. Retrieval must find the transcribed handwriting; the answer reflects the note's spelling.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "6cf677b7-cs-notes-1#aad1e762c9"
+      ]
+    },
+    {
+      "qid": "handwritten-02",
+      "question": "What was C++ originally called, according to the notes?",
+      "_anchor_phrase": "C with Classes",
+      "_expected_answer": "C++ was originally named 'C with Classes'.",
+      "_answer_type": "single_fact",
+      "_note": "History detail unique to this note.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "6cf677b7-cs-notes-1#aad1e762c9"
+      ]
+    },
+    {
+      "qid": "handwritten-03",
+      "question": "What 'level' of programming language do the notes describe C++ as, and why?",
+      "_anchor_phrase": "middle-level",
+      "_expected_answer": "C++ is described as a 'middle-level' language because it encapsulates both high-level and low-level language features.",
+      "_answer_type": "single_fact",
+      "_note": "Tests reading the reasoning clause, not just the label.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "6cf677b7-cs-notes-1#aad1e762c9"
+      ]
+    },
+    {
+      "qid": "handwritten-04",
+      "question": "Which programming paradigms do the notes say C++ supports?",
+      "_anchor_phrase": "object-oriented, procedural and generic programming",
+      "_expected_answer": "C++ supports object-oriented, procedural, and generic programming.",
+      "_answer_type": "list",
+      "_note": "Multi-item list from the transcribed bullet.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "6cf677b7-cs-notes-1#aad1e762c9"
+      ]
+    },
+    {
+      "qid": "handwritten-05",
+      "question": "According to the notes, is C++ a compiled or interpreted language?",
+      "_anchor_phrase": "imperative and a compiled language",
+      "_expected_answer": "C++ is a compiled language (the notes also describe it as imperative).",
+      "_answer_type": "single_fact",
+      "_note": "Compiled vs interpreted \u2014 stated explicitly.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "6cf677b7-cs-notes-1#aad1e762c9"
+      ]
+    },
+    {
+      "qid": "handwritten-06",
+      "question": "What are the stages of the C++ compilation process shown in the notes?",
+      "_anchor_phrase": "C++ Compilation Process",
+      "_expected_answer": "Source Code \u2192 Compile \u2192 Machine Code (the source code is compiled into machine/binary code).",
+      "_answer_type": "process",
+      "_note": "Anchors on the transcribed diagram chunk (the VLM rendered the hand-drawn flow as text).",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "6cf677b7-cs-notes-1#b438ce8669"
+      ]
+    },
+    {
+      "qid": "handwritten-07",
+      "question": "According to the notes, what does the '++' in the name C++ signify?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 the note never explains the '++' etymology (it is the increment operator, but the note does not state this).",
+      "_answer_type": "counterfactual",
+      "_note": "In-corpus-unanswerable. Training-known C++ fact absent from the note \u2014 tests model-knowledge suppression.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "handwritten-08",
+      "question": "According to the notes, what is the most recent C++ standard (for example C++20 or C++23)?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 the note is an introduction/history and names no C++ standard version.",
+      "_answer_type": "counterfactual",
+      "_note": "In-corpus-unanswerable. The note predates / does not cover language standards.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "handwritten-09",
+      "question": "According to the notes, what IDE or compiler software is recommended for writing C++ programs?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 the note shows an abstract compile step (Source\u2192Compile\u2192Machine Code) but recommends no specific IDE or compiler.",
+      "_answer_type": "counterfactual",
+      "_note": "In-corpus-unanswerable. Tempting to answer from training (g++, Visual Studio) \u2014 must refuse.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "handwritten-10",
+      "question": "According to the notes, how does C++ manage memory \u2014 manual allocation or garbage collection?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 the note does not discuss C++ memory management at all.",
+      "_answer_type": "counterfactual",
+      "_note": "In-corpus-unanswerable. A strong training-temptation counterfactual (C++ uses manual/RAII) absent from the note.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    }
+  ]
+}
