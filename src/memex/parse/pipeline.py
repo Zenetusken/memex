@@ -24,7 +24,7 @@ import re
 import shutil
 import tempfile
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -534,6 +534,11 @@ def _classify(signals: PdfSignals) -> _Classification:
     return _Classification(doc_type="unknown", confidence=conf, attribution=attribution)
 
 
+# A doc with fewer extractable chars/page than this is "image-only" — a scan, not a
+# text doc with some images. Mirrors the image-heavy classifier threshold (line ~413).
+_SCAN_MAX_CHARS_PER_PAGE = 100.0
+
+
 @dataclass(frozen=True)
 class _PreFilterDecision:
     """Outcome of the PyMuPDF pre-filter step.
@@ -542,11 +547,15 @@ class _PreFilterDecision:
     otherwise None and the caller must run Docling. `force_ocr_on_fallthrough`
     is the classifier's hint about whether the fall-through Docling
     call should have OCR forced on (mixed-content, scan-like,
-    image-heavy, etc.).
+    image-heavy, etc.). `is_scan` flags a predominantly-image doc
+    (`doc_type` in {"scan","image-heavy"}) — when the VLM is enabled the
+    caller routes it to the scan→VLM route instead of Docling-OCR (which
+    can't read handwriting); see `docs/specs/scan-vlm-parse.md`.
     """
 
     result: ParseResult | None
     force_ocr_on_fallthrough: bool = False
+    is_scan: bool = False
 
 
 def _source_file(vault_path: Path, doc_id: str) -> Path:
@@ -1155,6 +1164,138 @@ async def _parse_with_docling(
     )
 
 
+def _assemble_scan_pages(
+    results: Mapping[int, DoclingPageOutput | Exception], page_count: int
+) -> tuple[list[PageDecision], list[str]]:
+    """PURE: turn the VLM per-page transcription results into ordered `PageDecision`s
+    (engine="scan") + the non-empty markdown parts to stitch, in reading order. A
+    failed/missing page → confidence 0 with the error in `rationale` (recorded, not
+    silently dropped) and no markdown contribution."""
+    pages: list[PageDecision] = []
+    parts: list[str] = []
+    for page_no in range(1, page_count + 1):
+        res = results.get(page_no)
+        if isinstance(res, DoclingPageOutput):
+            pages.append(
+                PageDecision(page=page_no, engine="scan", confidence=1.0, rationale="VLM scan")
+            )
+            if res.markdown.strip():
+                parts.append(res.markdown)
+        else:
+            err = res if isinstance(res, Exception) else None
+            pages.append(
+                PageDecision(
+                    page=page_no,
+                    engine="scan",
+                    confidence=0.0,
+                    rationale=f"VLM scan failed: {err}" if err else "VLM scan: no output",
+                )
+            )
+    return pages, parts
+
+
+async def _parse_scan_with_vlm(
+    vault_path: Path,
+    doc_id: str,
+    source: Path,
+    *,
+    refresh_vlm: bool = False,
+) -> ParseResult:
+    """Parse a scanned / handwritten (image-only) PDF by transcribing EVERY page with
+    the VLM (`convert_pages`), bypassing Docling-OCR — which is printed-text-only and
+    crashed on image-only PDFs. The document-level analogue of the per-page VLM
+    escalation; reuses the same serving + cache + prompt. VLM-gated by the caller
+    (`_parse_pdf` only routes here when `not disable_vlm`). See
+    `docs/specs/scan-vlm-parse.md`."""
+    import pypdfium2  # lazy — a [parse] dep, same style as the worker imports
+
+    correlation_id = str(ulid.ULID())
+    log = logger.bind(doc_id=doc_id, correlation_id=correlation_id, engine="scan")
+    log.info("parse.scan.start", source=str(source))
+    start = time.monotonic()
+
+    pdf = pypdfium2.PdfDocument(str(source))
+    try:
+        page_count = len(pdf)
+    finally:
+        pdf.close()
+
+    # Transcribe ALL pages in one VLM acquisition, orchestrator paused (nestable — the
+    # CLI ingest/index already holds the pause, so this is a no-op there).
+    vlm_cache = await VLMTranscriptionCache.open(vault_path)
+    try:
+        async with pause_vllm_for_gpu():
+            results = await vlm_convert_pages(
+                source_pdf=source,
+                page_numbers=list(range(1, page_count + 1)),  # convert_pages is 1-based
+                cache=vlm_cache,
+                refresh_vlm=refresh_vlm,
+            )
+    finally:
+        await vlm_cache.close()
+
+    pages, parts = _assemble_scan_pages(results, page_count)
+
+    if not parts:
+        # Nothing transcribed off the whole scan — fail recoverably rather than write an
+        # empty doc (HARD-gate-safe: the agent never fabricates from an unreadable scan).
+        raise ParseConfidenceTooLow(
+            "VLM transcribed no content from the scanned document.",
+            context={"doc_id": doc_id, "pages": page_count},
+            recoverable=True,
+        )
+
+    final_body = _finalize_body("\n\n".join(parts))
+    duration_ms = int((time.monotonic() - start) * 1000)
+
+    existing = (
+        await read_document(vault_path, doc_id)
+        if (vault_path / "documents" / f"{doc_id}.md").exists()
+        else None
+    )
+    fm = (
+        existing.frontmatter
+        if existing
+        else Frontmatter(title=await derive_title(vault_path, doc_id))
+    )
+    doc = VaultDocument(
+        ref=_bootstrap_ref(vault_path, doc_id, final_body),
+        frontmatter=fm,
+        body=final_body,
+        mtime_ns=0,
+    )
+    ref = await write_document(vault_path, doc)
+
+    parse_stage = ParseStage(
+        correlation_id=correlation_id,
+        parsed_at=now_utc(),
+        parser_version=_PARSER_VERSION,
+        pages=pages,
+        duration_ms=duration_ms,
+    )
+    await update_manifest(
+        vault_path,
+        doc_id,
+        content_sha256=ref.content_sha256,
+        parse=parse_stage,
+        correlation_id=correlation_id,
+    )
+    log.info(
+        "parse.scan.done",
+        pages=page_count,
+        transcribed=len(parts),
+        markdown_bytes=len(final_body.encode("utf-8")),
+        duration_ms=duration_ms,
+    )
+    return ParseResult(
+        doc_id=doc_id,
+        correlation_id=correlation_id,
+        engine="scan",
+        pages=pages,
+        markdown_bytes=len(final_body.encode("utf-8")),
+    )
+
+
 # Minimum figure area (PDF user-space sq. points) for the diagram
 # classification arm — mirrors chart_ocr_backend's pre-filter so a tiny
 # mis-classified badge/watermark (a 50×50 "flow_chart") doesn't trigger a
@@ -1460,7 +1601,20 @@ async def _parse_with_pymupdf(vault_path: Path, doc_id: str, source: Path) -> _P
             threshold=settings.parse.pymupdf_min_confidence,
             force_ocr=classification.needs_ocr,
         )
-        return _PreFilterDecision(result=None, force_ocr_on_fallthrough=classification.needs_ocr)
+        # A scan/handwriting candidate = the classifier wants OCR AND the doc is
+        # image-only (≈no extractable text). That's the robust signal across every
+        # scan-dominant doc_type (scan / scan-like / image-heavy / rasterised /
+        # mostly-empty) WITHOUT enumerating labels, and it excludes mixed-content
+        # (which has real text → Docling + per-page VLM escalation handles it better).
+        is_scan = (
+            classification.needs_ocr
+            and conversion.signals.chars_per_page_avg < _SCAN_MAX_CHARS_PER_PAGE
+        )
+        return _PreFilterDecision(
+            result=None,
+            force_ocr_on_fallthrough=classification.needs_ocr,
+            is_scan=is_scan,
+        )
 
     # PyMuPDF wins. Write the canonical markdown, record the manifest,
     # return the ParseResult.
@@ -1560,6 +1714,13 @@ async def _parse_pdf(
     decision = await _parse_with_pymupdf(vault_path, doc_id, source)
     if decision.result is not None:
         return decision.result
+    # A predominantly-image doc (scan / handwriting) routes to the VLM, which CAN read
+    # handwriting + diagrams — NOT to Docling-OCR (printed-text only; crashes on image-only
+    # PDFs). VLM-gated: with the VLM off, fall through to Docling-OCR (unchanged). See
+    # docs/specs/scan-vlm-parse.md.
+    disable_vlm = get_settings().parse.disable_vlm
+    if decision.is_scan and not disable_vlm and source.suffix.lower() == ".pdf":
+        return await _parse_scan_with_vlm(vault_path, doc_id, source, refresh_vlm=refresh_vlm)
     return await _parse_with_docling(
         vault_path,
         doc_id,

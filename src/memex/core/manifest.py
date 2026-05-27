@@ -40,7 +40,7 @@ class PageDecision(BaseModel):
     """Per-page parse engine routing record."""
 
     page: int
-    engine: Literal["docling", "vlm", "passthrough", "pymupdf"]
+    engine: Literal["docling", "vlm", "passthrough", "pymupdf", "scan"]
     confidence: float
     rationale: str = ""
     duration_ms: int = 0
