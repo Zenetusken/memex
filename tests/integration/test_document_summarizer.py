@@ -289,6 +289,29 @@ def _fake_complete_drop_tabular():
 
 
 @pytest.mark.asyncio
+async def test_long_doc_sub_splits_huge_section_no_content_dropped(
+    _settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # "Intro" (small) + "Big" (14 chunks → 3 window-sized batches: b0.., b6.., b12..).
+    chunks = [_chunk("docA#intro", "Intro", "intro text")] + [
+        _chunk(f"docA#b{i}", "Big", "z" * 2_000) for i in range(14)
+    ]
+    monkeypatch.setattr(ds, "FTSStore", _FakeFTS)
+    monkeypatch.setattr(_FakeFTS, "chunks", chunks)
+    monkeypatch.setattr(ds, "complete_structured", _fake_complete(ground=True))
+
+    resp = await ds.summarize_document("docA")
+
+    assert resp.answered
+    # the huge "Big" section was split into multiple parts (not truncated to one)
+    big_parts = [s for s in resp.sections if s.section_title.startswith("Big (part")]
+    assert len(big_parts) >= 2
+    # a chunk from the LATE batch is cited → its content was summarized, not dropped
+    cited = {kp.source_chunk_id for kp in resp.claims}
+    assert "docA#b12" in cited
+
+
+@pytest.mark.asyncio
 async def test_tabular_route_surfaces_grounded_key_figures(
     _settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:

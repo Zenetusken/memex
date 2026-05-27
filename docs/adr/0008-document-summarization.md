@@ -106,11 +106,11 @@ SMALLEST supported window (fast/6144).**
   digests capped to `_REDUCE_MAX_SECTIONS=24`) reservations keep prompt+output
   inside 6144.
 
-A section larger than the budget is truncated *identically in both modes*
-(sub-splitting a huge section across multiple MAP calls, so none of its content
-is dropped, is a deferred refinement). Validated live: the same doc in `fast`
-and `full` produced the same 9 sections / 12 grounded claims / faithful abstract,
-no window-overflow errors.
+A section larger than the budget is **sub-split** across multiple window-sized
+MAP calls (`_split_section_into_batches`, shipped 2026-05-27 — see §9) so none of
+its content is dropped, while every call stays mode-independent. Validated live:
+the same doc in `fast` and `full` produced the same 9 sections / 12 grounded
+claims / faithful abstract, no window-overflow errors.
 
 ### 5. A tunable detail knob; a token budget
 
@@ -195,6 +195,26 @@ CUDA deck 89% tiny → pack, GUIDELINES 77% → pack, GTE paper 31% / NIST 21% �
 Validated live: the CUDA deck's shallow per-slide digests became 6 substantive
 thematic groups. HARD-gate-neutral (grouping only — grounding/refusal unchanged).
 
+### 9. Section sub-splitting (shipped 2026-05-27)
+
+The flip side of packing: a section LARGER than one window. The per-group loop used
+to call `_bound_section_chunks`, which kept only the first window-worth of chunks
+and **truncated the rest — silently dropping that content** from the summary.
+`_split_section_into_batches` instead splits the section into consecutive batches
+that each fit the fast window (every chunk lands in exactly one batch — no content
+dropped), and each batch is MAPped + GROUNDed into its own `SectionSummary`
+(a multi-batch section is suffixed `(part k)`). A section that already fits is one
+batch (unchanged). It applies to BOTH routes: the long route's per-section groups
+AND the short route's single whole-doc group (which also truncated before). The
+abstract now REDUCEs whenever there's >1 summary (incl. a split single-section doc);
+a lone summary still uses its digest directly. Bounded by `token_budget` +
+`_MAX_SECTIONS`. **Validated live** on a synthetic 18-chunk single-section doc → 3
+batch-parts; the late content (subsystems 25-36, exclusive to batch 3, chunk 17)
+was summarized in "part 3" where the pre-split route would have dropped everything
+past batch 1. Mode-independent (each batch fits fast) + HARD-gate-neutral (grouping
+only). Pinned by `test_split_section_into_batches_*` + the no-content-dropped
+integration test (a late-batch chunk is cited).
+
 ## Consequences
 
 ### Positive
@@ -209,9 +229,9 @@ thematic groups. HARD-gate-neutral (grouping only — grounding/refusal unchange
 
 ### Negative / Trade-offs
 
-- v1 truncates an oversized section to fit the fast window rather than
-  sub-splitting it (content beyond the per-section budget isn't summarized) — a
-  deferred refinement, chosen so quality stays mode-independent today.
+- A section/doc with more total content than the budget allows still stops early
+  (`token_budget` / `_MAX_SECTIONS`) — but within those bounds, sub-splitting (§9)
+  now covers a large section in full rather than truncating it.
 - A long document is heavier than a single RAG answer (sequential per-section
   MAP+GROUND); the token budget bounds it but a very long doc is partial.
 - `scan` routes as generic `long` until specialised; the `tabular` (§7, with
@@ -234,8 +254,8 @@ thematic groups. HARD-gate-neutral (grouping only — grounding/refusal unchange
   slots into `_classify_route` + grouping/MAP — the GROUND/REDUCE/compose spine is
   unchanged. The tabular route's next deepening is **figure-framing** robustness on
   complex/mis-bounded tables (better table parsing + label-attribution).
-- **Section sub-splitting** (no content dropped on a huge section) is the obvious
-  vertical deepening of `_bound_section_chunks`.
+- **Section sub-splitting** (no content dropped on a huge section) **shipped** (§9,
+  `_split_section_into_batches`).
 - This is the structured-summary **capability tier** ADR-0007 §"Expanding
   horizontally" anticipated: it layers on the same resource postures rather than
   adding a resource bundle.
@@ -243,7 +263,7 @@ thematic groups. HARD-gate-neutral (grouping only — grounding/refusal unchange
 ## Revisit When
 
 - A doc-type route is specialised (fold its MAP contract in here).
-- Section sub-splitting lands (the §4 truncation trade-off goes away).
+- (Section sub-splitting landed 2026-05-27 — §9.)
 - The grounded-summary eval suite (`memex eval-summary`, shipped 2026-05-27 —
   `eval/runner.py::run_summary_eval`, `tests/eval-data/summary/queries.json`,
   HARD gates `hallucination_count==0` ∧ `summarize_correct_count==case_count`)

@@ -18,6 +18,7 @@ from memex.agents.document_summarizer import (
     _rank_tables,
     _render_table,
     _should_pack_sections,
+    _split_section_into_batches,
     _table_chunks,
     _table_salience,
 )
@@ -164,6 +165,31 @@ def test_pack_sections_merges_to_budget_titled_by_first_in_order() -> None:
 def test_pack_sections_caps_at_max_sections() -> None:
     groups = _pack_sections([_sec(i, 4000) for i in range(100)], 1)  # budget 1 → 1 section/group
     assert len(groups) <= _MAX_SECTIONS
+
+
+# ── section sub-splitting (ADR-0008) — a huge section spans batches, no content dropped ──
+
+
+def test_split_section_multi_batch_drops_no_content() -> None:
+    chunks = [_c(f"docA#{i}", "Big", "x" * 4000) for i in range(10)]  # 10×1800=18000 > 12000
+    batches = _split_section_into_batches(chunks, _MAX_SECTION_INPUT_CHARS)
+    assert len(batches) > 1  # splits
+    # every chunk lands in exactly one batch, in order — nothing truncated away
+    assert [c for batch in batches for c in batch] == chunks
+    # each batch fits the window budget (mode-independent)
+    assert all(
+        sum(min(len(c.text), 1_800) for c in batch) <= _MAX_SECTION_INPUT_CHARS for batch in batches
+    )
+
+
+def test_split_section_single_batch_when_it_fits() -> None:
+    chunks = [_c(f"docA#{i}", "S", "x" * 1_000) for i in range(3)]  # 3×1000 = 3000 < budget
+    assert _split_section_into_batches(chunks, _MAX_SECTION_INPUT_CHARS) == [chunks]
+
+
+def test_split_section_lone_giant_chunk_is_its_own_batch() -> None:
+    chunks = [_c("docA#0", "S", "y" * 50_000)]
+    assert _split_section_into_batches(chunks, _MAX_SECTION_INPUT_CHARS) == [chunks]
 
 
 # ── figure-salience (ADR-0008 §7) — rank tables by figure-richness, not doc order ──

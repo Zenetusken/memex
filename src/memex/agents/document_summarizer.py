@@ -229,6 +229,31 @@ def _bound_section_chunks(chunks: list[Chunk]) -> list[Chunk]:
     return out
 
 
+def _split_section_into_batches(chunks: list[Chunk], max_chars: int) -> list[list[Chunk]]:
+    """Split a section's chunks into consecutive batches that EACH fit `max_chars`
+    (the fast-window budget, by the prompt's per-chunk `truncate` measure), so a
+    section larger than one window is summarized across multiple MAP calls rather
+    than TRUNCATED — every chunk lands in exactly one batch, so no content is
+    dropped, and each batch is mode-independent (fits fast). A section that already
+    fits is a single batch (unchanged behaviour); a lone oversized chunk forms its
+    own batch (the prompt truncates it). This generalizes `_bound_section_chunks`
+    (which returns only the first batch)."""
+    batches: list[list[Chunk]] = []
+    cur: list[Chunk] = []
+    total = 0
+    for c in chunks:
+        clen = min(len(c.text), _CHUNK_TRUNCATE_CHARS)
+        if cur and total + clen > max_chars:
+            batches.append(cur)
+            cur = []
+            total = 0
+        cur.append(c)
+        total += clen
+    if cur:
+        batches.append(cur)
+    return batches
+
+
 async def _map_section(
     section_title: str,
     chunks: list[Chunk],
@@ -562,28 +587,38 @@ async def summarize_document(
                 log.info("summarize.key_figures", figures=len(kf.key_points))
 
         for title, sec_chunks in groups:
-            if tokens_total > token_budget:
+            if tokens_total > token_budget or len(section_summaries) >= _MAX_SECTIONS:
                 log.info("summarize.budget_exhausted", done=len(section_summaries))
                 break
-            # Bound the section's chunks ONCE to fit the smallest (fast) window, and
-            # feed the SAME set to MAP and GROUND — so the input (hence the quality)
-            # is identical in fast and full mode (the baseline rule).
-            map_chunks = _bound_section_chunks(sec_chunks)
-            mapped, t_map = await _map_section(
-                title, map_chunks, instruction, max_output_tokens, map_guidance
-            )
-            tokens_total += t_map
-            if mapped is None:
-                continue
-            grounded, t_g = await _ground_points(mapped.digest, mapped.key_points, map_chunks)
-            tokens_total += t_g
-            section_summaries.append(
-                SectionSummary(
-                    section_title=mapped.section_title or title,
-                    digest=mapped.digest,
-                    key_points=grounded,
+            # Sub-split a section larger than one window into batches that EACH fit
+            # the smallest (fast) window — so its content is summarized across multiple
+            # MAP calls rather than TRUNCATED to the first window (no content dropped),
+            # while every call's input stays mode-independent. A section that fits is
+            # one batch (unchanged). Each batch → its own grounded SectionSummary; a
+            # multi-batch section is suffixed "(part k)".
+            batches = _split_section_into_batches(sec_chunks, _MAX_SECTION_INPUT_CHARS)
+            for bi, batch in enumerate(batches):
+                if tokens_total > token_budget or len(section_summaries) >= _MAX_SECTIONS:
+                    log.info("summarize.budget_exhausted", done=len(section_summaries))
+                    break
+                mapped, t_map = await _map_section(
+                    title, batch, instruction, max_output_tokens, map_guidance
                 )
-            )
+                tokens_total += t_map
+                if mapped is None:
+                    continue
+                grounded, t_g = await _ground_points(mapped.digest, mapped.key_points, batch)
+                tokens_total += t_g
+                sec_title = mapped.section_title or title
+                if len(batches) > 1:
+                    sec_title = f"{sec_title} (part {bi + 1})"
+                section_summaries.append(
+                    SectionSummary(
+                        section_title=sec_title,
+                        digest=mapped.digest,
+                        key_points=grounded,
+                    )
+                )
 
         # Doc-level key-points = the grounded section points (reading order, capped).
         doc_points = [kp for ss in section_summaries for kp in ss.key_points][:_MAX_DOC_KEY_POINTS]
@@ -604,11 +639,13 @@ async def summarize_document(
                 regenerate_attempts=0,
             )
 
-        # REDUCE → abstract. Short non-tabular route: the single section digest IS
-        # the abstract (no second call). Long OR tabular: synthesize across the
-        # (prose + key-figures) digests so the abstract reflects both.
-        if route == "short" and not is_tabular:
-            abstract = section_summaries[0].digest if section_summaries else ""
+        # REDUCE → abstract. When there is exactly ONE section summary (a small
+        # single-section doc, not split, not tabular) its digest IS the abstract — no
+        # second call. Otherwise (multiple sections, a sub-split section's parts, or
+        # the tabular key-figures section) synthesize across the digests so the
+        # abstract reflects them all.
+        if len(section_summaries) == 1 and not is_tabular:
+            abstract = section_summaries[0].digest
         else:
             abstract, t_r = await _reduce(
                 doc_title, section_summaries, instruction, max_output_tokens, guidance["abstract"]

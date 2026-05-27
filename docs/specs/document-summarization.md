@@ -98,10 +98,14 @@ window (`fast`/6144), so the call's input is identical in `fast` and `full`.
 | GROUND `verify_grounding` | the SAME bounded section chunks | `_VERIFY_MAX_TOKENS` (768) |
 | REDUCE `summarize_reduce` | digests capped to `_REDUCE_MAX_SECTIONS` (24) | `min(max_output_tokens, _REDUCE_MAX_TOKENS=1024)` |
 
-`_bound_section_chunks` selects the section's chunks ONCE (up to the char budget
-and `_MAX_SECTION_CHUNKS`) and feeds the SAME list to MAP and GROUND. A section
-larger than the budget is truncated *identically per mode*; sub-splitting it
-across multiple MAP calls (no content dropped) is a deferred refinement.
+`_bound_section_chunks` selects a section's chunks up to the char budget; the
+per-group loop uses `_split_section_into_batches` (its generalization) so a section
+LARGER than one window is split into consecutive window-sized batches — each
+MAPped + GROUNDed into its own `SectionSummary` (`(part k)` suffix when >1) so no
+content is truncated away (every chunk lands in one batch). Each batch is fed
+identically to MAP and GROUND (mode-independent). A section that fits is one batch
+(unchanged). The abstract REDUCEs whenever there's >1 summary (incl. a split
+single-section doc); a lone summary uses its digest directly.
 
 Validated live (GTE arXiv, `--token-budget 20000`): `fast`(6144) and `full`(24576)
 both → 9 sections, 12 grounded claims, faithful abstract, ~identical latency, zero
@@ -164,7 +168,9 @@ construction.
   *framing* on a complex/mis-bounded table can mis-attribute a grounded value's
   metric/period (table-parse quality, not a hallucination). `deck` (section-packing,
   step 3c) shipped. `scan` (over VLM text) route remains.
-- Section sub-splitting (no content dropped on an oversized section).
+- ~~Section sub-splitting~~ **SHIPPED** (`_split_section_into_batches`; a huge
+  section spans window-sized batch-parts, no content dropped; validated live on a
+  synthetic 18-chunk doc → 3 parts covering subsystems 1-36).
 - ~~A grounded-summary eval suite~~ **SHIPPED** (`memex eval-summary` →
   `eval/runner.py::run_summary_eval`; cases at `tests/eval-data/summary/queries.json`;
   scorers `mention_recall` (soft) + `absent_assertion_violations` (the no-leak HARD
