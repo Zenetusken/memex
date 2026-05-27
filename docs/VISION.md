@@ -114,7 +114,7 @@ Memex is opinionated about its stack because constraint at this level is what ma
 **Document understanding**
 
 - **Docling** (IBM, Apache 2.0) as the primary parsing pipeline. Handles layout, tables, equations, and outputs structured Markdown directly. CPU-first with optional GPU acceleration.
-- **Qwen2.5-VL 7B** (Q4_K_M, ~5GB VRAM) as the vision-language fallback for pages Docling can't handle confidently — scanned handwriting, dense diagrams, unusual layouts.
+- **Qwen3-VL-8B-AWQ** (~7.4 GB, served via a short-lived parse-time vLLM process) as the vision-language fallback for pages Docling can't handle confidently — scanned handwriting, dense diagrams, directed flow/state diagrams, unusual layouts.
 
 **Reasoning and agents**
 
@@ -143,7 +143,7 @@ Memex is opinionated about its stack because constraint at this level is what ma
 
 - An **MCP server** exposing the vault as queryable tools (search, retrieve, follow links, summarize, cite). Any MCP client speaks to Memex.
 
-VRAM budget on the reference RTX 4070 (12GB), with the agent and embedding models co-resident: orchestrator ~5GB, embedder ~600MB, reranker ~600MB, KV cache and overhead ~3GB, headroom ~2.5GB for the VLM fallback (swapped in on demand). Inference is sequential by design — the agent is the bottleneck, not parallel decoding.
+VRAM budget on the reference RTX 4070 (12GB), with the agent and embedding models co-resident: orchestrator ~5GB, embedder ~600MB, reranker ~600MB, KV cache and overhead ~3GB. The VLM fallback (Qwen3-VL-8B-AWQ, ~7.4GB) runs only at *parse* time, in its own short-lived vLLM process on the GPU freed by pausing the orchestrator — never co-resident with answering. Inference is sequential by design — the agent is the bottleneck, not parallel decoding.
 
 ---
 

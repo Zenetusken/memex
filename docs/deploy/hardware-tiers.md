@@ -58,6 +58,8 @@ Live VRAM usage observed on RTX 4070 12 GB (cold start, single eval pass):
 - **Total live usage**: ~11.5 GB
 - Headroom: ~0.5 GB (tight; back-to-back evals can OOM intermittently — see Operational notes below)
 
+**Parse-time only** (when `MEMEX_PARSE__DISABLE_VLM=false`): the diagram VLM is **Qwen3-VL-8B-AWQ served by a short-lived vLLM process**, *not* co-resident with answering — the orchestrator vLLM is paused (`pause_vllm_for_gpu`) to free the GPU, the VLM vLLM runs at `gpu_memory_utilization=0.80` (~7.4 GB weights + KV cache; 0.80 leaves headroom for the **variable desktop graphics load** — 0.89 intermittently fails startup when the desktop's GPU use rises, e.g. a Zoom call), then it's torn down *before* the in-process chart-OCR pass (the two can't co-reside: 7.4 + ~3 GB > 12 GB). Recipe + rationale: [`../specs/vlm-vllm-serving.md`](../specs/vlm-vllm-serving.md).
+
 ---
 
 ## 8 GB tier (smaller orchestrator — Qwen3-4B-AWQ)

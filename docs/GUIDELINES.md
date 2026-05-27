@@ -37,7 +37,7 @@ When in doubt, return to those.
 | Agent orchestration | **LangGraph** | Explicit state machines, not free-form ReAct |
 | Inference | **vLLM** | Paged attention, OpenAI-compatible API, sustained throughput under agentic load |
 | Document parsing | **Docling** | Layout, tables, equations → Markdown; CPU+GPU |
-| Vision-language fallback | **Qwen2.5-VL 7B** | Hard pages, handwriting, dense diagrams |
+| Vision-language fallback | **Qwen3-VL-8B-AWQ** (parse-time vLLM) | Hard pages, handwriting, dense diagrams, directed flow/state diagrams |
 | Embeddings | **EmbeddingGemma 300M** | Small, multilingual, fast |
 | Reranker | **bge-reranker-v2-m3** | Second-stage precision |
 | Vector store | **LanceDB** | Embedded, columnar, fast |
@@ -177,8 +177,9 @@ A single `MemexSettings` pydantic-settings model is the source of truth. Loaded 
 class ModelSettings(BaseModel):
     orchestrator: str = "Qwen/Qwen3-8B-AWQ"
     orchestrator_quantization: Literal["AWQ", "GPTQ", "Q4_K_M", "Q5_K_M", "Q8_0"] = "AWQ"
-    vlm: str = "Qwen/Qwen2.5-VL-7B-Instruct-AWQ"
+    vlm: str = "cyankiwi/Qwen3-VL-8B-Instruct-AWQ-4bit"
     vlm_quantization: Literal["awq_int4", "bf16"] = "awq_int4"
+    vlm_serving: Literal["transformers", "vllm"] = "vllm"  # Qwen3-VL → parse-time vLLM process
     embedder: str = "google/embeddinggemma-300m"
     reranker: str = "BAAI/bge-reranker-v2-m3"
     chart_ocr: str = "nvidia/NVIDIA-Nemotron-Parse-v1.2"
@@ -212,11 +213,11 @@ The reference target is an RTX 4070 (12GB VRAM) with 32GB system RAM. Every mode
 | Qwen3-8B-AWQ | Orchestrator, answerer | AWQ-Int4 (out-of-process via vLLM) | ~5.5 GB | vLLM daemon |
 | EmbeddingGemma 300M | Embeddings | bf16 | ~0.6 GB | Always (registry) |
 | bge-reranker-v2-m3 | Reranking | bf16 | ~1.0 GB | Always (registry) |
-| Qwen2.5-VL 7B AWQ | Page transcription fallback | AWQ-Int4 + bf16 activations | ~5.0 GB | Lazy + `disable_vlm=True` by default on 12 GB |
+| Qwen3-VL-8B-AWQ | Page transcription fallback (diagrams) | AWQ-Int4 (compressed-tensors, vLLM Marlin) | ~7.4 GB | **Parse-time vLLM process** (`vlm_serving="vllm"`); `disable_vlm=True` by default on 12 GB |
 | Nemotron-Parse-v1.2 | Chart-OCR over Docling figures (default since 2026-05-23) | bf16 | ~3.0 GB | Lazy + **enabled by default**; opt-out via `MEMEX_PARSE__DISABLE_CHART_OCR=true` |
 | KV cache + vLLM overhead | — | — | ~2.0 GB | — |
 
-Steady-state on 12 GB tier (vLLM + embedder + reranker + KV cache): ~9 GB. **VLM is disabled by default; chart-OCR is enabled by default** (per the 2026-05-23 P3.3-c shootout — Nemotron-Parse-v1.2 achieves no prose regression). Both use the pause-vLLM strategy when activated during parse (see P3.3 in ROADMAP for the trade-off, and `docs/audits/chart_ocr_shootout_2026-05-23.md` for the backend verdict). On the 8 GB tier (P4.2), `Qwen3-4B-AWQ + gpu_memory_utilization=0.50` ships as the documented profile in `docs/deploy/hardware-tiers.md`. On the reference 12 GB rig with chart-OCR enabled, `MEMEX_VLLM_GPU_FRACTION=0.68` is recommended.
+Steady-state on 12 GB tier (vLLM + embedder + reranker + KV cache): ~9 GB. **VLM is disabled by default; chart-OCR is enabled by default** (per the 2026-05-23 P3.3-c shootout — Nemotron-Parse-v1.2 achieves no prose regression). Both run only during parse with the orchestrator vLLM paused (`pause_vllm_for_gpu`). The VLM (Qwen3-VL) is itself served by a **short-lived vLLM process** started + torn down inside `vlm_backend.convert_pages` (`vlm_serving="vllm"`; in-process transformers can't run its compressed-tensors int4 on 12 GB — it decompresses to dense → OOM), phase-separated from the in-process chart-OCR pass (the two can't co-reside). See `docs/specs/vlm-vllm-serving.md` + ADR-0006 §4, and `docs/audits/chart_ocr_shootout_2026-05-23.md` for the chart-OCR backend verdict. On the 8 GB tier (P4.2), `Qwen3-4B-AWQ + gpu_memory_utilization=0.50` ships as the documented profile in `docs/deploy/hardware-tiers.md`. On the reference 12 GB rig with chart-OCR enabled, `MEMEX_VLLM_GPU_FRACTION=0.68` is recommended.
 
 ### VRAM management
 
@@ -225,7 +226,7 @@ VRAM is a managed resource. We do not let arbitrary code allocate.
 - A single `ModelRegistry` in `models/registry.py` owns every model handle.
 - Modules request a model via context manager: `async with registry.use("vlm") as vlm:`. The registry handles loading, unloading, and swap.
 - The registry tracks resident memory and refuses to load a model that won't fit, raising `InsufficientVRAMError` with context.
-- For the orchestrator and embedder, "use" is a no-op (they're always resident). For the VLM, it triggers a load if absent.
+- For the orchestrator and embedder, "use" is a no-op (they're always resident). The **default Qwen3-VL VLM is NOT a registry resident** — it's served by a parse-time vLLM process (`vlm_serving="vllm"`); `registry.use("vlm")` is the *legacy* in-process AutoAWQ path (Qwen2.5-VL via `vlm_serving="transformers"`), where it triggers a load if absent.
 - Swaps are logged to Langfuse with their wall-clock cost. If swap cost dominates total runtime, that's a configuration problem and the observability will surface it.
 
 ### Agent design with LangGraph

@@ -91,7 +91,7 @@ async def start_watcher(watch_dir: Path) -> WatcherHandle: ...
 
 ### 1.3 `memex.parse` — Docling primary + VLM fallback
 
-**Responsibility.** Turn `vault/documents/{doc_id}/source.{ext}` into `vault/documents/{doc_id}.md` plus the per-page provenance in `manifest.json`. Decides, per page, whether Docling's output is high-confidence enough to keep or whether to escalate to Qwen2.5-VL. Extracts figures and tables to `vault/documents/{doc_id}/figures/` and `tables/`. Runs in a child process sandbox (Part VI: "Sandboxed parsing").
+**Responsibility.** Turn `vault/documents/{doc_id}/source.{ext}` into `vault/documents/{doc_id}.md` plus the per-page provenance in `manifest.json`. Decides, per page, whether Docling's output is high-confidence enough to keep or whether to escalate to the VLM (as-built 2026-05-26: **Qwen3-VL-8B-AWQ**, served via a parse-time vLLM process — see Routing logic + `docs/specs/vlm-vllm-serving.md`). Extracts figures and tables to `vault/documents/{doc_id}/figures/` and `tables/`. Runs in a child process sandbox (Part VI: "Sandboxed parsing").
 
 **Public interface** (files: `parse/router.py`, `parse/docling_backend.py`, `parse/vlm_backend.py`, `parse/manifest.py`):
 
@@ -122,7 +122,7 @@ class ParseResult(BaseModel):
 async def parse_document(doc_id: str) -> ParseResult: ...
 ```
 
-**Routing logic.** First pass: Docling on the whole document. Second pass: any page where Docling reports confidence < `MEMEX_PARSE__VLM_THRESHOLD` (default 0.65) gets re-run with the VLM under `ModelRegistry.use("vlm")`. Output for that page replaces Docling's. Both decisions go into the manifest. (As-built the escalation trigger is a per-page `image_fraction` + diagram-class signal, not Docling's confidence — see `parse/pipeline.py::_route_and_escalate`.)
+**Routing logic.** First pass: Docling on the whole document. Second pass: any page where Docling reports confidence < `MEMEX_PARSE__VLM_THRESHOLD` (default 0.65) gets re-run with the VLM under `ModelRegistry.use("vlm")`. Output for that page replaces Docling's. Both decisions go into the manifest. (As-built the escalation trigger is a per-page `image_fraction` + diagram-class signal, not Docling's confidence — see `parse/pipeline.py::_route_and_escalate`. As-built 2026-05-26 the VLM is **Qwen3-VL-8B-AWQ served by a short-lived parse-time vLLM process** (`vlm_serving="vllm"`, started/torn-down inside `vlm_backend.convert_pages`), NOT the in-process registry — its compressed-tensors int4 can't run in-process on 12 GB (decompresses to dense → OOM); `registry.use("vlm")` is now the legacy AutoAWQ Qwen2.5-VL path. The orchestrator vLLM is paused (`pause_vllm_for_gpu`) so the VLM vLLM gets the GPU, then torn down before chart-OCR. See `docs/specs/vlm-vllm-serving.md`.)
 
 **Office sources.** `.pptx`/`.docx`/`.xlsx` + their ODF cousins can't be rendered by pypdfium2 (the VLM + chart-OCR figure renderers are PDF-only), so `parse_document` converts an Office source to a cached `documents/{doc_id}/converted.pdf` via headless LibreOffice (`parse/office_convert.py`) and runs the FULL PDF pipeline on it — Docling + VLM + chart-OCR all operate on the PDF, so figure bboxes align and diagrams transcribe. The converted PDF is cached + reused so its bytes (hence the content-addressed VLM/chart-OCR cache keys) stay byte-stable across re-parses.
 
