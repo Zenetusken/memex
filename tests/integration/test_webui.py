@@ -20,6 +20,7 @@ from memex.agents.answering import (
     reset_compiled_graph,
 )
 from memex.core.config import MemexSettings, set_settings
+from memex.core.types import Chunk
 from memex.ingest.pipeline import ingest_markdown_passthrough
 from memex.parse.pdf_render import PDFPreviewError
 from memex.webui.app import create_app
@@ -130,6 +131,51 @@ def test_ask_answer_fragment_renders_sources_wikilinks(
     assert "Sources" in r.text
     assert 'href="/documents/d1#reflexivity"' in r.text
     assert 'class="wikilink"' in r.text
+
+
+@pytest.mark.asyncio
+async def test_ask_renders_sources_and_claims_by_title(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#2/#3: a claim's source chip + the Sources list render the human document
+    TITLE (› section), linked to the doc section, with the raw docid#hash only as
+    the hover tooltip — not as the visible label."""
+
+    async def _fake(question: str, **_kw: Any) -> FinalResponse:
+        chunk = Chunk(
+            chunk_id="abc12345#h1",
+            document_id="abc12345",
+            document_title="CS Notes",
+            text="C++ was developed by Stroustrup.",
+            heading_path=["C++ Tutorials", "History"],
+        )
+        return FinalResponse(
+            answered=True,
+            summary="C++ history.",
+            claims=[
+                CitedClaim(
+                    claim="Developed by Stroustrup.",
+                    source_chunk_id="abc12345#h1",
+                    confidence="high",
+                )
+            ],
+            used_chunks=[chunk],
+            wikilinks=["[[abc12345#History]]"],
+            correlation_id="01HZTITLE0000000000000000",
+            tokens_used=10,
+            nodes_traversed=4,
+            regenerate_attempts=0,
+        )
+
+    monkeypatch.setattr("memex.webui.app.answer_query", _fake)
+    r = client.post("/ask", data={"question": "who made C++?"})
+    assert r.status_code == 200
+    # claim source chip → "Title › Section", linked to the doc section
+    assert 'class="claim-source-link"' in r.text
+    assert "CS Notes › History" in r.text
+    assert 'href="/documents/abc12345#history"' in r.text
+    assert 'title="abc12345#h1"' in r.text  # raw id only as the tooltip
+    assert ">abc12345#h1<" not in r.text  # NOT shown as a visible <code> chip
 
 
 def test_ask_renders_refusal(client: TestClient, fake_refused: None) -> None:

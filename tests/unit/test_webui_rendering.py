@@ -458,11 +458,25 @@ def test_markdown_link_heading_dedups_against_plain() -> None:
 
 
 def test_render_wikilink_section_emits_slug_fragment() -> None:
-    """`[[doc#Sec]]` → an `<a>` to `/documents/doc#sec` (section slugified)."""
+    """`[[doc#Sec]]` → an `<a>` to `/documents/doc#sec` (section slugified). The
+    visible label is "doc › Sec" (doc-id fallback when no title map); the raw
+    `doc#Sec` is only the `title=` hover tooltip, NOT the rendered text."""
     out = str(render_wikilink("[[doc#Sec]]"))
     assert 'href="/documents/doc#sec"' in out
     assert 'class="wikilink"' in out
-    assert "[[doc#Sec]]" in out  # display label keeps raw section text
+    assert "doc › Sec" in out  # by-title label
+    assert 'title="doc#Sec"' in out  # raw id survives only as the tooltip
+    assert "[[doc#Sec]]" not in out  # raw wikilink syntax no longer shown
+
+
+def test_render_wikilink_uses_title_map() -> None:
+    """Given a doc_id→title map, the label is the human TITLE (+ section); the
+    href + tooltip keep the stable doc-id."""
+    out = str(render_wikilink("[[6cf-notes#Intro]]", {"6cf-notes": "CS Notes"}))
+    assert "CS Notes › Intro" in out  # title replaces the raw doc-id in the label
+    assert 'href="/documents/6cf-notes#intro"' in out
+    assert 'title="6cf-notes#Intro"' in out
+    assert ">6cf-notes" not in out  # the doc-id is not the visible label
 
 
 def test_render_wikilink_bare_doc_has_no_fragment() -> None:

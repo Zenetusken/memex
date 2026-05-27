@@ -428,6 +428,16 @@ html { scroll-behavior: smooth; }
   color: rgb(161 161 170);                 /* zinc-400 */
   word-break: break-all;
 }
+/* A claim's source rendered by human "Title › Section" (the raw docid#hash is
+   the title= tooltip). Blue = the single action accent, signalling a link. */
+.claim-source-link {
+  color: rgb(147 197 253);                 /* blue-300 — matches .wikilink */
+  text-decoration: none;
+}
+.claim-source-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 
 /* Confidence chip — colour AND label, never colour alone (WCAG 1.4.1). */
 .conf {
@@ -777,4 +787,4 @@ html { scroll-behavior: smooth; }
 .summary-section-digest { font-size: 0.8125rem; color: rgb(161 161 170); margin: 0.2rem 0 0.35rem; }  /* zinc-400 */
 .summary-section-points { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.25rem; }
 .summary-section-points li { font-size: 0.78rem; color: rgb(161 161 170); display: flex; gap: 0.5rem; align-items: baseline; }
-.summary-section-points .chunk-id { color: rgb(161 161 170); font-size: 0.6875rem; white-space: nowrap; }  /* zinc-400 (AA) */  /* blue-600 */
+.summary-section-points .chunk-id { color: rgb(161 161 170); font-size: 0.6875rem; white-space: nowrap; }  /* zinc-400 (AA) */

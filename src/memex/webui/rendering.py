@@ -201,26 +201,45 @@ def _replace_wikilinks_with_anchors(escaped_line: str) -> str:
     return _WIKILINK_RE.sub(lambda m: _anchor_for_wikilink(m.group(1)), escaped_line)
 
 
-def render_wikilink(wikilink: str) -> Markup:
+def render_wikilink(wikilink: str, titles: dict[str, str] | None = None) -> Markup:
     """Render a single `[[doc]]` / `[[doc#section]]` wikilink string as
     an `<a class="wikilink">` anchor — the public Jinja filter behind the
-    answer "Sources" list (`templates/_answer.html`).
+    answer / summary "Sources" list (`templates/_answer.html`).
 
-    Input is the full wikilink (with the surrounding `[[` `]]`). It's
-    HTML-escaped, then the FIRST `[[...]]` match is rewritten via the
-    same `_anchor_for_wikilink` construction the body rewrite uses
-    (`/documents/{doc}#{slug}` with the section slugified; bare `[[doc]]`
-    → no fragment). An unparseable input (no well-formed `[[...]]`) is
-    returned as escaped raw text — defensive, never raw HTML.
+    The link LABEL is the **human document title** (+ `› section`) when a
+    `doc_id → title` map is supplied (`titles`), instead of the raw
+    `[[doc_id#section]]` syntax — the stable doc-id survives only as the
+    `href` and a `title=` hover tooltip. With no/empty map (or an unknown
+    doc-id) the label falls back to the doc-id, so it never renders blank.
+    An unparseable input (no well-formed `[[...]]`) is returned as escaped
+    raw text — defensive, never raw HTML.
 
-    Returns `markupsafe.Markup` so Jinja's auto-escape leaves the
-    emitted `<a>` intact.
+    NB this DIVERGES from `_anchor_for_wikilink` (the document-BODY rewrite),
+    which keeps the literal `[[doc#section]]` label for raw-markdown fidelity
+    inside the `<pre>`. "Sources" is a presentation surface, so it reads by
+    title; both still emit `class="wikilink"` + the same href shape. The raw
+    input is parsed first, then every interpolation is escaped at output
+    (single escape — no double-escaping).
+
+    Returns `markupsafe.Markup` so Jinja's auto-escape leaves the emitted
+    `<a>` intact.
     """
-    escaped = str(escape(wikilink))
-    match = _WIKILINK_RE.search(escaped)
+    match = _WIKILINK_RE.search(wikilink)
     if match is None:
-        return Markup(escaped)  # noqa: S704 — already HTML-escaped above
-    return Markup(_anchor_for_wikilink(match.group(1)))  # noqa: S704
+        return Markup(str(escape(wikilink)))  # noqa: S704 — escaped above
+    target = parse_wikilink(match.group(1))
+    doc_label = (titles or {}).get(target.doc_id, target.doc_id)
+    if target.section:
+        href = f"/documents/{target.doc_id}#{slugify_heading(target.section)}"
+        label = f"{doc_label} › {target.section}"  # "Title › Section"
+        tip = f"{target.doc_id}#{target.section}"
+    else:
+        href = f"/documents/{target.doc_id}"
+        label = doc_label
+        tip = target.doc_id
+    return Markup(  # noqa: S704 — all interpolations escaped
+        f'<a class="wikilink" href="{escape(href)}" title="{escape(tip)}">{escape(label)}</a>'
+    )
 
 
 # ----------------------------------------------------------------------

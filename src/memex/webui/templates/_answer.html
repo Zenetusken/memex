@@ -20,7 +20,9 @@
         <p class="claim-meta">
           <span class="conf conf-{{ claim.confidence }}">{{ claim.confidence }} confidence</span>
           <span class="claim-src">source</span>
-          <code class="chunk-id">{{ claim.source_chunk_id }}</code>
+          {% set ref = (chunk_refs or {}).get(claim.source_chunk_id) -%}
+          {%- if ref %}<a class="claim-source-link" href="{{ ref.href }}" title="{{ claim.source_chunk_id }}">{{ ref.title }}{% if ref.section %} › {{ ref.section }}{% endif %}</a>
+          {%- else %}<code class="chunk-id" title="chunk id">{{ claim.source_chunk_id }}</code>{% endif %}
         </p>
       </li>
       {% endfor %}
@@ -33,7 +35,7 @@
     <p class="ans-eyebrow">Sources</p>
     <ul class="ans-sources">
       {% for wikilink in response.wikilinks %}
-      <li>{{ wikilink | render_wikilink }}</li>
+      <li>{{ wikilink | render_wikilink(doc_titles) }}</li>
       {% endfor %}
     </ul>
   </section>

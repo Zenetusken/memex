@@ -51,7 +51,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from jinja2 import Environment, FileSystemLoader
 
-from memex.agents.answering import answer_query
+from memex.agents.answering import FinalResponse, answer_query
 from memex.agents.document_summarizer import summarize_document
 from memex.core.config import get_settings
 from memex.core.errors import (
@@ -88,7 +88,7 @@ from memex.vault.store import (
     read_document_title,
     write_document,
 )
-from memex.webui.rendering import extract_toc, render_body_html, render_wikilink
+from memex.webui.rendering import extract_toc, render_body_html, render_wikilink, slugify_heading
 
 _HERE = Path(__file__).parent
 _TEMPLATES_DIR = _HERE / "templates"
@@ -237,6 +237,30 @@ def _find_preview_pdf(vault_path: Path, doc_id: str) -> Path | None:
     if converted.is_file():
         return converted
     return None
+
+
+def _source_view(response: FinalResponse) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
+    """View-model for rendering answer/summary sources by HUMAN TITLE instead of
+    the raw `docid#hash` / `[[doc#section]]` syntax. Returns:
+
+    - `chunk_refs`: `chunk_id → {title, section, href}` for the per-claim source
+      chips (a claim whose chunk isn't here — e.g. a synthetic table/SQL chunk —
+      falls back to the raw id in the template).
+    - `doc_titles`: `doc_id → title` for the `render_wikilink` Sources labels.
+
+    Built from the cited chunks' OWN `document_title` + `heading_path` — no extra
+    I/O (the same data the refusal panel already shows)."""
+    chunk_refs: dict[str, dict[str, str]] = {}
+    doc_titles: dict[str, str] = {}
+    for c in response.used_chunks:
+        section = c.heading_path[-1] if c.heading_path else ""
+        href = f"/documents/{c.document_id}"
+        if section:
+            href = f"{href}#{slugify_heading(section)}"
+        title = c.document_title or c.document_id
+        chunk_refs[c.chunk_id] = {"title": title, "section": section, "href": href}
+        doc_titles[c.document_id] = title
+    return chunk_refs, doc_titles
 
 
 def _kind_for(path: Path) -> tuple[str, str]:
@@ -437,6 +461,8 @@ def create_app() -> FastAPI:
             {"doc_id": doc_id, "title": await read_document_title(settings.vault_path, doc_id)}
             for doc_id in response.artifact_scope_doc_ids
         ]
+        # Render claim sources + the Sources list by human title, not raw ids.
+        chunk_refs, doc_titles = _source_view(response)
         return templates.TemplateResponse(
             request,
             "_answer.html",
@@ -447,6 +473,8 @@ def create_app() -> FastAPI:
                 # The route knows the scope SOURCE (it passed the user selection);
                 # the template uses it to phrase the ".ans-scope" note correctly.
                 "scope_source": "selected" if scope_doc_ids else "named",
+                "chunk_refs": chunk_refs,
+                "doc_titles": doc_titles,
             },
         )
 
@@ -603,8 +631,16 @@ def create_app() -> FastAPI:
                 },
                 status_code=503,
             )
+        chunk_refs, doc_titles = _source_view(response)
         return templates.TemplateResponse(
-            request, "_summary.html", {"response": response, "error": None}
+            request,
+            "_summary.html",
+            {
+                "response": response,
+                "error": None,
+                "chunk_refs": chunk_refs,
+                "doc_titles": doc_titles,
+            },
         )
 
     @app.get("/documents/{doc_id}/source")
