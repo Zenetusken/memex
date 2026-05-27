@@ -1164,13 +1164,34 @@ async def _parse_with_docling(
     )
 
 
+def _strip_markdown_fence_wrapper(md: str) -> str:
+    """PURE: unwrap a VLM transcription that emitted its WHOLE page inside a single
+    ```markdown / ```md code fence. The VLM, asked to transcribe a full page, often
+    answers ```markdown\\n<the page>\\n``` — and left in place that fence makes the
+    chunker + grounding treat the note's prose as a code block, which degrades
+    answerability (validated on the handwritten scan corpus: 'is C++ compiled?' /
+    'compilation stages?' false-refused until the wrapper was removed). Only an
+    explicitly markdown-LABELLED outer fence is unwrapped, and only when its matching
+    close is the LAST fenced line — a bare ``` wrapper is left alone (it may be a real
+    code block), and any nested fences (e.g. an ASCII diagram) stay balanced inside."""
+    lines = md.strip().splitlines()
+    if len(lines) < 2 or lines[0].strip() not in ("```markdown", "```md"):
+        return md
+    close_idx = next((i for i in range(len(lines) - 1, 0, -1) if lines[i].strip() == "```"), None)
+    if close_idx is None:
+        return md
+    inner = "\n".join(lines[1:close_idx]).strip()
+    return inner or md
+
+
 def _assemble_scan_pages(
     results: Mapping[int, DoclingPageOutput | Exception], page_count: int
 ) -> tuple[list[PageDecision], list[str]]:
     """PURE: turn the VLM per-page transcription results into ordered `PageDecision`s
     (engine="scan") + the non-empty markdown parts to stitch, in reading order. A
     failed/missing page → confidence 0 with the error in `rationale` (recorded, not
-    silently dropped) and no markdown contribution."""
+    silently dropped) and no markdown contribution. Each page's markdown has a
+    whole-page ```markdown fence wrapper stripped (`_strip_markdown_fence_wrapper`)."""
     pages: list[PageDecision] = []
     parts: list[str] = []
     for page_no in range(1, page_count + 1):
@@ -1179,8 +1200,9 @@ def _assemble_scan_pages(
             pages.append(
                 PageDecision(page=page_no, engine="scan", confidence=1.0, rationale="VLM scan")
             )
-            if res.markdown.strip():
-                parts.append(res.markdown)
+            md = _strip_markdown_fence_wrapper(res.markdown)
+            if md.strip():
+                parts.append(md)
         else:
             err = res if isinstance(res, Exception) else None
             pages.append(
