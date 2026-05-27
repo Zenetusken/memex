@@ -116,11 +116,24 @@ summary:focus-visible {
 .pane-header a { color: rgb(161 161 170); }
 .pane-header a:hover { color: rgb(244 244 245); }
 
-.pdf-frame {
-  width: 100%;
-  height: 100%;
-  border: 0;
+/* Source-preview pane: SERVER-rendered page images (one PNG per page), not an
+   <iframe> PDF embed — the latter rendered blank under the browser's "download
+   PDFs" setting + iframe-PDF quirks. Works for any visual source (a PDF or an
+   Office doc's converted.pdf). The .pane-body already scrolls (overflow:auto). */
+.pdf-pages {
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
   background: rgb(24 24 27);
+}
+.pdf-page {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid rgb(39 39 42);      /* zinc-800 */
+  border-radius: 0.25rem;
+  background: rgb(39 39 42);             /* placeholder tint until the PNG loads */
 }
 
 /* Single-column variant when there is no PDF source. */

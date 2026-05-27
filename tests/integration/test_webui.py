@@ -21,6 +21,7 @@ from memex.agents.answering import (
 )
 from memex.core.config import MemexSettings, set_settings
 from memex.ingest.pipeline import ingest_markdown_passthrough
+from memex.parse.pdf_render import PDFPreviewError
 from memex.webui.app import create_app
 
 
@@ -361,6 +362,9 @@ async def test_document_source_serves_pdf(settings: MemexSettings, client: TestC
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("application/pdf")
     assert r.content.startswith(b"%PDF-")
+    # Served INLINE (not "attachment") so it can render in a browser; the
+    # template's download link forces a download via the HTML attribute.
+    assert "inline" in r.headers.get("content-disposition", "")
 
 
 def test_document_source_404s_without_source(settings: MemexSettings, client: TestClient) -> None:
@@ -378,7 +382,7 @@ def test_document_source_404s_without_source(settings: MemexSettings, client: Te
 
 @pytest.mark.asyncio
 async def test_document_view_renders_pane_split_when_pdf_present(
-    settings: MemexSettings, client: TestClient
+    settings: MemexSettings, client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ref = await ingest_markdown_passthrough(
         "# With source\n\nMarkdown body.\n", source_stem="with_source"
@@ -386,11 +390,18 @@ async def test_document_view_renders_pane_split_when_pdf_present(
     asset_dir = settings.vault_path / "documents" / ref.doc_id
     asset_dir.mkdir(parents=True, exist_ok=True)
     (asset_dir / "source.pdf").write_bytes(b"%PDF-1.7\n%%EOF\n")
+    # The pane wiring is what's under test; fake the page count so pypdfium2
+    # need not parse the stub bytes (the real render is covered by the page route).
+    monkeypatch.setattr("memex.webui.app.pdf_page_count", lambda _p: 2)
 
     r = client.get(f"/documents/{ref.doc_id}")
     assert r.status_code == 200
     assert "pane-split" in r.text
-    assert f"/documents/{ref.doc_id}/source" in r.text
+    # Server-rendered page images (one <img> per page), NOT an <iframe> embed.
+    assert f"/documents/{ref.doc_id}/source/page/0" in r.text
+    assert f"/documents/{ref.doc_id}/source/page/1" in r.text
+    assert "<iframe" not in r.text
+    assert f'/documents/{ref.doc_id}/source"' in r.text  # download link → original
 
 
 def test_document_view_renders_solo_when_no_source(
@@ -406,6 +417,65 @@ def test_document_view_renders_solo_when_no_source(
     assert r.status_code == 200
     assert "pane-solo" in r.text
     assert "pane-split" not in r.text
+
+
+@pytest.mark.asyncio
+async def test_document_source_page_renders_png(
+    settings: MemexSettings, client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The preview pane's per-page route rasterises the page to a PNG (server
+    side) — so the page renders inline regardless of the browser's PDF setting."""
+    ref = await ingest_markdown_passthrough("# Pg\n\n.\n", source_stem="pg_src")
+    asset_dir = settings.vault_path / "documents" / ref.doc_id
+    asset_dir.mkdir(parents=True, exist_ok=True)
+    (asset_dir / "source.pdf").write_bytes(b"%PDF-1.7\n%%EOF\n")
+    monkeypatch.setattr(
+        "memex.webui.app.render_pdf_page_png", lambda _p, _n: b"\x89PNG\r\n\x1a\nDATA"
+    )
+
+    r = client.get(f"/documents/{ref.doc_id}/source/page/0")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/png"
+    assert r.content.startswith(b"\x89PNG")
+
+
+@pytest.mark.asyncio
+async def test_document_source_page_out_of_range_404s(
+    settings: MemexSettings, client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ref = await ingest_markdown_passthrough("# Pg2\n\n.\n", source_stem="pg2_src")
+    asset_dir = settings.vault_path / "documents" / ref.doc_id
+    asset_dir.mkdir(parents=True, exist_ok=True)
+    (asset_dir / "source.pdf").write_bytes(b"%PDF-1.7\n%%EOF\n")
+
+    def _boom(_p: object, _n: object) -> bytes:
+        raise PDFPreviewError("page index out of range", context={})
+
+    monkeypatch.setattr("memex.webui.app.render_pdf_page_png", _boom)
+    r = client.get(f"/documents/{ref.doc_id}/source/page/99")
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_office_doc_preview_renders_converted_pdf(
+    settings: MemexSettings, client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An Office doc (`source.pptx`) has no `source.pdf`, but the parse stage left
+    a `converted.pdf` — the preview pane renders THAT (labelled "(rendered)"),
+    while the download link still points at the original `.pptx`."""
+    ref = await ingest_markdown_passthrough("# Deck\n\nSlides.\n", source_stem="deck_src")
+    asset_dir = settings.vault_path / "documents" / ref.doc_id
+    asset_dir.mkdir(parents=True, exist_ok=True)
+    (asset_dir / "source.pptx").write_bytes(b"PK\x03\x04 fake pptx")
+    (asset_dir / "converted.pdf").write_bytes(b"%PDF-1.7\n%%EOF\n")
+    monkeypatch.setattr("memex.webui.app.pdf_page_count", lambda _p: 1)
+
+    r = client.get(f"/documents/{ref.doc_id}")
+    assert r.status_code == 200
+    assert "pane-split" in r.text
+    assert f"/documents/{ref.doc_id}/source/page/0" in r.text  # renders converted.pdf
+    assert "(rendered)" in r.text  # the pane is labelled a render of the pptx
+    assert "download pptx" in r.text
 
 
 @pytest.mark.asyncio

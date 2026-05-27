@@ -46,7 +46,7 @@ from typing import Any
 
 import structlog
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from jinja2 import Environment, FileSystemLoader
@@ -73,6 +73,12 @@ from memex.daemon import status as daemon_status
 from memex.index.graph_store import GraphStore
 from memex.index.pipeline import retitle_document
 from memex.models.registry import ModelNotConfigured, get_registry
+
+# webui → parse boundary edge (documented, like webui → daemon / models.registry):
+# the source-preview pane rasterises PDF/Office pages to images server-side — the
+# Phase-4 "side-by-side preview" job (IMPLEMENTATION-PLAN §1.10). `pdf_render` is the
+# LIGHT pypdfium2-only renderer (no ML/Docling deps), so this import stays cheap.
+from memex.parse.pdf_render import PDFPreviewError, pdf_page_count, render_pdf_page_png
 from memex.vault.store import (
     VaultDocument,
     hash_bytes,
@@ -215,6 +221,22 @@ def _find_source(vault_path: Path, doc_id: str) -> Path | None:
         return None
     candidates = sorted(asset_dir.glob("source.*"))
     return candidates[0] if candidates else None
+
+
+def _find_preview_pdf(vault_path: Path, doc_id: str) -> Path | None:
+    """The PDF to rasterise in the source-preview pane, for ANY visual source
+    type: a PDF doc's own `source.pdf`, or — for an Office/ODF doc — the
+    `converted.pdf` the parse stage produced (the original `.pptx`/`.docx`
+    can't render inline; the converted PDF is exactly what was parsed). A
+    markdown-passthrough / text source has neither → no preview pane."""
+    asset_dir = vault_path / "documents" / doc_id
+    source_pdf = asset_dir / "source.pdf"
+    if source_pdf.is_file():
+        return source_pdf
+    converted = asset_dir / "converted.pdf"
+    if converted.is_file():
+        return converted
+    return None
 
 
 def _kind_for(path: Path) -> tuple[str, str]:
@@ -528,6 +550,18 @@ def create_app() -> FastAPI:
         else:
             source_kind = None
             has_source = False
+        # The preview pane rasterises a PDF to page images (the doc's own
+        # source.pdf, or an Office doc's converted.pdf) — a server-side render
+        # that works for every visual source type regardless of the browser's
+        # PDF handling. A corrupt/unreadable PDF degrades to no-pane (never 500s).
+        preview_pdf = _find_preview_pdf(settings.vault_path, doc_id)
+        preview_pages = 0
+        if preview_pdf is not None:
+            try:
+                preview_pages = pdf_page_count(preview_pdf)
+            except PDFPreviewError:
+                logger.warning("document.preview_unreadable", doc_id=doc_id, pdf=str(preview_pdf))
+                preview_pdf = None
         return templates.TemplateResponse(
             request,
             "document.html",
@@ -537,6 +571,8 @@ def create_app() -> FastAPI:
                 "toc": extract_toc(doc.body),
                 "has_source": has_source,
                 "source_kind": source_kind,
+                "has_preview": preview_pdf is not None and preview_pages > 0,
+                "preview_pages": preview_pages,
             },
         )
 
@@ -589,6 +625,37 @@ def create_app() -> FastAPI:
             source,
             media_type=media_type,
             filename=source.name,
+            # "inline", NOT FileResponse's default "attachment" — otherwise the
+            # browser downloads the file instead of rendering it in the
+            # side-by-side <iframe> preview, leaving the pane BLANK. The
+            # template's "download" link forces a download via the HTML
+            # `download` attribute, so the download path still works.
+            content_disposition_type="inline",
+        )
+
+    @app.get("/documents/{doc_id}/source/page/{page}")
+    async def document_source_page(doc_id: str, page: int) -> Response:
+        """Rasterise one **0-based** page of the doc's preview PDF (its own
+        `source.pdf`, or an Office doc's `converted.pdf`) to a PNG. The preview
+        pane shows one `<img>` per page — a SERVER-side render, so the original
+        page always displays inline regardless of the browser's "download PDFs"
+        setting or iframe-PDF quirks (which left the old `<iframe>` blank). The
+        render is CPU-bound, so it runs in a thread; the bytes are content-stable
+        so the browser caches them."""
+        doc_id = _validate_doc_id(doc_id)
+        settings = get_settings()
+        preview_pdf = _find_preview_pdf(settings.vault_path, doc_id)
+        if preview_pdf is None:
+            raise HTTPException(status_code=404, detail=f"no previewable PDF for doc_id={doc_id!r}")
+        try:
+            png = await asyncio.to_thread(render_pdf_page_png, preview_pdf, page)
+        except PDFPreviewError as e:
+            # out-of-range page or a render failure → 404 (the <img> just won't load)
+            raise HTTPException(status_code=404, detail=str(e)) from e
+        return Response(
+            content=png,
+            media_type="image/png",
+            headers={"Cache-Control": "private, max-age=3600"},
         )
 
     @app.get("/documents/{doc_id}/edit", response_class=HTMLResponse)

@@ -2,14 +2,15 @@
 {% block title %}{{ document.frontmatter.title or document.ref.doc_id }} — Memex{% endblock %}
 {% block content %}
 {#
-  Renders three different layouts:
-    1. has_source AND source_kind == "pdf"  → pane-split (PDF | markdown)
-    2. otherwise                            → pane-solo (markdown only)
+  Renders two layouts:
+    1. has_preview (a PDF source, or an Office doc's converted.pdf) → pane-split
+       (server-rendered page images | markdown)
+    2. otherwise                                                    → pane-solo (markdown only)
   Both surface an "edit" toggle that swaps the markdown pane between
   view-mode (_document_body.html) and edit-mode (_document_edit.html)
   via HTMX. The edit form POSTs to /documents/{doc_id}/review.
 #}
-{% if has_source and source_kind == 'pdf' %}
+{% if has_preview %}
 <style>main { max-width: 100% !important; }</style>
 {% endif %}
 
@@ -68,17 +69,22 @@
 <span id="summary-loading" class="htmx-indicator text-sm text-zinc-500">summarizing… (this can take a moment)</span>
 <section id="summary-pane" class="mb-5"></section>
 
-{% if has_source and source_kind == 'pdf' %}
+{% if has_preview %}
 <div class="pane-split">
   <div class="pane-scroll">
     <div class="pane-header">
-      <span>source · {{ source_kind }}</span>
-      <a href="/documents/{{ document.ref.doc_id }}/source" download>download</a>
+      <span>source · {{ source_kind }}{% if source_kind != 'pdf' %} (rendered){% endif %}</span>
+      <a href="/documents/{{ document.ref.doc_id }}/source" download>download {{ source_kind }}</a>
     </div>
-    <div class="pane-body">
-      <iframe class="pdf-frame"
-              src="/documents/{{ document.ref.doc_id }}/source"
-              title="source PDF"></iframe>
+    {# Server-rendered page images — one <img> per page (lazy). NOT an <iframe>
+       PDF embed: that rendered blank under the browser's "download PDFs" setting
+       and iframe-PDF quirks. Works for any visual source (PDF or converted.pdf). #}
+    <div class="pane-body pdf-pages">
+      {% for n in range(preview_pages) %}
+      <img class="pdf-page" loading="lazy"
+           src="/documents/{{ document.ref.doc_id }}/source/page/{{ n }}"
+           alt="page {{ n + 1 }} of {{ preview_pages }}">
+      {% endfor %}
     </div>
   </div>
   <div class="pane-divider" aria-hidden="true"></div>
@@ -117,7 +123,7 @@
   </div>
   {% if show_toc %}{% include "_document_toc.html" %}{% endif %}
 </div>
-{% if has_source and source_kind != 'pdf' %}
+{% if has_source %}
 <p class="text-xs text-zinc-500 mt-2">
   Original source available as
   <a href="/documents/{{ document.ref.doc_id }}/source"

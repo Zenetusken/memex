@@ -14,7 +14,7 @@ parse/ → models/ + vault/ + core/ + observability/
 enrich/ → models/ + index/ + prompts/ + vault/ + core/
 ingest/ → vault/ + core/
 mcp/ → agents/ + retrieve/ + vault/ + core/
-webui/ → agents/ + vault/ + core/    (+ index/graph_store as a test seam; + index.retitle_document as a write path; + daemon + models.registry for the live mode hot-switch)
+webui/ → agents/ + vault/ + core/    (+ index/graph_store as a test seam; + index.retitle_document as a write path; + daemon + models.registry for the live mode hot-switch; + parse.pdf_render for the source-preview rasteriser)
 cli/ → everything
 daemon/ → core/                       (vLLM lifecycle is config-driven)
 ```

@@ -119,6 +119,35 @@ Validated live (Chrome e2e): Apply `fast` → the daemon restarted 24,576→6,14
 panel + chip flipped to Fast. Pinned by `test_webui.py` (restart args + device unload +
 manual-skips-restart + unknown-mode error).
 
+## Source-preview pane (`document.html` + `pdf-page` images, 2026-05-27)
+
+The side-by-side preview (the Phase-4 "source ↔ extracted markdown" view) renders
+the source as **server-rasterised page images**, NOT an embedded PDF. The original
+`<iframe src=".../source">` left the pane **blank**: a browser's "download PDFs
+instead of opening" setting (a per-user pref no `Content-Disposition` can override)
+plus general iframe-PDF flakiness defeat native in-browser PDF rendering. So the
+document route computes a **preview PDF** via `_find_preview_pdf` — the doc's own
+`source.pdf`, **or** an Office/ODF doc's `converted.pdf` (what the parse stage
+actually rendered; the `.pptx`/`.docx` can't render inline) — and passes
+`has_preview` + `preview_pages`; the template emits one `<img loading="lazy"
+src="/documents/{id}/source/page/{n}">` per page (`.pdf-pages`/`.pdf-page` CSS). The
+new route `GET /documents/{id}/source/page/{n}` rasterises a **0-based** page to PNG
+via `memex.parse.pdf_render.render_pdf_page_png` (a documented `webui → parse` edge;
+`pdf_render` is the LIGHT pypdfium2+PIL twin of `vlm_backend`'s renderer — no ML deps,
+so the import stays cheap), `asyncio.to_thread`'d (CPU-bound) + browser-cached. This
+works in **every** browser/setting (it's an `<img>`) and is the right affordance for
+scans/handwriting (the original page sits beside its transcription). `pdf_render`
+wraps pypdfium2 failures as `PDFPreviewError` (the route + the doc-view page-count both
+catch ONE type → a corrupt PDF degrades to no-pane, never a 500). `/documents/{id}/
+source` still serves the original file — now **`content_disposition_type="inline"`**
+(was the default `attachment`, which forced a download) — for the pane header's
+`download` link (which uses the HTML `download` attribute to force a save). Validated
+live (Chrome e2e): a scanned handwritten note AND a `.pptx` deck both render their
+pages beside the markdown. Pinned by `test_webui.py` (pane-split emits page-image
+srcs / no `<iframe>` / inline disposition / Office `converted.pdf` "(rendered)" + the
+page route serves PNG + out-of-range 404) + `test_pdf_render.py` (render + corrupt +
+out-of-range).
+
 ## Two inline-edit flows (both HTMX view/edit toggles)
 
 - **Body**: the `edit` button swaps `#md-pane` (`/documents/{id}/edit` → form; `/documents/{id}/review` POST writes through `vault.write_document` with optimistic-CAS conflict handling; `/documents/{id}/body` is the view partial).
