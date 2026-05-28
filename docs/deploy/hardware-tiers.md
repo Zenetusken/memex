@@ -62,9 +62,9 @@ Live VRAM usage observed on RTX 4070 12 GB (cold start, single eval pass):
 
 | Mode | Retrieval | Orchestrator | Context window | Latency/ask | Use when |
 |---|---|---|---|---|---|
-| `fast` | GPU | util 0.60 | 6,144 tok (top-k RAG) | ~14 s | fast single-user answers; short contexts |
-| `full` | reranker→CPU | util 0.80, **max-model-len 24,576** | ~24,576 tok (whole document) | ~33 s | long-form synthesis / `memex summarize`; full KV |
-| `gpu_only` | GPU | util 0.72 | 6,144 tok | ~14 s | cards with headroom (>12 GB) / orchestrator not co-resident |
+| `fast` | GPU | util 0.60 | 6,144 tok · top-5 chunks | ~14 s | fast single-user answers; short contexts |
+| `full` | reranker→CPU | util 0.80, **max-model-len 24,576** | 24,576 tok · top-18 chunks | ~33 s | deeper retrieval (grounds against more chunks); full KV |
+| `gpu_only` | GPU | util 0.72 | 6,144 tok · top-5 chunks | ~14 s | cards with headroom (>12 GB) / orchestrator not co-resident |
 | `manual` *(default)* | explicit `{embedder,reranker}_device` | as launched | as launched | — | hand-tuning the raw knobs |
 
 `memex mode show` prints the active profile; `memex mode set full` restarts the daemon-managed orchestrator at the mode's util/context (set `MEMEX_MODELS__CO_RESIDENCE_MODE` + restart `memex serve web` to apply the retrieval-device change). The CPU-retrieval cost is the rerank of ~50 candidates on CPU (a per-*query* ~20 s cost, not per-token); the orchestrator's *weights* are never CPU-offloaded (ADR-0001). The resolver (`core/resources.py`) is the seam a future dynamic VRAM manager replaces. See [ADR-0007](../adr/0007-co-residence-resource-modes.md).

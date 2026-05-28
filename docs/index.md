@@ -44,6 +44,7 @@ The full set of ADRs lives under [`adr/`](adr/0001-vllm-as-sole-inference-engine
 - **[ADR-0006](adr/0006-cuda-dispatch-and-dtype.md)** — CUDA toolkit pin, dtype dispatch, attention implementation
 - **[ADR-0007](adr/0007-co-residence-resource-modes.md)** — Co-residence resource modes (the VRAM-tradeoff policy layer; dynamic-VRAM-manager precursor)
 - **[ADR-0008](adr/0008-document-summarization.md)** — Document summarization (doc-type-aware, structured, grounded map-reduce)
+- **[ADR-0009](adr/0009-remove-free-form-synthesis-baseline.md)** — Remove the free-form synthesis baseline (unwired + unreliable on vLLM; superseded by the structured summarizer)
 
 ## Building this site locally
 

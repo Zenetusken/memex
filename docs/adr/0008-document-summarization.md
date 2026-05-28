@@ -9,8 +9,9 @@
 
 "Summarize this document" is the staple LLM request Memex did not yet answer
 well. ADR-0007 shipped `full` mode (a ~24,576-token orchestrator window) and a
-free-form baseline (`agents/synthesize.py`) as the first consumer of it. That
-baseline established two hard facts that drive this ADR:
+free-form baseline (`agents/synthesize.py`) as the first consumer of it (that
+baseline was later **removed** — [ADR-0009](0009-remove-free-form-synthesis-baseline.md)
+— but it established two hard facts that drive this ADR):
 
 1. **vLLM guided-JSON enforces list `maxItems` but NOT string `maxLength`.** A
    schema with one big free-form `summary: str(max_length=N)` does not stop the

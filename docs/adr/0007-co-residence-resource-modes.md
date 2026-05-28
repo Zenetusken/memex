@@ -5,6 +5,16 @@
 - **Deciders**: Memex core team
 - **Tags**: stack, gpu, models, resources, architecture
 
+> **Update (2026-05-28, [ADR-0009](0009-remove-free-form-synthesis-baseline.md)):**
+> the "full-document synthesis" consumer this ADR names (`agents/synthesize.py`,
+> the free-form baseline) was **removed** — it was unwired and unreliable on vLLM
+> (a single free-form `summary` string can't be length-bounded; the model overran
+> the window). `full` mode's realized value is **deeper retrieval** (the ask
+> grounds against `retrieval_top_k`=18 reranked chunks vs 5) + a larger KV
+> reservation — NOT free-form synthesis. The structured, grounded
+> [ADR-0008](0008-document-summarization.md) summarizer is the long-document path
+> (and is mode-independent). Read the `synthesis` references below as superseded.
+
 ## Context
 
 Memex targets a single consumer GPU (reference: RTX 4070, 12 GB). The answering

@@ -437,7 +437,7 @@ Integration tests fake the heavy I/O (vLLM, Docling, PyMuPDF worker, LanceDB, se
 | 🔧 The how (engineering rules + stack) | [`docs/GUIDELINES.md`](docs/GUIDELINES.md) |
 | 🗺️ What's done & what's queued | [`docs/ROADMAP.md`](docs/ROADMAP.md) |
 | 🏗️ The architecture blueprint | [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) |
-| 📐 Why we picked what we picked | [`docs/adr/`](docs/adr/) (ADRs 0001–0008) |
+| 📐 Why we picked what we picked | [`docs/adr/`](docs/adr/) (ADRs 0001–0009) |
 | 🚀 Network-facing MCP setup | [`docs/deploy/mcp-http.md`](docs/deploy/mcp-http.md) |
 | 🖥️ systemd deployment (Linux) | [`docs/deploy/systemd.md`](docs/deploy/systemd.md) |
 | 🍎 launchd deployment (macOS dev) | [`docs/deploy/launchd.md`](docs/deploy/launchd.md) |
