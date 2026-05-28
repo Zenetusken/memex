@@ -27,6 +27,8 @@ from pathlib import Path
 
 import structlog
 
+from memex.core.sqlite_tuning import apply_sqlite_pragmas
+
 logger = structlog.get_logger(__name__)
 
 _SCHEMA = """
@@ -63,6 +65,7 @@ class ChartOCRCache:
 
         def _connect() -> sqlite3.Connection:
             db = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
+            apply_sqlite_pragmas(db)  # WAL + cache + mmap (ADR-0003 derived state)
             db.executescript(_SCHEMA)
             return db
 

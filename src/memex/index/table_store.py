@@ -28,6 +28,7 @@ from pathlib import Path
 
 import structlog
 
+from memex.core.sqlite_tuning import apply_sqlite_pragmas
 from memex.core.types import StoredTable
 from memex.parse.table_linearize import (
     GFM_TABLE_RE,
@@ -128,6 +129,7 @@ class TableStore:
 
         def _connect() -> sqlite3.Connection:
             db = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
+            apply_sqlite_pragmas(db)  # WAL + cache + mmap (ADR-0003 derived state)
             db.executescript(_SCHEMA)
             return db
 

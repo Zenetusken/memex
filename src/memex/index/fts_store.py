@@ -13,6 +13,7 @@ from pathlib import Path
 
 import structlog
 
+from memex.core.sqlite_tuning import apply_sqlite_pragmas
 from memex.core.text import strip_chart_extracted_for_index, strip_superseded_gfm_tables
 from memex.core.types import Chunk
 
@@ -100,6 +101,7 @@ class FTSStore:
 
         def _connect() -> sqlite3.Connection:
             db = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
+            apply_sqlite_pragmas(db)  # WAL + cache + mmap (ADR-0003 derived state)
             db.executescript(_SCHEMA)
             return db
 
@@ -285,14 +287,20 @@ class FTSStore:
         """
 
         def _read() -> list[Chunk]:
+            # Drive the lookup off chunks_meta (which has the `chunks_meta_doc`
+            # index on document_id) and ORDER BY its char_start — NOT off the FTS
+            # `document_id` column, which is UNINDEXED, so filtering there forces a
+            # full virtual-table scan + a temp-B-tree sort. Same rows, same order;
+            # an index seek instead of an O(all-chunks-in-vault) scan (the
+            # summarizer's per-doc load path). Text still comes from FTS by chunk_id.
             rows = self._db.execute(
                 """
                 SELECT
-                  f.chunk_id, f.document_id, f.document_title, f.text,
+                  f.chunk_id, m.document_id, m.document_title, f.text,
                   m.page, m.char_start, m.char_end, m.heading_path
-                FROM chunks_fts f
-                JOIN chunks_meta m ON m.chunk_id = f.chunk_id
-                WHERE f.document_id = ?
+                FROM chunks_meta m
+                JOIN chunks_fts f ON f.chunk_id = m.chunk_id
+                WHERE m.document_id = ?
                 ORDER BY m.char_start
                 """,
                 (doc_id,),

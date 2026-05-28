@@ -246,6 +246,25 @@ class VectorStore:
         results = await query.where(where).limit(k).to_pydantic(_ChunkRow)
         return [_chunk_from_row(r, score=float(k - i) / max(k, 1)) for i, r in enumerate(results)]
 
+    async def optimize(self) -> None:
+        """Compact the table — merge data fragments + materialize/prune deletion
+        tombstones. LanceDB is append-only: every `add` writes a new fragment and
+        every `delete` writes a tombstone, and a flat KNN scan must read ALL
+        fragments + apply ALL tombstones on every query. The incremental upsert
+        path (delete-by-id then add, per `index_document`) and the file-watcher
+        accumulate these without bound — the ONE unbounded term in query latency +
+        on-disk size at this corpus scale (flat search itself stays exact + fast).
+        Call after a bulk reindex (and periodically from the watcher). Best-effort:
+        a failure logs + returns — compaction is an optimization, never a
+        correctness requirement, so it must never fail the operation that triggers
+        it."""
+        try:
+            table = await self._db.open_table(_TABLE)
+            await table.optimize()
+            logger.info("vector.optimize.done")
+        except Exception as e:  # best-effort: never fail a reindex on compaction
+            logger.warning("vector.optimize.failed", error=str(e)[:200])
+
     async def close(self) -> None:
         """No-op today — LanceDB's `AsyncConnection` releases via GC.
         Kept as an async surface so future driver versions can wire

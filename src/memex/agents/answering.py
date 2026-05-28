@@ -485,6 +485,13 @@ class AnswerState(BaseModel):
     # to seed graph traversal from. Smaller = less noise + fewer
     # graph queries; larger = wider reach.
     graph_expansion_budget: int = 3
+    # How many neighbour DOCUMENTS to pull per seed (the graph query's
+    # LIMIT). Previously `graph_expansion_budget` was overloaded as BOTH
+    # the seed count AND this per-seed neighbour cap — two unrelated
+    # quantities, so a densely-connected hub silently truncated to the
+    # seed count. Split out so each is tunable independently; the default
+    # (3) preserves the prior effective behaviour exactly.
+    neighbors_per_doc: int = 3
     # Chunks pulled from each neighbour document via filtered hybrid
     # search. The reranker is the quality gate downstream.
     chunks_per_neighbor: int = 2
@@ -743,7 +750,7 @@ async def _expand_graph_impl(state: AnswerState) -> AnswerStateUpdate:
     seen_neighbors: set[str] = set()
     try:
         for doc_id in seen_docs:
-            neighbours = await store.neighbors(doc_id, limit=state.graph_expansion_budget)
+            neighbours = await store.neighbors(doc_id, limit=state.neighbors_per_doc)
             for n in neighbours:
                 if n.doc_id in seen_neighbors:
                     continue

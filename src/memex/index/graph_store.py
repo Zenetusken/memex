@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import re
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,16 @@ logger = structlog.get_logger(__name__)
 
 _SCHEMA_PATH = Path(__file__).parent / "schemas" / "graph.cypher"
 _STMT_SPLIT = re.compile(r";\s*\n")
+
+# The graph DDL is immutable at runtime + the `CREATE ... IF NOT EXISTS` statements
+# are idempotent, but `GraphStore.open` runs PER `/ask` (the lazy-store-open pattern),
+# so re-reading + re-splitting the file and re-executing ~10 DDL statements on every
+# open was a fixed per-request tax. Parse the file ONCE at import, and apply the DDL
+# only the FIRST time this process opens a given graph path (the on-disk schema is
+# persistent, so later opens of the same DB can skip it). The lock makes the
+# check-and-apply atomic across the `asyncio.to_thread` workers that call `_connect`.
+# NB this addresses the parse + DDL cost only; the embedded-DB cold-open per request
+# is separate (would need connection reuse — deferred as a riskier refactor).
 
 
 def _strip_cypher_comments(schema: str) -> str:
@@ -46,6 +57,24 @@ def _strip_cypher_comments(schema: str) -> str:
             continue
         lines.append(line)
     return "\n".join(lines)
+
+
+def _parse_schema_statements() -> list[str]:
+    """Read + strip + split the Cypher schema into executable statements ONCE."""
+    schema = _strip_cypher_comments(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    out: list[str] = []
+    for stmt in _STMT_SPLIT.split(schema):
+        # A trailing `;` on the final chunk (no newline after it) would produce
+        # `;;`, which ryugraph's parser rejects — strip then re-append exactly one.
+        cleaned = stmt.strip().rstrip(";").strip()
+        if cleaned:
+            out.append(cleaned + ";")
+    return out
+
+
+_SCHEMA_STATEMENTS: list[str] = _parse_schema_statements()
+_schema_applied_paths: set[str] = set()
+_schema_lock = threading.Lock()
 
 
 class GraphNeighbor(BaseModel):
@@ -94,15 +123,16 @@ class GraphStore:
 
             db = ryugraph.Database(str(path))
             conn = ryugraph.Connection(db)
-            schema = _strip_cypher_comments(_SCHEMA_PATH.read_text(encoding="utf-8"))
-            for stmt in _STMT_SPLIT.split(schema):
-                # If the file doesn't end with a newline after the final
-                # `;`, the last split chunk retains its trailing `;` —
-                # strip it so the re-append below doesn't produce `;;`
-                # (which ryugraph's parser rejects).
-                stmt = stmt.strip().rstrip(";").strip()
-                if stmt:
-                    conn.execute(stmt + ";")
+            # Apply the (pre-parsed, idempotent) DDL only the first time this
+            # process opens this path — the on-disk schema persists, so later
+            # opens skip it. Lock makes check-and-apply atomic across to_thread
+            # workers; only contended on the very first open(s) of a path.
+            key = str(path)
+            with _schema_lock:
+                if key not in _schema_applied_paths:
+                    for stmt in _SCHEMA_STATEMENTS:
+                        conn.execute(stmt)
+                    _schema_applied_paths.add(key)
             return conn
 
         conn = await asyncio.to_thread(_connect)

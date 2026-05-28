@@ -550,6 +550,16 @@ async def reindex_vault(*, force: bool = False) -> ReindexReport:
                 error_type=type(e).__name__,
                 error=str(e),
             )
+    # Compact the vector store once after the bulk rebuild: the per-doc upserts
+    # above each left fragments + deletion tombstones that a flat KNN scan would
+    # otherwise read on every query (the one unbounded latency/size term). Best-
+    # effort inside VectorStore.optimize — never fails the reindex.
+    if processed:
+        vstore = await VectorStore.open(settings.vault_path)
+        try:
+            await vstore.optimize()
+        finally:
+            await vstore.close()
     return ReindexReport(
         documents_processed=processed,
         chunks_written=chunks_total,

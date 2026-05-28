@@ -28,6 +28,7 @@ import structlog
 
 from memex.core.errors import ConfigurationError
 from memex.core.events import EventStage, MemexEvent
+from memex.core.sqlite_tuning import apply_sqlite_pragmas
 
 logger = structlog.get_logger(__name__)
 
@@ -73,6 +74,7 @@ class EventBus:
                 isolation_level=None,
                 check_same_thread=False,
             )
+            apply_sqlite_pragmas(self._db)  # WAL + cache + mmap (regenerable trace log)
             self._db.execute(
                 "CREATE TABLE IF NOT EXISTS events ("
                 "event_id TEXT PRIMARY KEY, "
