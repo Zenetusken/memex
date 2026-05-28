@@ -66,6 +66,27 @@ class VLMServeSettings(BaseModel):
     startup_timeout_s: int = Field(default=180, ge=10)
 
 
+class SummarizerServeSettings(BaseModel):
+    """Recipe for the short-lived SUMMARIZER vLLM process (summarize-time only), used when
+    `ModelSettings.summarizer` is set (ADR-0010 swap-in). A stronger model (e.g.
+    Gemma-3-12B-it-AWQ) is served briefly on the GPU freed by `pause_vllm_for_gpu` — the
+    same proven parse-time VLM lifecycle, text-only — to break the cross-paragraph
+    repetition an 8B can't, then torn down and the orchestrator restored.
+
+    On the 12 GB rig the orchestrator (and VLM) are DOWN during the swap, so the card is
+    free for the 12B; `gpu_memory_utilization` 0.85 (still leaves headroom for the
+    desktop's variable ~1-2 GB), `max_model_len` 8192 (fits a report MAP/GROUND chunk batch
+    + the rolling overview-so-far + bounded output), `enforce_eager` for fast startup. A
+    port DISTINCT from the orchestrator (8000) and the VLM (8001); a 12B loads slower than
+    the 8B VLM, so a longer `startup_timeout_s`."""
+
+    host: str = "127.0.0.1"
+    port: int = Field(default=8002, ge=1, le=65535)
+    gpu_memory_utilization: float = Field(default=0.85, ge=0.1, le=1.0)
+    max_model_len: int = Field(default=8192, ge=512)
+    startup_timeout_s: int = Field(default=300, ge=10)
+
+
 class ModelSettings(BaseModel):
     """Pydantic-settings record for every model the registry owns —
     orchestrator (out-of-process via vLLM), embedder, reranker, VLM,
@@ -95,6 +116,13 @@ class ModelSettings(BaseModel):
     # registry path (AutoAWQ Qwen2.5-VL). See VLMServeSettings.
     vlm_serving: Literal["transformers", "vllm"] = "vllm"
     vlm_serve: VLMServeSettings = Field(default_factory=VLMServeSettings)
+    # OPTIONAL summarizer swap-in (ADR-0010): when set, `report`-detail summaries serve
+    # this stronger model briefly at summarize-time (on the GPU freed by pausing the
+    # orchestrator) to break the cross-paragraph repetition an 8B can't. None (default) =
+    # no swap (the orchestrator does the summary). Researched pick:
+    # `gaunernst/gemma-3-12b-it-int4-awq`. `MEMEX_MODELS__SUMMARIZER=...`.
+    summarizer: str | None = None
+    summarizer_serve: SummarizerServeSettings = Field(default_factory=SummarizerServeSettings)
     embedder: str = "google/embeddinggemma-300m"
     reranker: str = "BAAI/bge-reranker-v2-m3"
     # P3.3 chart-OCR model — default `google/deplot` per Session 1

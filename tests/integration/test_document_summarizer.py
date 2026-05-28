@@ -13,6 +13,8 @@ summary (the no-hallucination HARD gate, extended to summaries).
 from __future__ import annotations
 
 import re
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -300,6 +302,74 @@ async def test_report_planner_coalesces_oversplit(
     assert len(paragraphs) == 3
     assert resp.report_confidence is not None
     assert len(resp.report_confidence.per_paragraph) == 3
+
+
+@pytest.mark.asyncio
+async def test_report_summarizer_swap_in(
+    _settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-0010 swap-in: with `models.summarizer` set, a `report` summary pauses the
+    orchestrator, serves the swap-in model, and routes the map-reduce there — then the
+    stack always closes (orchestrator restored). Mocks the GPU/process contexts; no vLLM."""
+    _settings.models.summarizer = "fake/gemma-swap"
+    set_settings(_settings)
+    chunks = [_chunk(f"docA#{i}", f"H{i}", chr(97 + i) * 9_000) for i in range(5)]
+    monkeypatch.setattr(ds, "FTSStore", _FakeFTS)
+    monkeypatch.setattr(_FakeFTS, "chunks", chunks)
+    monkeypatch.setattr(ds, "complete_structured", _fake_complete(ground=True))
+    monkeypatch.setattr(ds, "_embedding_alignment", _no_embed)
+
+    seen = {"paused": False, "served": None, "closed": False}
+
+    @asynccontextmanager
+    async def _fake_pause() -> AsyncGenerator[None]:
+        seen["paused"] = True
+        try:
+            yield
+        finally:
+            seen["closed"] = True  # orchestrator restored on exit
+
+    @asynccontextmanager
+    async def _fake_serve(model: str) -> AsyncGenerator[str]:
+        seen["served"] = model
+        yield "http://fake-summarizer:8002/v1"
+
+    monkeypatch.setattr("memex.parse.pipeline.pause_vllm_for_gpu", _fake_pause)
+    monkeypatch.setattr("memex.agents.summarizer_serve.serve_summarizer_vllm", _fake_serve)
+
+    resp = await ds.summarize_document("docA", detail="report")
+
+    assert resp.answered
+    assert seen["paused"] is True  # orchestrator paused for the swap
+    assert seen["served"] == "fake/gemma-swap"  # the swap model was served
+    assert seen["closed"] is True  # stack closed → orchestrator restored
+
+
+@pytest.mark.asyncio
+async def test_report_no_swap_when_summarizer_unset(
+    _settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The swap is OPT-IN: with no `models.summarizer`, a report summary never pauses the
+    orchestrator or serves anything (the default path is a pure no-op stack)."""
+    chunks = [_chunk(f"docA#{i}", f"H{i}", chr(97 + i) * 9_000) for i in range(5)]
+    monkeypatch.setattr(ds, "FTSStore", _FakeFTS)
+    monkeypatch.setattr(_FakeFTS, "chunks", chunks)
+    monkeypatch.setattr(ds, "complete_structured", _fake_complete(ground=True))
+    monkeypatch.setattr(ds, "_embedding_alignment", _no_embed)
+
+    served = {"called": False}
+
+    @asynccontextmanager
+    async def _fake_serve(model: str) -> AsyncGenerator[str]:
+        served["called"] = True
+        yield "http://nope:8002/v1"
+
+    monkeypatch.setattr("memex.agents.summarizer_serve.serve_summarizer_vllm", _fake_serve)
+
+    resp = await ds.summarize_document("docA", detail="report")
+
+    assert resp.answered
+    assert served["called"] is False  # no swap when summarizer unset
 
 
 @pytest.mark.asyncio

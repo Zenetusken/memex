@@ -27,6 +27,7 @@ import asyncio
 import re
 import sqlite3
 from collections.abc import Callable
+from contextlib import AsyncExitStack
 from itertools import pairwise
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -53,7 +54,7 @@ from memex.core.types import Chunk, StoredTable
 from memex.core.wikilinks import format_wikilink
 from memex.index.fts_store import FTSStore
 from memex.index.table_store import TableStore
-from memex.models.client import complete_structured
+from memex.models.client import complete_structured, inference_override
 from memex.observability import bind_run_context, clear_run_context
 from memex.prompts import render_prompt
 
@@ -895,6 +896,13 @@ async def summarize_document(
         except Exception:
             log.warning("summarize.on_phase_failed", phase=phase)
 
+    # Summarizer swap-in (ADR-0010): for `report` detail with a configured summarizer,
+    # serve a stronger model on the GPU freed by pausing the orchestrator and route the
+    # whole map-reduce there (a 12B dedups across paragraphs where the 8B can't). Entered
+    # AFTER the no-chunks check so a missing doc never spawns it; `finally` aclose()s the
+    # stack (reap the summarizer + restart the orchestrator), so even an early refusal or
+    # an error restores the orchestrator. Empty stack (the default path) is a pure no-op.
+    swap_stack = AsyncExitStack()
     try:
         settings = get_settings()
         store = await FTSStore.open(settings.vault_path)
@@ -914,6 +922,17 @@ async def summarize_document(
                 nodes_traversed=1,
                 regenerate_attempts=0,
             )
+
+        summarizer_model = settings.models.summarizer
+        if summarizer_model and detail == "report":
+            from memex.agents.summarizer_serve import serve_summarizer_vllm
+            from memex.parse.pipeline import pause_vllm_for_gpu
+
+            log.info("summarize.swap_in", model=summarizer_model)
+            _emit("Loading summarizer")
+            await swap_stack.enter_async_context(pause_vllm_for_gpu())
+            base_url = await swap_stack.enter_async_context(serve_summarizer_vllm(summarizer_model))
+            await swap_stack.enter_async_context(inference_override(base_url, summarizer_model))
 
         # Tabular route (ADR-0008): a table-heavy doc also gets a grounded
         # "Key figures" pass over its stored tables (fail-open → [] skips it).
@@ -1126,4 +1145,7 @@ async def summarize_document(
     except MemexError:
         raise
     finally:
+        # Tear down the swap-in (reap the summarizer vLLM + restart the orchestrator via
+        # pause_vllm_for_gpu's exit + reset the routing override). No-op when not swapping.
+        await swap_stack.aclose()
         clear_run_context()

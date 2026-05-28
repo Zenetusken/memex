@@ -156,3 +156,29 @@ and a live browser e2e on the NVIDIA 10-K + a CUDA deck.
   trigger signal for when it's worth the cost).
 - A forcing function appears for an executive-summary-over-the-body layer (a second
   bounded reduce over the batch paragraphs).
+
+## Summarizer swap-in (2026-05-28): the dedup lever, hardware-blocked on 12 GB
+
+The cross-length browser testing confirmed the residual repetition is an **8B
+capability limit** (it re-states a doc's thesis in every paragraph and ignores the
+dedup instruction even given the full overview-so-far). The fix is a stronger
+summarizer served briefly at summarize-time. **The infrastructure is built + gated off**
+(`ModelSettings.summarizer=None` by default):
+
+- `models.client.inference_override(base_url, model)` — a ContextVar routing every
+  `complete_structured` in an async context to a swapped model, WITHOUT touching the
+  global client (a concurrent `/ask` is unaffected).
+- `agents/summarizer_serve.py::serve_summarizer_vllm` — a text-only twin of the parse
+  VLM lifecycle (gid-capture-at-spawn + group-emptiness reap, copied not shared).
+- `summarize_document` (report detail + a configured summarizer): an `AsyncExitStack`
+  wraps the map-reduce in `pause_vllm_for_gpu()` → serve → `inference_override`; the
+  `finally` reaps + restarts the orchestrator. Pure no-op when off.
+
+**Blocker:** `gaunernst/gemma-3-12b-it-int4-awq` **OOMs on the 12 GB RTX 4070** even with
+the orchestrator paused — it's the multimodal build (loads a ~1.5 GB vision tower it
+doesn't need) plus Gemma-3's **262k-vocab unquantized lm_head (~1.9 GB)** on top of ~6 GB
+AWQ weights → ~11 GB during load. The swap *lifecycle* worked perfectly (paused → 2 spawn
+attempts → clean reap → orchestrator restored → graceful `ModelCallError`); only the model
+didn't fit. **Re-enable** with `MEMEX_MODELS__SUMMARIZER=<a-model-that-fits>` — a text-only,
+smaller-vocab 14B (e.g. Qwen3-14B-AWQ) is the best fit-bet on 12 GB; Gemma-3-12B needs a
+bigger card. See the `summarizer-swap-in-2026-05-28` memory.

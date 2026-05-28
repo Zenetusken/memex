@@ -15,6 +15,9 @@ prompt, completion, token counts, and latency attached. See ADR-0004.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 import structlog
@@ -46,6 +49,37 @@ _client: AsyncOpenAI | None = None
 # event loop only holds a weak ref and may GC the task before
 # `old.close()` finishes (RUF006). The done-callback drains the set.
 _CLEANUP_TASKS: set[asyncio.Task[None]] = set()
+
+# Per-async-context inference routing override (ADR-0010 summarizer swap-in). When a
+# summarize spawns a short-lived stronger model on its own port, the WHOLE map-reduce's
+# `complete_structured` calls route to that base_url + model for the duration — via a
+# ContextVar, NOT by reconfiguring the global `_client`, so a concurrent /ask on the
+# orchestrator is unaffected. A tiny per-base_url client cache avoids leaking a
+# connection pool per call.
+_inference_override: ContextVar[tuple[str, str] | None] = ContextVar(
+    "inference_override", default=None
+)
+_override_clients: dict[str, AsyncOpenAI] = {}
+
+
+@asynccontextmanager
+async def inference_override(base_url: str, model: str) -> AsyncGenerator[None]:
+    """Route every `complete_structured` in this async context to `base_url` + `model`
+    (a swapped-in summarizer). Resets on exit; never touches the global client."""
+    token = _inference_override.set((base_url, model))
+    try:
+        yield
+    finally:
+        _inference_override.reset(token)
+
+
+def _override_client(base_url: str) -> AsyncOpenAI:
+    """A cached client for an override base_url (reused across the summarize's calls)."""
+    c = _override_clients.get(base_url)
+    if c is None:
+        c = AsyncOpenAI(base_url=base_url, api_key="EMPTY")
+        _override_clients[base_url] = c
+    return c
 
 
 class _Unset:
@@ -236,12 +270,19 @@ async def complete_structured(
     seed_val = sampling.seed if isinstance(seed, _Unset) else seed
     max_tokens = max_tokens if max_tokens is not None else sampling.max_tokens
 
-    client = get_client()
-    if model is None:
-        # vLLM 0.21+ requires the served model name in chat completions
-        # ("default" is no longer accepted as a fallback). The orchestrator
-        # string in settings is the same id `vllm serve` was launched with.
-        model = settings.models.orchestrator
+    override = _inference_override.get()
+    if override is not None:
+        # A swap-in summarizer (or similar) owns this async context — route here, and
+        # use its served model id (NOT the orchestrator's).
+        ov_base_url, model = override
+        client = _override_client(ov_base_url)
+    else:
+        client = get_client()
+        if model is None:
+            # vLLM 0.21+ requires the served model name in chat completions
+            # ("default" is no longer accepted as a fallback). The orchestrator
+            # string in settings is the same id `vllm serve` was launched with.
+            model = settings.models.orchestrator
     log = logger.bind(
         prompt_tag=prompt_tag or schema.__name__,
         schema=schema.__name__,
