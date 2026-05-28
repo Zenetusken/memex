@@ -66,13 +66,14 @@ def test_cited_claim_source_chunk_id_rejects_over_max_length() -> None:
 
 
 def test_draft_answer_summary_rejects_over_max_length() -> None:
-    """Answer-node summary is "one or two sentences" — 300 chars
-    headroom (Path C tightening). Bound prevents runaway emission
-    that previously could eat max_tokens before the claims list
-    opened."""
-    DraftAnswer(summary="x" * 300, claims=[])
+    """The summary is the headline answer; the cap is a safety ceiling (the prompt
+    still asks for 1-2 sentences). Raised 300→600 (2026-05-28) after full mode's
+    deeper retrieval gave the model enough context to write a thorough answer that
+    hit exactly 300 and was force-closed MID-WORD by xgrammar ("…policyEn"). The
+    answer node raises max_tokens to match so the bigger output still closes."""
+    DraftAnswer(summary="x" * 600, claims=[])
     with pytest.raises(ValidationError):
-        DraftAnswer(summary="x" * 301, claims=[])
+        DraftAnswer(summary="x" * 601, claims=[])
 
 
 def test_draft_answer_claims_list_bounded() -> None:

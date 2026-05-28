@@ -40,6 +40,11 @@ REFERENCE_VRAM_GB = 12.0
 # has no fixed profile (it echoes the user's explicit device knobs).
 _CURATED_ORDER: tuple[CoResidenceMode, ...] = ("fast", "full", "gpu_only")
 
+# The historical RAG default (matches the prior hard-coded `MEMEX_RERANK_TOP_K`
+# default in the answer node) — `manual` mode echoes it, so the common path is
+# byte-unchanged; only the curated `full` mode raises retrieval depth.
+_DEFAULT_TOP_K = 5
+
 
 class ResourceProfile(BaseModel):
     """The concrete resource posture a mode resolves to.
@@ -58,6 +63,12 @@ class ResourceProfile(BaseModel):
     reranker_device: Device
     orchestrator_gpu_fraction: float | None
     orchestrator_max_model_len: int | None
+    # How many reranked chunks the answering agent grounds against. This is the
+    # concrete way a mode LEVERAGES its orchestrator window: the fast 6,144 window
+    # holds ~5 truncated chunks, while full's 24,576 grounds against many more
+    # (deeper retrieval → more evidence per answer, the refusal gate unchanged).
+    # `MEMEX_RERANK_TOP_K`, when set, overrides this (operator escape hatch).
+    retrieval_top_k: int
     expected_latency: str
     context_window: str
 
@@ -76,24 +87,27 @@ def _curated(mode: CoResidenceMode) -> ResourceProfile:
             reranker_device="cuda",
             orchestrator_gpu_fraction=0.60,
             orchestrator_max_model_len=6144,
+            retrieval_top_k=5,
             expected_latency="~14 s / answer",
-            context_window="6,144 tokens (top-k RAG)",
+            context_window="6,144 tokens · top-5 chunks",
         )
     if mode == "full":
         return ResourceProfile(
             mode="full",
             label="Full context",
             summary=(
-                "Full-document context for long-form synthesis (summaries). The reranker "
-                "moves to the CPU, freeing GPU VRAM for a much larger orchestrator context "
-                "window — at the cost of slower (CPU) reranking."
+                "Deeper retrieval: the larger orchestrator window lets an answer ground "
+                "against many more reranked chunks (~18 vs 5) than the fast window holds — "
+                "more evidence per answer, the no-hallucination gate unchanged. The reranker "
+                "moves to the CPU to free that VRAM, at the cost of slower (CPU) reranking."
             ),
             embedder_device="cuda",
             reranker_device="cpu",
             orchestrator_gpu_fraction=0.80,
             orchestrator_max_model_len=24576,
+            retrieval_top_k=18,
             expected_latency="~30-40 s / answer",
-            context_window="~24,576 tokens (whole document)",
+            context_window="24,576 tokens · top-18 chunks",
         )
     if mode == "gpu_only":
         return ResourceProfile(
@@ -107,8 +121,9 @@ def _curated(mode: CoResidenceMode) -> ResourceProfile:
             reranker_device="cuda",
             orchestrator_gpu_fraction=0.72,
             orchestrator_max_model_len=6144,
+            retrieval_top_k=5,
             expected_latency="~14 s / answer",
-            context_window="6,144 tokens (top-k RAG)",
+            context_window="6,144 tokens · top-5 chunks",
         )
     raise ConfigurationError(
         f"unknown co-residence mode {mode!r}",
@@ -145,6 +160,7 @@ def resolve_profile(
             reranker_device=reranker_device,
             orchestrator_gpu_fraction=None,
             orchestrator_max_model_len=None,
+            retrieval_top_k=_DEFAULT_TOP_K,
             expected_latency="(depends on placement)",
             context_window="(as launched)",
         )

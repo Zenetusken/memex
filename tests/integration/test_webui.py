@@ -1233,7 +1233,9 @@ def test_resources_page_highlights_active_curated_mode(
         r = client.get("/resources")
         assert r.status_code == 200
         assert "mode-row-active" in r.text  # the `full` row is the active one
-        assert "~24,576 tokens (whole document)" in r.text
+        # full surfaces its concrete leverage: a 24,576 window + deeper retrieval.
+        assert "24,576 tokens" in r.text
+        assert "top-18 chunks" in r.text
         assert "Full context" in client.get("/").text  # chip label
     finally:
         set_settings(None)

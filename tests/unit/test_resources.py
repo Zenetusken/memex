@@ -33,6 +33,21 @@ def test_full_mode_offloads_reranker_for_a_large_window() -> None:
     assert p.orchestrator_max_model_len == 24576
 
 
+def test_retrieval_top_k_scales_with_the_window() -> None:
+    """How a mode LEVERAGES its window: full grounds against MANY more reranked
+    chunks than fast (its larger orchestrator window holds them). fast/gpu_only/
+    manual keep the historical 5 — so only an explicit `full` switch deepens
+    retrieval (the common manual path is unchanged)."""
+    assert resolve_profile("fast").retrieval_top_k == 5
+    assert resolve_profile("gpu_only").retrieval_top_k == 5
+    assert resolve_profile("manual").retrieval_top_k == 5
+    assert resolve_profile("full").retrieval_top_k == 18
+    # full's deeper retrieval must fit its window: 18 chunks × 1800-char truncate
+    # ≈ 8.1k tokens + scaffold + output, well under 24,576.
+    full = resolve_profile("full")
+    assert full.retrieval_top_k * 1800 // 4 < full.orchestrator_max_model_len
+
+
 def test_gpu_only_mode() -> None:
     p = resolve_profile("gpu_only")
     assert (p.embedder_device, p.reranker_device) == ("cuda", "cuda")

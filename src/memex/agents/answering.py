@@ -244,13 +244,17 @@ class CitedClaim(BaseModel):
 class DraftAnswer(BaseModel):
     """The model's structured draft. Verified before it reaches the user."""
 
-    # Path C tightening (2026-05-22): see CitedClaim for the budget
-    # rationale. "One or two sentences" overview legitimately runs
-    # 50-200 chars; 300 is generous headroom while leaving room for
-    # up to 8 claims under max_tokens=1024.
+    # The summary is the headline ANSWER the user reads (`.ans-answer`). The
+    # cap is a SAFETY ceiling, not the target length — the prompt still asks for
+    # "one or two sentences". 300 was too tight once `full` mode's deeper retrieval
+    # (top-k 18) gives the model enough context to write a thorough 3-clause answer:
+    # it hit exactly 300 and xgrammar force-closed the JSON string MID-WORD
+    # ("…and policyEn"). 600 lets a thorough headline finish cleanly while the cap
+    # still guards against a runaway; the answer node raises `max_tokens` to match
+    # so xgrammar can always close (600 summary + 8×~435-char claims ≈ 1.1k tokens).
     summary: str = Field(
         description="One or two sentences overviewing the answer.",
-        max_length=300,
+        max_length=600,
     )
     claims: list[CitedClaim] = Field(
         description="Detailed claims, each with a citation.",
@@ -727,6 +731,37 @@ async def _expand_graph_impl(state: AnswerState) -> AnswerStateUpdate:
     }
 
 
+def _resolve_rerank_top_k(env_value: str | None) -> int:
+    """How many reranked chunks the answer prompt grounds against. Resolution:
+    an explicit `MEMEX_RERANK_TOP_K` wins (the operator escape hatch; a bad value
+    falls back to 5), otherwise the ACTIVE co-residence mode's `retrieval_top_k`
+    (ADR-0007) — the concrete way `full` mode leverages its 24,576 window: it
+    grounds against ~18 chunks vs `fast`/`manual`'s 5. HARD-gate-neutral: more
+    chunks only add candidate evidence; the grounding + refusal gates downstream
+    are unchanged, so a deeper pool can never turn a refusal into a hallucination.
+    Always ≥ 1. Falls back to 5 when settings aren't initialised (a unit-test
+    context with no `set_settings`) — matching the prior env-default behaviour."""
+    from memex.core.config import get_settings
+    from memex.core.errors import MemexError
+    from memex.core.resources import resolve_profile
+
+    if env_value is not None:
+        try:
+            return max(1, int(env_value))
+        except ValueError:
+            return 5
+    try:
+        s = get_settings()
+    except MemexError:
+        return 5  # settings not initialised (e.g. a unit test) → historical default
+    profile = resolve_profile(
+        s.models.co_residence_mode,
+        embedder_device=s.models.embedder_device,
+        reranker_device=s.models.reranker_device,
+    )
+    return max(1, profile.retrieval_top_k)
+
+
 async def rerank(state: AnswerState) -> AnswerStateUpdate:
     """Second-stage reranking. Backend selected by settings
     (`reranker_backend`): bge cross-encoder by default, Qwen3-Reranker
@@ -736,22 +771,18 @@ async def rerank(state: AnswerState) -> AnswerStateUpdate:
 
     log = logger.bind(node="rerank")
     log.info("start", candidate_count=len(state.candidates))
-    # Default top_k=5 fits a 4096-token assembly budget when each chunk
-    # is truncated at 1800 chars (~450 tokens) in the answer prompt:
-    # 5 × 1800 × ~0.25 tok/char ≈ 2250 tokens for chunks + ~500 for
-    # scaffolding + 1024 for output = ~3774 tokens, comfortably under
-    # max-model-len=4096. The earlier `top_k=10` default paired with
-    # an aggressive `truncate(700)` in the answer prompt clipped most
-    # chunks to ~32% of their content (median chunk is 2172 chars);
-    # bumping truncate to 1800 and dropping top_k to 5 trades retrieval
-    # breadth for grounding fidelity, which the eval showed was the
-    # winning trade. Users with longer-context model variants can raise
-    # MEMEX_RERANK_TOP_K to recover breadth.
-    try:
-        top_k = int(os.environ.get("MEMEX_RERANK_TOP_K", "5"))
-    except ValueError:
-        top_k = 5
-    top_k = max(1, top_k)
+    # `top_k` is the count of reranked chunks the answer prompt grounds against.
+    # It's resolved from the active co-residence mode (ADR-0007): the `fast`/6,144
+    # window holds ~5 truncated chunks (5 × 1800 chars ≈ 2250 tokens + scaffold +
+    # output, comfortably under 6,144), while `full`/24,576 grounds against ~18 —
+    # the concrete way full mode LEVERAGES its larger window (deeper retrieval =
+    # more evidence per answer; the grounding/refusal gate downstream is unchanged,
+    # so more chunks can only add evidence, never a hallucination). `manual` keeps
+    # the historical default of 5. An explicit `MEMEX_RERANK_TOP_K` overrides the
+    # mode (the operator escape hatch — e.g. to recover breadth on a custom window).
+    env_top_k = os.environ.get("MEMEX_RERANK_TOP_K")
+    top_k = _resolve_rerank_top_k(env_top_k)
+    log.info("top_k_resolved", top_k=top_k, source="env" if env_top_k is not None else "mode")
     reranked = await cross_encoder_rerank(state.query, state.candidates, top_k=top_k)
     log.info("done", reranked_count=len(reranked))
     return {
@@ -1220,6 +1251,13 @@ async def answer(state: AnswerState) -> AnswerStateUpdate:
     draft, tokens = await complete_structured(
         prompt=messages,
         schema=DraftAnswer,
+        # Explicit (above the 1024 default): the summary cap is 600 + up to 8
+        # claims (~435 chars each) ≈ 4.1k chars ≈ ~1.1-1.6k tokens worst-case, so
+        # xgrammar needs room to CLOSE the JSON or the draft truncates invalid.
+        # 1800 clears that with margin and still fits the fast 6,144 window
+        # (input ~2.3k tokens + 1.8k output). The summary-cap bump (300→600)
+        # fixed the mid-word "policyEn" cut full mode's richer answers exposed.
+        max_tokens=1800,
         prompt_tag="answer@v3",
     )
 

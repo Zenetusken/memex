@@ -125,3 +125,31 @@ def test_route_no_regenerate_when_attempts_exhausted_but_partial_off() -> None:
         allow_partial_grounded=False,
     )
     assert route_after_verify(s) == "refuse"
+
+
+# ── mode-aware rerank top_k (ADR-0007 full-mode leverage) ──
+
+
+def test_resolve_rerank_top_k_env_override_wins(monkeypatch) -> None:
+    """An explicit MEMEX_RERANK_TOP_K is the operator escape hatch — it wins over
+    the mode (and a bad value falls back to 5, never crashes the node)."""
+    from memex.agents.answering import _resolve_rerank_top_k
+
+    assert _resolve_rerank_top_k("12") == 12
+    assert _resolve_rerank_top_k("0") == 1  # floored to ≥1
+    assert _resolve_rerank_top_k("notanint") == 5  # parse failure → safe default
+
+
+def test_resolve_rerank_top_k_follows_active_mode(monkeypatch) -> None:
+    """With no env override, top_k comes from the ACTIVE co-residence mode:
+    full deepens retrieval (18) while manual/fast keep 5 — so only an explicit
+    `full` switch changes the common path."""
+    from memex.agents.answering import _resolve_rerank_top_k
+    from memex.core.config import MemexSettings, set_settings
+
+    monkeypatch.delenv("MEMEX_RERANK_TOP_K", raising=False)
+    for mode, expected in (("manual", 5), ("fast", 5), ("gpu_only", 5), ("full", 18)):
+        s = MemexSettings()
+        s.models.co_residence_mode = mode
+        set_settings(s)
+        assert _resolve_rerank_top_k(None) == expected, mode
