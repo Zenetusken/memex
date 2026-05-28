@@ -8,6 +8,7 @@ route guards — that a corrupt/out-of-range PDF surfaces as `PDFPreviewError`
 
 from __future__ import annotations
 
+import concurrent.futures
 from pathlib import Path
 
 import pytest
@@ -59,3 +60,15 @@ def test_corrupt_pdf_raises_preview_error(tmp_path: Path) -> None:
         pdf_page_count(pdf)
     with pytest.raises(PDFPreviewError):
         render_pdf_page_png(pdf, 0)
+
+
+def test_concurrent_renders_are_serialized(tmp_path: Path) -> None:
+    """pypdfium2 is NOT thread-safe — concurrent renders SEGFAULTED the webui
+    (a deck's ~30 lazy <img> page requests). The module lock must serialize them;
+    this fires many parallel renders and asserts they all return valid PNGs (no
+    crash, no corruption). A regression here would likely segfault the run — loud."""
+    pdf = _write(tmp_path, _MINIMAL_PDF)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+        out = list(ex.map(lambda _: render_pdf_page_png(pdf, 0), range(24)))
+    assert len(out) == 24
+    assert all(png.startswith(b"\x89PNG\r\n\x1a\n") for png in out)
