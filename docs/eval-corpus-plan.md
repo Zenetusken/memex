@@ -255,9 +255,20 @@ runner calls `summarize_document` and scores:
 
 Cases live at `tests/eval-data/summary/queries.json` (source docs stay local, as
 elsewhere); each case may set `detail` + a bounded `token_budget`. Baseline
-2026-05-27 (gte / 10-K / cuda + a refuse case — the long-prose, tabular, and deck
-routes): 0 hallucinations, summarize_correct 4/4, mean_recall 1.0. HARD gates:
-`hallucination_count == 0` ∧ `summarize_correct_count == case_count`.
+2026-05-28 (gte / 10-K / cuda / NIST standard + a NIST **`report`-mode drift case** +
+a refuse case — the long-prose, tabular, deck, and report routes): **0 hallucinations,
+summarize_correct 6/6, mean_recall 1.0** (re-confirmed with the `report` defaults +
+the cross-paragraph dedup gate). HARD gates: `hallucination_count == 0` ∧
+`summarize_correct_count == case_count`.
+
+**A separate report-STRUCTURE validator** (`scripts/report_structure_audit.py` +
+corpus `tests/eval-data/report-structure/`) measures the `report` mode's
+STRUCTURE/coherence — paragraphs / faithfulness-confidence / distinctness (1 − mean
+pairwise content-Jaccard) / unique-openers / leaks — the granularity-tuning
+dimensions `eval-summary` (faithfulness) doesn't. It's a tuning/inspection tool (not
+a pytest gate); the shipped baseline lives at `report-structure/baseline.json` and the
+two knobs (`MEMEX_AGENTS__REPORT_PACK_CHARS` / `…__REPORT_COALESCE_TARGET`) are swept
+through it.
 
 ### Per-PR delta reporting
 

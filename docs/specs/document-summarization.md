@@ -1,6 +1,11 @@
 # Spec: Document Summarization
 
-Status: shipped 2026-05-27. Decision record: [ADR-0008](../adr/0008-document-summarization.md).
+Status: shipped 2026-05-27; `report` multi-paragraph mode + granularity tuning + the
+cross-paragraph dedup gate added 2026-05-28. Decision records:
+[ADR-0008](../adr/0008-document-summarization.md) (the grounded map-reduce),
+[ADR-0009](../adr/0009-remove-free-form-synthesis-baseline.md) (output is a bounded
+sentence-LIST, not a free-form string), [ADR-0010](../adr/0010-batched-reduce-report-mode.md)
+(the `report` hierarchical reduce + coherence/granularity refinements).
 
 The doc-type-aware, structured, **grounded** "summarize this document" path. A
 standalone async orchestration (`agents/document_summarizer.py`) — NOT a
@@ -12,9 +17,11 @@ LangGraph; map-reduce is linear and grounding is reusable functions.
 async def summarize_document(
     doc_id: str, *,
     instruction: str | None = None,
-    detail: SummaryDetail = "standard",       # "brief" | "standard" | "detailed"
+    detail: SummaryDetail = "standard",       # "brief" | "standard" | "detailed" | "report"
     max_output_tokens: int = 2048,
     token_budget: int = 120_000,
+    correlation_id: str | None = None,        # opt-in, threads logs/trace + drives the webui progress hook
+    on_phase: Callable[[str], None] | None = None,  # observe-only phase sink (raises swallowed)
 ) -> FinalResponse
 ```
 
@@ -64,10 +71,16 @@ Returns the same `FinalResponse` as the answering agent, plus the new optional
    the verify prompt with a `create_model(__base__=VerificationResult)` bounded to
    `n=len(key_points)`, keep only the confirmed-grounded indices. Conservative —
    missing index → dropped.
-6. **REDUCE** (`_reduce`) — render `summarize_reduce/v1` over the grounded section
-   digests → `DocAbstract.abstract`. The short **non-tabular** route skips this
-   (the single section's digest IS the abstract); `long` OR `tabular` reduces so the
-   abstract reflects both the prose digests and the Key-figures section.
+6. **REDUCE** (`_reduce`) — render `summarize_reduce/v2` (branched on `preceding`:
+   OPENING keeps the doc thesis + metadata-suppression, CONTINUATIONS add only their
+   sections' new specifics) over the grounded section digests → a `DocAbstract`
+   (returned whole so the report route can dedup at sentence granularity; non-report
+   callers read `.abstract`). The short **non-tabular** route skips REDUCE (the single
+   section's digest IS the abstract); `long` OR `tabular` reduces so the abstract
+   reflects both the prose digests and the Key-figures section. **`report` detail
+   switches to the HIERARCHICAL `_reduce_report`** (see "Report mode" below): one
+   bounded paragraph per planned section-group, stitched deterministically, with a
+   cross-paragraph dedup gate — NO final whole-output pass.
 7. **Compose** — `FinalResponse(summary=abstract, claims=grounded doc points
    [≤12], sections=…, used_chunks, wikilinks via core.wikilinks.format_wikilink,
    artifact_scope_doc_ids=[doc_id])`. Empty grounded set → refusal (sections still
@@ -76,15 +89,22 @@ Returns the same `FinalResponse` as the answering agent, plus the new optional
 ## Schemas (`agents/answering.py`)
 
 ```
-SectionSummary { section_title: str(max_length=200); digest: str(max_length=600);
-                 key_points: list[CitedClaim](max_length=8) }   # CitedClaim: claim≤300, chunk_id≤80, confidence
-DocAbstract    { abstract: str(max_length=800) }
-FinalResponse  { … ; sections: list[SectionSummary] = [] }      # new field; [] on the answer path
+SectionSummary  { section_title: str(max_length=200); digest: str(max_length=600);
+                  key_points: list[CitedClaim](max_length=8) }  # CitedClaim: claim≤300, chunk_id≤80, confidence
+DocAbstract     { sentences: list[str(max_length=300)](max_length=8) }  # ADR-0009; .abstract joins them
+ReportStructure { paragraph_starts: list[int](max_length=16) }  # report planner: section indices that START a paragraph
+ReportConfidence{ overall; embedding; lexical; per_paragraph: list[float] }  # report; inform-only
+FinalResponse   { … ; sections: list[SectionSummary] = [];
+                  report_confidence: ReportConfidence | None = None }  # new; [] / None on the answer path
 ```
 
-All lists `maxItems`-bounded; all strings short + bounded. **xgrammar enforces
-list bounds, NOT string `maxLength`** (the 2026-05-27 baseline) — hence bounded
-lists of short strings, never one big free-form string.
+All lists `maxItems`-bounded; all strings short + bounded. **Correction (2026-05-28,
+probe-verified): the pinned stack DOES enforce string `max_length` too** (the earlier
+"enforces maxItems but NOT maxLength" note was stale — see ADR-0009). The win of a
+bounded sentence-LIST over one free-form string is **natural-boundaries + count-bound +
+grounding**: each sentence ends at a real boundary so the joined `.abstract` can never
+force-close MID-WORD (the "policyEn" failure), `maxItems` bounds the COUNT, and a list
+invites synthesis over regurgitation.
 
 ## The mode-independence guarantee (the "baseline rule")
 
@@ -94,13 +114,21 @@ window (`fast`/6144), so the call's input is identical in `fast` and `full`.
 
 | call | input bound | output reservation |
 |---|---|---|
-| MAP `summarize_section` | `_bound_section_chunks` → `_MAX_SECTION_INPUT_CHARS` (12k chars ≈ 3k tok) | `max_output_tokens` (2048) |
+| MAP `summarize_section` | `_bound_section_chunks` → `_MAX_SECTION_INPUT_CHARS` (10k RENDERED chars) | `max_output_tokens` (2048) |
 | GROUND `verify_grounding` | the SAME bounded section chunks | `_VERIFY_MAX_TOKENS` (768) |
 | REDUCE `summarize_reduce` | digests capped to `_REDUCE_MAX_SECTIONS` (24) | `min(max_output_tokens, _REDUCE_MAX_TOKENS=1024)` |
 
-`_bound_section_chunks` selects a section's chunks up to the char budget; the
-per-group loop uses `_split_section_into_batches` (its generalization) so a section
-LARGER than one window is split into consecutive window-sized batches — each
+**The budget counts the RENDERED size, not just text** (`_chunk_budget_chars`, the
+2026-05-28 overflow fix): a chunk costs `min(len(text),1800)` PLUS its per-chunk prompt
+wrapper (`chunk_id` + repeated doc title + formatting, ~120-150 chars). A packed deck
+holds 20-59 tiny slide-chunks per group, so a text-ONLY budget under-counted by
+thousands of chars — a "9.5k-text" group rendered to ~18k chars / 6.6k tokens, the MAP
+400'd, and the section was silently DROPPED. The 10k ceiling is the RENDERED budget that
+clears the 6,144 window with the 2,048-token output reservation at the densest realistic
+~2.7 chars/token (verified 0 overflows). `_bound_section_chunks` selects a section's
+chunks up to that budget; the per-group loop uses `_split_section_into_batches` (its
+generalization) so a section LARGER than one window is split into consecutive
+window-sized batches — each
 MAPped + GROUNDed into its own `SectionSummary` (`(part k)` suffix when >1) so no
 content is truncated away (every chunk lands in one batch). Each batch is fed
 identically to MAP and GROUND (mode-independent). A section that fits is one batch
@@ -123,10 +151,52 @@ REDUCE produces the abstract.
 | brief | 1-2 sentences | 1 concise sentence |
 | standard | 2-4 sentences | 1-3 sentences |
 | detailed | a thorough paragraph of 5-8 sentences | 2-4 sentences |
+| report | one bounded paragraph PER section-group (hierarchical reduce, `_reduce_report`) | rich, like `detailed` |
+
+## Report mode (`detail="report"`, ADR-0010)
+
+A multi-paragraph "report" body via a HIERARCHICAL reduce (`_reduce_report`), the safe
+inverse of the removed free-form synthesis (ADR-0009):
+
+1. **Plan** (`_plan_report_structure`) — the model picks where paragraph breaks fall over
+   the ordered grounded section digests (`ReportStructure.paragraph_starts` = section
+   indices that START a paragraph; boundary-selection, so it can't drop/dup a section).
+   Guardrails: in-range/dedup/force-0; a size cap (`_REPORT_MAX_SECTIONS_PER_PARAGRAPH`=6);
+   **COALESCE** — merge runs up to `report_coalesce_target` sections (fixes the 8B's
+   over-splitting); a paragraph **FLOOR** (split a lone ≥4-section group in two); and a
+   fallback to mechanical `_REPORT_SECTIONS_PER_BATCH` (4) batching on a trivial/failed
+   plan. All logged (`report.plan*`).
+2. **Reduce each group** to ONE bounded `DocAbstract` paragraph (reusing `_reduce`), in
+   SEQUENCE with ROLLING `preceding` context + a position-aware `scope_note` (OPEN /
+   middle / CLOSE arc) so the paragraphs read as one narrative, not disjoint blocks.
+3. **Dedup** (`_dedup_sentences`) — DETERMINISTIC cross-paragraph gate: the branched
+   prompt + rolling context still don't stop the 8B re-covering a TOPIC when its sections
+   overlap a prior paragraph's (topic-aware planning can't fix it on decks' coarse/noisy
+   recovered headings). A sentence whose content tokens are >`_REPORT_DEDUP_THRESHOLD`
+   (0.7) covered by a SINGLE earlier kept sentence (overlap-precision) is dropped; an
+   emptied paragraph vanishes. LEXICAL → always-on + reproducible (the confidence embedder
+   degrades under VRAM pressure, so it can't be the dedup signal). HARD-gate-safe: only
+   REMOVES already-grounded prose. Logged `report.dedup`.
+4. **Stitch** deterministically with blank lines (no final whole-output model pass — that
+   would reintroduce the free-form trap), then **score** (`_score_report_confidence` →
+   `ReportConfidence`, hybrid lexical+embedding per paragraph vs its source digests;
+   inform-only, surfaced + logged `report.confidence`, NEVER a gate).
+
+**Granularity knobs** (`AgentsSettings`, env-overridable, report-mode only): `report_pack_chars`
+(deck-packing group size, default 4,000 — clamped to `_MAX_SECTION_INPUT_CHARS`) and
+`report_coalesce_target` (paragraph fullness, default 2). The defaults are the TUNED
+winner from a sweep over the **report-STRUCTURE validator** (`scripts/report_structure_audit.py`
++ corpus `tests/eval-data/report-structure/`, baseline `baseline.json`) which measures
+paragraphs / confidence / distinctness (1 − pairwise content-Jaccard) / unique-openers /
+must-not-assert leaks — the structure dimensions `eval-summary` doesn't. The knobs hit
+DIFFERENT deck profiles: `pack` only bites when `_should_pack_sections` fires (tiny-section
+decks); `coalesce` drives substantial-section decks.
+
+The webui splits the `\n\n` body into one `<p>` per paragraph inside one `.ans-answer`.
 
 ## Surfaces
 
-- **CLI** — `memex summarize <doc_id> [--detail b/s/d] [--token-budget N]
+- **CLI** — `memex summarize <doc_id> [--detail b/s/d/report] [--token-budget N]
   [--instruction …] [--max-tokens N]`.
 - **MCP** — `summarize(doc_id, instruction=None, detail="standard")`
   (`detail` validated → `SummaryDetail`, unknown falls back to `standard`).
@@ -152,14 +222,23 @@ construction.
   budget cap / always-keep-one / keep-all-when-small), `_render_table`
   (header-paired verbatim cells / row-cap / ragged-row fallback) + `_table_chunks`
   (id format / section / cap) + `_table_salience`/`_rank_tables` (numeric>text,
-  fragment→0, keyword tiebreak, wide-grid multiplicative penalty, stable order).
+  fragment→0, keyword tiebreak, wide-grid multiplicative penalty, stable order) +
+  **`_dedup_sentences`** (drops a near-restatement, keeps a sentence sharing only common
+  terms, exact-dup dropped + ledger integrity).
 - `tests/integration/test_document_summarizer.py` — faked `FTSStore` + (for the
   tabular route) faked `TableStore` + schema-dispatched `complete_structured`:
   long-route map-reduce, short-route single-pass (no REDUCE), grounding drops
   ungrounded → zero-grounded refuses, no-indexed-chunks refusal, the detail knob
   threading, token-budget early stop, **tabular** (Key-figures section leads +
   cites a synthetic table chunk, an unsupported figure is dropped, a sub-threshold
-  doc skips the pass).
+  doc skips the pass), **report** (multi-paragraph body + arc + rolling context +
+  adaptive plan / coalesce / floor; a repeated sentence kept ONCE across paragraphs
+  while distinct points survive; section sub-split).
+- `scripts/report_structure_audit.py` — the report-STRUCTURE validator (granularity
+  tuning, NOT a pytest gate): runs `summarize_document(detail="report")` over
+  `tests/eval-data/report-structure/decks.json` → paragraphs / confidence / distinctness /
+  openers / leaks; baseline `baseline.json` (the shipped H3 config). Sweep via
+  `MEMEX_AGENTS__REPORT_PACK_CHARS` / `MEMEX_AGENTS__REPORT_COALESCE_TARGET`.
 
 ## Deferred
 
@@ -174,5 +253,7 @@ construction.
 - ~~A grounded-summary eval suite~~ **SHIPPED** (`memex eval-summary` →
   `eval/runner.py::run_summary_eval`; cases at `tests/eval-data/summary/queries.json`;
   scorers `mention_recall` (soft) + `absent_assertion_violations` (the no-leak HARD
-  gate); baseline 2026-05-27: 4 cases, 0 hallucinations, summarize_correct 4/4,
-  mean_recall 1.0). Section sub-splitting + the `scan` route remain.
+  gate); baseline 2026-05-28: **6 cases (incl. a `report`-mode drift case + a refuse
+  case), 0 hallucinations, summarize_correct 6/6, mean_recall 1.0** — re-confirmed with
+  the `report` defaults + dedup gate). The `report` route + granularity tuning + the
+  cross-paragraph dedup gate shipped 2026-05-28 (ADR-0010). Only the `scan` route remains.

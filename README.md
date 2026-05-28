@@ -189,10 +189,11 @@ Output is JSON on a pipe, rich tables in a terminal. Every `claim` carries a `so
 ```sh
 uv run memex summarize 2f96ae1c-some-paper                       # standard detail
 uv run memex summarize 2f96ae1c-some-paper --detail detailed     # longer
+uv run memex summarize 2f96ae1c-some-paper --detail report       # multi-paragraph report
 uv run memex summarize 2f96ae1c-some-paper -i "focus on the method"
 ```
 
-Produces a **structured, grounded** summary (ADR-0008): an abstract + cited key-points + per-section digests, built by a map-reduce over the document's indexed chunks. Every key-point is grounded to a source chunk or dropped, and a document with nothing groundable **refuses** — the same no-hallucination gate the answering agent uses, extended to summaries. `--detail` (`brief`/`standard`/`detailed`) tunes length; `--token-budget` caps the work on very long docs. Quality is identical whether you're in `fast` or `full` co-residence mode (the strategy is chosen by the document, not the mode). Also available as the **Summarize** button on the web UI document view, and the MCP `summarize` tool.
+Produces a **structured, grounded** summary (ADR-0008): an abstract + cited key-points + per-section digests, built by a map-reduce over the document's indexed chunks. Every key-point is grounded to a source chunk or dropped, and a document with nothing groundable **refuses** — the same no-hallucination gate the answering agent uses, extended to summaries. `--detail` (`brief`/`standard`/`detailed`/`report`) tunes length — `report` produces a coherent **multi-paragraph** body via a hierarchical reduce (one bounded paragraph per section-group, stitched with a deterministic cross-paragraph dedup pass; ADR-0010); `--token-budget` caps the work on very long docs. Quality is identical whether you're in `fast` or `full` co-residence mode (the strategy is chosen by the document, not the mode). Also available as the **Summarize** button on the web UI document view, and the MCP `summarize` tool.
 
 ### Switch the co-residence mode (speed vs. context)
 
