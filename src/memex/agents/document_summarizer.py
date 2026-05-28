@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -137,10 +138,28 @@ _MONEY_RE = re.compile(r"[$€£%]|\b(?:thousand|million|billion|trillion)\b", r
 _WIDE_TABLE_COLS = 6
 _SALIENT_SECTION_TERMS: frozenset[str] = frozenset(
     {
-        "revenue", "income", "sales", "earnings", "profit", "margin", "expense",
-        "cost", "asset", "liabilit", "equity", "cash flow", "dividend", "repurchase",
-        "compensation", "balance sheet", "segment", "operations", "financial",
-        "statement", "results", "performance",
+        "revenue",
+        "income",
+        "sales",
+        "earnings",
+        "profit",
+        "margin",
+        "expense",
+        "cost",
+        "asset",
+        "liabilit",
+        "equity",
+        "cash flow",
+        "dividend",
+        "repurchase",
+        "compensation",
+        "balance sheet",
+        "segment",
+        "operations",
+        "financial",
+        "statement",
+        "results",
+        "performance",
     }
 )
 
@@ -180,9 +199,7 @@ def _should_pack_sections(sections: list[tuple[str, list[Chunk]]]) -> bool:
     tiny ones) returns False, keeping its own per-section digests."""
     if len(sections) < _PACK_MIN_SECTIONS:
         return False
-    tiny = sum(
-        1 for _t, cs in sections if sum(len(c.text) for c in cs) <= _PACK_TINY_SECTION_CHARS
-    )
+    tiny = sum(1 for _t, cs in sections if sum(len(c.text) for c in cs) <= _PACK_TINY_SECTION_CHARS)
     return tiny / len(sections) >= _PACK_TINY_FRACTION
 
 
@@ -408,7 +425,7 @@ def _render_table(table: StoredTable) -> str:
         else:
             lines.append(" | ".join(row))
     # The prompt also truncates to ~1700; cap here so a giant table can't dominate.
-    return "\n".join(lines)[: _CHUNK_TRUNCATE_CHARS]
+    return "\n".join(lines)[:_CHUNK_TRUNCATE_CHARS]
 
 
 def _table_chunks(doc_id: str, tables: list[StoredTable], document_title: str) -> list[Chunk]:
@@ -496,6 +513,8 @@ async def summarize_document(
     detail: SummaryDetail = "standard",
     max_output_tokens: int = 2048,
     token_budget: int = 120_000,
+    correlation_id: str | None = None,
+    on_phase: Callable[[str], None] | None = None,
 ) -> FinalResponse:
     """Produce a structured, GROUNDED summary of one document (ADR-0008).
 
@@ -508,11 +527,28 @@ async def summarize_document(
     `FinalResponse`: `summary`=the abstract, `claims`=grounded doc-level
     key-points, `sections`=per-section digests, `wikilinks`/`used_chunks` for
     "Sources". A zero-grounded doc refuses.
+
+    `correlation_id` (optional) keys the run instead of a fresh ULID — the webui's
+    progress registry uses it. `on_phase` (optional) is an observe-only sink called
+    with each phase label ("Summarizing · section k of N", "Reducing", …) for a live
+    progress UI; it never touches the summary. Both default off → CLI/MCP/eval
+    unchanged.
     """
-    correlation_id = str(ulid.ULID())
+    correlation_id = correlation_id or str(ulid.ULID())
     clear_run_context()
     bind_run_context(correlation_id, query_preview=f"summarize {doc_id}")
     log = logger.bind(node="summarize", doc_id=doc_id)
+
+    def _emit(phase: str) -> None:
+        # Observe-only progress sink (the webui's live indicator); a failing sink
+        # must NEVER abort the summary.
+        if on_phase is None:
+            return
+        try:
+            on_phase(phase)
+        except Exception:
+            log.warning("summarize.on_phase_failed", phase=phase)
+
     try:
         settings = get_settings()
         store = await FTSStore.open(settings.vault_path)
@@ -578,6 +614,7 @@ async def summarize_document(
         # doc-level key-points); the prose sections append after. Bounded + grounded
         # like every other call; an empty/ungrounded result is simply skipped.
         if is_tabular:
+            _emit("Summarizing · key figures")
             kf, t_kf = await _key_figures_section(
                 table_chunks, instruction, max_output_tokens, guidance["digest"]
             )
@@ -586,10 +623,11 @@ async def summarize_document(
                 section_summaries.append(kf)
                 log.info("summarize.key_figures", figures=len(kf.key_points))
 
-        for title, sec_chunks in groups:
+        for gi, (title, sec_chunks) in enumerate(groups):
             if tokens_total > token_budget or len(section_summaries) >= _MAX_SECTIONS:
                 log.info("summarize.budget_exhausted", done=len(section_summaries))
                 break
+            _emit(f"Summarizing · section {gi + 1} of {len(groups)}")
             # Sub-split a section larger than one window into batches that EACH fit
             # the smallest (fast) window — so its content is summarized across multiple
             # MAP calls rather than TRUNCATED to the first window (no content dropped),
@@ -647,6 +685,7 @@ async def summarize_document(
         if len(section_summaries) == 1 and not is_tabular:
             abstract = section_summaries[0].digest
         else:
+            _emit("Reducing")
             abstract, t_r = await _reduce(
                 doc_title, section_summaries, instruction, max_output_tokens, guidance["abstract"]
             )
@@ -667,6 +706,7 @@ async def summarize_document(
                 seen.add(wl)
                 wikilinks.append(wl)
 
+        _emit("Composing")
         log.info(
             "summarize.done",
             sections=len(section_summaries),

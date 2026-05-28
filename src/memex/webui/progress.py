@@ -63,6 +63,26 @@ def phase_for(node: str) -> str:
     return _NODE_PHASES.get(node, "")
 
 
+# The summarizer's phases (it's linear, not a graph — `summarize_document` calls
+# its `on_phase` sink directly). "Key figures" + the per-section counter ride under
+# "Summarizing" as the eyebrow detail (see `summary_phase_view`), so the dominant
+# phase shows live progress without a step that mostly sits still.
+SUMMARY_PHASES: tuple[str, ...] = ("Reading", "Summarizing", "Reducing", "Composing")
+
+
+def summary_phase_view(label: str) -> tuple[int, str]:
+    """Split a summarizer phase label into ``(active-step index, eyebrow detail)``.
+    `summarize_document` emits e.g. ``"Summarizing · section 3 of 9"`` or
+    ``"Reducing"``; the base maps to a `SUMMARY_PHASES` step, the ``" · "`` suffix
+    (if any) is the live detail (``"section 3 of 9"`` / ``"key figures"`` / ``""``).
+    An unknown base falls back to step 0."""
+    base, _, detail = label.partition(" · ")
+    try:
+        return SUMMARY_PHASES.index(base), detail
+    except ValueError:
+        return 0, detail
+
+
 @dataclass
 class ProgressEntry:
     """The live state of one in-flight ``/ask``, keyed by ``correlation_id``."""

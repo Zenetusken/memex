@@ -21,9 +21,11 @@ import memex.agents.answering as ans
 from memex.agents.answering import FinalResponse, _NodeProgressHandler, answer_query
 from memex.webui.progress import (
     PHASES,
+    SUMMARY_PHASES,
     ProgressEntry,
     ProgressRegistry,
     phase_for,
+    summary_phase_view,
 )
 
 # --- _NodeProgressHandler discriminator (verified langgraph 1.2.0 fields) -------
@@ -123,6 +125,17 @@ def test_phase_for_and_active_index() -> None:
         scope_doc_ids=[], scope_source="named", phase="Grounding"
     ).active_index() == (PHASES.index("Grounding"))
     assert ProgressEntry(scope_doc_ids=[], scope_source="named", phase="weird").active_index() == 0
+
+
+def test_summary_phase_view_parses_base_and_detail() -> None:
+    assert summary_phase_view("Summarizing · section 3 of 9") == (
+        SUMMARY_PHASES.index("Summarizing"),
+        "section 3 of 9",
+    )
+    assert summary_phase_view("Summarizing · key figures") == (1, "key figures")
+    assert summary_phase_view("Reducing") == (SUMMARY_PHASES.index("Reducing"), "")
+    assert summary_phase_view("Reading") == (0, "")
+    assert summary_phase_view("Mystery") == (0, "")  # unknown base → step 0
 
 
 def test_registry_sweep_evicts_stale_on_new() -> None:

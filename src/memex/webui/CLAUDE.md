@@ -150,6 +150,28 @@ srcs / no `<iframe>` / inline disposition / Office `converted.pdf` "(rendered)" 
 page route serves PNG + out-of-range 404) + `test_pdf_render.py` (render + corrupt +
 out-of-range).
 
+## Live progress (long-poll, `_progress.html` + `webui/progress.py`, 2026-05-27)
+
+Both `/ask` AND **Summarize** share one long-poll progress widget. The summarize
+flow mirrors `/ask`: `POST /documents/{id}/summarize` runs `summarize_document` in a
+background `_run_summarize` task (keyed by a cid) and returns `_progress.html` into
+`#summary-pane`, which long-polls `GET /documents/{id}/summarize/status?cid=&v=`.
+The summarizer is LINEAR (not a graph), so it reports progress via an opt-in
+`on_phase` sink (not a LangGraph callback): it emits `"Summarizing · section k of
+N"` per section (the dominant phase — the COUNTER is the real signal), plus "Key
+figures" (tabular), "Reducing", "Composing". `progress.set_phase` stores the full
+label; `summary_phase_view(label)` splits it into `(active_index in SUMMARY_PHASES,
+eyebrow detail)` so the step list (Reading → Summarizing → Reducing → Composing)
+highlights the base phase while the eyebrow shows "section 3 of 9". The status route
+renders `_summary.html` on completion (via `_source_view`, identical to before). The
+`_progress.html` fragment is **generic** — the route passes `poll_url` (the full
+next-poll URL incl. `v`) + `phases`/`active_index`/`elapsed` + an optional eyebrow
+`detail`; the shared `ProgressRegistry`/`_progress_expired.html` are reused as-is.
+The Summarize form dropped its `#summary-loading`/`hx-indicator`. Pinned by
+`test_webui.py` (summarize POST→progress, status branches, a live progression) +
+`test_progress.py` (`summary_phase_view`) + `test_document_summarizer.py`
+(`on_phase` sequence + cid threading).
+
 ## Live ask-progress (long-poll, `_progress.html` + `webui/progress.py`, 2026-05-27)
 
 `POST /ask` no longer blocks ~60–90 s. It starts the agent in a background

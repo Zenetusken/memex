@@ -159,6 +159,31 @@ async def test_long_doc_map_reduce_grounded(
 
 
 @pytest.mark.asyncio
+async def test_on_phase_emits_section_sequence_and_threads_cid(
+    _settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The opt-in progress hook (for the webui's live indicator): a caller-supplied
+    correlation_id threads into the response, and on_phase fires the per-section
+    sequence → Reducing → Composing. Observe-only; omitting it is unchanged (covered
+    by the other tests, which call summarize_document without the new params)."""
+    chunks = [_chunk("docA#1", "Intro", "a" * 9_000), _chunk("docA#2", "Methods", "b" * 9_000)]
+    monkeypatch.setattr(ds, "FTSStore", _FakeFTS)
+    monkeypatch.setattr(_FakeFTS, "chunks", chunks)
+    monkeypatch.setattr(ds, "complete_structured", _fake_complete(ground=True))
+    seen: list[str] = []
+
+    resp = await ds.summarize_document("docA", correlation_id="fixed-cid", on_phase=seen.append)
+
+    assert resp.correlation_id == "fixed-cid"
+    assert seen == [
+        "Summarizing · section 1 of 2",
+        "Summarizing · section 2 of 2",
+        "Reducing",
+        "Composing",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_short_doc_single_pass_uses_digest_as_abstract(
     _settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:

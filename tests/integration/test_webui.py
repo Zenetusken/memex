@@ -448,6 +448,116 @@ async def test_ask_live_progression_surfaces_phase(
         assert "The grounded answer." in final
 
 
+# ----- summarize progress (long-poll, mirrors /ask) -----
+
+
+def _summary_fr(cid: str = "cidS") -> FinalResponse:
+    return FinalResponse(
+        answered=True,
+        summary="A grounded summary.",
+        claims=[],
+        sections=[],
+        correlation_id=cid,
+        tokens_used=5,
+        nodes_traversed=2,
+        regenerate_attempts=0,
+    )
+
+
+def test_summarize_post_returns_progress_fragment(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST /summarize returns the progress fragment (the SUMMARY step list + the
+    summarize status poll URL), not the summary."""
+
+    async def _fake(doc_id: str, **_kw: Any) -> FinalResponse:
+        return _summary_fr()
+
+    monkeypatch.setattr("memex.webui.app.summarize_document", _fake)
+    r = client.post("/documents/abcd1234/summarize", data={"detail": "standard"})
+    assert r.status_code == 200
+    assert "<html" not in r.text
+    assert 'class="progress"' in r.text
+    assert "/documents/abcd1234/summarize/status?cid=" in r.text
+    assert "Summarizing" in r.text  # the SUMMARY_PHASES step list
+    assert "Retrieving" not in r.text  # NOT the /ask phases
+
+
+def test_summarize_status_progress_then_done_and_evicts(client: TestClient) -> None:
+    registry = client.app.state.progress
+    cid = "01HZSUMMARYTEST000000000000"
+    registry.new(cid, scope_doc_ids=[], scope_source="named")
+    registry.set_phase(cid, "Summarizing · section 2 of 5")  # version → 1
+    r = client.get(f"/documents/abcd1234/summarize/status?cid={cid}&v=0")
+    assert r.status_code == 200
+    assert 'class="progress"' in r.text
+    assert "Summarizing" in r.text
+    assert "section 2 of 5" in r.text  # the eyebrow detail (the section counter)
+    assert "progress-step-active" in r.text
+    # Finish → the summary fragment (no poll trigger).
+    registry.finish(cid, response=_summary_fr())
+    r = client.get(f"/documents/abcd1234/summarize/status?cid={cid}&v=0")
+    assert r.status_code == 200
+    assert "A grounded summary." in r.text
+    assert 'class="progress"' not in r.text
+    # Evicted on delivery → expired.
+    r = client.get(f"/documents/abcd1234/summarize/status?cid={cid}&v=0")
+    assert "Expired" in r.text
+
+
+def test_summarize_status_done_error_renders_banner_at_200(client: TestClient) -> None:
+    registry = client.app.state.progress
+    cid = "01HZSUMMARYERR0000000000000"
+    registry.new(cid, scope_doc_ids=[], scope_source="named")
+    registry.finish(cid, error="Couldn't summarise: ModelCallError. boom")
+    r = client.get(f"/documents/abcd1234/summarize/status?cid={cid}&v=0")
+    assert r.status_code == 200
+    assert "Couldn&#39;t summarise" in r.text or "Couldn't summarise" in r.text
+    assert 'class="progress"' not in r.text
+
+
+@pytest.mark.asyncio
+async def test_summarize_live_progression_surfaces_section(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end: the summarizer's on_phase("Summarizing · section 1 of 2") flows
+    into a poll frame (active + the counter), then the summary swaps in."""
+    gate = asyncio.Event()
+
+    async def _fake(doc_id: str, *, on_phase: Any = None, **_kw: Any) -> FinalResponse:
+        if on_phase is not None:
+            on_phase("Summarizing · section 1 of 2")
+        await gate.wait()
+        return _summary_fr()
+
+    monkeypatch.setattr("memex.webui.app.summarize_document", _fake)
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=client.app), base_url="http://t"
+    ) as ac:
+        r = await ac.post("/documents/abcd1234/summarize", data={"detail": "standard"})
+        text = r.text
+        saw = False
+        for _ in range(100):
+            m = re.search(r'hx-get="([^"]+)"', text)
+            assert m is not None
+            await asyncio.sleep(0.005)
+            text = (await ac.get(m.group(1))).text
+            if "section 1 of 2" in text and "progress-step-active" in text:
+                saw = True
+                break
+        assert saw, "never observed the live 'section 1 of 2' phase"
+        gate.set()
+        final = ""
+        for _ in range(100):
+            m = re.search(r'hx-get="([^"]+)"', text)
+            if m is None:
+                final = text
+                break
+            await asyncio.sleep(0.005)
+            text = (await ac.get(m.group(1))).text
+        assert "A grounded summary." in final
+
+
 # ----- saved scope sets (persist + reapply a selection) -----
 
 

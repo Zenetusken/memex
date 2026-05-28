@@ -53,7 +53,7 @@ from fastapi.templating import Jinja2Templates
 from jinja2 import Environment, FileSystemLoader
 
 from memex.agents.answering import FinalResponse, answer_query
-from memex.agents.document_summarizer import summarize_document
+from memex.agents.document_summarizer import SummaryDetail, summarize_document
 from memex.core.config import get_settings
 from memex.core.errors import (
     MemexError,
@@ -89,7 +89,13 @@ from memex.vault.store import (
     read_document_title,
     write_document,
 )
-from memex.webui.progress import PHASES, ProgressRegistry, phase_for
+from memex.webui.progress import (
+    PHASES,
+    SUMMARY_PHASES,
+    ProgressRegistry,
+    phase_for,
+    summary_phase_view,
+)
 from memex.webui.rendering import extract_toc, render_body_html, render_wikilink, slugify_heading
 
 _HERE = Path(__file__).parent
@@ -493,12 +499,11 @@ def create_app() -> FastAPI:
             request,
             "_progress.html",
             {
-                "cid": cid,
-                "phase": PHASES[0],
+                "poll_url": f"/ask/{cid}/status?v=0",
                 "phases": PHASES,
-                "version": 0,
-                "elapsed": 0,
                 "active_index": 0,
+                "elapsed": 0,
+                "detail": "",
             },
         )
 
@@ -517,12 +522,11 @@ def create_app() -> FastAPI:
                 request,
                 "_progress.html",
                 {
-                    "cid": cid,
-                    "phase": entry.phase,
+                    "poll_url": f"/ask/{cid}/status?v={entry.version}",
                     "phases": PHASES,
-                    "version": entry.version,
-                    "elapsed": entry.phase_elapsed_s(),
                     "active_index": entry.active_index(),
+                    "elapsed": entry.phase_elapsed_s(),
+                    "detail": "",
                 },
             )
         # Done → render the final answer exactly like the old synchronous route.
@@ -645,7 +649,9 @@ def create_app() -> FastAPI:
         preview_pages = 0
         if preview_pdf is not None:
             try:
-                preview_pages = pdf_page_count(preview_pdf)
+                # In a thread: pdf_page_count holds the pypdfium2 lock, so keep it
+                # off the event loop (a concurrent page render may hold it ~200ms).
+                preview_pages = await asyncio.to_thread(pdf_page_count, preview_pdf)
             except PDFPreviewError:
                 logger.warning("document.preview_unreadable", doc_id=doc_id, pdf=str(preview_pdf))
                 preview_pdf = None
@@ -663,39 +669,92 @@ def create_app() -> FastAPI:
             },
         )
 
+    async def _run_summarize(cid: str, doc_id: str, level: SummaryDetail) -> None:
+        """Background runner: drive the summarizer, streaming phase updates into the
+        registry (incl. the per-section counter), and store the result/error for the
+        status poll. Top of a fire-and-forget task — never crash silently."""
+        from memex.core.errors import MemexError
+
+        try:
+            response = await summarize_document(
+                doc_id,
+                detail=level,
+                correlation_id=cid,
+                on_phase=lambda p: progress.set_phase(cid, p),
+            )
+            progress.finish(cid, response=response)
+        except MemexError as e:
+            logger.warning("summarize.failed", error_type=type(e).__name__, error=str(e)[:200])
+            progress.finish(cid, error=f"Couldn't summarise: {type(e).__name__}. {str(e)[:160]}")
+        except Exception as e:
+            logger.error("summarize.crashed", error_type=type(e).__name__, error=str(e)[:200])
+            progress.finish(cid, error="An unexpected error occurred while summarising.")
+
     @app.post("/documents/{doc_id}/summarize", response_class=HTMLResponse)
     async def document_summarize(
         request: Request,
         doc_id: str,
         detail: str = Form("standard"),
     ) -> HTMLResponse:
-        """Generate a structured, grounded summary of the document (ADR-0008) and
-        render the `_summary.html` partial (HTMX swap target on the doc view).
-        `detail` (brief/standard/detailed) tunes length; quality is the same in
-        any co-residence mode. A MemexError renders as a banner, not a 500."""
-        from memex.core.errors import MemexError
-
+        """Start the grounded summary (ADR-0008) in a background task and IMMEDIATELY
+        return the `_progress.html` fragment, which long-polls
+        `/documents/{id}/summarize/status` for the live phase ("Summarizing · section
+        k of N" → "Reducing" → …) until the summary swaps in."""
         doc_id = _validate_doc_id(doc_id)
-        level = detail if detail in ("brief", "standard", "detailed") else "standard"
-        try:
-            response = await summarize_document(doc_id, detail=level)
-        except MemexError as e:
-            logger.warning("summarize.failed", error_type=type(e).__name__, error=str(e)[:200])
+        level: SummaryDetail = detail if detail in ("brief", "standard", "detailed") else "standard"
+        cid = str(ulid.ULID())
+        progress.new(cid, scope_doc_ids=[], scope_source="named")
+        task = asyncio.create_task(_run_summarize(cid, doc_id, level))
+        progress.attach_task(cid, task)
+        return templates.TemplateResponse(
+            request,
+            "_progress.html",
+            {
+                "poll_url": f"/documents/{doc_id}/summarize/status?cid={cid}&v=0",
+                "phases": SUMMARY_PHASES,
+                "active_index": 0,
+                "elapsed": 0,
+                "detail": "",
+            },
+        )
+
+    @app.get("/documents/{doc_id}/summarize/status", response_class=HTMLResponse)
+    async def summarize_status(
+        request: Request, doc_id: str, cid: str = "", v: int = 0
+    ) -> HTMLResponse:
+        """Long-poll the in-flight summary: block until the phase advances past `v`,
+        the run finishes, or a ~1 s keepalive — then render `_progress.html` (current
+        phase + the section counter as the eyebrow detail) or, when done,
+        `_summary.html`. Always HTTP 200; done/expired carry no poll trigger."""
+        entry = await progress.wait_for_change(cid, v)
+        if entry is None:
+            return templates.TemplateResponse(request, "_progress_expired.html", {})
+        if not entry.done:
+            active_index, detail = summary_phase_view(entry.phase)
+            return templates.TemplateResponse(
+                request,
+                "_progress.html",
+                {
+                    "poll_url": f"/documents/{doc_id}/summarize/status?cid={cid}&v={entry.version}",
+                    "phases": SUMMARY_PHASES,
+                    "active_index": active_index,
+                    "elapsed": entry.phase_elapsed_s(),
+                    "detail": detail,
+                },
+            )
+        progress.evict(cid)
+        if entry.error is not None or entry.response is None:
             return templates.TemplateResponse(
                 request,
                 "_summary.html",
-                {
-                    "response": None,
-                    "error": f"Couldn't summarise: {type(e).__name__}. {str(e)[:160]}",
-                },
-                status_code=503,
+                {"response": None, "error": entry.error or "Summarising produced no result."},
             )
-        chunk_refs, doc_titles = _source_view(response)
+        chunk_refs, doc_titles = _source_view(entry.response)
         return templates.TemplateResponse(
             request,
             "_summary.html",
             {
-                "response": response,
+                "response": entry.response,
                 "error": None,
                 "chunk_refs": chunk_refs,
                 "doc_titles": doc_titles,
