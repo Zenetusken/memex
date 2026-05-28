@@ -278,6 +278,28 @@ async def test_report_adaptive_structure_uses_plan(
 
 
 @pytest.mark.asyncio
+async def test_report_floor_prevents_single_paragraph(
+    _settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-0010 floor: a few-section doc whose planner groups coalesce to ONE must still
+    split into ≥2 paragraphs — a heavily-packed deck yielding ~4 section-summaries shouldn't
+    read as a single paragraph (just a `detailed` summary)."""
+    chunks = [_chunk(f"docA#{i}", f"H{i}", chr(97 + i) * 9_000) for i in range(4)]
+    monkeypatch.setattr(ds, "FTSStore", _FakeFTS)
+    monkeypatch.setattr(_FakeFTS, "chunks", chunks)
+    # plan_starts [0,2] → 2 groups of 2 → coalesce merges to one group of 4 → floor splits.
+    monkeypatch.setattr(
+        ds, "complete_structured", _fake_complete(ground=True, plan_starts=[0, 2])
+    )
+    monkeypatch.setattr(ds, "_embedding_alignment", _no_embed)
+
+    resp = await ds.summarize_document("docA", detail="report")
+
+    assert resp.answered
+    assert len(resp.summary.split("\n\n")) == 2  # NOT 1 — the floor kept it multi-paragraph
+
+
+@pytest.mark.asyncio
 async def test_report_planner_coalesces_oversplit(
     _settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -521,6 +521,15 @@ async def _plan_report_structure(
             cur.extend(g)
     if cur:
         groups.append(cur)
+    # FLOOR: a `report` must read as multi-paragraph. A heavily-packed deck can yield few
+    # section_summaries that coalesce to ONE paragraph (observed: an 89-slide WAN module
+    # packed to 4 sections → 1 paragraph), which is just a `detailed` summary. If the
+    # coalesce produced a single group of ≥4 sections, split it back in half. Only the
+    # degenerate case is touched — a doc that already yields ≥2 paragraphs is unchanged.
+    if len(groups) == 1 and len(groups[0]) >= 4:
+        lone = groups[0]
+        mid = len(lone) // 2
+        groups = [lone[:mid], lone[mid:]]
     log.info(
         "report.plan",
         chosen_starts=len(starts),
@@ -870,8 +879,13 @@ async def _key_figures_section(
     # chunk (the LLM verifier false-positives near-numbers; a key figure must be verbatim).
     chunk_text_by_id = {c.chunk_id: c.text for c in shown}
     verified = [kp for kp in grounded if _figure_number_in_chunk(kp, chunk_text_by_id)]
-    if len(verified) < len(grounded):
-        logger.info("summarize.key_figures_numeric_drop", dropped=len(grounded) - len(verified))
+    dropped = [kp.claim for kp in grounded if not _figure_number_in_chunk(kp, chunk_text_by_id)]
+    if dropped:
+        logger.info(
+            "summarize.key_figures_numeric_drop",
+            dropped=len(dropped),
+            claims=[c[:120] for c in dropped],
+        )
     return (
         SectionSummary(section_title="Key figures", digest=mapped.digest, key_points=verified),
         t_map + t_g,

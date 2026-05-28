@@ -126,9 +126,15 @@ invariant (small grounded input → bounded output; no free-form whole-output pa
    the section indices that *start* a paragraph (`ReportStructure.paragraph_starts`).
    Boundary-selection over the ordered sequence **cannot drop or duplicate a section**
    (unlike free index assignment), so it's a clean partition by construction. Guardrails:
-   in-range/dedup/force-a-start-at-0, **size-cap** each run at
-   `_REPORT_MAX_SECTIONS_PER_PARAGRAPH` (blocks a degenerate "combine everything"), and
-   **fall back to mechanical batching** on a model error or a trivial (no-break) plan.
+   in-range/dedup/force-a-start-at-0; **size-cap** each run at
+   `_REPORT_MAX_SECTIONS_PER_PARAGRAPH`; **COALESCE** the runs up to
+   `_REPORT_TARGET_SECTIONS_PER_PARAGRAPH` (an 8B over-splits — observed 15 near-singletons
+   over 19 sections; coalescing holds it to ~4-6-section paragraphs); a **paragraph FLOOR**
+   that splits a lone coalesced paragraph of ≥4 sections back in two (a heavily-packed deck
+   can yield ~4 section_summaries that coalesce to 1 — observed on an 89-slide WAN module;
+   the floor keeps a `report` multi-paragraph instead of degenerating to a `detailed`-style
+   single paragraph); and **fall back to mechanical batching** on a model error or trivial
+   plan.
    Every decision logs (`report.plan` / `report.plan_trivial` / `report.plan_failed`) —
    the observability the non-deterministic step needs. HARD-gate-neutral: only the
    *grouping* changes, never grounding.
