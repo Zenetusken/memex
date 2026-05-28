@@ -7,6 +7,7 @@ independent of the co-residence mode (the "baseline rule").
 
 from __future__ import annotations
 
+from memex.agents.answering import CitedClaim, SectionSummary
 from memex.agents.document_summarizer import (
     _MAX_SECTION_INPUT_CHARS,
     _MAX_SECTIONS,
@@ -17,6 +18,7 @@ from memex.agents.document_summarizer import (
     _pack_sections,
     _rank_tables,
     _render_table,
+    _select_doc_key_points,
     _should_pack_sections,
     _split_section_into_batches,
     _table_chunks,
@@ -250,3 +252,39 @@ def test_rank_tables_orders_by_salience_then_stable_doc_order() -> None:
     ranked = _rank_tables([_GLOSSARY, a, b])
     assert ranked[-1] is _GLOSSARY  # text table is least salient
     assert ranked.index(a) < ranked.index(b)  # tie → original (input) order preserved
+
+
+def _kp(claim: str) -> CitedClaim:
+    return CitedClaim(claim=claim, source_chunk_id="d#x", confidence="high")
+
+
+def _ss(title: str, points: list[str]) -> SectionSummary:
+    return SectionSummary(section_title=title, digest="d", key_points=[_kp(p) for p in points])
+
+
+def test_select_doc_key_points_round_robins_across_sections() -> None:
+    """A front-matter section with many trivial points must NOT fill the whole
+    cap before substantive sections contribute — round-robin takes each
+    section's top point first. (The NIST-boilerplate regression.)"""
+    sections = [
+        _ss("Cover", ["c1", "c2", "c3", "c4", "c5", "c6"]),  # front-matter: 6 points
+        _ss("Introduction", ["i1", "i2"]),
+        _ss("Zero Trust Tenets", ["t1", "t2"]),
+        _ss("Components", ["k1"]),
+    ]
+    picked = [c.claim for c in _select_doc_key_points(sections, cap=4)]
+    # Round-robin rank 0: one from EACH section → all 4 distinct sections represented,
+    # NOT 4 cover points.
+    assert picked == ["c1", "i1", "t1", "k1"]
+
+
+def test_select_doc_key_points_takes_second_rank_after_first_pass() -> None:
+    sections = [_ss("A", ["a1", "a2"]), _ss("B", ["b1"])]
+    # cap 4 but only 3 points exist → a1,b1 (rank0), a2 (rank1), then stop.
+    assert [c.claim for c in _select_doc_key_points(sections, cap=4)] == ["a1", "b1", "a2"]
+
+
+def test_select_doc_key_points_single_section_keeps_order() -> None:
+    """A single-section doc is unchanged — points come out in their original order."""
+    sections = [_ss("Only", ["p1", "p2", "p3"])]
+    assert [c.claim for c in _select_doc_key_points(sections, cap=12)] == ["p1", "p2", "p3"]

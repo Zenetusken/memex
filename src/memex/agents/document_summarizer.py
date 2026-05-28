@@ -348,6 +348,33 @@ async def _ground_points(
     return kept, tokens
 
 
+def _select_doc_key_points(
+    sections: list[SectionSummary], cap: int
+) -> list[CitedClaim]:
+    """PURE: pick the doc-level headline key-points from the per-section grounded
+    points, distributed ROUND-ROBIN across sections so the `cap` spans many
+    sections instead of being a reading-order prefix dominated by a front-matter
+    section's points (see the call site for the NIST boilerplate motivation).
+
+    Rank 0 takes `key_points[0]` of each section in reading order, then rank 1
+    takes `key_points[1]` of each, etc., until `cap` is reached or every point
+    is consumed. Deterministic + stable; a single-section doc is unchanged
+    (its points come out in order). HARD-gate-neutral (selection only)."""
+    out: list[CitedClaim] = []
+    rank = 0
+    progressed = True
+    while len(out) < cap and progressed:
+        progressed = False
+        for ss in sections:
+            if rank < len(ss.key_points):
+                out.append(ss.key_points[rank])
+                progressed = True
+                if len(out) >= cap:
+                    break
+        rank += 1
+    return out
+
+
 async def _reduce(
     title: str,
     sections: list[SectionSummary],
@@ -658,8 +685,21 @@ async def summarize_document(
                     )
                 )
 
-        # Doc-level key-points = the grounded section points (reading order, capped).
-        doc_points = [kp for ss in section_summaries for kp in ss.key_points][:_MAX_DOC_KEY_POINTS]
+        # Doc-level key-points = the grounded section points, distributed
+        # ROUND-ROBIN across sections (not a reading-order prefix). A document
+        # with heavy front-matter — a government standard's cover + legal/FISMA
+        # boilerplate, a paper's title/abstract/keywords — produces many easily
+        # grounded but trivial points in its FIRST sections; a flat prefix
+        # `[:12]` would fill the whole cap with them before any substantive
+        # section contributes (observed live on NIST SP 800-207: all 12 points
+        # were cover-page boilerplate). Round-robin takes each section's top
+        # point first, then second points, etc. — so the cap spans up to 12
+        # distinct sections and the body's substance is represented. Order
+        # within the result still follows reading order at each rank, so the
+        # abstract/claims read coherently. HARD-gate-neutral: every point is
+        # already grounded; this only changes WHICH grounded points are the
+        # headline set, never whether one is asserted.
+        doc_points = _select_doc_key_points(section_summaries, _MAX_DOC_KEY_POINTS)
         if not doc_points:
             log.info("summarize.zero_grounded")
             return FinalResponse(
