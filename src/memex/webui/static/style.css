@@ -131,6 +131,14 @@ summary:focus-visible {
   display: block;
   width: 100%;
   height: auto;
+  /* `aspect-ratio: auto N/M` uses the natural ratio once the PNG loads (replaced
+     element, `auto` keyword) and falls back to N/M while it's still a
+     placeholder — so the row has the RIGHT height from the start (no layout snap
+     when the PNG arrives), AND offscreen `loading="lazy"` placeholders are
+     correctly tall, so the browser actually defers them. Page-0 dimensions feed
+     `--pdf-page-aspect` via the .pdf-pages container; 8.5/11 is the fallback
+     when the source PDF's page size can't be read. */
+  aspect-ratio: auto var(--pdf-page-aspect, 8.5 / 11);
   border: 1px solid rgb(39 39 42);      /* zinc-800 */
   border-radius: 0.25rem;
   background: rgb(39 39 42);             /* placeholder tint until the PNG loads */

@@ -75,8 +75,12 @@
     </div>
     {# Server-rendered page images — one <img> per page (lazy). NOT an <iframe>
        PDF embed: that rendered blank under the browser's "download PDFs" setting
-       and iframe-PDF quirks. Works for any visual source (PDF or converted.pdf). #}
-    <div class="pane-body pdf-pages">
+       and iframe-PDF quirks. Works for any visual source (PDF or converted.pdf).
+       The `--pdf-page-aspect` CSS var feeds .pdf-page's `aspect-ratio` so the
+       placeholder has a REAL height before the PNG loads — without it, every
+       row reads as "in viewport" and `loading="lazy"` fires all pages at once. #}
+    <div class="pane-body pdf-pages"
+         {% if preview_aspect %}style="--pdf-page-aspect: {{ preview_aspect }};"{% endif %}>
       {% for n in range(preview_pages) %}
       <img class="pdf-page" loading="lazy"
            src="/documents/{{ document.ref.doc_id }}/source/page/{{ n }}"

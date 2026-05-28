@@ -79,7 +79,12 @@ from memex.models.registry import ModelNotConfigured, get_registry
 # the source-preview pane rasterises PDF/Office pages to images server-side — the
 # Phase-4 "side-by-side preview" job (IMPLEMENTATION-PLAN §1.10). `pdf_render` is the
 # LIGHT pypdfium2-only renderer (no ML/Docling deps), so this import stays cheap.
-from memex.parse.pdf_render import PDFPreviewError, pdf_page_count, render_pdf_page_png
+from memex.parse.pdf_render import (
+    PDFPreviewError,
+    pdf_page_count,
+    pdf_page_size,
+    render_pdf_page_png,
+)
 from memex.vault.store import (
     VaultDocument,
     hash_bytes,
@@ -647,14 +652,31 @@ def create_app() -> FastAPI:
         # PDF handling. A corrupt/unreadable PDF degrades to no-pane (never 500s).
         preview_pdf = _find_preview_pdf(settings.vault_path, doc_id)
         preview_pages = 0
+        # Page-0 dimensions feed the placeholder `<img>` aspect-ratio so the
+        # browser-native `loading="lazy"` actually defers offscreen pages — a
+        # 0-height placeholder reads as "near viewport" and fires immediately,
+        # which is what made all 49 deck pages render on initial load. Most PDFs
+        # are uniform-sized so page 0 is a fair stand-in for the deck; a `None`
+        # fallback (in the template) gives a sane 8.5/11 placeholder ratio.
+        preview_aspect: str | None = None
         if preview_pdf is not None:
             try:
-                # In a thread: pdf_page_count holds the pypdfium2 lock, so keep it
+                # In a thread: both calls hold the pypdfium2 lock, so keep them
                 # off the event loop (a concurrent page render may hold it ~200ms).
                 preview_pages = await asyncio.to_thread(pdf_page_count, preview_pdf)
             except PDFPreviewError:
                 logger.warning("document.preview_unreadable", doc_id=doc_id, pdf=str(preview_pdf))
                 preview_pdf = None
+                preview_pages = 0
+            else:
+                if preview_pages > 0:
+                    try:
+                        w, h = await asyncio.to_thread(pdf_page_size, preview_pdf, 0)
+                        preview_aspect = f"{w:.3f} / {h:.3f}"
+                    except PDFPreviewError:
+                        # Non-fatal: the pages render fine; the CSS 8.5/11 fallback
+                        # just gives a Letter-shaped placeholder for the unknown ratio.
+                        logger.warning("document.preview_size_unreadable", doc_id=doc_id)
         return templates.TemplateResponse(
             request,
             "document.html",
@@ -666,6 +688,7 @@ def create_app() -> FastAPI:
                 "source_kind": source_kind,
                 "has_preview": preview_pdf is not None and preview_pages > 0,
                 "preview_pages": preview_pages,
+                "preview_aspect": preview_aspect,
             },
         )
 

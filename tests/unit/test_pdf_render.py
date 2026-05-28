@@ -13,7 +13,12 @@ from pathlib import Path
 
 import pytest
 
-from memex.parse.pdf_render import PDFPreviewError, pdf_page_count, render_pdf_page_png
+from memex.parse.pdf_render import (
+    PDFPreviewError,
+    pdf_page_count,
+    pdf_page_size,
+    render_pdf_page_png,
+)
 
 # A minimal but valid 1-page PDF (no xref table — pdfium rebuilds it). One empty
 # 120×120 page, enough to page-count and rasterise.
@@ -60,6 +65,21 @@ def test_corrupt_pdf_raises_preview_error(tmp_path: Path) -> None:
         pdf_page_count(pdf)
     with pytest.raises(PDFPreviewError):
         render_pdf_page_png(pdf, 0)
+
+
+def test_page_size_returns_native_dimensions(tmp_path: Path) -> None:
+    """`pdf_page_size` returns the source page's points (the MediaBox), feeding
+    the preview pane's placeholder `aspect-ratio` — without it the lazy-load
+    fires every page at once (a 0-height placeholder reads as in-viewport)."""
+    pdf = _write(tmp_path, _MINIMAL_PDF)
+    w, h = pdf_page_size(pdf, 0)
+    assert (w, h) == (120.0, 120.0)  # matches the MediaBox above
+
+
+def test_page_size_out_of_range_raises(tmp_path: Path) -> None:
+    pdf = _write(tmp_path, _MINIMAL_PDF)
+    with pytest.raises(PDFPreviewError):
+        pdf_page_size(pdf, 5)
 
 
 def test_concurrent_renders_are_serialized(tmp_path: Path) -> None:

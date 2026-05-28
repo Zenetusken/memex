@@ -707,9 +707,12 @@ async def test_document_view_renders_pane_split_when_pdf_present(
     asset_dir = settings.vault_path / "documents" / ref.doc_id
     asset_dir.mkdir(parents=True, exist_ok=True)
     (asset_dir / "source.pdf").write_bytes(b"%PDF-1.7\n%%EOF\n")
-    # The pane wiring is what's under test; fake the page count so pypdfium2
-    # need not parse the stub bytes (the real render is covered by the page route).
+    # The pane wiring is what's under test; fake the page count + size so
+    # pypdfium2 need not parse the stub bytes (the real render is covered by the
+    # page route). `pdf_page_size` returns a 16:9 deck size to also pin that the
+    # aspect-ratio CSS var is emitted into the container.
     monkeypatch.setattr("memex.webui.app.pdf_page_count", lambda _p: 2)
+    monkeypatch.setattr("memex.webui.app.pdf_page_size", lambda _p, _n=0: (1280.0, 720.0))
 
     r = client.get(f"/documents/{ref.doc_id}")
     assert r.status_code == 200
@@ -719,6 +722,10 @@ async def test_document_view_renders_pane_split_when_pdf_present(
     assert f"/documents/{ref.doc_id}/source/page/1" in r.text
     assert "<iframe" not in r.text
     assert f'/documents/{ref.doc_id}/source"' in r.text  # download link → original
+    # Aspect-ratio var feeds the placeholder height so `loading="lazy"` actually
+    # defers offscreen pages — without it every row reads as in-viewport and
+    # all pages render on initial load (the stale-cache foot-gun we just hit).
+    assert "--pdf-page-aspect: 1280.000 / 720.000" in r.text
 
 
 def test_document_view_renders_solo_when_no_source(
@@ -786,6 +793,7 @@ async def test_office_doc_preview_renders_converted_pdf(
     (asset_dir / "source.pptx").write_bytes(b"PK\x03\x04 fake pptx")
     (asset_dir / "converted.pdf").write_bytes(b"%PDF-1.7\n%%EOF\n")
     monkeypatch.setattr("memex.webui.app.pdf_page_count", lambda _p: 1)
+    monkeypatch.setattr("memex.webui.app.pdf_page_size", lambda _p, _n=0: (1280.0, 720.0))
 
     r = client.get(f"/documents/{ref.doc_id}")
     assert r.status_code == 200

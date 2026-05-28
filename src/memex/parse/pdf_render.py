@@ -19,6 +19,7 @@ from __future__ import annotations
 import io
 import threading
 from pathlib import Path
+from typing import cast
 
 from memex.core.errors import MemexError
 
@@ -74,6 +75,38 @@ def pdf_page_count(pdf_path: Path) -> int:
         except Exception as e:
             if type(e).__module__.split(".")[0] == "pypdfium2":
                 raise _wrap_pdfium(e, "could not read PDF page count", path=str(pdf_path)) from e
+            raise
+        finally:
+            doc.close()
+
+
+def pdf_page_size(pdf_path: Path, page_index: int = 0) -> tuple[float, float]:
+    """Native width/height **in points** for one page — the preview pane uses it
+    as the CSS `aspect-ratio` on placeholder `<img>`s, so the browser-native
+    `loading="lazy"` correctly defers offscreen pages (a 0-height placeholder is
+    "near viewport" and fires immediately, defeating the lazy attribute).
+
+    Raises `PDFPreviewError` on the same conditions as the page renderer.
+    """
+    with _PDFIUM_LOCK:
+        doc = _open(pdf_path)
+        try:
+            page_count = len(doc)
+            if not 0 <= page_index < page_count:
+                raise PDFPreviewError(
+                    f"page index {page_index} out of range",
+                    context={"page_index": page_index, "page_count": page_count},
+                )
+            # `get_size()` is a public pypdfium2 PdfPage method but isn't on the
+            # type stubs — `cast` pins the (width, height) shape locally so the
+            # callers see a strict `tuple[float, float]`.
+            size = cast(tuple[float, float], doc[page_index].get_size())  # type: ignore[attr-defined]
+            return float(size[0]), float(size[1])
+        except PDFPreviewError:
+            raise
+        except Exception as e:
+            if type(e).__module__.split(".")[0] == "pypdfium2":
+                raise _wrap_pdfium(e, "could not read PDF page size", page_index=page_index) from e
             raise
         finally:
             doc.close()
