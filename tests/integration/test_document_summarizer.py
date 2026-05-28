@@ -304,6 +304,26 @@ async def test_report_planner_coalesces_oversplit(
     assert len(resp.report_confidence.per_paragraph) == 3
 
 
+def test_key_figures_numeric_guard() -> None:
+    """The deterministic key-figures backstop (ADR-0008): a figure whose number is ABSENT
+    from its cited chunk is dropped (the LLM verifier's near-number false-positive — it
+    grounded a fabricated "$16,042M" against a cell holding "16384"); a verbatim figure and a
+    no-number qualitative claim survive."""
+    chunks = {"docA#tbl0": "Table — Model configs\nModel=GTEsmall; Params=30M; SeqLen=16384"}
+
+    def _claim(text: str) -> CitedClaim:
+        return CitedClaim(claim=text, source_chunk_id="docA#tbl0", confidence="high")
+
+    # 2026 + 16042 are both absent from the chunk (which has 16384) → dropped.
+    assert ds._figure_number_in_chunk(_claim("Fiscal 2026 Gaming revenue was $16,042M"), chunks) is False
+    # 30 is present (30M) → a real verbatim figure survives.
+    assert ds._figure_number_in_chunk(_claim("GTEsmall has 30M parameters"), chunks) is True
+    # No number → left to the LLM grounding (qualitative key point).
+    assert ds._figure_number_in_chunk(_claim("The table lists model configurations"), chunks) is True
+    # 16384 IS in the chunk → a figure citing it survives (no false-drop of a real figure).
+    assert ds._figure_number_in_chunk(_claim("The max sequence length is 16384"), chunks) is True
+
+
 @pytest.mark.asyncio
 async def test_report_summarizer_swap_in(
     _settings: MemexSettings, monkeypatch: pytest.MonkeyPatch

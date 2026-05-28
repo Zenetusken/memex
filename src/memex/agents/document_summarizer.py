@@ -811,6 +811,26 @@ async def _load_doc_tables(vault_path: Path, doc_id: str) -> list[StoredTable]:
         await store.close()
 
 
+def _figure_number_in_chunk(claim: CitedClaim, chunk_text_by_id: dict[str, str]) -> bool:
+    """Deterministic backstop for key figures (ADR-0008): a key figure is a VERBATIM cell
+    read, so at least one of the claim's numbers must literally appear (comma-normalized) in
+    its cited table-chunk. Catches what the LLM verifier's numeric false-positive lets
+    through — it once grounded a fabricated "$16,042M" against a cell holding "16384" (a
+    close number, different figure). A claim with NO number is left to the LLM grounding (a
+    qualitative key point). Scoped to the verbatim key-figures path ONLY — NOT the answer
+    path, whose claims paraphrase numbers (e.g. "about 800 million") where this would
+    false-reject."""
+    nums = re.findall(r"\d[\d,]*\.?\d*", claim.claim)
+    if not nums:
+        return True
+    norm_chunk = (chunk_text_by_id.get(claim.source_chunk_id) or "").replace(",", "")
+    for n in nums:
+        norm = n.replace(",", "").rstrip(".")
+        if norm and norm in norm_chunk:
+            return True
+    return False
+
+
 async def _key_figures_section(
     table_chunks: list[Chunk],
     instruction: str | None,
@@ -846,8 +866,14 @@ async def _key_figures_section(
     # chunks before grounding — same id-transcription fix as the prose path.
     repaired_points, _ = repair_claim_chunk_ids(mapped.key_points, shown)
     grounded, t_g = await _ground_points(mapped.digest, repaired_points, shown)
+    # Deterministic backstop: drop any grounded figure whose number is absent from its cited
+    # chunk (the LLM verifier false-positives near-numbers; a key figure must be verbatim).
+    chunk_text_by_id = {c.chunk_id: c.text for c in shown}
+    verified = [kp for kp in grounded if _figure_number_in_chunk(kp, chunk_text_by_id)]
+    if len(verified) < len(grounded):
+        logger.info("summarize.key_figures_numeric_drop", dropped=len(grounded) - len(verified))
     return (
-        SectionSummary(section_title="Key figures", digest=mapped.digest, key_points=grounded),
+        SectionSummary(section_title="Key figures", digest=mapped.digest, key_points=verified),
         t_map + t_g,
     )
 
