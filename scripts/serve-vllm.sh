@@ -56,6 +56,15 @@ GPU_FRACTION="${MEMEX_VLLM_GPU_FRACTION:-0.72}"
 # refuse fp8_e5m2 KV cache at startup — set this env var to `auto` for
 # them and vLLM picks a compatible default.
 KV_CACHE_DTYPE="${MEMEX_VLLM_KV_CACHE_DTYPE:-fp8_e5m2}"
+# Dynamic KV-scale calculation. `fp8_e5m2` (the default) has a wide exponent
+# range and runs WITHOUT scales. `fp8_e4m3` is more PRECISE but its range is
+# small (±240) → it needs an FP32 k/v scale or it falls back to scale=1.0
+# (lossy). Setting MEMEX_VLLM_CALCULATE_KV_SCALES=1 appends
+# `--calculate-kv-scales` so vLLM computes the scales DYNAMICALLY at runtime
+# (no offline calibration step) — the fair-fight config for an e4m3-vs-e5m2
+# accuracy A/B. Empty/unset → omit the flag (the e5m2 default needs no scales).
+# Small per-forward latency cost; measure it alongside quality before adopting.
+CALCULATE_KV_SCALES="${MEMEX_VLLM_CALCULATE_KV_SCALES:-}"
 
 # Explicit single-device — skips the multi-GPU discovery codepath at
 # startup (~1–2 s faster cold start on a single-card rig).
@@ -118,6 +127,7 @@ if command -v uv >/dev/null 2>&1; then
         --max-num-seqs 8 \
         --max-model-len "$MAX_MODEL_LEN" \
         --kv-cache-dtype "$KV_CACHE_DTYPE" \
+        ${CALCULATE_KV_SCALES:+--calculate-kv-scales} \
         --enable-prefix-caching \
         ${MEMEX_VLLM_EAGER:+--enforce-eager}
 else
@@ -133,6 +143,7 @@ else
         --max-num-seqs 8 \
         --max-model-len "$MAX_MODEL_LEN" \
         --kv-cache-dtype "$KV_CACHE_DTYPE" \
+        ${CALCULATE_KV_SCALES:+--calculate-kv-scales} \
         --enable-prefix-caching \
         ${MEMEX_VLLM_EAGER:+--enforce-eager}
 fi
