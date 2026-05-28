@@ -150,6 +150,41 @@ srcs / no `<iframe>` / inline disposition / Office `converted.pdf` "(rendered)" 
 page route serves PNG + out-of-range 404) + `test_pdf_render.py` (render + corrupt +
 out-of-range).
 
+## Live ask-progress (long-poll, `_progress.html` + `webui/progress.py`, 2026-05-27)
+
+`POST /ask` no longer blocks ~60–90 s. It starts the agent in a background
+`asyncio.Task` (`_run_ask`, keyed by a `cid` ULID — held strongly in the registry
+so the loop can't GC it) and IMMEDIATELY returns the `_progress.html` fragment into
+`#answer`. That fragment **long-polls** `GET /ask/{cid}/status?v=N`
+(`hx-trigger="load"` + `hx-swap="outerHTML"` on itself): the status route HOLDS the
+connection (`ProgressRegistry.wait_for_change`) until the phase advances past `v`,
+the run finishes, or a ~1 s keepalive — so the step list (Retrieving → Reranking →
+Assessing → Drafting → Grounding → Checking relevance → Composing) updates the
+INSTANT a node transition happens (SSE-like), while a held phase still ticks its
+per-phase elapsed timer. This is the user's "as accurate as real-time SSE" ask done
+with zero new vendored JS — it adapts to our agent's bursty timing (instant across
+the quick LLM phases, a heartbeat during the slow CPU rerank). When the run is done
+the route renders `_answer.html` (or the error / `_progress_expired.html` fragment),
+none of which carry an `hx-trigger` → the poll chain stops by itself. **Every status
+response is HTTP 200** — the outcome is content, decoupled from the HTTP status, so
+the HTMX 1.9.10-vs-2.x `responseHandling` quirk in `base.html` is irrelevant here.
+
+The agent stays oblivious: `answer_query(correlation_id=cid, on_node=…)` appends an
+observe-only LangGraph callback (`_NodeProgressHandler`) that maps node starts →
+node names; `webui/progress.py` owns the `ProgressRegistry` (in-process,
+single-worker-safe, `cid → ProgressEntry`, event-driven via `asyncio.Event` + a
+monotonic `version`, lazy TTL+cap cleanup, evict-on-delivery) and the node→phase
+map. `_answer.html` is UNCHANGED — the status route reproduces the old synchronous
+context via `_answer_context` (scope-doc titles + `_source_view` + scope_source).
+The Ask form dropped its old `#loading`/`hx-indicator`/`hx-disabled-elt` (the
+progress fragment is the in-flight feedback; a fresh ask while one runs just gets a
+new cid, abandoning the prior poll, which the TTL sweep reaps). Semantic
+`.progress-*` CSS only (step text floored at zinc-400 for AA; the active dot's pulse
+gated behind `prefers-reduced-motion`), no new Tailwind. Pinned by `test_webui.py`
+(the `_ask_to_completion` poll-flow helper + status branches + a live
+`httpx.AsyncClient` progression with a gate) + `test_progress.py` (the callback
+discriminator, the registry incl. `wait_for_change`, the `answer_query` threading).
+
 ## Two inline-edit flows (both HTMX view/edit toggles)
 
 - **Body**: the `edit` button swaps `#md-pane` (`/documents/{id}/edit` → form; `/documents/{id}/review` POST writes through `vault.write_document` with optimistic-CAS conflict handling; `/documents/{id}/body` is the view partial).

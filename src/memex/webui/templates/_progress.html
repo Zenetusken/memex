@@ -1,0 +1,21 @@
+{# Live ask-progress fragment (long-poll). It re-polls /ask/{cid}/status with the
+   current version via hx-trigger="load"; the status endpoint HOLDS the connection
+   until the phase advances past ?v, the run finishes, or a ~1s keepalive — so this
+   updates the instant a node transition happens (SSE-like) while a held phase
+   still ticks its elapsed timer. When the run is done the endpoint returns
+   _answer.html (no hx-trigger) instead → the polling chain stops by itself. #}
+<div class="progress"
+     hx-get="/ask/{{ cid }}/status?v={{ version }}"
+     hx-trigger="load"
+     hx-target="this"
+     hx-swap="outerHTML">
+  <p class="ans-eyebrow">Working <span class="tabular">· {{ elapsed }}s</span></p>
+  <ol class="progress-steps" aria-label="answering progress">
+    {% for p in phases %}
+    <li class="progress-step{% if loop.index0 == active_index %} progress-step-active{% elif loop.index0 < active_index %} progress-step-done{% endif %}"
+        {% if loop.index0 == active_index %}aria-current="step"{% endif %}>
+      <span class="progress-dot" aria-hidden="true"></span>{{ p }}
+    </li>
+    {% endfor %}
+  </ol>
+</div>

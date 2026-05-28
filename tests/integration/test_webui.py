@@ -7,12 +7,16 @@ is a real tmp dir, the document list iterates real files).
 
 from __future__ import annotations
 
+import asyncio
+import re
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
+from httpx import ASGITransport
 
 from memex.agents.answering import (
     CitedClaim,
@@ -95,6 +99,32 @@ def fake_refused(monkeypatch: pytest.MonkeyPatch) -> None:
 # ----- Tests -----
 
 
+async def _ask_to_completion(app: Any, question: str, **form: Any) -> str:
+    """POST /ask, then long-poll /ask/{cid}/status (via httpx on the test's event
+    loop, so the background agent task actually runs) until the answer/expired
+    fragment replaces the progress fragment. Returns the final HTML — mirrors the
+    browser's long-poll chain end-to-end. (A sync TestClient can't drive the
+    background task between polls; the shared-loop AsyncClient can.)"""
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.post("/ask", data={"question": question, **form})
+        assert r.status_code == 200, r.text
+        text = r.text
+        m = re.search(r"/ask/([^/?\"]+)/status\?v=(\d+)", text)
+        assert m is not None, f"POST /ask did not return a progress fragment: {text[:300]}"
+        cid, v = m.group(1), int(m.group(2))
+        for _ in range(100):
+            await asyncio.sleep(0.01)
+            r = await ac.get(f"/ask/{cid}/status?v={v}")
+            assert r.status_code == 200
+            text = r.text
+            if 'class="progress"' not in text:
+                return text  # answer / expired fragment — no poll trigger, chain stops
+            mv = re.search(r"\?v=(\d+)", text)
+            if mv is not None:
+                v = int(mv.group(1))
+        raise AssertionError(f"ask did not complete after polling: {text[:300]}")
+
+
 def test_index_renders_ask_form(client: TestClient) -> None:
     r = client.get("/")
     assert r.status_code == 200
@@ -111,26 +141,26 @@ def test_healthz_reports_vault_path(settings: MemexSettings, client: TestClient)
     assert payload["vault_path"] == str(settings.vault_path)
 
 
-def test_ask_returns_answer_fragment(client: TestClient, fake_answered: None) -> None:
-    r = client.post("/ask", data={"question": "What does Smith argue?"})
-    assert r.status_code == 200
+@pytest.mark.asyncio
+async def test_ask_returns_answer_fragment(client: TestClient, fake_answered: None) -> None:
+    text = await _ask_to_completion(client.app, "What does Smith argue?")
     # Fragment, not full document — no <html> tag.
-    assert "<html" not in r.text
-    assert "Smith treats reflexivity" in r.text
-    assert "Reflexivity shapes the data" in r.text
-    assert "01HZTESTWEBUI" in r.text  # correlation id printed
+    assert "<html" not in text
+    assert "Smith treats reflexivity" in text
+    assert "Reflexivity shapes the data" in text
+    assert "01HZTESTWEBUI" in text  # correlation id printed
 
 
-def test_ask_answer_fragment_renders_sources_wikilinks(
+@pytest.mark.asyncio
+async def test_ask_answer_fragment_renders_sources_wikilinks(
     client: TestClient, fake_answered: None
 ) -> None:
     """P4.1: the answered partial lists each wikilink as an `<a>` to the
     cited doc/section."""
-    r = client.post("/ask", data={"question": "What does Smith argue?"})
-    assert r.status_code == 200
-    assert "Sources" in r.text
-    assert 'href="/documents/d1#reflexivity"' in r.text
-    assert 'class="wikilink"' in r.text
+    text = await _ask_to_completion(client.app, "What does Smith argue?")
+    assert "Sources" in text
+    assert 'href="/documents/d1#reflexivity"' in text
+    assert 'class="wikilink"' in text
 
 
 @pytest.mark.asyncio
@@ -168,25 +198,24 @@ async def test_ask_renders_sources_and_claims_by_title(
         )
 
     monkeypatch.setattr("memex.webui.app.answer_query", _fake)
-    r = client.post("/ask", data={"question": "who made C++?"})
-    assert r.status_code == 200
+    text = await _ask_to_completion(client.app, "who made C++?")
     # claim source chip → "Title › Section", linked to the doc section
-    assert 'class="claim-source-link"' in r.text
-    assert "CS Notes › History" in r.text
-    assert 'href="/documents/abc12345#history"' in r.text
-    assert 'title="abc12345#h1"' in r.text  # raw id only as the tooltip
-    assert ">abc12345#h1<" not in r.text  # NOT shown as a visible <code> chip
+    assert 'class="claim-source-link"' in text
+    assert "CS Notes › History" in text
+    assert 'href="/documents/abc12345#history"' in text
+    assert 'title="abc12345#h1"' in text  # raw id only as the tooltip
+    assert ">abc12345#h1<" not in text  # NOT shown as a visible <code> chip
 
 
-def test_ask_renders_refusal(client: TestClient, fake_refused: None) -> None:
-    r = client.post("/ask", data={"question": "What is the etymology?"})
-    assert r.status_code == 200
-    assert "Refused" in r.text
-    assert "vault doesn&#39;t contain" in r.text or "vault doesn't contain" in r.text
+@pytest.mark.asyncio
+async def test_ask_renders_refusal(client: TestClient, fake_refused: None) -> None:
+    text = await _ask_to_completion(client.app, "What is the etymology?")
+    assert "Refused" in text
+    assert "vault doesn&#39;t contain" in text or "vault doesn't contain" in text
     # P4.1: no Sources section on a refusal (wikilinks default to []).
-    assert "Sources" not in r.text
+    assert "Sources" not in text
     # #256: no scope note when retrieval wasn't re-scoped (artifact_scope_doc_ids=[]).
-    assert "Scoped to" not in r.text
+    assert "Scoped to" not in text
 
 
 @pytest.mark.asyncio
@@ -216,16 +245,17 @@ async def test_ask_refusal_surfaces_artifact_scope_titles(
 
     monkeypatch.setattr("memex.webui.app.answer_query", _fake)
 
-    r = client.post("/ask", data={"question": "Quelle plage VLAN dans le diagramme de coupe-feu ?"})
-    assert r.status_code == 200
-    assert "Refused" in r.text
-    assert "Scoped to the documents you named" in r.text
+    text = await _ask_to_completion(
+        client.app, "Quelle plage VLAN dans le diagramme de coupe-feu ?"
+    )
+    assert "Refused" in text
+    assert "Scoped to the documents you named" in text
     # Human titles render (not the raw doc-ids as the visible text).
-    assert "CR350 Firewall Diagrams" in r.text
-    assert "CR350 Cours 6 Coupe-feu" in r.text
+    assert "CR350 Firewall Diagrams" in text
+    assert "CR350 Cours 6 Coupe-feu" in text
     # The doc-id is retained as the link target + hover tooltip (stable identifier).
-    assert f'href="/documents/{fw.doc_id}"' in r.text
-    assert f'title="{fw.doc_id}"' in r.text
+    assert f'href="/documents/{fw.doc_id}"' in text
+    assert f'title="{fw.doc_id}"' in text
 
 
 @pytest.mark.asyncio
@@ -277,14 +307,145 @@ async def test_ask_scopes_to_selected_docs_and_labels_note(
 
     monkeypatch.setattr("memex.webui.app.answer_query", _fake)
 
-    r = client.post(
-        "/ask",
-        data={"question": "How is the root bridge elected?", "scope_doc_ids": [lec.doc_id]},
+    text = await _ask_to_completion(
+        client.app, "How is the root bridge elected?", scope_doc_ids=[lec.doc_id]
     )
-    assert r.status_code == 200
     assert captured["scope_doc_ids"] == [lec.doc_id]  # the route forwarded the selection
-    assert "Scoped to your selected document" in r.text  # picker phrasing, not "you named"
-    assert "CR350 Cours 5 STP" in r.text  # scoped doc shown by title
+    assert "Scoped to your selected document" in text  # picker phrasing, not "you named"
+    assert "CR350 Cours 5 STP" in text  # scoped doc shown by title
+
+
+# ----- live progress indicator (long-poll) -----
+
+
+def test_ask_post_returns_progress_fragment(client: TestClient, fake_answered: None) -> None:
+    """POST /ask returns IMMEDIATELY with the self-polling progress fragment (not
+    the answer): a status-poll URL + the step list, no <html>."""
+    r = client.post("/ask", data={"question": "anything"})
+    assert r.status_code == 200
+    assert "<html" not in r.text
+    assert 'class="progress"' in r.text
+    assert "/ask/" in r.text and "/status?v=" in r.text
+    assert 'hx-trigger="load"' in r.text
+    assert "Retrieving" in r.text  # the first step renders
+
+
+def test_ask_status_progress_then_done_and_evicts(client: TestClient) -> None:
+    """Status route: a running entry → the progress fragment (still polling); a
+    finished entry → the answer (no poll trigger); a second poll → expired (the
+    entry is evicted on delivery)."""
+    registry = client.app.state.progress
+    cid = "01HZSTATUSTEST0000000000000"
+    registry.new(cid, scope_doc_ids=[], scope_source="named")
+    registry.set_phase(cid, "Grounding")  # version → 1
+    # Running: poll with v=0 (< current version) → immediate progress fragment.
+    r = client.get(f"/ask/{cid}/status?v=0")
+    assert r.status_code == 200
+    assert 'class="progress"' in r.text
+    assert "Grounding" in r.text
+    assert "progress-step-active" in r.text
+    # Finish → the answer fragment (no poll trigger → polling stops).
+    fr = FinalResponse(
+        answered=True,
+        summary="The composed answer.",
+        claims=[],
+        correlation_id="cidX",
+        tokens_used=1,
+        nodes_traversed=1,
+        regenerate_attempts=0,
+    )
+    registry.finish(cid, response=fr)
+    r = client.get(f"/ask/{cid}/status?v=0")
+    assert r.status_code == 200
+    assert "The composed answer." in r.text
+    assert 'class="progress"' not in r.text
+    # Evicted on delivery → a second poll is "Expired".
+    r = client.get(f"/ask/{cid}/status?v=0")
+    assert r.status_code == 200
+    assert "Expired" in r.text
+    assert 'class="progress"' not in r.text
+
+
+def test_ask_status_done_error_renders_banner_at_200(client: TestClient) -> None:
+    """A finished-with-error entry renders the error banner as content at HTTP 200
+    (not a 4xx/5xx — the long-poll outcome is decoupled from the HTTP status)."""
+    registry = client.app.state.progress
+    cid = "01HZERRTEST00000000000000000"
+    registry.new(cid, scope_doc_ids=[], scope_source="named")
+    registry.finish(cid, error="Couldn't answer: ModelCallError. boom")
+    r = client.get(f"/ask/{cid}/status?v=0")
+    assert r.status_code == 200
+    assert "Couldn&#39;t answer" in r.text or "Couldn't answer" in r.text
+    assert 'class="progress"' not in r.text
+
+
+def test_ask_status_unknown_cid_is_expired(client: TestClient) -> None:
+    r = client.get("/ask/01HZNOPE0000000000000000000/status?v=0")
+    assert r.status_code == 200
+    assert "Expired" in r.text
+    assert 'class="progress"' not in r.text
+
+
+@pytest.mark.asyncio
+async def test_ask_live_progression_surfaces_phase(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end on a shared loop: the agent's `on_node` calls flow into the
+    registry, so a poll observes a mid-run phase BEFORE the answer arrives. A gate
+    makes it deterministic — the fake holds at "Grounding" until the test sees it."""
+    gate = asyncio.Event()
+
+    async def _fake(question: str, *, on_node: Any = None, **_kw: Any) -> FinalResponse:
+        if on_node is not None:
+            on_node("verify")  # maps to the "Grounding" phase
+        await gate.wait()  # hold here until the test has observed "Grounding"
+        return FinalResponse(
+            answered=True,
+            summary="The grounded answer.",
+            claims=[],
+            correlation_id="cidL",
+            tokens_used=3,
+            nodes_traversed=4,
+            regenerate_attempts=0,
+        )
+
+    monkeypatch.setattr("memex.webui.app.answer_query", _fake)
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=client.app), base_url="http://t"
+    ) as ac:
+        r = await ac.post("/ask", data={"question": "go"})
+        m = re.search(r"/ask/([^/?\"]+)/status\?v=(\d+)", r.text)
+        assert m is not None
+        cid, v = m.group(1), int(m.group(2))
+        # Poll until a frame shows "Grounding" active (the held phase).
+        saw_grounding = False
+        for _ in range(100):
+            await asyncio.sleep(0.005)
+            r = await ac.get(f"/ask/{cid}/status?v={v}")
+            if (
+                'class="progress"' in r.text
+                and "Grounding" in r.text
+                and "progress-step-active" in r.text
+            ):
+                saw_grounding = True
+                break
+            mv = re.search(r"\?v=(\d+)", r.text)
+            if mv is not None:
+                v = int(mv.group(1))
+        assert saw_grounding, "never observed the live 'Grounding' phase"
+        # Release the agent → the next poll returns the answer; polling stops.
+        gate.set()
+        final = ""
+        for _ in range(100):
+            await asyncio.sleep(0.005)
+            r = await ac.get(f"/ask/{cid}/status?v={v}")
+            if 'class="progress"' not in r.text:
+                final = r.text
+                break
+            mv = re.search(r"\?v=(\d+)", r.text)
+            if mv is not None:
+                v = int(mv.group(1))
+        assert "The grounded answer." in final
 
 
 # ----- saved scope sets (persist + reapply a selection) -----
@@ -890,7 +1051,9 @@ def _fake_daemon(monkeypatch: pytest.MonkeyPatch, restarts: list[dict[str, Any]]
     async def _status(_s: Any) -> _FakeState:
         return _FakeState(alive=True)
 
-    async def _restart(_s: Any, *, gpu_fraction: Any = None, max_model_len: Any = None) -> _FakeState:
+    async def _restart(
+        _s: Any, *, gpu_fraction: Any = None, max_model_len: Any = None
+    ) -> _FakeState:
         restarts.append({"gpu_fraction": gpu_fraction, "max_model_len": max_model_len})
         return _FakeState(reachable=True)
 

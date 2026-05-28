@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import Any
 
 import structlog
+import ulid
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -88,6 +89,7 @@ from memex.vault.store import (
     read_document_title,
     write_document,
 )
+from memex.webui.progress import PHASES, ProgressRegistry, phase_for
 from memex.webui.rendering import extract_toc, render_body_html, render_wikilink, slugify_heading
 
 _HERE = Path(__file__).parent
@@ -263,6 +265,28 @@ def _source_view(response: FinalResponse) -> tuple[dict[str, dict[str, str]], di
     return chunk_refs, doc_titles
 
 
+async def _answer_context(
+    vault_path: Path, response: FinalResponse, scope_source: str
+) -> dict[str, object]:
+    """Build the `_answer.html` context from a FinalResponse — scope-doc titles
+    (#256), the source-by-title view-model, and the scope-source label. Shared by
+    the long-poll status route so the rendered answer is identical to the old
+    synchronous path."""
+    scope_docs = [
+        {"doc_id": d, "title": await read_document_title(vault_path, d)}
+        for d in response.artifact_scope_doc_ids
+    ]
+    chunk_refs, doc_titles = _source_view(response)
+    return {
+        "response": response,
+        "error": None,
+        "scope_docs": scope_docs,
+        "scope_source": scope_source,
+        "chunk_refs": chunk_refs,
+        "doc_titles": doc_titles,
+    }
+
+
 def _kind_for(path: Path) -> tuple[str, str]:
     ext = path.suffix.lower()
     if ext in _SOURCE_KINDS:
@@ -410,17 +434,48 @@ def create_app() -> FastAPI:
         )
         return templates.TemplateResponse(request, "_scope_picker.html", ctx)
 
+    # Live-progress registry for in-flight asks (long-poll). One per app, like
+    # `mode_switch_lock`; single-worker uvicorn → an in-process dict is safe.
+    # Exposed on app.state so tests can pre-seed/inspect entries.
+    progress = ProgressRegistry()
+    app.state.progress = progress
+
+    async def _run_ask(cid: str, question: str, scope_doc_ids: list[str]) -> None:
+        """Background runner: drive the agent, stream node→phase updates into the
+        registry, and store the result (or error) for the status poll. This is the
+        top of a fire-and-forget task — it must never crash silently."""
+        from memex.core.errors import MemexError
+
+        try:
+            response = await answer_query(
+                question,
+                scope_doc_ids=scope_doc_ids,
+                correlation_id=cid,
+                on_node=lambda n: progress.set_phase(cid, phase_for(n)),
+            )
+            progress.finish(cid, response=response)
+        except MemexError as e:
+            # Typed agent errors (schema-violating LLM output, OOM, tripped
+            # breaker, …) → the same friendly banner the synchronous route showed.
+            logger.warning("ask.failed", error_type=type(e).__name__, error=str(e)[:200])
+            progress.finish(cid, error=f"Couldn't answer: {type(e).__name__}. {str(e)[:160]}")
+        except Exception as e:
+            # reason: top-of-task boundary — surface as a generic error + log,
+            # rather than an unretrieved task exception. CancelledError (a
+            # BaseException) is intentionally NOT caught, so cancellation still
+            # propagates and tears the task down cleanly.
+            logger.error("ask.crashed", error_type=type(e).__name__, error=str(e)[:200])
+            progress.finish(cid, error="An unexpected error occurred while answering.")
+
     @app.post("/ask", response_class=HTMLResponse)
     async def ask(
         request: Request,
         question: str = Form(..., max_length=_QUESTION_MAX_BYTES),
         scope_doc_ids: list[str] = Form([]),  # noqa: B008  # FastAPI Form default sentinel
     ) -> HTMLResponse:
-        """Run the answering agent against `question` and render the
-        HTMX `_answer.html` partial. Typed MemexError subclasses render
-        as a refusal banner with status 503 rather than a bare 500."""
-        from memex.core.errors import MemexError
-
+        """Start the answering agent in a background task and IMMEDIATELY return
+        the `_progress.html` fragment, which long-polls `/ask/{cid}/status` for the
+        live step (Retrieving → … → Composing) until the answer is ready."""
         question = question.strip()
         if not question:
             return templates.TemplateResponse(
@@ -429,54 +484,58 @@ def create_app() -> FastAPI:
                 {"response": None, "error": "Question is empty."},
                 status_code=400,
             )
-        try:
-            response = await answer_query(question, scope_doc_ids=scope_doc_ids)
-        except MemexError as e:
-            # The agent surfaces typed MemexError subclasses (ModelCallError
-            # from a schema-violating LLM output, InsufficientVRAMError on
-            # OOM, CircuitBreakerOpen on a tripped breaker, etc). Render
-            # them as a refusal partial rather than a bare 500. The HTMX
-            # caller swaps the same target either way, so a clean error
-            # banner is friendlier than the browser's default error page.
-            logger.warning(
-                "ask.failed",
-                error_type=type(e).__name__,
-                error=str(e)[:200],
+        cid = str(ulid.ULID())
+        scope_source = "selected" if scope_doc_ids else "named"
+        progress.new(cid, scope_doc_ids=scope_doc_ids, scope_source=scope_source)
+        task = asyncio.create_task(_run_ask(cid, question, scope_doc_ids))
+        progress.attach_task(cid, task)  # strong ref → the loop won't GC the task mid-run
+        return templates.TemplateResponse(
+            request,
+            "_progress.html",
+            {
+                "cid": cid,
+                "phase": PHASES[0],
+                "phases": PHASES,
+                "version": 0,
+                "elapsed": 0,
+                "active_index": 0,
+            },
+        )
+
+    @app.get("/ask/{cid}/status", response_class=HTMLResponse)
+    async def ask_status(request: Request, cid: str, v: int = 0) -> HTMLResponse:
+        """Long-poll the in-flight ask: block until the phase advances past `v`,
+        the run finishes, or a ~1 s keepalive — so the indicator updates the INSTANT
+        a node transition happens (SSE-like), while a held phase still ticks its
+        elapsed timer. Always HTTP 200; the done / expired fragments carry no poll
+        trigger, so polling stops on its own."""
+        entry = await progress.wait_for_change(cid, v)
+        if entry is None:  # swept / unknown cid (e.g. a server restart mid-poll)
+            return templates.TemplateResponse(request, "_progress_expired.html", {})
+        if not entry.done:
+            return templates.TemplateResponse(
+                request,
+                "_progress.html",
+                {
+                    "cid": cid,
+                    "phase": entry.phase,
+                    "phases": PHASES,
+                    "version": entry.version,
+                    "elapsed": entry.phase_elapsed_s(),
+                    "active_index": entry.active_index(),
+                },
             )
+        # Done → render the final answer exactly like the old synchronous route.
+        progress.evict(cid)
+        if entry.error is not None or entry.response is None:
             return templates.TemplateResponse(
                 request,
                 "_answer.html",
-                {
-                    "response": None,
-                    "error": (f"Couldn't answer: {type(e).__name__}. {str(e)[:160]}"),
-                },
-                status_code=503,
+                {"response": None, "error": entry.error or "Answering produced no result."},
             )
-        # #256: resolve the re-scoped doc-ids to human titles for the answer
-        # panel's "Scoped to …" note (doc-ids stay the stable identifier on the
-        # FinalResponse / MCP / CLI; titles are a presentation concern).
-        # `read_document_title` falls back to the doc_id if a title can't be read.
         settings = get_settings()
-        scope_docs = [
-            {"doc_id": doc_id, "title": await read_document_title(settings.vault_path, doc_id)}
-            for doc_id in response.artifact_scope_doc_ids
-        ]
-        # Render claim sources + the Sources list by human title, not raw ids.
-        chunk_refs, doc_titles = _source_view(response)
-        return templates.TemplateResponse(
-            request,
-            "_answer.html",
-            {
-                "response": response,
-                "error": None,
-                "scope_docs": scope_docs,
-                # The route knows the scope SOURCE (it passed the user selection);
-                # the template uses it to phrase the ".ans-scope" note correctly.
-                "scope_source": "selected" if scope_doc_ids else "named",
-                "chunk_refs": chunk_refs,
-                "doc_titles": doc_titles,
-            },
-        )
+        ctx = await _answer_context(settings.vault_path, entry.response, entry.scope_source)
+        return templates.TemplateResponse(request, "_answer.html", ctx)
 
     # ----- Resource mode (ADR-0007) -----
 

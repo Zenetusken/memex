@@ -788,3 +788,49 @@ html { scroll-behavior: smooth; }
 .summary-section-points { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.25rem; }
 .summary-section-points li { font-size: 0.78rem; color: rgb(161 161 170); display: flex; gap: 0.5rem; align-items: baseline; }
 .summary-section-points .chunk-id { color: rgb(161 161 170); font-size: 0.6875rem; white-space: nowrap; }  /* zinc-400 (AA) */
+
+/* Live ask-progress (the long-poll step list) — semantic, mirrors the .ans-*
+   motif. All STEP TEXT floors at zinc-400 (AA); the 6px dot is a decorative
+   graphic (redundant with the label), so its dim shades are exempt. The active
+   dot pulses to say "in flight", gated behind prefers-reduced-motion. */
+.progress {
+  border-left: 2px solid rgb(37 99 235);   /* blue-600 — the single action accent, as .ans-answer */
+  padding: 0.1rem 0 0.1rem 0.875rem;
+}
+.progress-steps {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.progress-step {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.875rem;
+  color: rgb(161 161 170);                 /* zinc-400 — AA on zinc-950 (done + pending) */
+}
+.progress-step-active {
+  color: rgb(228 228 231);                 /* zinc-200 — the current step stands out */
+  font-weight: 500;
+}
+.progress-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: rgb(63 63 70);                /* zinc-700 — pending */
+}
+.progress-step-done .progress-dot { background: rgb(82 82 91); }    /* zinc-600 — completed */
+.progress-step-active .progress-dot { background: rgb(37 99 235); } /* blue-600 — current */
+@media (prefers-reduced-motion: no-preference) {
+  .progress-step-active .progress-dot {
+    animation: progress-pulse 1.4s ease-in-out infinite;
+  }
+}
+@keyframes progress-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}

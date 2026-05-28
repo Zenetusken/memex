@@ -45,10 +45,12 @@ Usage:
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from typing import Annotated, Literal, TypedDict
 
 import structlog
 import ulid
+from langchain_core.callbacks.base import BaseCallbackHandler
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, Field, create_model
@@ -77,6 +79,70 @@ from memex.retrieve import (
 )
 
 logger = structlog.get_logger(__name__)
+
+
+# The answering graph's top-level node names — the canonical "steps" a progress
+# UI surfaces. Used by `_NodeProgressHandler` to filter the callback firehose to
+# real node starts; the webui maps each to a human phase label.
+_PROGRESS_NODES = frozenset(
+    {
+        "retrieve",
+        "resolve_artifact_scope",
+        "expand_graph",
+        "rerank",
+        "query_tables",
+        "assess",
+        "answer",
+        "regenerate",
+        "verify",
+        "assess_relevance",
+        "compose",
+        "refuse",
+    }
+)
+
+
+class _NodeProgressHandler(BaseCallbackHandler):
+    """Observe-only LangGraph callback that reports each top-level node as it
+    STARTS, for the webui's live progress indicator (`answer_query(on_node=…)`).
+
+    It is appended NEXT TO the Langfuse handler and never reads or mutates the
+    graph state, so it cannot affect routing or the answering HARD gates — the
+    worst a misbehaving sink can do is be swallowed (see below).
+
+    Filtering (verified on langgraph 1.2.0 / langchain-core 1.4.0): a top-level
+    graph node's `on_chain_start` carries `metadata["langgraph_node"]`, a
+    `graph:step:N` tag, and `kwargs["name"] == langgraph_node`. Nested
+    routers/runnables inside a node carry `seq:step:` tags or a mismatched
+    `name`, and the root `LangGraph` event has no node metadata — all excluded.
+    """
+
+    def __init__(self, on_node: Callable[[str], None]) -> None:
+        self._on_node = on_node
+
+    def on_chain_start(
+        self,
+        serialized: object,
+        inputs: object,
+        *,
+        tags: list[str] | None = None,
+        metadata: dict[str, object] | None = None,
+        **kwargs: object,
+    ) -> None:
+        # `serialized`/`inputs` are part of the base signature, unused here; the
+        # node name + the discriminating tag/name come via metadata/tags/kwargs.
+        node = (metadata or {}).get("langgraph_node")
+        if not isinstance(node, str) or node not in _PROGRESS_NODES:
+            return
+        if not any(t.startswith("graph:step:") for t in (tags or [])):
+            return  # a nested runnable inside the node (seq:step:…), not the node start
+        if kwargs.get("name") != node:
+            return
+        try:
+            self._on_node(node)
+        except Exception:
+            # reason: a progress-UI sink must NEVER abort an answering run.
+            logger.warning("progress.on_node_failed", node=node)
 
 
 # Node return contract. `total=False` because each node updates only
@@ -1758,6 +1824,8 @@ async def answer_query(
     graph_expansion_budget: int = 3,
     chunks_per_neighbor: int = 2,
     scope_doc_ids: list[str] | None = None,
+    correlation_id: str | None = None,
+    on_node: Callable[[str], None] | None = None,
 ) -> FinalResponse:
     """Run the answering graph for a single query.
 
@@ -1783,6 +1851,13 @@ async def answer_query(
     retrieval to — takes precedence over inferred artifact-scope (#256). Empty /
     None = the full-corpus path. The applied scope is surfaced on
     `FinalResponse.artifact_scope_doc_ids`.
+
+    `correlation_id` (optional): a caller-supplied id used instead of a fresh
+    ULID — it drives the structlog/Langfuse binding AND
+    `FinalResponse.correlation_id` (the webui keys its progress registry by it).
+    `on_node` (optional): an observe-only sink invoked with each top-level node
+    name as it STARTS, for a live progress UI (`_NodeProgressHandler`); it never
+    touches graph state or routing. Both default off → CLI/MCP unchanged.
     """
     # Partial-grounded ship is a settings policy toggle (default on). Read it
     # fail-open so a non-bootstrapped fixture keeps the default behaviour.
@@ -1803,16 +1878,27 @@ async def answer_query(
         chunks_per_neighbor=chunks_per_neighbor,
         allow_partial_grounded=allow_partial_grounded,
         scope_doc_ids=scope_doc_ids or [],
+        # A caller-supplied correlation_id (e.g. the webui's progress key) drives
+        # both the structlog/Langfuse binding and FinalResponse.correlation_id, so
+        # logs + trace + the progress registry stay joined (ADR-0004). None → mint
+        # a fresh ULID here (matching the field's default_factory).
+        correlation_id=correlation_id if correlation_id is not None else str(ulid.ULID()),
     )
 
     clear_run_context()  # belt-and-suspenders: a missed clear elsewhere
     bind_run_context(initial.correlation_id, query_preview=query[:80])
     try:
         graph = get_compiled_graph()
+        # Langfuse trace + (opt-in) the webui's live node-progress observer. The
+        # progress handler is observe-only — appended after Langfuse, it never
+        # touches state or routing, so the HARD gates are unaffected.
+        callbacks: list[BaseCallbackHandler] = [callback_handler()]
+        if on_node is not None:
+            callbacks.append(_NodeProgressHandler(on_node))
         final_state = await graph.ainvoke(
             initial,
             config={
-                "callbacks": [callback_handler()],
+                "callbacks": callbacks,
                 "metadata": run_attributes(initial.correlation_id, "answer_query"),
             },
         )
