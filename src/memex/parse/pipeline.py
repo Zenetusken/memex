@@ -604,7 +604,13 @@ async def _passthrough_markdown(vault_path: Path, doc_id: str, source: Path) -> 
     ref = await write_document(vault_path, doc)
 
     correlation_id = str(ulid.ULID())
-    page = PageDecision(page=1, engine="passthrough", confidence=1.0, rationale="markdown source")
+    page = PageDecision(
+        page=1,
+        engine="passthrough",
+        confidence=1.0,
+        rationale="markdown source",
+        char_count=len(doc.body),
+    )
     parse_stage = ParseStage(
         correlation_id=correlation_id,
         parsed_at=now_utc(),
@@ -1197,12 +1203,19 @@ def _assemble_scan_pages(
     for page_no in range(1, page_count + 1):
         res = results.get(page_no)
         if isinstance(res, DoclingPageOutput):
-            pages.append(
-                PageDecision(page=page_no, engine="scan", confidence=1.0, rationale="VLM scan")
-            )
             md = _strip_markdown_fence_wrapper(res.markdown)
-            if md.strip():
-                parts.append(md)
+            page_md = md if md.strip() else ""
+            pages.append(
+                PageDecision(
+                    page=page_no,
+                    engine="scan",
+                    confidence=1.0,
+                    rationale="VLM scan",
+                    char_count=len(page_md),
+                )
+            )
+            if page_md:
+                parts.append(page_md)
         else:
             err = res if isinstance(res, Exception) else None
             pages.append(
@@ -1211,6 +1224,7 @@ def _assemble_scan_pages(
                     engine="scan",
                     confidence=0.0,
                     rationale=f"VLM scan failed: {err}" if err else "VLM scan: no output",
+                    char_count=0,
                 )
             )
     return pages, parts
@@ -1499,6 +1513,20 @@ async def _route_and_escalate(
             }
         )
 
+    # Record per-page markdown length on the decisions — feeds the chunker's
+    # chunk→page attribution for the webui's click-source→jump-to-PDF-page UX
+    # (chunker reads `ParseStage.pages[].char_count`, computes cumulative
+    # intervals, binary-searches each chunk's char_start). Computed AFTER the
+    # escalation stitch above so escalated pages report the VLM-transcribed
+    # length, not the original Docling output. Post-pipeline transforms
+    # (`_stitch_chart_extractions`, `_finalize_body`'s table linearization)
+    # may insert into / after a page's content; the page mapping is
+    # navigation-grade, not citation-grade — small drift on a chunk near a
+    # boundary is acceptable. Pre-existing manifests carry the default 0
+    # → chunker sees no usable intervals → falls back to section-only nav.
+    char_counts: dict[int, int] = {p.page: len(p.markdown) for p in conversion.pages}
+    decisions = [d.model_copy(update={"char_count": char_counts.get(d.page, 0)}) for d in decisions]
+
     return decisions, conversion
 
 
@@ -1670,6 +1698,7 @@ async def _parse_with_pymupdf(vault_path: Path, doc_id: str, source: Path) -> _P
             engine="pymupdf",
             confidence=classification.confidence,
             rationale=f"pymupdf:{classification.doc_type}",
+            char_count=p.char_count,
         )
         for p in conversion.pages
     ]

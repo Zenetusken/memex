@@ -79,10 +79,10 @@
        The `--pdf-page-aspect` CSS var feeds .pdf-page's `aspect-ratio` so the
        placeholder has a REAL height before the PNG loads — without it, every
        row reads as "in viewport" and `loading="lazy"` fires all pages at once. #}
-    <div class="pane-body pdf-pages"
+    <div id="pdf-pages" class="pane-body pdf-pages"
          {% if preview_aspect %}style="--pdf-page-aspect: {{ preview_aspect }};"{% endif %}>
       {% for n in range(preview_pages) %}
-      <img class="pdf-page" loading="lazy"
+      <img id="page-{{ n + 1 }}" class="pdf-page" loading="lazy"
            src="/documents/{{ document.ref.doc_id }}/source/page/{{ n }}"
            alt="page {{ n + 1 }} of {{ preview_pages }}">
       {% endfor %}
@@ -143,4 +143,59 @@
     <div class="dl-row"><dt>assets</dt><dd>{{ document.ref.asset_dir }}</dd></div>
   </dl>
 </details>
+
+{% if has_preview %}
+{#-
+  Preview-pane page navigation. The answer/summary `.claim-source-link`
+  carries a `data-page="N"` when the chunker attributed the chunk to a
+  source page (`Chunk.page` populated from the parser's per-page
+  char_counts in the manifest), AND the URL becomes `?page=N#section`.
+  This script:
+    (a) on initial load, reads `?page=N` and scrolls `#page-N` in the
+        preview pane into view — so a same-tab Ask → cited-source click
+        that lands here lands on the right PDF page.
+    (b) intercepts in-page clicks on `[data-page]` links to the SAME
+        doc — scrolls the preview AND lets the browser do the section
+        anchor on the markdown side. We `replaceState` to update the
+        URL with `?page=N` so a copy-link from there keeps the page
+        hint, but DON'T navigate (would be a full page reload for a
+        same-doc-different-query URL).
+  No-op on a markdown-only doc (no `#pdf-pages`, no `<img id="page-N">`).
+  Vanilla DOM only — no new vendored deps.
+-#}
+<script>
+(function(){
+  const pane = document.getElementById('pdf-pages');
+  if (!pane) return;
+  const scrollPreviewTo = (page) => {
+    const img = document.getElementById('page-' + page);
+    if (img) img.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  const initial = new URLSearchParams(window.location.search).get('page');
+  if (initial && /^\d+$/.test(initial)) scrollPreviewTo(initial);
+  const docPath = '/documents/{{ document.ref.doc_id }}';
+  document.addEventListener('click', (e) => {
+    const a = e.target && e.target.closest && e.target.closest('a[data-page]');
+    if (!a) return;
+    const href = a.getAttribute('href') || '';
+    // Only intercept SAME-DOC links — cross-doc clicks should navigate normally.
+    if (!href.startsWith(docPath)) return;
+    const page = a.getAttribute('data-page');
+    if (!page || !/^\d+$/.test(page)) return;
+    e.preventDefault();
+    scrollPreviewTo(page);
+    // Also scroll the markdown side via the section anchor if present.
+    const hashIdx = href.indexOf('#');
+    if (hashIdx >= 0) {
+      const slug = href.slice(hashIdx + 1);
+      const target = slug && document.getElementById(slug);
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    // Persist the page hint in the URL bar (no reload).
+    const newUrl = docPath + '?page=' + page + (hashIdx >= 0 ? href.slice(hashIdx) : '');
+    history.replaceState(null, '', newUrl);
+  });
+})();
+</script>
+{% endif %}
 {% endblock %}

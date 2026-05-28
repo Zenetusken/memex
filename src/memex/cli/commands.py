@@ -253,7 +253,17 @@ def register(app: typer.Typer) -> None:
         _print(asyncio.run(_run()))
 
     @app.command(name="index")
-    def index_cmd(doc_id: str) -> None:
+    def index_cmd(
+        doc_id: str,
+        force: bool = _Option(
+            False,
+            "--force",
+            help="Re-chunk + re-embed every chunk (not just the diff). Use to "
+            "backfill metadata that the content-addressed partial index skips "
+            "on a same-content re-parse — e.g. source-page attribution "
+            "(`Chunk.page`) after re-parsing a doc that predates it.",
+        ),
+    ) -> None:
         """Chunk, embed, and write derived state for one document."""
 
         async def _run():
@@ -261,7 +271,7 @@ def register(app: typer.Typer) -> None:
             # Pause vLLM around the embed — the embedder OOMs co-resident with
             # vLLM (~8.5 GB) on the 12 GB rig; no-op when vLLM isn't running.
             async with pause_vllm_for_gpu():
-                return await index_document(doc_id)
+                return await index_document(doc_id, force=force)
 
         _print(asyncio.run(_run()))
 

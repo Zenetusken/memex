@@ -256,22 +256,35 @@ def _source_view(response: FinalResponse) -> tuple[dict[str, dict[str, str]], di
     """View-model for rendering answer/summary sources by HUMAN TITLE instead of
     the raw `docid#hash` / `[[doc#section]]` syntax. Returns:
 
-    - `chunk_refs`: `chunk_id → {title, section, href}` for the per-claim source
-      chips (a claim whose chunk isn't here — e.g. a synthetic table/SQL chunk —
-      falls back to the raw id in the template).
+    - `chunk_refs`: `chunk_id → {title, section, href, page}` for the per-claim
+      source chips (a claim whose chunk isn't here — e.g. a synthetic table/SQL
+      chunk — falls back to the raw id in the template). `page` is `""` when
+      unknown (legacy chunks indexed before the chunker's page-attribution lever
+      shipped, OR a doc parsed without per-page char counts in its manifest);
+      otherwise the 1-based source page number, threaded into the href as
+      `?page=N#section-slug` so the doc-page template can scroll the PDF
+      preview pane to that page on landing.
     - `doc_titles`: `doc_id → title` for the `render_wikilink` Sources labels.
 
-    Built from the cited chunks' OWN `document_title` + `heading_path` — no extra
-    I/O (the same data the refusal panel already shows)."""
+    Built from the cited chunks' OWN `document_title` + `heading_path` + `page` —
+    no extra I/O (the same data the refusal panel already shows)."""
     chunk_refs: dict[str, dict[str, str]] = {}
     doc_titles: dict[str, str] = {}
     for c in response.used_chunks:
         section = c.heading_path[-1] if c.heading_path else ""
+        page_str = str(c.page) if c.page is not None else ""
         href = f"/documents/{c.document_id}"
+        if page_str:
+            href = f"{href}?page={page_str}"
         if section:
             href = f"{href}#{slugify_heading(section)}"
         title = c.document_title or c.document_id
-        chunk_refs[c.chunk_id] = {"title": title, "section": section, "href": href}
+        chunk_refs[c.chunk_id] = {
+            "title": title,
+            "section": section,
+            "href": href,
+            "page": page_str,
+        }
         doc_titles[c.document_id] = title
     return chunk_refs, doc_titles
 

@@ -208,6 +208,53 @@ async def test_ask_renders_sources_and_claims_by_title(
 
 
 @pytest.mark.asyncio
+async def test_ask_source_link_carries_page_when_chunk_attributed(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the chunker attributed a chunk to a source PDF page (`Chunk.page`
+    populated), the claim's source-link emits `data-page="N"` + the URL gains
+    `?page=N` + the visible label gains "· p. N" — fueling the doc-page's
+    preview-pane jump-to-page UX. Existing chunks (no page attribution) keep
+    the previous behavior, pinned by the test above."""
+
+    async def _fake(question: str, **_kw: Any) -> FinalResponse:
+        chunk = Chunk(
+            chunk_id="abc12345#p6",
+            document_id="abc12345",
+            document_title="Module 1",
+            text="LED indicators table.",
+            page=6,
+            heading_path=["Switch LED Indicators (Cont.)"],
+        )
+        return FinalResponse(
+            answered=True,
+            summary="LED indicators.",
+            claims=[
+                CitedClaim(
+                    claim="STAT amber means port-blocked.",
+                    source_chunk_id="abc12345#p6",
+                    confidence="high",
+                )
+            ],
+            used_chunks=[chunk],
+            wikilinks=[],
+            correlation_id="01HZPAGE0000000000000000",
+            tokens_used=10,
+            nodes_traversed=4,
+            regenerate_attempts=0,
+        )
+
+    monkeypatch.setattr("memex.webui.app.answer_query", _fake)
+    text = await _ask_to_completion(client.app, "what does amber STAT mean?")
+    # The link carries the page hint three ways: the URL param (cross-page
+    # navigation), the data-page attribute (same-page JS scroll), and the
+    # visible label (so the reader can see WHICH page they're being sent to).
+    assert 'data-page="6"' in text
+    assert 'href="/documents/abc12345?page=6#switch-led-indicators-cont' in text
+    assert "· p. 6" in text
+
+
+@pytest.mark.asyncio
 async def test_ask_renders_refusal(client: TestClient, fake_refused: None) -> None:
     text = await _ask_to_completion(client.app, "What is the etymology?")
     assert "Refused" in text
@@ -726,6 +773,13 @@ async def test_document_view_renders_pane_split_when_pdf_present(
     # defers offscreen pages — without it every row reads as in-viewport and
     # all pages render on initial load (the stale-cache foot-gun we just hit).
     assert "--pdf-page-aspect: 1280.000 / 720.000" in r.text
+    # Each preview <img> carries `id="page-{1-based}"` so a claim's
+    # `data-page="N"` can `scrollIntoView` to it (the click-source→jump-to-PDF
+    # UX). The inline `<script>` is gated on `has_preview` so it only ships
+    # when a preview exists.
+    assert 'id="page-1"' in r.text
+    assert 'id="page-2"' in r.text
+    assert "scrollPreviewTo" in r.text  # the inline script's hook
 
 
 def test_document_view_renders_solo_when_no_source(

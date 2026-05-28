@@ -418,7 +418,54 @@ def _split_section_into_chunks(
     return chunks
 
 
-def chunk_document(doc: VaultDocument) -> list[Chunk]:
+def page_intervals(page_char_counts: list[tuple[int, int]]) -> list[tuple[int, int, int]] | None:
+    """Cumulative `(page_no, char_start, char_end)` intervals against the joined
+    body, computed from a `[(page_no, char_count), ...]` list (one tuple per page,
+    in reading order). The body is `"\\n\\n".join(per_page_md)` — every parse path
+    uses that delimiter — so each page interval starts at the cumulative sum of
+    previous pages' char_counts + 2-char delimiters. Returns `None` when every
+    page's char_count is 0 (the "page mapping unavailable" sentinel — legacy
+    manifests written before `PageDecision.char_count` existed) so the caller
+    knows to skip page attribution rather than collapsing every chunk to page 1.
+
+    Pure + deterministic — pinned by unit tests.
+    """
+    if not page_char_counts or all(c == 0 for _, c in page_char_counts):
+        return None
+    intervals: list[tuple[int, int, int]] = []
+    cursor = 0
+    for i, (page_no, cc) in enumerate(page_char_counts):
+        start = cursor
+        end = start + cc
+        intervals.append((page_no, start, end))
+        cursor = end
+        if i < len(page_char_counts) - 1:
+            cursor += 2  # "\n\n" delimiter
+    return intervals
+
+
+def _page_for_offset(intervals: list[tuple[int, int, int]], offset: int) -> int | None:
+    """Find the page whose interval contains `offset`. Linear scan — the
+    intervals list is short (one entry per page; a typical doc has 10-100,
+    a 49-page deck is the long tail). A chunk just past the LAST page's
+    `end` (post-stitch drift; chart-OCR / table linearization can append
+    content after the per-page char_counts were recorded) attributes to
+    the LAST page rather than `None`."""
+    if not intervals:
+        return None
+    for page_no, start, end in intervals:
+        if start <= offset < end:
+            return page_no
+    # Past the last page's recorded end — attribute to the last page (drift
+    # from post-stitch transforms; documented limitation).
+    return intervals[-1][0]
+
+
+def chunk_document(
+    doc: VaultDocument,
+    *,
+    page_char_counts: list[tuple[int, int]] | None = None,
+) -> list[Chunk]:
     """Produce the canonical chunk list for a vault document.
 
     Reads target window + overlap from `IndexSettings` (live, not at
@@ -430,6 +477,15 @@ def chunk_document(doc: VaultDocument) -> list[Chunk]:
     `OVERLAP_TOKENS`) when settings haven't been initialised — keeps
     pure-function tests that call the chunker directly working without
     needing a `set_settings` fixture.
+
+    `page_char_counts` is optional `[(page_no, char_count), ...]` from
+    `ParseStage.pages` — when provided AND any page has a non-zero
+    char_count, each chunk's `char_start` is binary-searched into the
+    page intervals and `Chunk.page` is populated (drives the webui's
+    click-source→jump-to-PDF-page UX). When omitted or all-zero (legacy
+    manifests), `Chunk.page` stays `None` and the webui falls back to
+    section-only anchors. HARD-gate-neutral (a derived navigation
+    metadata field; never alters retrieval or grounding).
     """
     try:
         settings = get_settings()
@@ -440,6 +496,7 @@ def chunk_document(doc: VaultDocument) -> list[Chunk]:
         overlap = OVERLAP_TOKENS
 
     title = doc.frontmatter.title or doc.ref.doc_id
+    intervals = page_intervals(page_char_counts) if page_char_counts else None
     # Post-audit perf fix (2026-05-23): compute chart-extracted spans
     # ONCE per document instead of N+1 times (once in
     # `_split_into_sections`, then once per `_heading_path_at` call
@@ -455,12 +512,14 @@ def chunk_document(doc: VaultDocument) -> list[Chunk]:
             overlap_tokens=overlap,
         ):
             heading_path = _heading_path_at(doc.body, cs, chart_spans=chart_spans)
+            page = _page_for_offset(intervals, cs) if intervals else None
             out.append(
                 Chunk(
                     chunk_id=_stable_chunk_id(doc.ref.doc_id, text),
                     document_id=doc.ref.doc_id,
                     document_title=title,
                     text=text,
+                    page=page,
                     char_start=cs,
                     char_end=ce,
                     heading_path=heading_path,

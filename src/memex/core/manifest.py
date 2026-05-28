@@ -37,13 +37,24 @@ class IngestStage(BaseModel):
 
 
 class PageDecision(BaseModel):
-    """Per-page parse engine routing record."""
+    """Per-page parse engine routing record.
+
+    `char_count` is the per-page markdown length AT JOIN TIME (before any
+    post-stitch transforms like chart-OCR or GFM-table linearization) — used
+    by the chunker to attribute each chunk to its dominant source page (for
+    the click-source→jump-to-PDF-page UX in the webui). `0` is the legacy
+    default: docs parsed before this field was added carry `char_count=0`
+    across all pages, which the chunker reads as "page mapping unavailable"
+    and falls back to section-anchor-only navigation (no regression). Newly
+    parsed/re-parsed docs populate it.
+    """
 
     page: int
     engine: Literal["docling", "vlm", "passthrough", "pymupdf", "scan"]
     confidence: float
     rationale: str = ""
     duration_ms: int = 0
+    char_count: int = 0
 
 
 class ParseStage(BaseModel):

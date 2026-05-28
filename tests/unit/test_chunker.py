@@ -9,7 +9,9 @@ import pytest
 from memex.index.chunker import (
     OVERLAP_TOKENS,
     TARGET_TOKENS,
+    _page_for_offset,
     chunk_document,
+    page_intervals,
 )
 from memex.vault.store import DocumentRef, Frontmatter, VaultDocument
 
@@ -315,3 +317,63 @@ def test_prose_chunk_ids_identical_across_runs_and_versus_no_table_doc() -> None
     # The prose has no `|---|` rows at all → no chunk should carry a synthetic
     # delimiter row (proves the table machinery never touched it).
     assert all(_TABLE_DELIM not in c.text for c in run_a)
+
+
+# --- chunk → source-page attribution (drives the webui's click-source UX) ---
+
+
+def test_page_intervals_cumulates_with_delimiter() -> None:
+    """Pages are joined with `\\n\\n` (2 chars) — each next page's interval starts
+    at the prior end + 2. Pinned so a refactor of the join-delimiter convention
+    can't silently shift the chunker's page mapping."""
+    intervals = page_intervals([(1, 100), (2, 50), (3, 80)])
+    assert intervals == [(1, 0, 100), (2, 102, 152), (3, 154, 234)]
+
+
+def test_page_intervals_all_zero_returns_none() -> None:
+    """Legacy manifest sentinel — every char_count=0 means the parser didn't
+    record per-page sizes, so the chunker MUST treat it as 'no mapping' and
+    skip attribution (else it would collapse every chunk to page 1)."""
+    assert page_intervals([(1, 0), (2, 0)]) is None
+    assert page_intervals([]) is None
+
+
+def test_page_for_offset_picks_containing_interval() -> None:
+    intervals = [(1, 0, 100), (2, 102, 152), (3, 154, 234)]
+    assert _page_for_offset(intervals, 0) == 1
+    assert _page_for_offset(intervals, 99) == 1
+    assert _page_for_offset(intervals, 102) == 2
+    assert _page_for_offset(intervals, 234) == 3  # past last end → falls to last page
+
+
+def test_chunk_document_attributes_pages_when_counts_given() -> None:
+    """End-to-end: with per-page char counts threaded in, each chunk gets
+    `Chunk.page` set from its `char_start`. Two-paragraph body large enough
+    to split into a section and a chunk per page."""
+    body = "# H1\n\nFirst page content.\n\n# H2\n\nSecond page content."
+    # Pretend the source had two pages of ~25 chars each (the actual values
+    # don't matter for the attribution logic — only the cumulative offsets do).
+    counts = [(1, 25), (2, len(body) - 27)]  # 27 = first page + the "\n\n" delimiter
+    chunks = chunk_document(_doc(body), page_char_counts=counts)
+    assert chunks  # non-empty
+    pages = [c.page for c in chunks]
+    assert all(p is not None for p in pages)
+    # The first chunk starts at 0 → page 1; later chunks past the delimiter → page 2.
+    assert pages[0] == 1
+
+
+def test_chunk_document_skips_attribution_on_legacy_zero_counts() -> None:
+    """A doc with a manifest predating `PageDecision.char_count` (all zeros)
+    must NOT collapse every chunk to page 1 — `Chunk.page` stays `None`,
+    the webui falls back to section-only anchors (no regression)."""
+    body = "# H\n\nA paragraph that fits in one chunk."
+    chunks = chunk_document(_doc(body), page_char_counts=[(1, 0), (2, 0)])
+    assert chunks
+    assert all(c.page is None for c in chunks)
+
+
+def test_chunk_document_default_page_none_when_no_counts() -> None:
+    """`page_char_counts=None` (the default) keeps the legacy behavior —
+    `Chunk.page` is None, byte-identical to pre-attribution chunkers."""
+    chunks = chunk_document(_doc("# H\n\nA tiny paragraph."))
+    assert all(c.page is None for c in chunks)

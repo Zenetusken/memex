@@ -179,7 +179,22 @@ async def index_document(doc_id: str, *, force: bool = False) -> IndexResult:
     start = time.monotonic()
 
     doc = await read_document(settings.vault_path, doc_id)
-    new_chunks = chunk_document(doc)
+    # One manifest read serves both (a) the parse stage's per-page char counts
+    # below (chunker page attribution → the webui's click-source→jump-to-PDF-page
+    # UX) and (b) the embedder/recipe drift checks further down. A second
+    # `read_manifest` call would race a concurrent watcher / re-parse — single
+    # snapshot keeps the chunker, the force-detection, and the recorded recipe
+    # all consistent.
+    prior_manifest = await read_manifest(settings.vault_path, doc_id)
+    # Legacy manifests written before `PageDecision.char_count` existed carry
+    # all-zero counts → `chunk_document` treats that as "no mapping available"
+    # and leaves `Chunk.page` as `None` (the webui falls back to section-only
+    # anchors; no regression). Same fallback when there's no manifest yet (very
+    # first index call).
+    page_char_counts: list[tuple[int, int]] | None = None
+    if prior_manifest is not None and prior_manifest.parse is not None:
+        page_char_counts = [(p.page, p.char_count) for p in prior_manifest.parse.pages]
+    new_chunks = chunk_document(doc, page_char_counts=page_char_counts)
     new_by_id = {c.chunk_id: c for c in new_chunks}
     new_ids = set(new_by_id.keys())
 
@@ -195,7 +210,7 @@ async def index_document(doc_id: str, *, force: bool = False) -> IndexResult:
     # from the one recorded the last time we indexed this doc, the
     # existing vectors are in the wrong space — force a full re-embed.
     if not force:
-        prior = await read_manifest(settings.vault_path, doc_id)
+        prior = prior_manifest
         if prior is not None and prior.index is not None:
             if prior.index.embedding_model != settings.models.embedder:
                 log.info(
