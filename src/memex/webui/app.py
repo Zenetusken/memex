@@ -101,7 +101,13 @@ from memex.webui.progress import (
     phase_for,
     summary_phase_view,
 )
-from memex.webui.rendering import extract_toc, render_body_html, render_wikilink, slugify_heading
+from memex.webui.rendering import (
+    clean_heading_text,
+    extract_toc,
+    render_body_html,
+    render_wikilink,
+    slugify_heading,
+)
 
 _HERE = Path(__file__).parent
 _TEMPLATES_DIR = _HERE / "templates"
@@ -271,7 +277,11 @@ def _source_view(response: FinalResponse) -> tuple[dict[str, dict[str, str]], di
     chunk_refs: dict[str, dict[str, str]] = {}
     doc_titles: dict[str, str] = {}
     for c in response.used_chunks:
-        section = c.heading_path[-1] if c.heading_path else ""
+        # Clean inline-markdown (`**bold**`, `[x](url)`, `` `code` ``) out of the
+        # heading text — a parsed heading like `**Zero Trust Architecture**` would
+        # otherwise show its literal asterisks in the source chip. Same cleaner the
+        # TOC uses; the slug (href) is derived independently via `slugify_heading`.
+        section = clean_heading_text(c.heading_path[-1]) if c.heading_path else ""
         page_str = str(c.page) if c.page is not None else ""
         href = f"/documents/{c.document_id}"
         if page_str:

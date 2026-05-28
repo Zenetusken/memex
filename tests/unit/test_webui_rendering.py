@@ -479,6 +479,17 @@ def test_render_wikilink_uses_title_map() -> None:
     assert ">6cf-notes" not in out  # the doc-id is not the visible label
 
 
+def test_render_wikilink_cleans_inline_markdown_in_section() -> None:
+    """A parsed heading like `**Zero Trust Architecture**` must show as clean
+    text (not literal asterisks) in the Sources label, and slug off the CLEANED
+    text so the href matches the doc-page anchor (which `_walk_headings` builds
+    from the cleaned label). The raw section stays in the `title=` tooltip."""
+    out = str(render_wikilink("[[nist-207#**Zero Trust Architecture**]]", {"nist-207": "NIST 207"}))
+    assert "NIST 207 › Zero Trust Architecture" in out  # no `**` in the label
+    assert "**" not in out.split('title="')[0]  # no asterisks in the visible label/href
+    assert 'href="/documents/nist-207#zero-trust-architecture"' in out  # slug off cleaned text
+
+
 def test_render_wikilink_bare_doc_has_no_fragment() -> None:
     """A bare `[[doc]]` → `/documents/doc` with NO `#` fragment."""
     out = str(render_wikilink("[[doc]]"))

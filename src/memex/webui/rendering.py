@@ -230,8 +230,14 @@ def render_wikilink(wikilink: str, titles: dict[str, str] | None = None) -> Mark
     target = parse_wikilink(match.group(1))
     doc_label = (titles or {}).get(target.doc_id, target.doc_id)
     if target.section:
-        href = f"/documents/{target.doc_id}#{slugify_heading(target.section)}"
-        label = f"{doc_label} › {target.section}"  # "Title › Section"
+        # Clean inline-markdown out of the section for DISPLAY + slug (a parsed
+        # heading like `**Zero Trust Architecture**` would otherwise show literal
+        # asterisks and slug off the raw text — mismatching the doc-page anchor,
+        # which `_walk_headings` builds from the cleaned label). The raw section
+        # stays in the `title=` tooltip for traceability.
+        section_label = clean_heading_text(target.section)
+        href = f"/documents/{target.doc_id}#{slugify_heading(section_label)}"
+        label = f"{doc_label} › {section_label}"  # "Title › Section"
         tip = f"{target.doc_id}#{target.section}"
     else:
         href = f"/documents/{target.doc_id}"
