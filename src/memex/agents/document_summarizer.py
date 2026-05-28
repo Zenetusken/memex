@@ -107,16 +107,27 @@ _MAX_SECTION_CHUNKS = 16
 # The prompt template's per-chunk `truncate(N)` — kept in sync here so the input
 # budget below can predict the real prompt size.
 _CHUNK_TRUNCATE_CHARS = 1_800
-# Hard cap on the chunk-text a SINGLE map/ground call may show. Sized to fit the
-# SMALLEST co-residence window (fast = 6,144 tokens): ~12k chars ≈ ~3k tokens,
-# leaving room for the prompt scaffold + the bounded output. This is the load-
-# bearing guarantee behind the "baseline rule": because the per-call input is
-# bounded to fit fast, it is IDENTICAL in fast and full mode, so the summary's
-# quality is independent of the mode (the mode only changes speed/capacity, never
-# what the summarizer sees). A section larger than this is truncated identically
-# in both modes; sub-splitting a huge section across multiple MAP calls (so none
-# of its content is dropped) is a deferred refinement (ADR-0008).
-_MAX_SECTION_INPUT_CHARS = 12_000
+# Hard cap on the RENDERED prompt size (per-chunk text + wrapper) a SINGLE map/ground
+# call may show — the budget the packers/splitter enforce via `_chunk_budget_chars`. The
+# MAP call is budget-binding: it requests up to ~2,048 output tokens inside the SMALLEST
+# (fast = 6,144) window, so the rendered input must clear ~6,144 − 2,048 = ~4,096 tokens.
+# At the densest realistic ~2.7 chars/token, 10k rendered chars ≈ 3.7k tokens, +2,048
+# output ≈ 5.8k < 6,144 (margin ~350). CRUCIAL: the budget counts the per-chunk WRAPPER
+# (the ~65-char content-addressed chunk_id + the repeated doc title + formatting), NOT
+# just the text — a packed deck holds 20-59 tiny slide-chunks, so a text-ONLY budget of
+# 9,500 rendered to 18k chars / 6.6k tokens and the section MAP 400'd → the section was
+# silently DROPPED (caught by `_map_section`; surfaced by scripts/report_structure_audit.py
+# on the CUDA deck). This is the load-bearing guarantee behind the "baseline rule": the
+# per-call input is bounded to fit fast, so it is IDENTICAL in fast and full mode →
+# summary quality is mode-independent. A section larger than this is sub-split across MAP
+# calls (`_split_section_into_batches`, no content dropped); a lone over-budget chunk is
+# truncated by the prompt's per-chunk `truncate`, identically per mode.
+_MAX_SECTION_INPUT_CHARS = 10_000
+# Per-chunk rendered overhead beyond its text: the literal scaffolding in
+# `summarize_section`'s chunk loop — `- [{chunk_id}] {document_title} (p.{page})\n  > …\n`.
+# The chunk_id + doc-title lengths are added per chunk in `_chunk_budget_chars`; this is
+# just the fixed literals (`- []  (p.) \n  > \n` + a short page no.), rounded up.
+_CHUNK_WRAPPER_FIXED_CHARS = 24
 # Doc-level key-point cap (mirrors DocSummary intent); section list cap.
 _MAX_DOC_KEY_POINTS = 12
 _MAX_SECTIONS = 40
@@ -143,6 +154,18 @@ _REPORT_MAX_SECTIONS_PER_PARAGRAPH = 6
 # ~this many sections per paragraph. Keeps paragraphs full + faithful regardless of the
 # model's compliance with the "combine" instruction.
 _REPORT_TARGET_SECTIONS_PER_PARAGRAPH = 4
+# Cross-paragraph dedup (ADR-0010). The 8B re-covers a topic when its OWN sections overlap a
+# prior paragraph's — IGNORING the reduce prompt's strong "do NOT repeat" rule AND the full
+# rolling `preceding` context (confirmed live on SRWE-Module-5: root-bridge election written
+# in two adjacent paragraphs; two paragraphs sharing a "Module Practice and Quiz" closer).
+# Prompt-only anti-repetition is a known dead end on this model (the OPENING-pattern repeat
+# needed a STRUCTURAL fix — the branched prompt — not an instruction). So a DETERMINISTIC
+# gate drops a sentence whose content tokens are already >this fraction covered by a SINGLE
+# earlier kept sentence (overlap-PRECISION, so merely sharing a few common terms survives).
+# Lexical → always-on + reproducible (the confidence embedder degrades under VRAM pressure,
+# so it can't be the dedup signal). HARD-gate-safe: only REMOVES already-grounded prose,
+# never adds — it cannot introduce an ungrounded assertion.
+_REPORT_DEDUP_THRESHOLD = 0.7
 # Output reservation for the small GROUND/REDUCE calls (a verification index-list /
 # a short abstract) — kept tight so prompt + output clears the fast window.
 _VERIFY_MAX_TOKENS = 768
@@ -235,6 +258,21 @@ def _should_pack_sections(sections: list[tuple[str, list[Chunk]]]) -> bool:
     return tiny / len(sections) >= _PACK_TINY_FRACTION
 
 
+def _chunk_budget_chars(c: Chunk) -> int:
+    """A chunk's REAL contribution to the rendered MAP/GROUND prompt: its (truncated) text
+    PLUS the per-chunk wrapper (`- [{chunk_id}] {doc_title} (p.{page})\\n  > …`). The
+    wrapper is dominated by the long content-addressed chunk_id + the repeated doc title, so
+    a text-ONLY budget under-counts a packed deck's many tiny slide-chunks by thousands of
+    chars → window overflow + dropped sections. All the window-budget packers measure with
+    THIS so the cap reflects the rendered size, not just the text."""
+    return (
+        min(len(c.text), _CHUNK_TRUNCATE_CHARS)
+        + len(c.chunk_id)
+        + len(c.document_title or "")
+        + _CHUNK_WRAPPER_FIXED_CHARS
+    )
+
+
 def _pack_sections(
     sections: list[tuple[str, list[Chunk]]], max_chars: int
 ) -> list[tuple[str, list[Chunk]]]:
@@ -248,7 +286,7 @@ def _pack_sections(
     buf_chunks: list[Chunk] = []
     buf_total = 0
     for sec_title, sec_chunks in sections:
-        sec_chars = sum(min(len(c.text), _CHUNK_TRUNCATE_CHARS) for c in sec_chunks)
+        sec_chars = sum(_chunk_budget_chars(c) for c in sec_chunks)
         if buf_chunks and buf_total + sec_chars > max_chars:
             groups.append((buf_title, buf_chunks))
             buf_title, buf_chunks, buf_total = "", [], 0
@@ -270,7 +308,7 @@ def _bound_section_chunks(chunks: list[Chunk]) -> list[Chunk]:
     out: list[Chunk] = []
     total = 0
     for c in chunks[:_MAX_SECTION_CHUNKS]:
-        clen = min(len(c.text), _CHUNK_TRUNCATE_CHARS)  # mirrors the prompt truncate
+        clen = _chunk_budget_chars(c)  # text + per-chunk wrapper (mirrors the rendered prompt)
         if out and total + clen > _MAX_SECTION_INPUT_CHARS:
             break
         out.append(c)
@@ -291,7 +329,7 @@ def _split_section_into_batches(chunks: list[Chunk], max_chars: int) -> list[lis
     cur: list[Chunk] = []
     total = 0
     for c in chunks:
-        clen = min(len(c.text), _CHUNK_TRUNCATE_CHARS)
+        clen = _chunk_budget_chars(c)
         if cur and total + clen > max_chars:
             batches.append(cur)
             cur = []
@@ -416,8 +454,12 @@ async def _reduce(
     *,
     scope_note: str = "",
     preceding: str = "",
-) -> tuple[str, int]:
+) -> tuple[DocAbstract, int]:
     """Synthesize the per-section digests into a whole-document abstract.
+
+    Returns the `DocAbstract` (not just its joined `.abstract` string) so the report
+    route can dedup at the SENTENCE level across paragraphs; the single-level caller
+    reads `.abstract` as before.
 
     `scope_note` (default "") overrides the prompt's scope framing. Empty = the
     whole-document overview (the single-level reduce — byte-identical to before).
@@ -444,8 +486,8 @@ async def _reduce(
         )
     except ModelCallError as e:
         logger.warning("summarize.reduce_failed", error=str(e)[:160])
-        return "", 0
-    return overview.abstract, tokens
+        return DocAbstract(sentences=[]), 0
+    return overview, tokens
 
 
 async def _plan_report_structure(
@@ -463,9 +505,12 @@ async def _plan_report_structure(
     only the grouping changes, never grounding."""
     log = logger.bind(node="summarize")
     n = len(sections)
+    # Coalesce fullness target — tunable (default `_REPORT_TARGET_SECTIONS_PER_PARAGRAPH`)
+    # via `report_coalesce_target` so the report-structure validator can sweep it.
+    coalesce_target = get_settings().agents.report_coalesce_target
     # Suggest a paragraph count so the model combines (~target sections each) instead of
     # breaking at every section; the coalesce guardrail below enforces it regardless.
-    target_paragraphs = max(2, round(n / _REPORT_TARGET_SECTIONS_PER_PARAGRAPH))
+    target_paragraphs = max(2, round(n / coalesce_target))
     # A bounded, indexed digest preview per section (truncated so the plan prompt fits the
     # fast window even for a many-section doc) — the model picks break points over these.
     sections_block = "\n".join(
@@ -512,7 +557,7 @@ async def _plan_report_structure(
     cur: list[SectionSummary] = []
     for g in raw_groups:
         if cur and (
-            len(cur) >= _REPORT_TARGET_SECTIONS_PER_PARAGRAPH
+            len(cur) >= coalesce_target
             or len(cur) + len(g) > _REPORT_MAX_SECTIONS_PER_PARAGRAPH
         ):
             groups.append(cur)
@@ -578,6 +623,29 @@ def _lexical_overlap(paragraph: str, source: str) -> float:
     s_bi = set(pairwise(s))
     bi = sum(1 for b in p_bi if b in s_bi) / len(p_bi)
     return 0.7 * uni + 0.3 * bi
+
+
+def _dedup_sentences(sentences: list[str], kept_token_sets: list[set[str]]) -> list[str]:
+    """Return the `sentences` that ADD content, and append each survivor's content-token
+    set to `kept_token_sets` (the running ledger across the WHOLE report). A sentence is a
+    cross-paragraph REPEAT — dropped — when >`_REPORT_DEDUP_THRESHOLD` of its content tokens
+    already appear in a SINGLE earlier kept sentence (overlap-precision against the best
+    match, so a sentence merely sharing a few common terms survives). Deterministic +
+    HARD-gate-safe: it only removes already-grounded prose, so it can never add an
+    ungrounded assertion. The ledger is per-sentence (not a pooled union) so a genuinely
+    novel sentence isn't dropped just because its words appear scattered across earlier
+    sentences."""
+    survivors: list[str] = []
+    for sent in sentences:
+        toks = set(_content_tokens(sent))
+        if toks and any(
+            len(toks & kept) / len(toks) > _REPORT_DEDUP_THRESHOLD for kept in kept_token_sets
+        ):
+            continue
+        survivors.append(sent)
+        if toks:
+            kept_token_sets.append(toks)
+    return survivors
 
 
 async def _embedding_alignment(paragraphs: list[str], sources: list[str]) -> list[float] | None:
@@ -686,6 +754,8 @@ async def _reduce_report(
         ]
     paragraphs: list[str] = []
     para_groups: list[list[SectionSummary]] = []  # the source group per emitted paragraph
+    kept_tokens: list[set[str]] = []  # content-token set of every KEPT sentence (cross-para dedup)
+    sentences_in = sentences_kept = 0  # dedup observability
     n = len(groups)
     for gi, group in enumerate(groups):
         emit(f"Reducing · paragraph {gi + 1} of {n}")
@@ -708,7 +778,7 @@ async def _reduce_report(
         # inside the fast window in the pathological many-paragraph case.
         running = "\n\n".join(paragraphs) if (paragraphs and gi > 0) else ""
         preceding = running[-4000:]
-        paragraph, t = await _reduce(
+        da, t = await _reduce(
             title,
             group,
             instruction,
@@ -718,9 +788,25 @@ async def _reduce_report(
             preceding=preceding,
         )
         tokens_total += t
-        if paragraph:
-            paragraphs.append(paragraph)
+        # DETERMINISTIC cross-paragraph dedup: keep only this paragraph's sentences that add
+        # content not already covered (the rolling `preceding` + prompt rule above don't stop
+        # the 8B re-covering a topic when its own sections overlap a prior paragraph). A
+        # paragraph emptied by dedup is wholly redundant → dropped (so `preceding` for the
+        # next group also reflects the deduped text, and `para_groups` stays aligned).
+        survivors = _dedup_sentences(da.sentences, kept_tokens)
+        sentences_in += len(da.sentences)
+        sentences_kept += len(survivors)
+        if survivors:
+            paragraphs.append(" ".join(survivors))
             para_groups.append(group)
+    # Observability (ADR-0004): how much the dedup gate removed (inform-only).
+    logger.bind(node="summarize").info(
+        "report.dedup",
+        sentences_in=sentences_in,
+        kept=sentences_kept,
+        dropped=sentences_in - sentences_kept,
+        paragraphs=len(paragraphs),
+    )
     # Close the loop: score each paragraph's faithfulness to the digests it was built
     # from (ADR-0010, inform-only — never gates). `para_groups` stays aligned with the
     # paragraphs actually emitted (a group that produced nothing is skipped from both).
@@ -985,12 +1071,22 @@ async def summarize_document(
         # Rank tables by salience (not document order) so the headline data tables
         # win the window budget on a many-table doc.
         table_chunks = _table_chunks(doc_id, _rank_tables(tables), doc_title) if is_tabular else []
-        # Deck/tiny-sectioned: pack thin slide-sections into substantive MAP units.
+        # Deck/tiny-sectioned: pack thin slide-sections into substantive MAP units. For
+        # `report` detail, pack to the (tunable, default = window) `report_pack_chars` —
+        # SMALLER packs a deck into MORE, finer section_summaries, so the report planner has
+        # the granularity to build a richer multi-paragraph structure (ADR-0010). Standard
+        # detail keeps the full window. Each packed group is still ≤ the window, so the MAP
+        # call's mode-independence holds.
         should_pack = route == "long" and _should_pack_sections(sections)
+        pack_chars = (
+            min(settings.agents.report_pack_chars, _MAX_SECTION_INPUT_CHARS)
+            if detail == "report"
+            else _MAX_SECTION_INPUT_CHARS
+        )
         if route == "short":
             groups = [(doc_title, chunks)]
         elif should_pack:
-            groups = _pack_sections(sections, _MAX_SECTION_INPUT_CHARS)
+            groups = _pack_sections(sections, pack_chars)
         else:
             groups = sections[:_MAX_SECTIONS]
         guidance = _DETAIL_GUIDANCE[detail]
@@ -1129,10 +1225,11 @@ async def summarize_document(
             tokens_total += t_r
         else:
             _emit("Reducing")
-            abstract, t_r = await _reduce(
+            da, t_r = await _reduce(
                 doc_title, section_summaries, instruction, max_output_tokens, guidance["abstract"]
             )
             tokens_total += t_r
+            abstract = da.abstract
         if not abstract:
             # Fallback: synthesize a headline from the grounded points (never empty).
             abstract = " ".join(kp.claim for kp in doc_points[:3])

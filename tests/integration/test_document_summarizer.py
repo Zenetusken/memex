@@ -144,7 +144,12 @@ def _fake_complete(
                 5,
             )
         if name == "DocAbstract":
-            return DocAbstract(sentences=["The whole-document abstract."]), 8
+            # Distinct per reduce call (real reduce output differs per section span) so the
+            # cross-paragraph dedup gate doesn't collapse the multi-paragraph report body —
+            # derived from the section titles shown in THIS reduce prompt.
+            titles = re.findall(r"^## (.+)$", prompt, flags=re.MULTILINE)
+            tag = "-".join(t.strip() for t in titles) or "doc"
+            return DocAbstract(sentences=[f"Abstract of {tag}."]), 8
         raise AssertionError(f"unexpected schema {name!r}")
 
     return _complete
@@ -163,7 +168,7 @@ async def test_long_doc_map_reduce_grounded(
     resp = await ds.summarize_document("docA")
 
     assert resp.answered
-    assert resp.summary == "The whole-document abstract."  # REDUCE produced it
+    assert resp.summary == "Abstract of Intro-Methods."  # REDUCE produced it (from both sections)
     assert [s.section_title for s in resp.sections] == ["Intro", "Methods"]  # heading fallback
     assert all(len(s.key_points) == 1 for s in resp.sections)  # each grounded
     assert len(resp.claims) == 2  # doc-level points = grounded section points
@@ -305,7 +310,9 @@ async def test_report_planner_coalesces_oversplit(
 ) -> None:
     """ADR-0010 coalesce guardrail: an 8B that OVER-splits (a break at every section) must
     not shatter the report. With 9 sections and a break at all 9, the runs are coalesced up
-    to `_REPORT_TARGET_SECTIONS_PER_PARAGRAPH` → ~3 fuller paragraphs, NOT 9 singletons."""
+    to `report_coalesce_target` → fuller paragraphs, NOT 9 singletons. Pins the target to 4
+    (independent of the shipped default) → groups of 4,4,1 = 3 paragraphs."""
+    _settings.agents.report_coalesce_target = 4  # pin: test the behavior, not the live default
     chunks = [_chunk(f"docA#{i}", f"H{i}", chr(97 + i) * 9_000) for i in range(9)]
     monkeypatch.setattr(ds, "FTSStore", _FakeFTS)
     monkeypatch.setattr(_FakeFTS, "chunks", chunks)
@@ -586,9 +593,13 @@ async def test_long_doc_sub_splits_huge_section_no_content_dropped(
     # the huge "Big" section was split into multiple parts (not truncated to one)
     big_parts = [s for s in resp.sections if s.section_title.startswith("Big (part")]
     assert len(big_parts) >= 2
-    # a chunk from the LATE batch is cited → its content was summarized, not dropped
+    # a chunk from a LATE batch is cited → its content was summarized, not dropped.
+    # The fake cites the first chunk of each window-sized batch; with 14 z-chunks the
+    # last batch starts well past b0, so the highest cited b-index must be late.
+    # (Boundary-robust: independent of the exact `_MAX_SECTION_INPUT_CHARS` value.)
     cited = {kp.source_chunk_id for kp in resp.claims}
-    assert "docA#b12" in cited
+    big_cited = sorted(int(c.split("#b")[1]) for c in cited if "#b" in c)
+    assert big_cited and big_cited[-1] >= 5
 
 
 @pytest.mark.asyncio
@@ -706,3 +717,56 @@ async def test_used_chunks_covers_every_section_key_point(
     # The corrupted ids were REPAIRED (snapped to real ids), not left mangled —
     # so no "docAXX#" survives and there's nothing for a fallback to render.
     assert all("docAXX#" not in cid for cid in section_cited)
+
+
+@pytest.mark.asyncio
+async def test_report_dedups_repeated_sentence_across_paragraphs(
+    _settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The cross-paragraph dedup gate (ADR-0010): a sentence repeated across batches is
+    kept ONCE — the 8B re-covers a topic when its sections overlap a prior paragraph's,
+    ignoring the reduce prompt's anti-repeat rule (confirmed live on SRWE-Module-5: a
+    repeated 'Module Practice and Quiz' closer). Deterministic + HARD-gate-safe (only
+    removes already-grounded prose)."""
+    chunks = [_chunk(f"docA#{i}", f"H{i}", chr(97 + i) * 9_000) for i in range(9)]
+    monkeypatch.setattr(ds, "FTSStore", _FakeFTS)
+    monkeypatch.setattr(_FakeFTS, "chunks", chunks)
+    monkeypatch.setattr(ds, "_embedding_alignment", _no_embed)  # lexical-only, no model load
+
+    repeat = "Module practice and quiz assessments reinforce understanding of these concepts."
+
+    async def _fake(
+        prompt: str, schema: type, max_tokens: int = 0, prompt_tag: str = "", **_kw: Any
+    ) -> tuple[Any, int]:
+        name = schema.__name__
+        if name == "ReportStructure":
+            return ReportStructure(paragraph_starts=[0]), 6  # trivial → mechanical batching
+        if name == "SectionSummary":
+            m = re.search(r"\[([^\]]*#[^\]]*)\]", prompt)
+            cid = m.group(1) if m else "docA#x"
+            return (
+                SectionSummary(
+                    section_title="",
+                    digest="digest",
+                    key_points=[CitedClaim(claim="p", source_chunk_id=cid, confidence="high")],
+                ),
+                10,
+            )
+        if name == "VerificationResult":
+            return schema(grounded=[0], ungrounded=[], ungrounded_reasons=[]), 5
+        if name == "DocAbstract":
+            # Each batch emits a DISTINCT point plus the SAME repeated closer.
+            titles = re.findall(r"^## (.+)$", prompt, flags=re.MULTILINE)
+            tag = "-".join(t.strip() for t in titles) or "doc"
+            return DocAbstract(sentences=[f"Distinct point about {tag}.", repeat]), 8
+        raise AssertionError(f"unexpected schema {name!r}")
+
+    monkeypatch.setattr(ds, "complete_structured", _fake)
+
+    resp = await ds.summarize_document("docA", detail="report")
+
+    assert resp.answered
+    # The repeated closer survives EXACTLY once across the whole report (deduped)…
+    assert resp.summary.count(repeat) == 1
+    # …while every batch's distinct point is preserved (no over-dedup of novel content).
+    assert resp.summary.count("Distinct point about") >= 2

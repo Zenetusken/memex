@@ -210,3 +210,59 @@ swap**: 6 paragraphs now cover distinct aspects (intro → method → experiment
 jumped **0.46 → 0.825** (embedding 0.85 + lexical 0.77 — the hybrid fully works on the
 non-swap path, where the embedder fits beside the 8B). So report mode now produces coherent,
 distinct, faithful paragraphs on thesis-heavy docs too — on the 12 GB rig, no swap needed.
+
+## Granularity tuning + the cross-paragraph dedup gate (2026-05-28)
+
+The Resolution above fixed ONE repetition class (the OPENING pattern — continuations
+re-introducing the *document*). Fine-tuning report granularity on slide decks surfaced a
+SECOND class and a latent correctness bug. A standalone STRUCTURE validator
+(`scripts/report_structure_audit.py` + corpus `tests/eval-data/report-structure/`) measures
+paragraphs / section_summaries / faithfulness-confidence / **distinctness** (1 − mean
+pairwise content-Jaccard) / unique-openers / must-not-assert leaks — the dimensions
+`eval-summary` (faithfulness) doesn't.
+
+**Budget-undercount overflow (fixed first — correctness, all packed-deck routes).** The
+pack/split budget counted only chunk TEXT and ignored the per-chunk prompt WRAPPER (the
+~65-char content-addressed `chunk_id` + the repeated doc title + formatting, ≈120-150
+chars/chunk). A packed deck holds 20-59 tiny slide-chunks per group, so a "9,500-char-text"
+group actually rendered to ~18k chars / 6.6k tokens; +2,048 output ≫ the 6,144 fast window
+→ the section MAP got a 400 → the section was **silently dropped** (content lost, granularity
+worsened). Fix: `_chunk_budget_chars` (text + `len(chunk_id)` + `len(doc_title)` + literals)
+is now the measure in `_pack_sections` / `_split_section_into_batches` / `_bound_section_chunks`,
+and `_MAX_SECTION_INPUT_CHARS` is a **RENDERED-char ceiling = 10,000** (fits 6,144 with the
+full 2,048-token output reservation at the densest ~2.7 chars/token; verified 0 overflows).
+
+**Granularity sweep → tuned defaults (pack 4,000 / coalesce 2).** A 4-config sweep (H0
+10k/4 corrected baseline → H1 6k/4 → H2 6k/3 → H3 4k/2) over 3 decks found the hypothesized
+granularity↔repetition tension **does not exist**: H3 (most aggressive) won EVERY axis — 4×
+the paragraphs (2→8 on packed decks) AND the highest confidence (0.769→0.839) AND the highest
+distinctness (0.872→0.909), 0 leaks. A narrower pack → each section digest covers fewer slides
+→ tighter grounding (confidence up) and each paragraph is a more specific sub-topic (less
+sibling-vocab overlap → distinctness up). Defaults locked to H3 (the two env knobs
+`report_pack_chars` / `report_coalesce_target` remain for re-tuning; they hit DIFFERENT deck
+profiles — `pack` only bites when `_should_pack_sections` fires on tiny-section decks,
+`coalesce` drives substantial-section decks).
+
+**The cross-paragraph dedup gate (the SECOND repetition class).** Browser-verifying H3 on a
+fresh 43-section deck (SRWE-Module-5) showed the branched prompt + full rolling `preceding`
+context do NOT stop the 8B re-covering a *topic* when its own sections overlap a prior
+paragraph's (root-bridge election written twice; two paragraphs sharing a "Module Practice
+and Quiz" closer). This is TOPICAL repetition, distinct from the OPENING-pattern class the
+prompt fixed — and prompt-only anti-repetition is a known dead end on this model. Topic-aware
+PLANNING can't fix it here either (the recovered H1 headings are too coarse — one H1 spans
+10-12 sections — and noisy). So `_reduce_report` applies a DETERMINISTIC gate
+(`_dedup_sentences`, threshold `_REPORT_DEDUP_THRESHOLD`=0.7): a sentence whose content tokens
+are >70% already covered by a SINGLE earlier kept sentence (overlap-PRECISION) is dropped;
+an emptied paragraph vanishes. LEXICAL by design → always-on and reproducible (the confidence
+embedder degrades under VRAM pressure, so it can't be the dedup signal). `_reduce` now returns
+the `DocAbstract` so the dedup runs at sentence granularity; a `report.dedup` log records the
+drop (ADR-0004). **HARD-gate-safe by construction:** it only REMOVES already-grounded prose,
+so it cannot introduce an ungrounded assertion. Verified live: the duplicate closer dropped
+(2/66 sentences), confidence held (0.829), 13 paragraphs preserved. **Residual (accepted):**
+purely-semantic overlap re-worded across paragraphs survives — catching it needs embeddings
+(non-deterministic) or feasible topical headings (absent on decks); the gate removes the
+egregious verbatim/near-verbatim repeats, which is the visible-quality win.
+
+**Validation:** `eval-summary` holds the no-hallucination HARD gate with H3 + dedup; the full
+suite is green (940) incl. +4 dedup tests (3 unit `_dedup_sentences`, 1 integration: a repeated
+closer kept once, distinct points preserved) + the budget-undercount fix.

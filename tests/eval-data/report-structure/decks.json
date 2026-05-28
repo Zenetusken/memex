@@ -1,0 +1,29 @@
+{
+  "_description": "Report-STRUCTURE audit corpus (ADR-0010 deck granularity). The standard `eval-summary` gates FAITHFULNESS (mention-recall + must_not_assert + summarize/refuse). This corpus measures the STRUCTURE/COHERENCE quality a granularity change targets — so a change can be compared against a baseline and checked for no-regression. Decks (heavily-packed → the granularity-limited case). Source docs stay LOCAL (tests/eval-data/README.md); only this config + the baseline ship.",
+  "_metrics": {
+    "paragraphs": "report-body paragraph count (structural granularity)",
+    "section_summaries": "upstream granularity the packing controls (fewer = coarser)",
+    "confidence_overall / confidence_min": "faithfulness (report_confidence; hybrid embedding+lexical)",
+    "distinctness": "1 - mean pairwise content-Jaccard between paragraphs; the ANTI-REPETITION metric (low = paragraphs repeat each other)",
+    "unique_openers": "distinct first-8-content-words / paragraphs (catches opener-repetition)",
+    "violations": "must_not_assert leaks (the no-hallucination HARD gate — must stay 0)"
+  },
+  "_success_criteria": "A granularity change is GOOD iff: mean_paragraphs UP vs baseline AND mean_distinctness >= baseline AND mean_confidence >= baseline-0.05 AND total_violations == 0 AND mean_unique_openers >= baseline. (More paragraphs WITHOUT new repetition / drift / hallucination.)",
+  "cases": [
+    {
+      "doc_id": "a2c31996-ensa-module-7-2021b",
+      "must_not_assert": ["Gaming revenue", "photosynthesis"],
+      "_note": "ENSA Module 7 (WAN Concepts) — the audit doc; packed 89 slides -> ~4 section_summaries. 'Gaming revenue' regression-gates the key-figures fix."
+    },
+    {
+      "doc_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640",
+      "must_not_assert": ["quantum computing", "Gaming revenue"],
+      "_note": "CUDA deck (also a summary-eval case) — tabular + packed; the key-figures + report compose here."
+    },
+    {
+      "doc_id": "bbef665b-ensa-module-6-2021",
+      "must_not_assert": ["Gaming revenue", "photosynthesis"],
+      "_note": "ENSA Module 6 — the most-sectioned deck (91 headings)."
+    }
+  ]
+}

@@ -14,6 +14,7 @@ from memex.agents.document_summarizer import (
     _MAX_TABLE_ROWS,
     _bound_section_chunks,
     _classify_route,
+    _dedup_sentences,
     _group_sections,
     _pack_sections,
     _rank_tables,
@@ -173,7 +174,7 @@ def test_pack_sections_caps_at_max_sections() -> None:
 
 
 def test_split_section_multi_batch_drops_no_content() -> None:
-    chunks = [_c(f"docA#{i}", "Big", "x" * 4000) for i in range(10)]  # 10×1800=18000 > 12000
+    chunks = [_c(f"docA#{i}", "Big", "x" * 4000) for i in range(10)]  # 10×1800=18000 > the cap
     batches = _split_section_into_batches(chunks, _MAX_SECTION_INPUT_CHARS)
     assert len(batches) > 1  # splits
     # every chunk lands in exactly one batch, in order — nothing truncated away
@@ -288,3 +289,46 @@ def test_select_doc_key_points_single_section_keeps_order() -> None:
     """A single-section doc is unchanged — points come out in their original order."""
     sections = [_ss("Only", ["p1", "p2", "p3"])]
     assert [c.claim for c in _select_doc_key_points(sections, cap=12)] == ["p1", "p2", "p3"]
+
+
+# ── cross-paragraph dedup gate (ADR-0010) — drop sentences that repeat earlier content ──
+
+
+def test_dedup_sentences_drops_near_restatement_keeps_novel() -> None:
+    """A later sentence that restates an earlier one (most of its content tokens already
+    covered by a SINGLE kept sentence) is dropped; a genuinely new one survives."""
+    kept: list[set[str]] = []
+    opening = _dedup_sentences(
+        ["Spanning Tree Protocol prevents Layer 2 loops by blocking redundant ports."], kept
+    )
+    assert len(opening) == 1 and kept  # the opening seeds the running ledger
+    survivors = _dedup_sentences(
+        [
+            # near-restatement of the opening → dropped
+            "Layer 2 loops are prevented by Spanning Tree Protocol blocking redundant ports.",
+            # genuinely new content → kept
+            "RSTP introduces backup and alternate port roles for faster convergence.",
+        ],
+        kept,
+    )
+    assert survivors == ["RSTP introduces backup and alternate port roles for faster convergence."]
+
+
+def test_dedup_sentences_keeps_sentence_sharing_only_common_terms() -> None:
+    """Sharing a few common terms with an earlier sentence is NOT a repeat (overlap is
+    measured as PRECISION against the best single match, not pooled across all priors)."""
+    kept: list[set[str]] = []
+    _dedup_sentences(["The root bridge is elected using the lowest bridge ID."], kept)
+    survivors = _dedup_sentences(
+        ["Designated ports forward frames on each network segment toward the root bridge."], kept
+    )
+    assert len(survivors) == 1  # only "root"/"bridge" shared → below threshold → survives
+
+
+def test_dedup_sentences_empty_and_exact_duplicate() -> None:
+    """An exact duplicate is dropped; the ledger only grows with content-bearing kept ones."""
+    kept: list[set[str]] = []
+    s = "Switches exchange BPDU frames to elect the root bridge of the topology."
+    assert _dedup_sentences([s], kept) == [s]
+    assert _dedup_sentences([s], kept) == []  # exact repeat dropped
+    assert len(kept) == 1  # ledger unchanged by the dropped repeat

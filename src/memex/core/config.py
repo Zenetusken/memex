@@ -546,10 +546,30 @@ class AgentsSettings(BaseModel):
     ZERO-grounded verdict refuses, so counterfactuals are unaffected. Kill-switch:
     `MEMEX_AGENTS__PARTIAL_GROUNDED_ANSWERS=false` restores the all-or-nothing
     behaviour (any ungrounded claim → regenerate-then-refuse).
+
+    `report_pack_chars` / `report_coalesce_target` (ADR-0010): the `report`-detail
+    granularity knobs, tunable WITHOUT code edits via the report-structure validator
+    (`scripts/report_structure_audit.py`). `report_pack_chars` is the deck-packing group
+    size for `report` detail ONLY (smaller → more, finer section_summaries → richer
+    multi-paragraph reports; standard detail keeps the full `_MAX_SECTION_INPUT_CHARS`
+    window) — clamped to `_MAX_SECTION_INPUT_CHARS` (the fast-window safe ceiling, 10,000
+    RENDERED chars; the old 12k was a text-ONLY budget that ignored per-chunk wrapper
+    overhead and OVERFLOWED dense decks → dropped sections, see the constant's comment).
+    `report_coalesce_target` is the planner's coalesce fullness target (lower → more
+    paragraphs). The defaults (pack 4,000 / coalesce 2) are the TUNED granularity winner
+    from the `report-structure` sweep (2026-05-28): vs the 10k/4 corrected baseline they
+    ~4× the paragraphs (2→8 on packed decks) AND raise faithfulness-confidence AND
+    distinctness with 0 must-not-assert leaks — the hypothesized granularity↔repetition
+    tension didn't exist (a narrower pack → tighter per-paragraph grounding). The residual
+    cross-paragraph repetition is removed deterministically by the dedup gate
+    (`_dedup_sentences`), NOT by backing off these knobs. See the deck-granularity tracker.
+    `MEMEX_AGENTS__REPORT_PACK_CHARS=6000`.
     """
 
     artifact_scope_enabled: bool = True
     partial_grounded_answers: bool = True
+    report_pack_chars: int = 4_000
+    report_coalesce_target: int = Field(default=2, ge=1)
 
 
 class MemexSettings(BaseSettings):

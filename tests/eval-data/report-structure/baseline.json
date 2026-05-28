@@ -1,0 +1,52 @@
+{
+  "label": "shipped-H3-pack4k-coal2",
+  "config": {
+    "report_pack_chars": 4000,
+    "report_coalesce_target": 2
+  },
+  "cases": [
+    {
+      "doc_id": "a2c31996-ensa-module-7-2021b",
+      "answered": true,
+      "paragraphs": 7,
+      "section_summaries": 17,
+      "confidence_overall": 0.833,
+      "confidence_min": 0.723,
+      "distinctness": 0.942,
+      "unique_openers": 1.0,
+      "violations": []
+    },
+    {
+      "doc_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640",
+      "answered": true,
+      "paragraphs": 7,
+      "section_summaries": 21,
+      "confidence_overall": 0.843,
+      "confidence_min": 0.69,
+      "distinctness": 0.92,
+      "unique_openers": 1.0,
+      "violations": []
+    },
+    {
+      "doc_id": "bbef665b-ensa-module-6-2021",
+      "answered": true,
+      "paragraphs": 9,
+      "section_summaries": 19,
+      "confidence_overall": 0.878,
+      "confidence_min": 0.774,
+      "distinctness": 0.862,
+      "unique_openers": 1.0,
+      "violations": []
+    }
+  ],
+  "aggregate": {
+    "docs": 3,
+    "answered": 3,
+    "mean_paragraphs": 7.667,
+    "mean_section_summaries": 19.0,
+    "mean_confidence": 0.851,
+    "mean_distinctness": 0.908,
+    "mean_unique_openers": 1.0,
+    "total_violations": 0
+  }
+}
