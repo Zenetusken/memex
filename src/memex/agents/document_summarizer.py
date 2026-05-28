@@ -40,6 +40,7 @@ from memex.agents.answering import (
     FinalResponse,
     SectionSummary,
     VerificationResult,
+    repair_claim_chunk_ids,
 )
 from memex.agents.table_sql import coerce_number
 from memex.core.config import get_settings
@@ -526,7 +527,10 @@ async def _key_figures_section(
     except ModelCallError as e:
         logger.warning("summarize.tabular_map_failed", error=str(e)[:160])
         return None, 0
-    grounded, t_g = await _ground_points(mapped.digest, mapped.key_points, shown)
+    # Repair MAP-emitted ids (the synthetic `{doc}#tblN`) against the shown table
+    # chunks before grounding — same id-transcription fix as the prose path.
+    repaired_points, _ = repair_claim_chunk_ids(mapped.key_points, shown)
+    grounded, t_g = await _ground_points(mapped.digest, repaired_points, shown)
     return (
         SectionSummary(section_title="Key figures", digest=mapped.digest, key_points=grounded),
         t_map + t_g,
@@ -672,7 +676,19 @@ async def summarize_document(
                 tokens_total += t_map
                 if mapped is None:
                     continue
-                grounded, t_g = await _ground_points(mapped.digest, mapped.key_points, batch)
+                # Snap each MAP-emitted `source_chunk_id` back to a real chunk id from
+                # the batch the model was shown — the 8B model occasionally mangles the
+                # long `docid#hash` it was told to copy verbatim (drops the prefix,
+                # flips a char, corrupts the doc-id; observed live: "d646b8885-…",
+                # "…gte-281#…"). `_ground_points` grounds by claim CONTENT/index, so a
+                # content-supported point SURVIVES with its id still mangled → its
+                # source can't resolve in `used_chunks` → the webui shows the raw hash.
+                # Reuse the answering agent's deterministic repair (exact → suffix →
+                # fuzzy; an unrepairable id is left to dangle); run it BEFORE grounding
+                # so verify + the final stored ids both see the corrected id. Same
+                # problem + fix as `answer` (`repair_claim_chunk_ids`).
+                repaired_points, _ = repair_claim_chunk_ids(mapped.key_points, batch)
+                grounded, t_g = await _ground_points(mapped.digest, repaired_points, batch)
                 tokens_total += t_g
                 sec_title = mapped.section_title or title
                 if len(batches) > 1:
@@ -734,9 +750,21 @@ async def summarize_document(
             # Fallback: synthesize a headline from the grounded points (never empty).
             abstract = " ".join(kp.claim for kp in doc_points[:3])
 
-        used_ids = {kp.source_chunk_id for kp in doc_points}
-        # Include the synthetic table-chunks so a key-figure's source resolves for
-        # Sources/wikilinks (its chunk_id is `{doc_id}#tblN`, not an FTS chunk).
+        # `used_chunks` must resolve EVERY citation the response SURFACES, not just
+        # the doc-level headline. The webui renders the doc-level `claims` (doc_points)
+        # AND a "By section" breakdown of every `section_summaries[*].key_points`;
+        # MCP/CLI consume the per-section points too. Deriving the set from doc_points
+        # alone left every NON-headline per-section point without a resolvable chunk,
+        # so its source rendered as the raw `docid#hash` (the chunk wasn't in
+        # `used_chunks` → no `chunk_ref`). doc_points are SELECTED from the section
+        # key-points, so the section key-points ARE the complete set; the tabular
+        # "Key figures" section is in `section_summaries`, so its synthetic `#tblN`
+        # points are covered via `table_chunks`. Surviving key-points cite REAL chunk
+        # ids by construction (a corrupted id cites a chunk absent from the verifier's
+        # `chunk_by_id` → it can't ground → `_ground_points` drops it), so every id
+        # here resolves against `chunks`/`table_chunks` — no repair, no template
+        # fallback needed.
+        used_ids = {kp.source_chunk_id for ss in section_summaries for kp in ss.key_points}
         used_chunks = [c for c in (chunks + table_chunks) if c.chunk_id in used_ids]
         wikilinks: list[str] = []
         seen: set[str] = set()

@@ -394,3 +394,60 @@ async def test_non_tabular_doc_skips_table_pass(
     assert resp.answered
     assert all(s.section_title != "Key figures" for s in resp.sections)
     assert not any("#tbl" in c.source_chunk_id for c in resp.claims)
+
+
+@pytest.mark.asyncio
+async def test_used_chunks_covers_every_section_key_point(
+    _settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Root-cause regression for the by-section raw-`docid#hash` bug: `used_chunks`
+    must resolve EVERY surfaced citation, not just the doc-level headline 12. The
+    webui "By section" breakdown renders every `sections[*].key_points`; if a
+    non-headline point's chunk isn't in `used_chunks`, `_source_view` has no
+    `chunk_ref` for it → the template shows the raw id. With >12 grounded section
+    points (so the doc-level cap excludes some), every section citation must still
+    be in used_chunks — proving the resolution without any template fallback."""
+    # 3 sections × 5 chunks (~1000 chars) = 15 chunks. 15k>14k → long route;
+    # 5k/section < 12k → no sub-split; 3 < 12 sections → no packing.
+    chunks = [
+        _chunk(f"docA#{s}-{i}", f"Section {s}", "x" * 1000) for s in range(3) for i in range(5)
+    ]
+    monkeypatch.setattr(ds, "FTSStore", _FakeFTS)
+    monkeypatch.setattr(_FakeFTS, "chunks", chunks)
+
+    async def _fake(
+        prompt: str, schema: type, max_tokens: int = 0, prompt_tag: str = "", **_kw: Any
+    ) -> tuple[Any, int]:
+        name = schema.__name__
+        if name == "SectionSummary":
+            ids = re.findall(r"\[([^\]]*#[^\]]*)\]", prompt)  # every chunk-id in THIS section
+            kps = []
+            for j, cid in enumerate(ids[:5]):
+                # Corrupt the FIRST point's id per section — mangle the doc-id prefix
+                # but keep the hash suffix intact ("docAXX#0-0"), exactly how the 8B
+                # model fumbles a long id. Repair must snap it back via suffix-match
+                # BEFORE grounding, else it can't resolve in used_chunks (raw-hash).
+                emit = cid.replace("docA#", "docAXX#", 1) if j == 0 else cid
+                kps.append(CitedClaim(claim=f"point {cid}", source_chunk_id=emit, confidence="high"))
+            return SectionSummary(section_title="", digest="digest", key_points=kps), 10
+        if name == "VerificationResult":
+            return schema(grounded=[0, 1, 2, 3, 4], ungrounded=[], ungrounded_reasons=[]), 5
+        if name == "DocAbstract":
+            return DocAbstract(abstract="The whole-document abstract."), 8
+        raise AssertionError(f"unexpected schema {name!r}")
+
+    monkeypatch.setattr(ds, "complete_structured", _fake)
+
+    resp = await ds.summarize_document("docA")
+
+    assert resp.answered
+    section_cited = {kp.source_chunk_id for s in resp.sections for kp in s.key_points}
+    used = {c.chunk_id for c in resp.used_chunks}
+    # The gap must actually exist (otherwise the test wouldn't catch the bug):
+    # more distinct section citations than the doc-level headline cap.
+    assert len(section_cited) > ds._MAX_DOC_KEY_POINTS
+    # EVERY section citation resolves to a chunk in used_chunks — no raw-hash fallback.
+    assert section_cited <= used, f"unresolved: {section_cited - used}"
+    # The corrupted ids were REPAIRED (snapped to real ids), not left mangled —
+    # so no "docAXX#" survives and there's nothing for a fallback to render.
+    assert all("docAXX#" not in cid for cid in section_cited)

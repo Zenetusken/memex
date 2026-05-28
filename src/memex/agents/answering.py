@@ -793,7 +793,7 @@ def _build_synthetic_chunk(result: TableQueryResult) -> Chunk:
     bounded to `_SYNTHETIC_TEXT_MAX` so it survives the downstream truncate
     budgets; the SQL string is appended LAST (informational, clippable). The
     chunk_id suffix `sql0001` is 7 chars and contains the non-hex letters
-    `s/q/l`, so `_repair_claim_chunk_ids` can't fuzzy-collide it with a real
+    `s/q/l`, so `repair_claim_chunk_ids` can't fuzzy-collide it with a real
     10-hex-char chunk hash.
     """
     header = result.header
@@ -1101,7 +1101,7 @@ def _bounded_levenshtein(a: str, b: str, *, max_d: int) -> int:
     return prev[-1]
 
 
-def _repair_claim_chunk_ids(
+def repair_claim_chunk_ids(
     claims: list[CitedClaim], reranked: list[Chunk]
 ) -> tuple[list[CitedClaim], dict[str, int]]:
     """Snap each claim's emitted `source_chunk_id` to a real reranked
@@ -1228,7 +1228,7 @@ async def answer(state: AnswerState) -> AnswerStateUpdate:
     # shown (bare hash, single-char flip); snapping them back to real
     # reranked chunk_ids keeps the audit trail + grounding check honest.
     if draft.claims and state.reranked:
-        repaired, repair_stats = _repair_claim_chunk_ids(draft.claims, state.reranked)
+        repaired, repair_stats = repair_claim_chunk_ids(draft.claims, state.reranked)
         if repair_stats["suffix"] or repair_stats["fuzzy"] or repair_stats["unresolved"]:
             log.info("chunk_id_repair", **repair_stats)
         draft = draft.model_copy(update={"claims": repaired})

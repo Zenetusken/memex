@@ -1,4 +1,4 @@
-"""Unit tests for `agents.answering._repair_claim_chunk_ids` — snapping
+"""Unit tests for `agents.answering.repair_claim_chunk_ids` — snapping
 the answer LLM's occasionally-corrupted `source_chunk_id` emissions back
 to real reranked chunk ids.
 
@@ -13,7 +13,7 @@ from __future__ import annotations
 from memex.agents.answering import (
     CitedClaim,
     _bounded_levenshtein,
-    _repair_claim_chunk_ids,
+    repair_claim_chunk_ids,
 )
 from memex.core.types import Chunk
 
@@ -53,7 +53,7 @@ def test_bounded_levenshtein_basic() -> None:
 
 def test_exact_match_preserved() -> None:
     claims = [_claim("7f7ff186-cr350-semaine-4-routeurs#bfc5b7e89a")]
-    repaired, stats = _repair_claim_chunk_ids(claims, _RERANKED)
+    repaired, stats = repair_claim_chunk_ids(claims, _RERANKED)
     assert stats == {"exact": 1, "suffix": 0, "fuzzy": 0, "unresolved": 0}
     assert repaired[0].source_chunk_id == "7f7ff186-cr350-semaine-4-routeurs#bfc5b7e89a"
 
@@ -61,7 +61,7 @@ def test_exact_match_preserved() -> None:
 def test_bare_hash_repaired_via_suffix() -> None:
     """The xref-05 case: the model emitted just the hash, no `docid#`."""
     claims = [_claim("bfc5b7e89a")]
-    repaired, stats = _repair_claim_chunk_ids(claims, _RERANKED)
+    repaired, stats = repair_claim_chunk_ids(claims, _RERANKED)
     assert stats["suffix"] == 1
     assert repaired[0].source_chunk_id == "7f7ff186-cr350-semaine-4-routeurs#bfc5b7e89a"
 
@@ -69,7 +69,7 @@ def test_bare_hash_repaired_via_suffix() -> None:
 def test_single_char_corruption_repaired_via_fuzzy() -> None:
     """The xref-02 case: `c641e00478` emitted as `d641e00478`."""
     claims = [_claim("d641e00478")]
-    repaired, stats = _repair_claim_chunk_ids(claims, _RERANKED)
+    repaired, stats = repair_claim_chunk_ids(claims, _RERANKED)
     assert stats["fuzzy"] == 1
     assert repaired[0].source_chunk_id == "7e7cd59e-cr350-semaine-5-attaques#c641e00478"
 
@@ -77,7 +77,7 @@ def test_single_char_corruption_repaired_via_fuzzy() -> None:
 def test_corrupted_full_id_repaired_via_fuzzy() -> None:
     """A corrupted but prefix-bearing id fuzzy-matches on the hash."""
     claims = [_claim("7e7cd59e-cr350-semaine-5-attaques#c641e00479")]
-    repaired, stats = _repair_claim_chunk_ids(claims, _RERANKED)
+    repaired, stats = repair_claim_chunk_ids(claims, _RERANKED)
     assert stats["fuzzy"] == 1
     assert repaired[0].source_chunk_id == "7e7cd59e-cr350-semaine-5-attaques#c641e00478"
 
@@ -85,7 +85,7 @@ def test_corrupted_full_id_repaired_via_fuzzy() -> None:
 def test_far_off_id_left_unresolved() -> None:
     """A hash that matches nothing within distance 2 is left untouched."""
     claims = [_claim("ffffffffff")]
-    repaired, stats = _repair_claim_chunk_ids(claims, _RERANKED)
+    repaired, stats = repair_claim_chunk_ids(claims, _RERANKED)
     assert stats["unresolved"] == 1
     assert repaired[0].source_chunk_id == "ffffffffff"
 
@@ -97,7 +97,7 @@ def test_ambiguous_fuzzy_match_left_unresolved() -> None:
         _chunk("doc-b#aaaaaaaaab"),  # both distance 1 from the emitted hash
     ]
     claims = [_claim("aaaaaaaaac")]
-    repaired, stats = _repair_claim_chunk_ids(claims, reranked)
+    repaired, stats = repair_claim_chunk_ids(claims, reranked)
     assert stats["unresolved"] == 1
     assert repaired[0].source_chunk_id == "aaaaaaaaac"
 
@@ -109,7 +109,7 @@ def test_mixed_batch_counts_each_branch() -> None:
         _claim("d641e00478"),  # fuzzy
         _claim("zzzzzzzzzz"),  # unresolved
     ]
-    repaired, stats = _repair_claim_chunk_ids(claims, _RERANKED)
+    repaired, stats = repair_claim_chunk_ids(claims, _RERANKED)
     assert stats == {"exact": 1, "suffix": 1, "fuzzy": 1, "unresolved": 1}
     assert [c.source_chunk_id for c in repaired] == [
         "5c9f3e0e-cr350-cours-3#508099af73",
