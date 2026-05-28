@@ -23,11 +23,13 @@ so it can't run away the way a single free-form summary did.
 
 from __future__ import annotations
 
+import asyncio
 import re
 import sqlite3
 from collections.abc import Callable
+from itertools import pairwise
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 import structlog
 import ulid
@@ -38,6 +40,8 @@ from memex.agents.answering import (
     DocAbstract,
     DraftAnswer,
     FinalResponse,
+    ReportConfidence,
+    ReportStructure,
     SectionSummary,
     VerificationResult,
     repair_claim_chunk_ids,
@@ -126,6 +130,18 @@ _REDUCE_MAX_SECTIONS = 24
 # per-call boundedness that makes the single-level reduce safe holds per batch, and
 # EVERY section reaches the output (no `_REDUCE_MAX_SECTIONS` truncation).
 _REPORT_SECTIONS_PER_BATCH = 4
+# Adaptive structure (ADR-0010): the model picks where paragraph breaks fall over the
+# ordered sections (boundary-selection — can't drop/duplicate a section). Guardrail: no
+# planned paragraph may span more than this many sections (an over-long run is split),
+# which bounds each reduce's input and blocks a degenerate "combine everything" plan.
+_REPORT_MAX_SECTIONS_PER_PARAGRAPH = 6
+# The OTHER guardrail: an 8B tends to OVER-split (observed live: 15 near-singleton breaks
+# over 19 sections — worse fragmentation than mechanical, and it expands tiny 1-section
+# sources into long paragraphs that drift). So the planner's groups are COALESCED up to
+# this "fuller" target — the model can choose WHERE to break, but never fragment below
+# ~this many sections per paragraph. Keeps paragraphs full + faithful regardless of the
+# model's compliance with the "combine" instruction.
+_REPORT_TARGET_SECTIONS_PER_PARAGRAPH = 4
 # Output reservation for the small GROUND/REDUCE calls (a verification index-list /
 # a short abstract) — kept tight so prompt + output clears the fast window.
 _VERIFY_MAX_TOKENS = 768
@@ -398,13 +414,17 @@ async def _reduce(
     abstract_guidance: str,
     *,
     scope_note: str = "",
+    preceding: str = "",
 ) -> tuple[str, int]:
     """Synthesize the per-section digests into a whole-document abstract.
 
     `scope_note` (default "") overrides the prompt's scope framing. Empty = the
     whole-document overview (the single-level reduce — byte-identical to before).
     The report route (`_reduce_report`) passes a per-batch note so a batch
-    paragraph does NOT claim to summarize the whole document (ADR-0010)."""
+    paragraph does NOT claim to summarize the whole document, plus `preceding` =
+    the prior paragraph's text so this one opens with a transition and adds only
+    NEW material — the paragraphs read as ONE coherent narrative, not disjoint
+    blocks (ADR-0010). Both default empty → single-level prompt byte-identical."""
     prompt = render_prompt(
         "summarize_reduce",
         title=title,
@@ -412,6 +432,7 @@ async def _reduce(
         instruction=instruction or "",
         abstract_guidance=abstract_guidance,
         scope_note=scope_note,
+        preceding=preceding,
     )
     try:
         overview, tokens = await complete_structured(
@@ -426,6 +447,193 @@ async def _reduce(
     return overview.abstract, tokens
 
 
+async def _plan_report_structure(
+    title: str, sections: list[SectionSummary], instruction: str | None
+) -> tuple[list[list[SectionSummary]] | None, int]:
+    """Ask the model where paragraph breaks should fall over the ORDERED section digests
+    (ADR-0010 adaptive structure) so related sections COMBINE into one coherent paragraph.
+
+    Boundary-selection — the model returns the section indices that START a paragraph, so
+    the result is always a complete, order-preserving partition (it cannot drop or
+    duplicate a section). Validated + size-capped (`_REPORT_MAX_SECTIONS_PER_PARAGRAPH`).
+    Returns `(groups, tokens)`; `None` groups signals the caller to fall back to mechanical
+    batching — on a model error, an empty plan, or a TRIVIAL plan (no internal break). Every
+    decision is logged (the observability the structural step needs). HARD-gate-neutral:
+    only the grouping changes, never grounding."""
+    log = logger.bind(node="summarize")
+    n = len(sections)
+    # Suggest a paragraph count so the model combines (~target sections each) instead of
+    # breaking at every section; the coalesce guardrail below enforces it regardless.
+    target_paragraphs = max(2, round(n / _REPORT_TARGET_SECTIONS_PER_PARAGRAPH))
+    # A bounded, indexed digest preview per section (truncated so the plan prompt fits the
+    # fast window even for a many-section doc) — the model picks break points over these.
+    sections_block = "\n".join(
+        f"[{i}] {s.section_title} — {s.digest[:180]}" for i, s in enumerate(sections)
+    )
+    prompt = render_prompt(
+        "summarize_report_plan",
+        title=title,
+        sections_block=sections_block,
+        instruction=instruction or "",
+        target_paragraphs=target_paragraphs,
+    )
+    try:
+        plan, tokens = await complete_structured(
+            prompt=prompt,
+            schema=ReportStructure,
+            max_tokens=_REDUCE_MAX_TOKENS,
+            prompt_tag="summarize_report_plan@v1",
+        )
+    except ModelCallError as e:
+        log.warning("report.plan_failed", error=str(e)[:160])
+        return None, 0
+    # In-range, deduplicated, sorted; a paragraph always begins at section 0.
+    starts = sorted({s for s in plan.paragraph_starts if 0 <= s < n})
+    if not starts or starts[0] != 0:
+        starts = sorted({0, *starts})
+    if len(starts) <= 1:
+        # No internal break chosen → not a real plan; use mechanical batching.
+        log.info("report.plan_trivial", sections=n)
+        return None, tokens
+    # Build the consecutive runs, splitting any run that exceeds the size guardrail.
+    bounds = [*starts, n]
+    raw_groups: list[list[SectionSummary]] = []
+    for a, b in pairwise(bounds):
+        run = sections[a:b]
+        for i in range(0, len(run), _REPORT_MAX_SECTIONS_PER_PARAGRAPH):
+            raw_groups.append(run[i : i + _REPORT_MAX_SECTIONS_PER_PARAGRAPH])
+    # COALESCE: merge the planner's runs (in order, so reading order is preserved) up to the
+    # "fuller" target, never exceeding the hard max — this is what stops an over-splitting 8B
+    # from shattering the doc into near-singletons (the observed failure). The planner still
+    # chose WHERE the breaks may fall; coalescing only drops breaks that would leave a
+    # paragraph too thin.
+    groups: list[list[SectionSummary]] = []
+    cur: list[SectionSummary] = []
+    for g in raw_groups:
+        if cur and (
+            len(cur) >= _REPORT_TARGET_SECTIONS_PER_PARAGRAPH
+            or len(cur) + len(g) > _REPORT_MAX_SECTIONS_PER_PARAGRAPH
+        ):
+            groups.append(cur)
+            cur = list(g)
+        else:
+            cur.extend(g)
+    if cur:
+        groups.append(cur)
+    log.info(
+        "report.plan",
+        chosen_starts=len(starts),
+        raw_paragraphs=len(raw_groups),
+        paragraphs=len(groups),
+        sizes=[len(g) for g in groups],
+    )
+    return groups, tokens
+
+
+# Faithfulness confidence for `report` summaries (ADR-0010) — a hybrid, INFORM-ONLY
+# signal (never the HARD gate; `must_not_assert` stays that). Lexical overlap is the
+# deterministic "advanced pattern matching" half (catches fabricated specifics); embedding
+# cosine is the semantic half (sees through paraphrase). Each scores a generated paragraph
+# against the grounded digests it was built from, closing the loop on the restructuring.
+# Weight the SEMANTIC signal higher than lexical: a faithful abstractive paragraph
+# paraphrases (low verbatim overlap) but should stay semantically close, so embedding
+# is the better faithfulness proxy; lexical is the secondary "did it keep the key terms"
+# check. (Equal weighting read misleadingly low for good abstractive prose.)
+_CONFIDENCE_EMB_WEIGHT = 0.7
+_STOPWORDS = frozenset(
+    "the a an of to in and or for on at by is are was were be been being it its this that these "
+    "those with as from into than then so such not no but if while which who whom whose their "
+    "there here have has had do does did can could should would may might will shall we you they "
+    "he she them his her our your".split()
+)
+
+
+def _content_tokens(text: str) -> list[str]:
+    """Lowercased alphanumeric content tokens (stopwords + 1-char tokens dropped)."""
+    return [t for t in re.findall(r"[a-z0-9]+", text.lower()) if len(t) > 1 and t not in _STOPWORDS]
+
+
+def _lexical_overlap(paragraph: str, source: str) -> float:
+    """Fraction of the paragraph's content (unigrams 0.7 + bigrams 0.3) attested in the
+    source digests — the deterministic pattern-matching half. 1.0 for an empty paragraph."""
+    p = _content_tokens(paragraph)
+    if not p:
+        return 1.0
+    s = _content_tokens(source)
+    s_uni = set(s)
+    uni = sum(1 for t in p if t in s_uni) / len(p)
+    p_bi = list(pairwise(p))
+    if not p_bi:
+        return uni
+    s_bi = set(pairwise(s))
+    bi = sum(1 for b in p_bi if b in s_bi) / len(p_bi)
+    return 0.7 * uni + 0.3 * bi
+
+
+async def _embedding_alignment(paragraphs: list[str], sources: list[str]) -> list[float] | None:
+    """Per-paragraph semantic cosine vs its source-digest text, via the shared embedder
+    (normalized → cosine = dot). BEST-EFFORT: any failure (e.g. the embedder can't load
+    co-resident with the orchestrator) returns None so the caller degrades to lexical-only —
+    the confidence signal can never break a summary."""
+    log = logger.bind(node="summarize")
+    try:
+        from memex.models.registry import get_registry
+
+        registry = get_registry()
+        texts = [*paragraphs, *sources]
+
+        async with registry.use("embedder") as embedder:
+
+            def _encode() -> Any:
+                return embedder.encode(
+                    texts, normalize_embeddings=True, convert_to_numpy=True, show_progress_bar=False
+                )
+
+            vecs = await asyncio.to_thread(_encode)
+    except Exception as e:
+        log.warning("report.confidence_embed_unavailable", error=str(e)[:160])
+        return None
+    k = len(paragraphs)
+    out: list[float] = []
+    for i in range(k):
+        cos = float(vecs[i] @ vecs[k + i])  # normalized rows → dot == cosine
+        out.append(max(0.0, min(1.0, cos)))
+    return out
+
+
+async def _score_report_confidence(
+    paragraphs: list[str], groups: list[list[SectionSummary]]
+) -> ReportConfidence | None:
+    """Hybrid faithfulness confidence (ADR-0010, inform-only): each paragraph scored against
+    the digests of the sections it was built from — embedding cosine + lexical overlap,
+    combined `_CONFIDENCE_EMB_WEIGHT`/remainder. None when no paragraph was produced."""
+    if not paragraphs:
+        return None
+    sources = [" ".join(s.digest for s in g) for g in groups]
+    lex = [_lexical_overlap(p, src) for p, src in zip(paragraphs, sources, strict=False)]
+    emb = await _embedding_alignment(paragraphs, sources)
+    if emb is None:
+        emb = lex  # embedding unavailable → combined collapses to the lexical signal
+    w = _CONFIDENCE_EMB_WEIGHT
+    per_para = [round(w * e + (1 - w) * lx, 3) for e, lx in zip(emb, lex, strict=False)]
+    overall = round(sum(per_para) / len(per_para), 3)
+    conf = ReportConfidence(
+        overall=overall,
+        embedding=round(sum(emb) / len(emb), 3),
+        lexical=round(sum(lex) / len(lex), 3),
+        per_paragraph=per_para,
+    )
+    logger.bind(node="summarize").info(
+        "report.confidence",
+        overall=overall,
+        embedding=conf.embedding,
+        lexical=conf.lexical,
+        paragraphs=len(per_para),
+        min_paragraph=min(per_para),
+    )
+    return conf
+
+
 async def _reduce_report(
     title: str,
     sections: list[SectionSummary],
@@ -433,45 +641,81 @@ async def _reduce_report(
     max_output_tokens: int,
     abstract_guidance: str,
     emit: Callable[[str], None],
-) -> tuple[str, int]:
+) -> tuple[str, int, ReportConfidence | None]:
     """HIERARCHICAL reduce → a multi-paragraph report body (ADR-0010).
 
-    Batch the grounded section digests `_REPORT_SECTIONS_PER_BATCH` at a time,
-    reduce EACH batch to one bounded paragraph (reusing `_reduce`, hence the same
-    bounded `DocAbstract` primitive), then stitch the paragraphs in document order
-    with blank-line separators. This is the safe inverse of the removed free-form
+    `_plan_report_structure` groups the grounded section digests into paragraphs
+    (adaptive — combine related sections; falls back to fixed-size batching), then
+    EACH group is reduced to one bounded paragraph (reusing `_reduce`, hence the same
+    bounded `DocAbstract` primitive) and the paragraphs are stitched in document order
+    with blank-line separators. Finally `_score_report_confidence` closes the loop by
+    grading each paragraph against its source digests (inform-only). This is the safe
+    inverse of the removed free-form
     `synthesize` (ADR-0009): every model call still takes small grounded input →
     bounded output, so none of the three free-form failure modes (regurgitation /
     won't-stop / mid-word force-close) can occur, and EVERY section reaches the
     output (no `_REDUCE_MAX_SECTIONS` truncation). The stitch is DETERMINISTIC — no
     final whole-output model pass, which would reintroduce the free-form trap.
 
-    A batch paragraph is told (via `scope_note`) that it covers one span of a
-    longer overview, so it does not falsely claim whole-document scope."""
-    batches = [
-        sections[i : i + _REPORT_SECTIONS_PER_BATCH]
-        for i in range(0, len(sections), _REPORT_SECTIONS_PER_BATCH)
-    ]
+    The batches are reduced in SEQUENCE with ROLLING context: each paragraph after
+    the first is given the PREVIOUS paragraph (`preceding`) so it opens with a
+    transition and adds only NEW material — the paragraphs read as one coherent
+    narrative, not disjoint "The document focuses on…" blocks. `scope_note` makes it
+    a proper ARC: the FIRST batch is the OPENING (introduce the subject), the LAST is
+    the CLOSING (conclude), the rest CONTINUE (never claiming whole-doc scope). Both
+    signals are bounded (one prior paragraph + ≤4 digests), so the prompt stays inside
+    the fast window and grounding is untouched (it recombines already-grounded prose)."""
+    # ADAPTIVE structure: let the model group related sections into paragraphs; fall
+    # back to fixed-size batching on a trivial/failed plan (deterministic, always valid).
+    emit("Reducing · planning structure")
+    groups, tokens_total = await _plan_report_structure(title, sections, instruction)
+    if groups is None:
+        groups = [
+            sections[i : i + _REPORT_SECTIONS_PER_BATCH]
+            for i in range(0, len(sections), _REPORT_SECTIONS_PER_BATCH)
+        ]
     paragraphs: list[str] = []
-    tokens_total = 0
-    for bi, batch in enumerate(batches):
-        emit(f"Reducing · paragraph {bi + 1} of {len(batches)}")
-        scope_note = (
-            "one part of a longer multi-section overview — cover ONLY the digests "
-            "below and do not claim to summarize the whole document"
-        )
+    para_groups: list[list[SectionSummary]] = []  # the source group per emitted paragraph
+    n = len(groups)
+    for gi, group in enumerate(groups):
+        emit(f"Reducing · paragraph {gi + 1} of {n}")
+        # Position-aware framing gives the report a proper ARC: the FIRST group opens
+        # (introduce the subject), the LAST closes (conclude), the rest continue. With
+        # one group it's just a plain whole-doc overview (no arc).
+        if n == 1:
+            scope_note = ""
+        elif gi == 0:
+            scope_note = "the OPENING part of a multi-part overview"
+        elif gi == n - 1:
+            scope_note = "the CLOSING part of a multi-part overview"
+        else:
+            scope_note = "a CONTINUING part of a multi-part overview"
+        # The overview SO FAR = ALL prior paragraphs (not just the last), so the model can
+        # avoid REPEATING any earlier point — critical on a topically-homogeneous doc whose
+        # sections restate ONE thesis (a paper, a form), where last-paragraph-only context
+        # still produced near-duplicate paragraphs (observed live on the GTE paper). Bounded
+        # by the report's own (coalesce-capped) length; the trailing cap keeps the prompt
+        # inside the fast window in the pathological many-paragraph case.
+        running = "\n\n".join(paragraphs) if (paragraphs and gi > 0) else ""
+        preceding = running[-4000:]
         paragraph, t = await _reduce(
             title,
-            batch,
+            group,
             instruction,
             max_output_tokens,
             abstract_guidance,
             scope_note=scope_note,
+            preceding=preceding,
         )
         tokens_total += t
         if paragraph:
             paragraphs.append(paragraph)
-    return "\n\n".join(paragraphs), tokens_total
+            para_groups.append(group)
+    # Close the loop: score each paragraph's faithfulness to the digests it was built
+    # from (ADR-0010, inform-only — never gates). `para_groups` stays aligned with the
+    # paragraphs actually emitted (a group that produced nothing is skipped from both).
+    confidence = await _score_report_confidence(paragraphs, para_groups)
+    return "\n\n".join(paragraphs), tokens_total, confidence
 
 
 def _table_salience(table: StoredTable) -> float:
@@ -810,11 +1054,12 @@ async def summarize_document(
         # hierarchical reduce (ADR-0010) — every section reaches the output. Otherwise
         # (multiple sections, a sub-split section's parts, or the tabular key-figures
         # section) synthesize across the digests into a single abstract.
+        report_confidence: ReportConfidence | None = None
         if len(section_summaries) == 1 and not is_tabular:
             abstract = section_summaries[0].digest
         elif detail == "report":
             _emit("Reducing")
-            abstract, t_r = await _reduce_report(
+            abstract, t_r, report_confidence = await _reduce_report(
                 doc_title,
                 section_summaries,
                 instruction,
@@ -871,6 +1116,7 @@ async def summarize_document(
             used_chunks=used_chunks,
             wikilinks=wikilinks,
             sections=section_summaries,
+            report_confidence=report_confidence,
             artifact_scope_doc_ids=[doc_id],
             correlation_id=correlation_id,
             tokens_used=tokens_total,

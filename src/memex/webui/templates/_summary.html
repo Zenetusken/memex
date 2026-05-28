@@ -85,4 +85,13 @@
   <span class="tabular">tokens {{ response.tokens_used }}</span>
   <span class="tabular">sections {{ response.sections|length }}</span>
 </p>
+{% if response.report_confidence %}
+{% set rc = response.report_confidence %}
+{# Report-mode faithfulness (ADR-0010) — INFORM-ONLY: how closely the generated
+   paragraphs track their source digests (hybrid embedding + lexical). Not a gate. #}
+<p class="summary-confidence" title="Faithfulness of the report to its source digests (embedding + lexical). Inform-only — the no-hallucination gate is separate.">
+  faithfulness <span class="tabular">{{ "%.2f"|format(rc.overall) }}</span>
+  <span class="summary-confidence-detail">· embedding <span class="tabular">{{ "%.2f"|format(rc.embedding) }}</span> · lexical <span class="tabular">{{ "%.2f"|format(rc.lexical) }}</span></span>
+</p>
+{% endif %}
 {% endif %}

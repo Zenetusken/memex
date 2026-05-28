@@ -511,6 +511,17 @@ html { scroll-behavior: smooth; }
   color: rgb(161 161 170);                    /* zinc-400 (AA) */
 }
 
+/* Report-mode faithfulness (ADR-0010) — a quiet inform-only line under the footer.
+   Same restraint/zinc-400-AA as the footer; never coloured as a pass/fail. */
+.summary-confidence {
+  margin-top: 0.35rem;
+  font-size: 0.6875rem;
+  color: rgb(161 161 170);                 /* zinc-400 (AA) */
+}
+.summary-confidence-detail {
+  color: rgb(161 161 170);                 /* zinc-400 — the breakdown reads as one quiet line */
+}
+
 /* #256 artifact-scope note — when a query NAMED an artifact, retrieval was
    re-scoped to its document(s); surface that quietly so the narrowing (and,
    on a refusal, the reason for it) is auditable. Same restraint as the footer. */

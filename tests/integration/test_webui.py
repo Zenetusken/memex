@@ -592,6 +592,36 @@ def test_report_summary_renders_paragraphs_in_one_block(client: TestClient) -> N
     assert r.text.count('class="ans-answer"') == 1
 
 
+def test_report_summary_surfaces_faithfulness_confidence(client: TestClient) -> None:
+    """A report summary surfaces its INFORM-ONLY faithfulness confidence (ADR-0010):
+    the overall score + the embedding/lexical breakdown, quietly under the footer."""
+    from memex.agents.answering import ReportConfidence
+
+    registry = client.app.state.progress
+    cid = "01HZSUMMARYCONF00000000000"
+    registry.new(cid, scope_doc_ids=[], scope_source="named")
+    fr = FinalResponse(
+        answered=True,
+        summary="Para one.\n\nPara two.",
+        claims=[],
+        sections=[],
+        report_confidence=ReportConfidence(
+            overall=0.78, embedding=0.81, lexical=0.73, per_paragraph=[0.80, 0.76]
+        ),
+        correlation_id=cid,
+        tokens_used=5,
+        nodes_traversed=2,
+        regenerate_attempts=0,
+    )
+    registry.finish(cid, response=fr)
+    r = client.get(f"/documents/abcd1234/summarize/status?cid={cid}&v=0")
+    assert r.status_code == 200
+    assert "faithfulness" in r.text
+    assert "0.78" in r.text  # overall
+    assert "embedding" in r.text and "0.81" in r.text
+    assert "lexical" in r.text and "0.73" in r.text
+
+
 @pytest.mark.asyncio
 async def test_document_detail_select_offers_report(
     settings: MemexSettings, client: TestClient

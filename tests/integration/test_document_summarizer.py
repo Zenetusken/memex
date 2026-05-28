@@ -19,7 +19,7 @@ from typing import Any, ClassVar
 import pytest
 
 from memex.agents import document_summarizer as ds
-from memex.agents.answering import CitedClaim, DocAbstract, SectionSummary
+from memex.agents.answering import CitedClaim, DocAbstract, ReportStructure, SectionSummary
 from memex.core.config import MemexSettings, set_settings
 from memex.core.types import Chunk, StoredTable
 
@@ -87,13 +87,22 @@ def _stored_table(i: int) -> StoredTable:
     )
 
 
-def _fake_complete(*, ground: bool, capture: list[str] | None = None):
+async def _no_embed(*_a: object, **_k: object) -> None:
+    """Force the report confidence to the lexical-only path in tests (no model load)."""
+    return None
+
+
+def _fake_complete(
+    *, ground: bool, capture: list[str] | None = None, plan_starts: list[int] | None = None
+):
     """A `complete_structured` stand-in dispatched on the schema name:
 
     - `SectionSummary`     → one key-point citing the FIRST chunk-id in the prompt
       (so grounding can match it), `section_title=""` to exercise the heading fallback.
     - `VerificationResult` → grounds index 0 when `ground`, else marks it ungrounded.
     - `DocAbstract`        → a fixed whole-doc abstract (proves REDUCE ran).
+    - `ReportStructure`    → `plan_starts` if given, else `[0]` (trivial → the planner
+      falls back to mechanical batching, the default report path).
     """
 
     async def _complete(
@@ -106,6 +115,8 @@ def _fake_complete(*, ground: bool, capture: list[str] | None = None):
         if capture is not None:
             capture.append(prompt)
         name = schema.__name__
+        if name == "ReportStructure":
+            return ReportStructure(paragraph_starts=plan_starts if plan_starts is not None else [0]), 6
         if name == "SectionSummary":
             m = re.search(r"\[([^\]]*#[^\]]*)\]", prompt)
             cid = m.group(1) if m else "docA#x"
@@ -199,19 +210,28 @@ async def test_report_detail_builds_multi_paragraph_body(
     monkeypatch.setattr(_FakeFTS, "chunks", chunks)
     capture: list[str] = []
     monkeypatch.setattr(ds, "complete_structured", _fake_complete(ground=True, capture=capture))
+    monkeypatch.setattr(ds, "_embedding_alignment", _no_embed)  # lexical-only, no model load
     seen: list[str] = []
 
     resp = await ds.summarize_document("docA", detail="report", on_phase=seen.append)
 
     assert resp.answered
-    expected_batches = -(-9 // ds._REPORT_SECTIONS_PER_BATCH)  # ceil(9/4) = 3
+    # The planner gets a trivial plan ([0]) → falls back to mechanical ceil(9/4)=3 batches.
+    expected_batches = -(-9 // ds._REPORT_SECTIONS_PER_BATCH)  # 3
     # Multi-paragraph body: one (non-empty) paragraph per batch.
     paragraphs = resp.summary.split("\n\n")
     assert len(paragraphs) == expected_batches
     assert all(p.strip() for p in paragraphs)
-    # The reduce ran once PER BATCH, each told it covers one span (not the whole doc).
-    batch_reduces = [p for p in capture if "one part of a longer" in p]
+    # The reduce ran once PER BATCH, each framed as part of a multi-part overview.
+    batch_reduces = [p for p in capture if "multi-part overview" in p]
     assert len(batch_reduces) == expected_batches
+    # ROLLING context: exactly the CONTINUATION batches (all but the first) carry the
+    # preceding paragraph so they transition + add only new material (ADR-0010 coherence).
+    rolling = [p for p in capture if "The overview SO FAR" in p]
+    assert len(rolling) == expected_batches - 1
+    # Proper ARC: exactly ONE opening (first batch) and ONE closing (last batch).
+    assert len([p for p in capture if "This is the OPENING paragraph" in p]) == 1
+    assert len([p for p in capture if "This is the CLOSING paragraph" in p]) == 1
     # Live progress: a "Reducing · paragraph k of N" per batch (parses cleanly in
     # the webui's summary_phase_view → base "Reducing" + the paragraph eyebrow).
     para_phases = [s for s in seen if s.startswith("Reducing · paragraph")]
@@ -220,6 +240,66 @@ async def test_report_detail_builds_multi_paragraph_body(
     ]
     # Every section is still present in the structured by-section breakdown.
     assert len(resp.sections) == 9
+    # Close the loop: an inform-only faithfulness confidence, one score per paragraph.
+    assert resp.report_confidence is not None
+    assert len(resp.report_confidence.per_paragraph) == len(paragraphs)
+    assert 0.0 <= resp.report_confidence.overall <= 1.0
+
+
+@pytest.mark.asyncio
+async def test_report_adaptive_structure_uses_plan(
+    _settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-0010 adaptive structure: when the planner returns real break points, the report
+    is grouped by the PLAN (combining sections), not the mechanical every-4 split. With 9
+    sections and breaks at [0, 5], the body is 2 paragraphs (sections 0-4 and 5-8) — which
+    mechanical batching (3 paragraphs of 4/4/1) would never produce."""
+    chunks = [_chunk(f"docA#{i}", f"H{i}", chr(97 + i) * 9_000) for i in range(9)]
+    monkeypatch.setattr(ds, "FTSStore", _FakeFTS)
+    monkeypatch.setattr(_FakeFTS, "chunks", chunks)
+    capture: list[str] = []
+    monkeypatch.setattr(
+        ds, "complete_structured", _fake_complete(ground=True, capture=capture, plan_starts=[0, 5])
+    )
+    monkeypatch.setattr(ds, "_embedding_alignment", _no_embed)
+
+    resp = await ds.summarize_document("docA", detail="report")
+
+    assert resp.answered
+    # Two planned groups → two paragraphs (NOT the mechanical 3).
+    assert len(resp.summary.split("\n\n")) == 2
+    # The planner was actually consulted.
+    assert any("PARAGRAPH STRUCTURE" in p for p in capture)
+    # Confidence still computed over the (2) planned paragraphs.
+    assert resp.report_confidence is not None
+    assert len(resp.report_confidence.per_paragraph) == 2
+
+
+@pytest.mark.asyncio
+async def test_report_planner_coalesces_oversplit(
+    _settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-0010 coalesce guardrail: an 8B that OVER-splits (a break at every section) must
+    not shatter the report. With 9 sections and a break at all 9, the runs are coalesced up
+    to `_REPORT_TARGET_SECTIONS_PER_PARAGRAPH` → ~3 fuller paragraphs, NOT 9 singletons."""
+    chunks = [_chunk(f"docA#{i}", f"H{i}", chr(97 + i) * 9_000) for i in range(9)]
+    monkeypatch.setattr(ds, "FTSStore", _FakeFTS)
+    monkeypatch.setattr(_FakeFTS, "chunks", chunks)
+    monkeypatch.setattr(
+        ds,
+        "complete_structured",
+        _fake_complete(ground=True, plan_starts=[0, 1, 2, 3, 4, 5, 6, 7, 8]),
+    )
+    monkeypatch.setattr(ds, "_embedding_alignment", _no_embed)
+
+    resp = await ds.summarize_document("docA", detail="report")
+
+    assert resp.answered
+    paragraphs = resp.summary.split("\n\n")
+    # 9 single-section runs → coalesced to ceil(9/4) = 3 fuller paragraphs (never 9).
+    assert len(paragraphs) == 3
+    assert resp.report_confidence is not None
+    assert len(resp.report_confidence.per_paragraph) == 3
 
 
 @pytest.mark.asyncio
@@ -241,7 +321,9 @@ async def test_non_report_reduce_keeps_whole_document_scope(
     assert "\n\n" not in resp.summary  # single paragraph, not a multi-paragraph body
     reduce_prompts = [p for p in capture if "per-section digests of" in p]
     assert reduce_prompts and all("a whole-document overview" in p for p in reduce_prompts)
-    assert all("one part of a longer" not in p for p in reduce_prompts)
+    # None of the report-mode coherence framing leaks into the default path.
+    assert all("multi-part overview" not in p for p in reduce_prompts)
+    assert all("The overview SO FAR" not in p for p in reduce_prompts)
 
 
 @pytest.mark.asyncio

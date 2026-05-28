@@ -107,9 +107,52 @@ the paragraphs); a single-paragraph summary is exactly one `<p>` (unchanged).
 - Adjacency batching preserves the document's own narrative order; theme/salience
   clustering (which would need another model call) is a possible future refinement.
 
+## Refinements (2026-05-28): coherence, adaptive structure, confidence
+
+The first cut produced *correct but disjoint* paragraphs (every one opened "The
+document focuses on…"). Four additive layers, all preserving the bounded/grounded
+invariant (small grounded input → bounded output; no free-form whole-output pass):
+
+1. **Rolling context.** Each paragraph after the first is given the *previous*
+   paragraph (`_reduce`'s new `preceding` param) and told to open with a transition
+   and add only new material — so the body reads as one narrative, not blocks. Bounded
+   (one prior paragraph, itself `maxItems`-capped).
+2. **Open / middle / close arc.** Position-aware `scope_note`: the FIRST group is the
+   OPENING (introduce the subject), the LAST is the CLOSING (conclude — "assert nothing
+   beyond the digests"), the rest CONTINUE. Gated prompt blocks; single-paragraph and
+   single-level paths are untouched.
+3. **Adaptive structure** (`_plan_report_structure`). Instead of a fixed every-N split,
+   the model chooses where paragraph breaks fall via **boundary-selection** — it returns
+   the section indices that *start* a paragraph (`ReportStructure.paragraph_starts`).
+   Boundary-selection over the ordered sequence **cannot drop or duplicate a section**
+   (unlike free index assignment), so it's a clean partition by construction. Guardrails:
+   in-range/dedup/force-a-start-at-0, **size-cap** each run at
+   `_REPORT_MAX_SECTIONS_PER_PARAGRAPH` (blocks a degenerate "combine everything"), and
+   **fall back to mechanical batching** on a model error or a trivial (no-break) plan.
+   Every decision logs (`report.plan` / `report.plan_trivial` / `report.plan_failed`) —
+   the observability the non-deterministic step needs. HARD-gate-neutral: only the
+   *grouping* changes, never grounding.
+4. **Faithfulness confidence** (`_score_report_confidence`, `ReportConfidence`). Closes
+   the loop: each generated paragraph is scored against the digests it was built from,
+   **hybrid** = lexical content-overlap (unigram+bigram precision — the deterministic
+   "pattern matching" half, catches fabricated specifics) + semantic embedding cosine
+   (the shared EmbeddingGemma — sees through paraphrase), combined 0.6/0.4, per-paragraph
+   + overall on `FinalResponse.report_confidence`. **INFORM-ONLY** — surfaced (a quiet
+   webui `.summary-confidence` line) + logged (`report.confidence`), never a gate; the
+   `must_not_assert` eval stays the no-hallucination HARD gate. The embedding half is
+   **best-effort**: any failure (e.g. the embedder can't load co-resident) logs
+   `report.confidence_embed_unavailable` and degrades to lexical-only — confidence can
+   never break a summary.
+
+These supersede the original "adjacency batching" / "no rolling context" notes above.
+Validated: full `eval-summary` HARD gate held (report case `violations=[]`), 930 tests,
+and a live browser e2e on the NVIDIA 10-K + a CUDA deck.
+
 ## Revisit When
 
-- The `must_not_assert` eval shows drift in `report` bodies → add the per-paragraph
-  re-ground pass (the deferred mitigation above).
+- The `must_not_assert` eval shows drift in `report` bodies, or report-mode
+  `report_confidence.overall` trends low → add the per-paragraph **re-ground** pass (run
+  the existing verifier over the synthesized paragraphs; the confidence score is the
+  trigger signal for when it's worth the cost).
 - A forcing function appears for an executive-summary-over-the-body layer (a second
-  bounded reduce over the batch paragraphs) or theme-based batching.
+  bounded reduce over the batch paragraphs).

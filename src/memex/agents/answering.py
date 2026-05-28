@@ -375,6 +375,39 @@ class VerificationResult(BaseModel):
         return not self.ungrounded
 
 
+class ReportStructure(BaseModel):
+    """Adaptive paragraph structure for a `report` summary (ADR-0010): the 0-based
+    section indices (in reading order) at which a NEW paragraph begins. Lets the model
+    COMBINE related adjacent sections and choose logical breaks instead of a fixed
+    every-N split. Boundary-selection (NOT free index assignment) cannot drop or
+    duplicate a section; the result is validated + size-capped, with a deterministic
+    fallback to mechanical batching. Grouping ONLY — never grounding."""
+
+    paragraph_starts: list[int] = Field(
+        max_length=16,
+        description=(
+            "0-based section indices where a new paragraph begins (index 0 starts the "
+            "first paragraph). Group adjacent sections that share a theme together."
+        ),
+    )
+
+
+class ReportConfidence(BaseModel):
+    """Faithfulness confidence of a `report` summary against its source digests
+    (ADR-0010) — INFORM-ONLY, never the HARD gate. A hybrid signal: semantic embedding
+    cosine + lexical content-overlap, scored per paragraph against the grounded digests
+    that paragraph was built from, then aggregated. Higher = the generated prose tracks
+    the source more closely; a low score flags a paragraph worth a second look, not a
+    fabrication (the `must_not_assert` eval remains the no-hallucination gate)."""
+
+    overall: float = Field(description="Aggregate confidence in [0,1] (mean of per_paragraph).")
+    embedding: float = Field(description="Mean semantic cosine of each paragraph vs its digests.")
+    lexical: float = Field(description="Mean lexical content-overlap of each paragraph vs its digests.")
+    per_paragraph: list[float] = Field(
+        description="Per-paragraph combined confidence, in paragraph order."
+    )
+
+
 class FinalResponse(BaseModel):
     """What gets returned to the caller (CLI, web UI, MCP server)."""
 
@@ -395,6 +428,12 @@ class FinalResponse(BaseModel):
     # each section's `key_points` are grounded `CitedClaim`s, surfaced for the
     # webui's collapsible per-section view.
     sections: list[SectionSummary] = []
+
+    # Faithfulness confidence for a `report`-detail summary (ADR-0010) — the hybrid
+    # embedding+lexical alignment of each generated paragraph against the grounded
+    # digests it was built from. INFORM-ONLY (surfaced + logged, never gates); None
+    # on every other path (answers + non-report summaries).
+    report_confidence: ReportConfidence | None = None
 
     # Documents retrieval was deterministically RE-SCOPED to because the query
     # named a specific artifact (#256). Empty = the full-corpus path (the common

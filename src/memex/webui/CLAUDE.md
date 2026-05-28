@@ -84,7 +84,11 @@ per-section map-reduce) — the `#summary-loading` `.htmx-indicator` covers it.
 multi-paragraph (blank-line separated, ADR-0010), so the template splits
 `response.summary` on `\n\n` into one `<p>` per paragraph inside ONE `.ans-answer`
 block (the single blue rule spans them; `.ans-answer > p + p` spaces them); a
-single-paragraph summary is exactly one `<p>` (unchanged) — the grounded key-points as `.claim`
+single-paragraph summary is exactly one `<p>` (unchanged). A report also surfaces a
+quiet INFORM-ONLY **`.summary-confidence`** line under the footer (gated on
+`response.report_confidence`) — the hybrid embedding+lexical faithfulness of the
+generated prose vs its source digests (overall + breakdown; zinc-400, never coloured
+as pass/fail, NOT a gate). Then the grounded key-points as `.claim`
 cards with `.conf-{high,medium,low}` chips (colour **and** label, WCAG 1.4.1) + the
 monospace source `.chunk-id`, the Sources via the `render_wikilink` filter, and the
 `.ans-footer` audit line (correlation_id + token/section counts). It adds a
