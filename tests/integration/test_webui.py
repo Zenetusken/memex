@@ -1223,6 +1223,66 @@ def test_graph_404s_on_unknown_doc(client: TestClient) -> None:
     assert r.status_code == 404
 
 
+@pytest.mark.asyncio
+async def test_document_view_renders_related_documents(
+    settings: MemexSettings,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The doc view shows the 'Related documents' section (explore connections),
+    fed by GraphStore.related_documents — by human title + the connecting entities."""
+    from memex.index.graph_store import RelatedDocument
+
+    ref = await ingest_markdown_passthrough("# Center\n\nThe centerpiece.\n", source_stem="center")
+
+    class _FakeStore:
+        @classmethod
+        async def open(cls, vault_path):
+            return cls()
+
+        async def related_documents(self, doc_id, *, limit=10, max_entities=8):
+            return [
+                RelatedDocument(
+                    doc_id="abc12345-sibling-lecture",
+                    title="Sibling Lecture",
+                    score=3.91,
+                    shared_entities=["DNS spoofing", "stateful firewall"],
+                )
+            ]
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr("memex.webui.app.GraphStore.open", staticmethod(_FakeStore.open))
+
+    r = client.get(f"/documents/{ref.doc_id}")
+    assert r.status_code == 200
+    assert "Related documents" in r.text
+    assert "Sibling Lecture" in r.text
+    assert "/documents/abc12345-sibling-lecture" in r.text
+    assert "DNS spoofing" in r.text  # the connecting entity (the "why related")
+
+
+@pytest.mark.asyncio
+async def test_document_view_survives_graph_unavailable(
+    settings: MemexSettings,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Related is OPTIONAL: an ImportError from GraphStore.open (ryugraph absent)
+    must NOT 500 the doc view — it just omits the section."""
+    ref = await ingest_markdown_passthrough("# Solo\n\nNo graph.\n", source_stem="solo")
+
+    def _boom(vault_path):
+        raise ImportError("ryugraph not installed")
+
+    monkeypatch.setattr("memex.webui.app.GraphStore.open", staticmethod(_boom))
+
+    r = client.get(f"/documents/{ref.doc_id}")
+    assert r.status_code == 200
+    assert "Related documents" not in r.text  # section omitted, page still renders
+
+
 # ----- Inline title rename (metadata-only retitle) -----
 
 

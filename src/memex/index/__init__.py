@@ -16,7 +16,7 @@ from memex.index.embed_prompts import (
     native_prompts_enabled,
 )
 from memex.index.fts_store import FTSStore
-from memex.index.graph_store import GraphNeighbor, GraphStore
+from memex.index.graph_store import GraphNeighbor, GraphStore, RelatedDocument
 from memex.index.pipeline import (
     IndexResult,
     ReindexReport,
@@ -37,6 +37,7 @@ __all__ = [
     "GraphStore",
     "IndexResult",
     "ReindexReport",
+    "RelatedDocument",
     "RetitleResult",
     "TableStore",
     "VectorStore",

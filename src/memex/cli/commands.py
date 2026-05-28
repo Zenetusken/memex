@@ -488,6 +488,29 @@ def register(app: typer.Typer) -> None:
             _print(r)
 
     @app.command()
+    def related(
+        document: str = _Option(..., "--document", "-d", help="doc_id."),
+        limit: int = _Option(10, help="Max related documents to print."),
+    ) -> None:
+        """Explore connections: documents related to this one via SHARED ENTITIES,
+        ranked by entity SPECIFICITY (a rare shared concept outranks a generic one).
+        The on-mission discovery surface over the entity graph."""
+
+        async def _run():
+            from memex.core.config import get_settings
+
+            bootstrap()
+            store = await GraphStore.open(get_settings().vault_path)
+            try:
+                return await store.related_documents(document, limit=limit)
+            finally:
+                await store.close()
+
+        results = asyncio.run(_run())
+        for r in results:
+            _print(r)
+
+    @app.command()
     def doctor() -> None:
         """Health check: vault integrity, daemon reachability, breaker state."""
 

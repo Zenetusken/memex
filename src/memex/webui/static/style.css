@@ -550,6 +550,34 @@ html { scroll-behavior: smooth; }
   color: rgb(212 212 216);                 /* zinc-300 */
 }
 
+/* ── Related documents ("explore connections", 2026-05-28) ───────────────────
+   Entity-specificity-ranked graph discovery on the doc view. Quiet zinc; the
+   doc link uses the single action-blue (shared with .wikilink), the connecting
+   entities are restrained zinc-400 tags (the "why related"). */
+.related-title {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgb(161 161 170);                 /* zinc-400 — eyebrow, mirrors .ans-eyebrow */
+  margin: 0 0 0.5rem;
+}
+.related-list { list-style: none; padding: 0; margin: 0; }
+.related-item {
+  padding: 0.3rem 0;
+  border-top: 1px solid rgb(39 39 42);     /* zinc-800 divider */
+}
+.related-item:first-child { border-top: none; }
+.related-link { color: rgb(96 165 250); text-decoration: none; }  /* blue-400, the action accent */
+.related-link:hover { text-decoration: underline; }
+.related-via { color: rgb(161 161 170); font-size: 0.82rem; margin-left: 0.5rem; }  /* zinc-400 */
+.related-entity {
+  display: inline-block;
+  padding: 0.02rem 0.35rem;
+  border: 1px solid rgb(39 39 42);         /* zinc-800 */
+  border-radius: 0.25rem;
+  color: rgb(212 212 216);                 /* zinc-300 */
+}
+
 /* ── Ask-page document scope-picker (the doc-picker, 2026-05-27) ──────────────
    A quiet <details> disclosure of the vault's documents; ticking some scopes the
    question to them (Notebook-LM style). Native HTML, no JS. Palette matches the

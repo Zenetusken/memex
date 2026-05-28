@@ -700,6 +700,19 @@ def create_app() -> FastAPI:
                         # Non-fatal: the pages render fine; the CSS 8.5/11 fallback
                         # just gives a Letter-shaped placeholder for the unknown ratio.
                         logger.warning("document.preview_size_unreadable", doc_id=doc_id)
+        # Related documents ("explore connections") — entity-specificity-ranked graph
+        # discovery. Optional: a missing/unavailable graph fails OPEN to no section
+        # (never 500s the doc view), mirroring the /graph route.
+        related: list[dict[str, Any]] = []
+        try:
+            rstore = await GraphStore.open(settings.vault_path)
+        except ImportError as e:
+            logger.warning("webui.related_unavailable", doc_id=doc_id, reason=str(e))
+        else:
+            try:
+                related = [r.model_dump() for r in await rstore.related_documents(doc_id, limit=8)]
+            finally:
+                await rstore.close()
         return templates.TemplateResponse(
             request,
             "document.html",
@@ -712,6 +725,7 @@ def create_app() -> FastAPI:
                 "has_preview": preview_pdf is not None and preview_pages > 0,
                 "preview_pages": preview_pages,
                 "preview_aspect": preview_aspect,
+                "related": related,
             },
         )
 

@@ -281,7 +281,46 @@ def test_server_has_registered_the_five_tools() -> None:
         "get_document",
         "list_documents",
         "get_graph_neighbors",
+        "related_documents",
     } <= names
+
+
+@pytest.mark.asyncio
+async def test_related_documents_tool_returns_ranked_list(
+    settings: MemexSettings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The `related_documents` MCP tool surfaces GraphStore.related_documents
+    (entity-specificity-ranked) and is fail-open when the graph is unavailable."""
+    from memex.index.graph_store import RelatedDocument
+    from memex.mcp.server import related_documents
+
+    class _FakeStore:
+        @classmethod
+        async def open(cls, vault_path):
+            return cls()
+
+        async def related_documents(self, doc_id, *, limit=10, max_entities=8):
+            return [
+                RelatedDocument(
+                    doc_id="sib", title="Sibling", score=3.9, shared_entities=["DNS spoofing"]
+                )
+            ]
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr("memex.index.graph_store.GraphStore.open", staticmethod(_FakeStore.open))
+    out = await related_documents("some-doc", limit=5)
+    assert [r.doc_id for r in out] == ["sib"]
+    assert out[0].shared_entities == ["DNS spoofing"]
+
+    # Fail-open: ryugraph absent → ImportError → empty list, never a crash.
+    def _boom(vault_path):
+        raise ImportError("ryugraph not installed")
+
+    monkeypatch.setattr("memex.index.graph_store.GraphStore.open", staticmethod(_boom))
+    assert await related_documents("some-doc") == []
 
 
 # ----- HTTP transport: bind validation + auth wiring -----

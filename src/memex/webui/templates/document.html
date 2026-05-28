@@ -67,6 +67,24 @@
 
 <section id="summary-pane" class="mb-5"></section>
 
+{# Explore connections: documents linked by SPECIFIC shared entities (IDF-ranked),
+   not generic co-occurrence. Omitted when the graph is empty/unavailable. #}
+{% if related %}
+<section class="related-docs mb-5">
+  <h2 class="related-title">Related documents</h2>
+  <ul class="related-list">
+    {% for r in related %}
+    <li class="related-item">
+      <a class="related-link" href="/documents/{{ r.doc_id }}">{{ r.title }}</a>
+      {% if r.shared_entities %}
+      <span class="related-via">via{% for e in r.shared_entities[:5] %} <span class="related-entity">{{ e }}</span>{% endfor %}</span>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
 {% if has_preview %}
 <div class="pane-split">
   <div class="pane-scroll">

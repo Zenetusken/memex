@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import math
 import re
 import threading
 from pathlib import Path
@@ -84,6 +85,74 @@ class GraphNeighbor(BaseModel):
     title: str
     relation: str
     via: str | None = None  # e.g. shared entity name
+
+
+# Entity-specificity threshold for `related_documents`: an entity mentioned by MORE than
+# this fraction of the corpus is treated as NOISE (a generic connector like 'IP', 'HTTP',
+# or an author/instructor name that appears everywhere) and excluded from the "why". IDF
+# already down-weights such entities toward zero; the hard exclusion just keeps the
+# surfaced connecting-entities list clean. This is the lever that distinguishes the
+# `related_documents` discovery feature from the retired passive `expand_graph` (which
+# linked on these generic entities, unranked, and added nothing — see db-audit-2026-05-28).
+_RELATED_GENERIC_ENTITY_DF_FRACTION = 0.6
+
+
+class RelatedDocument(BaseModel):
+    """A document related to a seed doc via SHARED ENTITIES, ranked by the SPECIFICITY of
+    those entities (IDF — a rare shared entity is a strong topical signal; a near-universal
+    one is noise). The on-mission "explore connections" discovery surface, vs the retired
+    passive `expand_graph` which linked on generic entities, unranked, and never helped."""
+
+    doc_id: str
+    title: str
+    score: float  # Σ IDF(entity) over the shared, non-generic entities — higher = stronger
+    shared_entities: list[str]  # the connecting entities, most-specific first
+
+
+def _rank_related_documents(
+    rows: list[tuple[str, str, str, int]],
+    n_docs: int,
+    *,
+    limit: int,
+    max_entities: int,
+) -> list[RelatedDocument]:
+    """PURE scoring core of `GraphStore.related_documents` (separated for unit testing).
+
+    `rows` are `(neighbour_doc_id, neighbour_title, shared_entity, entity_df)` tuples —
+    one per (neighbour, shared-entity) pair, where `entity_df` is how many documents in
+    the corpus mention that entity. Scores each neighbour by Σ `ln(n_docs / df)` (IDF)
+    over its shared entities, EXCLUDING near-universal entities (df above
+    `_RELATED_GENERIC_ENTITY_DF_FRACTION` of the corpus — the generic-connector noise the
+    retired passive expansion fell for). Returns the top-`limit` neighbours, each with its
+    connecting entities most-specific-first (capped at `max_entities`)."""
+    if n_docs <= 1:
+        return []
+    df_cap = _RELATED_GENERIC_ENTITY_DF_FRACTION * n_docs
+    agg: dict[str, dict[str, Any]] = {}
+    for did, title, entity, df in rows:
+        if df <= 0 or df > df_cap:  # generic/noise entity → skip
+            continue
+        idf = math.log(n_docs / df)
+        rec = agg.setdefault(did, {"title": title or did, "score": 0.0, "ents": []})
+        rec["score"] = float(rec["score"]) + idf
+        ents: list[tuple[float, str]] = rec["ents"]
+        ents.append((idf, entity))
+    out: list[RelatedDocument] = [
+        RelatedDocument(
+            doc_id=did,
+            title=str(rec["title"]),
+            score=round(float(rec["score"]), 4),
+            # most-specific first; dedup by name (the same name can have >1 entity node
+            # — e.g. different `kind` — and a doubled "why" tag reads as sloppy).
+            shared_entities=list(
+                dict.fromkeys(e for _idf, e in sorted(rec["ents"], reverse=True))
+            )[:max_entities],
+        )
+        for did, rec in agg.items()
+    ]
+    # Rank by score desc; doc_id as a stable tiebreaker for deterministic output.
+    out.sort(key=lambda r: (-r.score, r.doc_id))
+    return out[:limit]
 
 
 def entity_id(name: str, kind: str) -> str:
@@ -257,6 +326,50 @@ class GraphStore:
                     )
                 )
             return out
+
+        return await asyncio.to_thread(_run)
+
+    async def related_documents(
+        self, doc_id: str, *, limit: int = 10, max_entities: int = 8
+    ) -> list[RelatedDocument]:
+        """Documents related to `doc_id`, ranked by the SPECIFICITY of their shared
+        entities (IDF). This is the "explore connections" discovery surface — the
+        on-mission successor to the retired passive `expand_graph`.
+
+        Where `neighbors()` returns shared-entity neighbours UNRANKED (so generic
+        entities — 'IP', 'HTTP', an instructor's name that appears in every doc —
+        dominate and the result is noise), this scores each neighbour by Σ IDF(e) over
+        the entities it shares with `doc_id`, where `IDF(e) = ln(N / df(e))` and `df(e)`
+        is how many documents mention `e`. A rare shared entity (low df → high IDF) is a
+        strong topical link; a near-universal one (df → N → IDF → 0) contributes ~nothing
+        and, above `_RELATED_GENERIC_ENTITY_DF_FRACTION` of the corpus, is excluded from
+        the surfaced `shared_entities` entirely. So a doc sharing ONE specific concept
+        outranks one sharing five generic terms — the meaningful connection wins."""
+
+        def _run() -> list[RelatedDocument]:
+            n_res = self._conn.execute("MATCH (d:Document) RETURN count(d) AS n;")
+            n_docs = int(n_res.get_next()[0]) if n_res.has_next() else 0
+            if n_docs <= 1:
+                return []
+            # Per (neighbour, shared-entity) row, with the entity's GLOBAL doc-frequency.
+            result = self._conn.execute(
+                "MATCH (d:Document {doc_id: $id})-[:MENTIONS]->(e:Entity)"
+                "<-[:MENTIONS]-(other:Document) "
+                "WHERE other.doc_id <> $id "
+                "WITH other, e "
+                "MATCH (e)<-[:MENTIONS]-(m:Document) "
+                "WITH other, e, count(DISTINCT m) AS df "
+                "RETURN other.doc_id AS doc_id, other.title AS title, "
+                "e.name AS entity, df;",
+                {"id": doc_id},
+            )
+            rows: list[tuple[str, str, str, int]] = []
+            while result.has_next():
+                row = result.get_next()
+                rows.append((row[0], row[1], row[2], int(row[3])))
+            return _rank_related_documents(
+                rows, n_docs, limit=limit, max_entities=max_entities
+            )
 
         return await asyncio.to_thread(_run)
 

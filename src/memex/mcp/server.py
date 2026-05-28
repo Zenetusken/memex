@@ -30,7 +30,7 @@ from memex.core.config import get_settings
 from memex.core.errors import ConfigurationError
 from memex.core.scope_sets import ScopeSet, get_scope_set, list_scope_sets
 from memex.core.types import Chunk
-from memex.index.graph_store import GraphNeighbor
+from memex.index.graph_store import GraphNeighbor, RelatedDocument
 from memex.mcp.auth import BearerAuthMiddleware, validate_bind
 from memex.retrieve import cross_encoder_rerank, hybrid_search
 from memex.vault.store import (
@@ -219,6 +219,38 @@ async def get_graph_neighbors(doc_id: str, limit: int = 50) -> list[GraphNeighbo
     return neighbors
 
 
+async def related_documents(doc_id: str, limit: int = 10) -> list[RelatedDocument]:
+    """Explore connections: documents related to `doc_id` via SHARED ENTITIES,
+    ranked by entity SPECIFICITY.
+
+    Unlike `get_graph_neighbors` (one-hop neighbours, unranked — so generic shared
+    entities like 'IP' or an author's name dominate), this scores each related document
+    by the inverse-document-frequency of the entities it shares with `doc_id`: a rare,
+    specific shared concept is a strong link; a near-universal one is filtered out as
+    noise. Returns up to `limit` documents, each with a `score` and the connecting
+    `shared_entities` (most-specific first) — the meaningful "what else in my corpus
+    relates to this" surface.
+
+    Returns an empty list if RyuGraph isn't installed (the graph is optional).
+    """
+    from memex.index.graph_store import GraphStore
+
+    settings = get_settings()
+    log = logger.bind(tool="related_documents", doc_id=doc_id)
+    log.info("mcp.tool.start")
+    try:
+        store = await GraphStore.open(settings.vault_path)
+    except ImportError as e:
+        log.warning("mcp.graph_unavailable", reason=str(e))
+        return []
+    try:
+        related = await store.related_documents(doc_id, limit=limit)
+    finally:
+        await store.close()
+    log.info("mcp.tool.done", count=len(related))
+    return related
+
+
 # Register with FastMCP. We do this after defining the functions so the
 # above docstrings show up verbatim in MCP tool-introspection responses.
 server.tool()(search)
@@ -228,6 +260,7 @@ server.tool()(get_document)
 server.tool(name="list_documents")(list_documents_tool)
 server.tool(name="list_scope_sets")(list_scope_sets_tool)
 server.tool()(get_graph_neighbors)
+server.tool()(related_documents)
 
 
 # ----- Transports -----
