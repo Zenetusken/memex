@@ -563,6 +563,47 @@ def test_summarize_status_done_error_renders_banner_at_200(client: TestClient) -
     assert 'class="progress"' not in r.text
 
 
+def test_summary_labels_sources_by_section_not_repeated_doc_title(client: TestClient) -> None:
+    """Item 5: a summary is of ONE doc, so the per-claim source chips label by
+    SECTION (+ page) — NOT "DocTitle › Section" repeated on every claim — and
+    there's no redundant "Sources" wikilink list re-listing the same doc once
+    per section. (The answer view keeps the full title › section + Sources.)"""
+    registry = client.app.state.progress
+    cid = "01HZSUMMARYSRC0000000000000"
+    registry.new(cid, scope_doc_ids=[], scope_source="named")
+    chunk = Chunk(
+        chunk_id="abcd1234#k",
+        document_id="abcd1234",
+        document_title="Access Control Exercise",
+        text="Key components.",
+        page=2,
+        heading_path=["Key Components"],
+    )
+    registry.finish(
+        cid,
+        response=FinalResponse(
+            answered=True,
+            summary="A grounded summary.",
+            claims=[
+                CitedClaim(claim="R1 and R2 are routers.", source_chunk_id="abcd1234#k", confidence="high")
+            ],
+            used_chunks=[chunk],
+            wikilinks=["[[abcd1234#Key Components]]"],
+            correlation_id=cid,
+            tokens_used=5,
+            nodes_traversed=2,
+            regenerate_attempts=0,
+        ),
+    )
+    r = client.get(f"/documents/abcd1234/summarize/status?cid={cid}&v=0")
+    assert r.status_code == 200
+    # Section-first chip: "Key Components · p. 2", NOT "Access Control Exercise › …".
+    assert "Key Components · p. 2" in r.text
+    assert "Access Control Exercise › Key Components" not in r.text
+    # No redundant Sources section (every source is this one doc).
+    assert "Sources" not in r.text
+
+
 @pytest.mark.asyncio
 async def test_summarize_live_progression_surfaces_section(
     client: TestClient, monkeypatch: pytest.MonkeyPatch

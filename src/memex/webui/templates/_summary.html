@@ -23,8 +23,11 @@
         <p class="claim-meta">
           <span class="conf conf-{{ claim.confidence }}">{{ claim.confidence }} confidence</span>
           <span class="claim-src">source</span>
+          {# A summary is always of ONE document (you're on its page) — so the
+             doc title is implicit. Label the source by SECTION (+ page), not
+             "DocTitle › Section", to avoid repeating the title on every claim. #}
           {% set ref = (chunk_refs or {}).get(claim.source_chunk_id) -%}
-          {%- if ref %}<a class="claim-source-link" href="{{ ref.href }}" title="{{ claim.source_chunk_id }}"{% if ref.page %} data-page="{{ ref.page }}"{% endif %}>{{ ref.title }}{% if ref.section %} › {{ ref.section }}{% endif %}{% if ref.page %} · p. {{ ref.page }}{% endif %}</a>
+          {%- if ref %}<a class="claim-source-link" href="{{ ref.href }}" title="{{ claim.source_chunk_id }}"{% if ref.page %} data-page="{{ ref.page }}"{% endif %}>{% if ref.section %}{{ ref.section }}{% else %}{{ ref.title }}{% endif %}{% if ref.page %} · p. {{ ref.page }}{% endif %}</a>
           {%- else %}<code class="chunk-id" title="chunk id">{{ claim.source_chunk_id }}</code>{% endif %}
         </p>
       </li>
@@ -47,7 +50,7 @@
         <ul class="summary-section-points">
           {% for kp in s.key_points %}
           {% set kref = (chunk_refs or {}).get(kp.source_chunk_id) %}
-          <li><span>{{ kp.claim }}</span> {% if kref %}<a class="claim-source-link" href="{{ kref.href }}" title="{{ kp.source_chunk_id }}"{% if kref.page %} data-page="{{ kref.page }}"{% endif %}>{{ kref.title }}{% if kref.section %} › {{ kref.section }}{% endif %}{% if kref.page %} · p. {{ kref.page }}{% endif %}</a>{% else %}<code class="chunk-id" title="chunk id">{{ kp.source_chunk_id }}</code>{% endif %}</li>
+          <li><span>{{ kp.claim }}</span> {% if kref %}<a class="claim-source-link" href="{{ kref.href }}" title="{{ kp.source_chunk_id }}"{% if kref.page %} data-page="{{ kref.page }}"{% endif %}>{% if kref.section %}{{ kref.section }}{% else %}{{ kref.title }}{% endif %}{% if kref.page %} · p. {{ kref.page }}{% endif %}</a>{% else %}<code class="chunk-id" title="chunk id">{{ kp.source_chunk_id }}</code>{% endif %}</li>
           {% endfor %}
         </ul>
         {% endif %}
@@ -57,16 +60,11 @@
   </details>
   {% endif %}
 
-  {% if response.wikilinks %}
-  <section>
-    <p class="ans-eyebrow">Sources</p>
-    <ul class="ans-sources">
-      {% for wikilink in response.wikilinks %}
-      <li>{{ wikilink | render_wikilink(doc_titles) }}</li>
-      {% endfor %}
-    </ul>
-  </section>
-  {% endif %}
+  {# No "Sources" section in a summary: every source IS the one document being
+     summarized, so a wikilink list would just repeat its title once per section
+     — already covered by the per-claim section links above + the "By section"
+     breakdown. (The answer view keeps Sources — an answer can span docs.) The
+     `wikilinks` field still ships on the FinalResponse for MCP/CLI consumers. #}
 </article>
 {% else %}
 <div class="ans-flash ans-flash-refused" role="status">
