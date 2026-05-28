@@ -131,7 +131,7 @@ def _fake_complete(*, ground: bool, capture: list[str] | None = None):
                 5,
             )
         if name == "DocAbstract":
-            return DocAbstract(abstract="The whole-document abstract."), 8
+            return DocAbstract(sentences=["The whole-document abstract."]), 8
         raise AssertionError(f"unexpected schema {name!r}")
 
     return _complete
@@ -307,7 +307,7 @@ def _fake_complete_drop_tabular():
                 5,
             )
         if name == "DocAbstract":
-            return DocAbstract(abstract="The abstract."), 8
+            return DocAbstract(sentences=["The abstract."]), 8
         raise AssertionError(f"unexpected schema {name!r}")
 
     return _complete
@@ -433,7 +433,7 @@ async def test_used_chunks_covers_every_section_key_point(
         if name == "VerificationResult":
             return schema(grounded=[0, 1, 2, 3, 4], ungrounded=[], ungrounded_reasons=[]), 5
         if name == "DocAbstract":
-            return DocAbstract(abstract="The whole-document abstract."), 8
+            return DocAbstract(sentences=["The whole-document abstract."]), 8
         raise AssertionError(f"unexpected schema {name!r}")
 
     monkeypatch.setattr(ds, "complete_structured", _fake)

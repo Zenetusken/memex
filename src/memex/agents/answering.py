@@ -284,12 +284,25 @@ class SectionSummary(BaseModel):
 
 class DocAbstract(BaseModel):
     """The REDUCE step's output: a whole-document overview synthesized from the
-    (already grounded) section digests (ADR-0008)."""
+    (already grounded) section digests (ADR-0008).
 
-    abstract: str = Field(
-        description="A 2-4 sentence overview of the entire document.",
-        max_length=800,
+    The overview is emitted as a bounded LIST of complete sentences, not one
+    free-form string — the same shape the rest of the summarizer uses (ADR-0009).
+    `maxItems` bounds the COUNT and each sentence is short enough to end at a
+    natural boundary, so the joined `abstract` can never force-close MID-WORD the
+    way a single capped string does (the "policyEn" failure). The `abstract`
+    property joins them, so `_reduce` / `FinalResponse.summary` / the webui are
+    unchanged."""
+
+    sentences: list[Annotated[str, Field(max_length=300)]] = Field(
+        description="The whole-document overview as 2-8 complete sentences.",
+        max_length=8,
     )
+
+    @property
+    def abstract(self) -> str:
+        """The overview as joined prose (what callers read)."""
+        return " ".join(s.strip() for s in self.sentences if s.strip())
 
 
 class SufficiencyAssessment(BaseModel):
