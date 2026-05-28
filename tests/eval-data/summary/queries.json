@@ -29,10 +29,11 @@
     "embedding"
    ],
    "must_not_assert": [
-    "reinforcement learning from human feedback"
+    "reinforcement learning from human feedback",
+    "Gaming revenue"
    ],
    "_route": "long-prose",
-   "_note": "GTE is a multi-stage contrastive text-embedding paper; RLHF is not in it."
+   "_note": "GTE is a multi-stage contrastive text-embedding paper; RLHF is not in it. 'Gaming revenue' regression-gates the 2026-05-28 key-figures fix: the tabular MAP used to copy the prompt's concrete example ('Fiscal 2026 Gaming revenue was $16,042M') verbatim when a doc's tables had no headline figure (the example is now a placeholder)."
   },
   {
    "doc_id": "0e725ba0-2026-annual-report-web",
