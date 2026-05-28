@@ -62,12 +62,20 @@ DocRoute = Literal["short", "long"]
 # abstract (whole-doc overview) and the per-section digest. The schema's
 # `maxItems`/`max_length` bounds are the hard safety net; this tunes the REQUESTED
 # verbosity within them.
-SummaryDetail = Literal["brief", "standard", "detailed"]
+SummaryDetail = Literal["brief", "standard", "detailed", "report"]
 _DETAIL_GUIDANCE: dict[SummaryDetail, dict[str, str]] = {
     "brief": {"abstract": "1-2 sentences", "digest": "1 concise sentence"},
     "standard": {"abstract": "2-4 sentences", "digest": "1-3 sentences"},
     "detailed": {
-        "abstract": "a thorough paragraph of 5-8 sentences",
+        "abstract": "a thorough 5-8 sentences",
+        "digest": "2-4 sentences",
+    },
+    # `report` is the multi-paragraph route (ADR-0010): the abstract guidance sizes
+    # ONE paragraph per batch of sections (a HIERARCHICAL reduce stitches the
+    # paragraphs), and the per-section digest is rich (like `detailed`) so each
+    # paragraph has substance to synthesize from.
+    "report": {
+        "abstract": "4-8 sentences",
         "digest": "2-4 sentences",
     },
 }
@@ -112,6 +120,12 @@ _MAX_SECTIONS = 40
 # under 6,144). A doc with more sections still abstracts from a representative
 # head; its per-section digests remain on `FinalResponse.sections` in full.
 _REDUCE_MAX_SECTIONS = 24
+# Report route (ADR-0010): the HIERARCHICAL reduce batches the grounded section
+# digests this many at a time → one bounded paragraph per batch. Small enough that
+# each batch's REDUCE prompt is well inside the fast window (≤4 digests), so the
+# per-call boundedness that makes the single-level reduce safe holds per batch, and
+# EVERY section reaches the output (no `_REDUCE_MAX_SECTIONS` truncation).
+_REPORT_SECTIONS_PER_BATCH = 4
 # Output reservation for the small GROUND/REDUCE calls (a verification index-list /
 # a short abstract) — kept tight so prompt + output clears the fast window.
 _VERIFY_MAX_TOKENS = 768
@@ -382,14 +396,22 @@ async def _reduce(
     instruction: str | None,
     max_output_tokens: int,
     abstract_guidance: str,
+    *,
+    scope_note: str = "",
 ) -> tuple[str, int]:
-    """Synthesize the per-section digests into a whole-document abstract."""
+    """Synthesize the per-section digests into a whole-document abstract.
+
+    `scope_note` (default "") overrides the prompt's scope framing. Empty = the
+    whole-document overview (the single-level reduce — byte-identical to before).
+    The report route (`_reduce_report`) passes a per-batch note so a batch
+    paragraph does NOT claim to summarize the whole document (ADR-0010)."""
     prompt = render_prompt(
         "summarize_reduce",
         title=title,
         sections=sections[:_REDUCE_MAX_SECTIONS],  # keep the REDUCE prompt within the fast window
         instruction=instruction or "",
         abstract_guidance=abstract_guidance,
+        scope_note=scope_note,
     )
     try:
         overview, tokens = await complete_structured(
@@ -402,6 +424,54 @@ async def _reduce(
         logger.warning("summarize.reduce_failed", error=str(e)[:160])
         return "", 0
     return overview.abstract, tokens
+
+
+async def _reduce_report(
+    title: str,
+    sections: list[SectionSummary],
+    instruction: str | None,
+    max_output_tokens: int,
+    abstract_guidance: str,
+    emit: Callable[[str], None],
+) -> tuple[str, int]:
+    """HIERARCHICAL reduce → a multi-paragraph report body (ADR-0010).
+
+    Batch the grounded section digests `_REPORT_SECTIONS_PER_BATCH` at a time,
+    reduce EACH batch to one bounded paragraph (reusing `_reduce`, hence the same
+    bounded `DocAbstract` primitive), then stitch the paragraphs in document order
+    with blank-line separators. This is the safe inverse of the removed free-form
+    `synthesize` (ADR-0009): every model call still takes small grounded input →
+    bounded output, so none of the three free-form failure modes (regurgitation /
+    won't-stop / mid-word force-close) can occur, and EVERY section reaches the
+    output (no `_REDUCE_MAX_SECTIONS` truncation). The stitch is DETERMINISTIC — no
+    final whole-output model pass, which would reintroduce the free-form trap.
+
+    A batch paragraph is told (via `scope_note`) that it covers one span of a
+    longer overview, so it does not falsely claim whole-document scope."""
+    batches = [
+        sections[i : i + _REPORT_SECTIONS_PER_BATCH]
+        for i in range(0, len(sections), _REPORT_SECTIONS_PER_BATCH)
+    ]
+    paragraphs: list[str] = []
+    tokens_total = 0
+    for bi, batch in enumerate(batches):
+        emit(f"Reducing · paragraph {bi + 1} of {len(batches)}")
+        scope_note = (
+            "one part of a longer multi-section overview — cover ONLY the digests "
+            "below and do not claim to summarize the whole document"
+        )
+        paragraph, t = await _reduce(
+            title,
+            batch,
+            instruction,
+            max_output_tokens,
+            abstract_guidance,
+            scope_note=scope_note,
+        )
+        tokens_total += t
+        if paragraph:
+            paragraphs.append(paragraph)
+    return "\n\n".join(paragraphs), tokens_total
 
 
 def _table_salience(table: StoredTable) -> float:
@@ -551,7 +621,8 @@ async def summarize_document(
 
     `instruction` optionally focuses the summary. `detail` tunes length/verbosity
     (`brief` / `standard` / `detailed` — threaded into the MAP/REDUCE prompts via
-    `_DETAIL_GUIDANCE`). `max_output_tokens` bounds each call; `token_budget` caps
+    `_DETAIL_GUIDANCE`; `report` additionally switches REDUCE to the multi-paragraph
+    hierarchical reducer, ADR-0010). `max_output_tokens` bounds each call; `token_budget` caps
     the whole map-reduce's total token traffic (a typical doc completes within it,
     bounded ultimately by `_MAX_SECTIONS`; a pathologically long doc stops early —
     a v1 limit, tunable per call). Returns a
@@ -735,11 +806,23 @@ async def summarize_document(
 
         # REDUCE → abstract. When there is exactly ONE section summary (a small
         # single-section doc, not split, not tabular) its digest IS the abstract — no
-        # second call. Otherwise (multiple sections, a sub-split section's parts, or
-        # the tabular key-figures section) synthesize across the digests so the
-        # abstract reflects them all.
+        # second call. The `report` detail builds a MULTI-paragraph body via the
+        # hierarchical reduce (ADR-0010) — every section reaches the output. Otherwise
+        # (multiple sections, a sub-split section's parts, or the tabular key-figures
+        # section) synthesize across the digests into a single abstract.
         if len(section_summaries) == 1 and not is_tabular:
             abstract = section_summaries[0].digest
+        elif detail == "report":
+            _emit("Reducing")
+            abstract, t_r = await _reduce_report(
+                doc_title,
+                section_summaries,
+                instruction,
+                max_output_tokens,
+                guidance["abstract"],
+                _emit,
+            )
+            tokens_total += t_r
         else:
             _emit("Reducing")
             abstract, t_r = await _reduce(

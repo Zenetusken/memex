@@ -222,7 +222,7 @@ def _load_summary_cases(query_set_path: Path) -> list[SummaryEvalCase]:
 
 
 def _coerce_detail(detail: str) -> SummaryDetail:
-    return detail if detail in ("brief", "standard", "detailed") else "standard"
+    return detail if detail in ("brief", "standard", "detailed", "report") else "standard"
 
 
 def _summary_text(resp: FinalResponse) -> str:

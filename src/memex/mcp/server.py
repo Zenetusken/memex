@@ -123,14 +123,17 @@ async def summarize(
     """Summarise a document — a structured, GROUNDED summary (ADR-0008): an
     `summary` abstract + cited `claims` (key-points) + per-section `sections`
     digests, every point grounded to a source chunk (it refuses rather than
-    fabricate). `detail` tunes length: "brief" | "standard" | "detailed". Same
-    quality regardless of the server's co-residence mode.
+    fabricate). `detail` tunes length: "brief" | "standard" | "detailed" |
+    "report" (a multi-paragraph body). Same quality regardless of the server's
+    co-residence mode.
 
     Use this for "summarize this doc"; use `ask` for a specific question.
     """
     log = logger.bind(tool="summarize", doc_id=doc_id)
     log.info("mcp.tool.start", detail=detail)
-    level: SummaryDetail = detail if detail in ("brief", "standard", "detailed") else "standard"
+    level: SummaryDetail = (
+        detail if detail in ("brief", "standard", "detailed", "report") else "standard"
+    )
     response = await summarize_document(doc_id, instruction=instruction, detail=level)
     log.info("mcp.tool.done", answered=response.answered, correlation_id=response.correlation_id)
     return response

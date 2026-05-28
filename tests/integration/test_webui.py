@@ -563,6 +563,50 @@ def test_summarize_status_done_error_renders_banner_at_200(client: TestClient) -
     assert 'class="progress"' not in r.text
 
 
+def test_report_summary_renders_paragraphs_in_one_block(client: TestClient) -> None:
+    """A `report`-detail summary (ADR-0010) is a multi-paragraph body (blank-line
+    separated). The done-render splits it into one <p> per paragraph inside ONE
+    .ans-answer block — one blue rule spans them, NOT N separate answer blocks."""
+    registry = client.app.state.progress
+    cid = "01HZSUMMARYREPORT0000000000"
+    registry.new(cid, scope_doc_ids=[], scope_source="named")
+    body = "First paragraph of the report.\n\nSecond paragraph.\n\nThird paragraph."
+    fr = FinalResponse(
+        answered=True,
+        summary=body,
+        claims=[],
+        sections=[],
+        correlation_id=cid,
+        tokens_used=5,
+        nodes_traversed=2,
+        regenerate_attempts=0,
+    )
+    registry.finish(cid, response=fr)
+    r = client.get(f"/documents/abcd1234/summarize/status?cid={cid}&v=0")
+    assert r.status_code == 200
+    # Each paragraph is its OWN <p> (the \n\n was split, not collapsed into one run).
+    assert "<p>First paragraph of the report.</p>" in r.text
+    assert "<p>Second paragraph.</p>" in r.text
+    assert "<p>Third paragraph.</p>" in r.text
+    # Exactly ONE .ans-answer block wraps all three (a single blue rule).
+    assert r.text.count('class="ans-answer"') == 1
+
+
+@pytest.mark.asyncio
+async def test_document_detail_select_offers_report(
+    settings: MemexSettings, client: TestClient
+) -> None:
+    """The Summarize control exposes the `report` detail (ADR-0010) alongside the
+    existing levels."""
+    ref = await ingest_markdown_passthrough(
+        "# Summary Control\n\nBody.\n", source_stem="summary_control"
+    )
+    r = client.get(f"/documents/{ref.doc_id}")
+    assert r.status_code == 200
+    assert '<option value="report">report</option>' in r.text
+    assert '<option value="detailed">detailed</option>' in r.text
+
+
 def test_summary_labels_sources_by_section_not_repeated_doc_title(client: TestClient) -> None:
     """Item 5: a summary is of ONE doc, so the per-claim source chips label by
     SECTION (+ page) — NOT "DocTitle › Section" repeated on every claim — and

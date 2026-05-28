@@ -10,7 +10,13 @@
 <article class="ans">
   <section>
     <p class="ans-eyebrow">Summary</p>
-    <p class="ans-answer">{{ response.summary }}</p>
+    {# `report` detail returns a multi-paragraph body (blank-line separated, ADR-0010);
+       brief/standard/detailed are a single paragraph. One blue rule spans the block. #}
+    <div class="ans-answer">
+      {% for para in response.summary.split("\n\n") %}
+      <p>{{ para }}</p>
+      {% endfor %}
+    </div>
   </section>
 
   {% if response.claims %}

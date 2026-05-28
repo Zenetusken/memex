@@ -415,7 +415,9 @@ def register(app: typer.Typer) -> None:
         doc_id: str = _Argument(..., help="Document id to summarise."),
         instruction: str = _Option("", "--instruction", "-i", help="Optionally focus the summary."),
         detail: str = _Option(
-            "standard", "--detail", help="Length/detail: brief | standard | detailed."
+            "standard",
+            "--detail",
+            help="Length/detail: brief | standard | detailed | report (multi-paragraph).",
         ),
         max_tokens: int = _Option(
             2048, "--max-tokens", help="Max output tokens per map/reduce call."
@@ -431,9 +433,10 @@ def register(app: typer.Typer) -> None:
         Doc-type-aware map-reduce over the document's sections: an abstract +
         cited key-points + per-section digests, every point grounded to a source
         chunk (refuses rather than fabricate). `--detail` tunes length
-        (brief/standard/detailed). Quality is identical in `fast` or `full` mode.
+        (brief/standard/detailed); `report` builds a multi-paragraph body via the
+        hierarchical reducer (ADR-0010). Quality is identical in `fast` or `full` mode.
         """
-        valid = ("brief", "standard", "detailed")
+        valid = ("brief", "standard", "detailed", "report")
         if detail not in valid:
             err.print(f"[red]Unknown --detail {detail!r}.[/red] Choose: {', '.join(valid)}")
             raise typer.Exit(code=2)

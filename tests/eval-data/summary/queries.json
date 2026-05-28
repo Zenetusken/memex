@@ -1,15 +1,23 @@
 {
  "_description": "Grounded-summary eval (ADR-0008). Each case summarizes a vault document and scores: mention-recall (soft \u2014 did the summary surface the doc's key topics/facts) + the must_not_assert no-leak HARD gate (a grounded summarizer must never assert a fact the doc doesn't support) + summarize-vs-refuse correctness.",
- "_doc_note": "Source documents stay LOCAL (per tests/eval-data/README.md); only this case set is committed. doc_ids are this vault's content-slugs. Route coverage: long-prose (gte), tabular (10-K), deck (cuda), refuse (nonexistent).",
+ "_doc_note": "Source documents stay LOCAL (per tests/eval-data/README.md); only this case set is committed. doc_ids are this vault's content-slugs. Route coverage: long-prose (gte), tabular (10-K), deck (cuda), front-matter-heavy standard (NIST), report multi-paragraph (NIST, ADR-0010), refuse (nonexistent).",
  "_created": "2026-05-27",
  "_hard_gates": "hallucination_count == 0 AND summarize_correct_count == case_count",
+ "_baseline_2026_05_28": {
+  "case_count": 6,
+  "summarized_count": 5,
+  "summarize_correct_count": 6,
+  "hallucination_count": 0,
+  "mean_mention_recall": 1.0,
+  "_note": "All HARD gates pass (full mode, reranker on CPU). gte/10-K/cuda/NIST(standard)/NIST(report) summarized recall 1.0 no leaks; nonexistent doc refused. The NIST `report` case (ADR-0010, 19 sections → ~5 batches, multi-paragraph) is the drift gate: violations=[] — the LONGER body asserted no blockchain."
+ },
  "_baseline_2026_05_27": {
   "case_count": 4,
   "summarized_count": 3,
   "summarize_correct_count": 4,
   "hallucination_count": 0,
   "mean_mention_recall": 1.0,
-  "_note": "All HARD gates pass. gte/10-K/cuda summarized (recall 1.0, no leaks); nonexistent doc refused. CUDA deck packed to 6 sections; 10-K tabular surfaced revenue+NVIDIA. token_budget 40k/case."
+  "_note": "Superseded by _baseline_2026_05_28. All HARD gates passed. gte/10-K/cuda summarized; nonexistent refused."
  },
  "cases": [
   {
@@ -67,6 +75,20 @@
    ],
    "_route": "long-prose / front-matter-heavy federal standard",
    "_note": "NIST SP 800-207 is a Zero Trust Architecture standard with heavy cover/FISMA front-matter. Regression-gates the 2026-05-28 abstract+key-point fix: the summary must surface the SUBSTANCE (zero trust, perimeter) and not be dominated by publication boilerplate. blockchain is a clean no-leak counterfactual (absent from a 2020 ZTA standard)."
+  },
+  {
+   "doc_id": "0290d6ec-nist-sp-800-207",
+   "detail": "report",
+   "should_summarize": true,
+   "must_mention": [
+    "zero trust",
+    "perimeter"
+   ],
+   "must_not_assert": [
+    "blockchain"
+   ],
+   "_route": "report (ADR-0010 hierarchical reduce — multi-paragraph)",
+   "_note": "Exercises report mode's multi-paragraph body on a many-section (19) front-matter-heavy standard: the LONGER body must still surface the substance (zero trust, perimeter), keep metadata out across every paragraph, and — the ADR-0010 drift gate — NOT assert blockchain anywhere despite more generated prose."
   },
   {
    "doc_id": "no-such-document-0000",

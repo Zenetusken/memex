@@ -401,6 +401,15 @@ html { scroll-behavior: smooth; }
   font-size: 1.0625rem;
   line-height: 1.55;
 }
+/* `report`-detail summaries (ADR-0010) wrap multiple paragraphs in one .ans-answer
+   block so the single blue rule spans them all; space the paragraphs without
+   adding gaps to the rule (a single-paragraph answer has exactly one child). */
+.ans-answer > p {
+  margin: 0;
+}
+.ans-answer > p + p {
+  margin-top: 0.6rem;
+}
 
 /* Grounded claims — each is one assertion + the chunk it is grounded in. */
 .claim-list {

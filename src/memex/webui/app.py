@@ -747,7 +747,9 @@ def create_app() -> FastAPI:
         `/documents/{id}/summarize/status` for the live phase ("Summarizing · section
         k of N" → "Reducing" → …) until the summary swaps in."""
         doc_id = _validate_doc_id(doc_id)
-        level: SummaryDetail = detail if detail in ("brief", "standard", "detailed") else "standard"
+        level: SummaryDetail = (
+            detail if detail in ("brief", "standard", "detailed", "report") else "standard"
+        )
         cid = str(ulid.ULID())
         progress.new(cid, scope_doc_ids=[], scope_source="named")
         task = asyncio.create_task(_run_summarize(cid, doc_id, level))

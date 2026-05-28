@@ -184,6 +184,67 @@ async def test_on_phase_emits_section_sequence_and_threads_cid(
 
 
 @pytest.mark.asyncio
+async def test_report_detail_builds_multi_paragraph_body(
+    _settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`detail="report"` (ADR-0010) → a HIERARCHICAL reduce: the grounded section
+    digests are batched `_REPORT_SECTIONS_PER_BATCH` at a time and EACH batch reduces
+    to one paragraph, stitched with blank lines. So: one paragraph per batch, the
+    reduce runs once per batch (every section reaches the output — no
+    `_REDUCE_MAX_SECTIONS` truncation), and each batch is told (via the scope-note)
+    that it covers a SPAN, not the whole document."""
+    # 9 distinct sections → long route → 9 grounded SectionSummaries → ceil(9/4)=3 batches.
+    chunks = [_chunk(f"docA#{i}", f"H{i}", chr(97 + i) * 9_000) for i in range(9)]
+    monkeypatch.setattr(ds, "FTSStore", _FakeFTS)
+    monkeypatch.setattr(_FakeFTS, "chunks", chunks)
+    capture: list[str] = []
+    monkeypatch.setattr(ds, "complete_structured", _fake_complete(ground=True, capture=capture))
+    seen: list[str] = []
+
+    resp = await ds.summarize_document("docA", detail="report", on_phase=seen.append)
+
+    assert resp.answered
+    expected_batches = -(-9 // ds._REPORT_SECTIONS_PER_BATCH)  # ceil(9/4) = 3
+    # Multi-paragraph body: one (non-empty) paragraph per batch.
+    paragraphs = resp.summary.split("\n\n")
+    assert len(paragraphs) == expected_batches
+    assert all(p.strip() for p in paragraphs)
+    # The reduce ran once PER BATCH, each told it covers one span (not the whole doc).
+    batch_reduces = [p for p in capture if "one part of a longer" in p]
+    assert len(batch_reduces) == expected_batches
+    # Live progress: a "Reducing · paragraph k of N" per batch (parses cleanly in
+    # the webui's summary_phase_view → base "Reducing" + the paragraph eyebrow).
+    para_phases = [s for s in seen if s.startswith("Reducing · paragraph")]
+    assert para_phases == [
+        f"Reducing · paragraph {i + 1} of {expected_batches}" for i in range(expected_batches)
+    ]
+    # Every section is still present in the structured by-section breakdown.
+    assert len(resp.sections) == 9
+
+
+@pytest.mark.asyncio
+async def test_non_report_reduce_keeps_whole_document_scope(
+    _settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The single-level reduce (brief/standard/detailed) must keep the byte-identical
+    whole-document prompt framing — the report `scope_note` is opt-in, never leaks
+    into the default path."""
+    chunks = [_chunk("docA#1", "Intro", "a" * 9_000), _chunk("docA#2", "Methods", "b" * 9_000)]
+    monkeypatch.setattr(ds, "FTSStore", _FakeFTS)
+    monkeypatch.setattr(_FakeFTS, "chunks", chunks)
+    capture: list[str] = []
+    monkeypatch.setattr(ds, "complete_structured", _fake_complete(ground=True, capture=capture))
+
+    resp = await ds.summarize_document("docA", detail="standard")
+
+    assert resp.answered
+    assert "\n\n" not in resp.summary  # single paragraph, not a multi-paragraph body
+    reduce_prompts = [p for p in capture if "per-section digests of" in p]
+    assert reduce_prompts and all("a whole-document overview" in p for p in reduce_prompts)
+    assert all("one part of a longer" not in p for p in reduce_prompts)
+
+
+@pytest.mark.asyncio
 async def test_short_doc_single_pass_uses_digest_as_abstract(
     _settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:

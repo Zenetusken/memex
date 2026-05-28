@@ -69,7 +69,8 @@ The Notebook-LM-style picker: the Ask page lets the user tick documents to scope
 ## Summarize action (`document.html` + `_summary.html`, ADR-0008, 2026-05-27)
 
 The document view has a **Summarize** control in the header: a `detail` `<select>`
-(brief/standard/detailed) + a button in one `<form>` that `hx-post`s to
+(brief/standard/detailed/**report** — the last is the multi-paragraph hierarchical
+reduce, ADR-0010) + a button in one `<form>` that `hx-post`s to
 `POST /documents/{id}/summarize` (`hx-target="#summary-pane"`, `hx-swap="innerHTML"`,
 `hx-indicator="#summary-loading"`, `hx-disabled-elt="button[name='go']"`). The route
 reads the `detail` Form field, calls `agents.document_summarizer.summarize_document`
@@ -79,7 +80,11 @@ No JS (native `<select>` + HTMX). The summary can take a moment (sequential
 per-section map-reduce) — the `#summary-loading` `.htmx-indicator` covers it.
 
 `_summary.html` **reuses the answer panel's zones** for cohesion: the abstract in
-`.ans-answer` (the blue left-rule "Summary"), the grounded key-points as `.claim`
+`.ans-answer` (the blue left-rule "Summary") — for `report` detail the body is
+multi-paragraph (blank-line separated, ADR-0010), so the template splits
+`response.summary` on `\n\n` into one `<p>` per paragraph inside ONE `.ans-answer`
+block (the single blue rule spans them; `.ans-answer > p + p` spaces them); a
+single-paragraph summary is exactly one `<p>` (unchanged) — the grounded key-points as `.claim`
 cards with `.conf-{high,medium,low}` chips (colour **and** label, WCAG 1.4.1) + the
 monospace source `.chunk-id`, the Sources via the `render_wikilink` filter, and the
 `.ans-footer` audit line (correlation_id + token/section counts). It adds a
