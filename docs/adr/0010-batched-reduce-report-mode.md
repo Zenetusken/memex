@@ -181,4 +181,26 @@ AWQ weights → ~11 GB during load. The swap *lifecycle* worked perfectly (pause
 attempts → clean reap → orchestrator restored → graceful `ModelCallError`); only the model
 didn't fit. **Re-enable** with `MEMEX_MODELS__SUMMARIZER=<a-model-that-fits>` — a text-only,
 smaller-vocab 14B (e.g. Qwen3-14B-AWQ) is the best fit-bet on 12 GB; Gemma-3-12B needs a
-bigger card. See the `summarizer-swap-in-2026-05-28` memory.
+bigger card. See the `summarizer-swap-in-2026-05-28` memory. (Both Gemma-3-12B AND
+Qwen3-14B were confirmed to OOM on the 12 GB card — a >8B model + KV doesn't fit even with
+the orchestrator paused. The swap-in stays as banked infra for a bigger GPU.)
+
+## Resolution (2026-05-28): the repetition was a PROMPTING bug, fixed on the 8B
+
+The swap-in turned out to be unnecessary. The cross-paragraph repetition was NOT a model
+ceiling — it was a prompt bug: `summarize_reduce` told **every** paragraph to "capture the
+document's SUBJECT, scope, and main conclusions," so continuation paragraphs dutifully
+re-introduced the subject ("GTE is a general text embedding model…") instead of advancing.
+The earlier "8B can't dedup via prompting" framing (and the two weak attempts —
+"don't repeat" + "never reuse the opening pattern") was WRONG about the cause.
+
+**Fix:** branch the reduce instruction on `preceding`. The OPENING (no `preceding`) keeps the
+document-level thesis + metadata-suppression; CONTINUATIONS are told the reader has already
+read the opening, to NOT re-introduce/re-describe the document or restate its headline
+results, and to write ONLY the specific content their sections add, leading with a concrete
+specific. Validated live on the GTE paper (the worst case) on the **original Qwen3-8B, no
+swap**: 6 paragraphs now cover distinct aspects (intro → method → experiments → MTEB results
+→ data-mixture ablation → limitations), no subject-reintroduction; and `report_confidence`
+jumped **0.46 → 0.825** (embedding 0.85 + lexical 0.77 — the hybrid fully works on the
+non-swap path, where the embedder fits beside the 8B). So report mode now produces coherent,
+distinct, faithful paragraphs on thesis-heavy docs too — on the 12 GB rig, no swap needed.
