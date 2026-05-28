@@ -150,6 +150,23 @@ srcs / no `<iframe>` / inline disposition / Office `converted.pdf` "(rendered)" 
 page route serves PNG + out-of-range 404) + `test_pdf_render.py` (render + corrupt +
 out-of-range).
 
+**Click-source → jump-to-page (2026-05-27).** A claim's `.claim-source-link`
+carries `data-page="N"` (+ a visible "· p. N", + `?page=N` in the href) when the
+chunker attributed its chunk to a source page (`Chunk.page`, populated from the
+parser's per-page `char_count` in the manifest — see `src/memex/CLAUDE.md`). Each
+preview `<img>` gets `id="page-{1-based}"`. An inline `<script>` in `document.html`
+(gated on `has_preview`, vanilla DOM, no vendored deps) does two things: on load it
+reads `?page=N` and `scrollIntoView`s `#page-N` (the cross-page case — a same-tab Ask
+whose cited source click lands on the doc page); and it intercepts same-doc
+`[data-page]` clicks to scroll the preview + the markdown section + `replaceState`
+the URL (no reload — a same-doc-different-query href would otherwise full-navigate).
+Cross-doc `[data-page]` links navigate normally (the `?page=N` survives → the target
+doc scrolls on load). A markdown-only doc (no `#pdf-pages`) no-ops. Pinned by
+`test_webui.py` (`data-page`/`?page=N`/"· p. N" on the source-link + `id="page-N"` +
+the `scrollPreviewTo` hook present). Existing docs need `memex index <doc> --force`
+(or a re-ingest) to backfill the page attribution — the content-addressed partial
+index skips it on a same-content re-parse; new ingests get it automatically.
+
 ## Live progress (long-poll, `_progress.html` + `webui/progress.py`, 2026-05-27)
 
 Both `/ask` AND **Summarize** share one long-poll progress widget. The summarize
