@@ -216,7 +216,7 @@ uv run memex list documents
 open http://127.0.0.1:7423
 ```
 
-The web UI gives you a documents list, PDF side-by-side preview, a Cytoscape graph view of entity neighbors, and an inline edit-then-save flow (with conflict detection if someone else changed the doc since you started editing — see [`docs/deploy/mcp-http.md`](docs/deploy/mcp-http.md) for the 409 conflict surface).
+The web UI gives you a documents list, **side-by-side preview of the source PDF** (server-rendered page images, lazy-loaded — works in every browser regardless of the "download PDFs" setting), a Cytoscape graph view of entity neighbors, and an inline edit-then-save flow (with conflict detection if someone else changed the doc since you started editing — see [`docs/deploy/mcp-http.md`](docs/deploy/mcp-http.md) for the 409 conflict surface). Long agent/summarizer runs surface **live progress** via an HTMX long-poll widget (no SSE / no new JS) — the per-section counter ticks on Summarize, the agent's node-by-node phase advances on Ask; the answer + summary panels label sources by **document title › section** (the raw `docid#hash` is kept as a tooltip), so a long deck's claims read as English rather than hashes.
 
 ### Edit a Markdown document
 
@@ -420,7 +420,7 @@ The only thing that talks to the network is the *initial model download* (one-ti
 ## 🧪 Run the tests
 
 ```sh
-uv run pytest                  # 837 tests, ~13 seconds, no GPU needed
+uv run pytest                  # 913 tests, ~14 seconds, no GPU needed
 uv run pytest tests/unit       # just the pure-function tests
 uv run pytest tests/integration  # full ingest→parse→index→ask flow with faked I/O
 ```

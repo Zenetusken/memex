@@ -387,20 +387,30 @@ async def serve_http(host: str = "127.0.0.1", port: int = 7424) -> None: ...
 
 **Public interface** (files: `webui/app.py`, `webui/routes/{ask,documents,graph,review}.py`):
 
-- `GET /` — search-and-ask landing
-- `POST /ask` — calls `answer_query`, streams a partial response if SSE is wired in, otherwise blocks
+- `GET /` — search-and-ask landing (now also lists the doc-picker checklist + the saved-scope-set bar)
+- `POST /ask` — kicks off `answer_query` in a background task, returns the live progress fragment (the `streams a partial response if SSE is wired in` idea below is realized as HTMX long-polling)
+- `GET /ask/{cid}/status?v=N` — long-polls the answering agent's phase advance; renders `_answer.html` on completion
 - `GET /documents` — list with filters
-- `GET /documents/{doc_id}` — side-by-side viewer
-- `GET /documents/{doc_id}/source` — serves the original PDF
+- `GET /documents/{doc_id}` — side-by-side viewer (markdown + page-image preview when a source PDF / Office-converted PDF is present)
+- `POST /documents/{doc_id}/summarize` — kicks off `summarize_document` in a background task, returns the live progress fragment
+- `GET /documents/{doc_id}/summarize/status?cid=&v=N` — long-polls the summarizer's phase advance; renders `_summary.html` on completion
+- `GET /documents/{doc_id}/source` — serves the original file (inline `Content-Disposition` for the pane header `download` link)
+- `GET /documents/{doc_id}/source/page/{n}` — rasterises a **0-based** page to PNG (`parse.pdf_render`, pypdfium2-light, lock-serialized — pypdfium2 is NOT thread-safe)
 - `GET /graph` — Cytoscape.js page; data fetched from `/api/graph/{doc_id}/neighbors`
 - `POST /documents/{doc_id}/review` — apply a manual correction (delegates to `vault.write_document` after merging)
+- `GET /resources` + `POST /resources/mode` — co-residence mode comparison + live hot-switch (ADR-0007 §"Runtime transitions")
+- `POST /scope-sets`, `POST /scope-sets/apply`, `POST /scope-sets/delete` — saved-scope-set CRUD (re-rendered partial)
 - `GET /healthz` — for `memex daemon status` polling
 
-**Dependencies.** `fastapi`, `uvicorn`, `jinja2` (already pulled in via prompts), HTMX as a vendored `static/htmx.min.js`, Cytoscape.js the same way. No build step, no React.
+**Dependencies.** `fastapi`, `uvicorn`, `jinja2` (already pulled in via prompts), HTMX as a vendored `static/htmx.min.js`, Tailwind as a hand-curated utility subset at `static/tailwind.css`. No build step, no React, no CDN. Cytoscape.js the same way for the graph view.
 
-**Minimum viable.** `/`, `POST /ask`, `GET /documents`, `GET /documents/{id}` (markdown render only, no PDF preview). Defer correction UI and graph viz to Phase 3+.
+**Minimum viable (shipped).** Every endpoint above except `/graph` (Phase 3+).
 
-**Risk.** "Just enough Tailwind" with no build step. Use the Tailwind CDN in dev, vendor a pre-built CSS for release. Document in the README. Verify WCAG AA in CI (axe-core via Playwright; Part V).
+**Live progress.** Both `POST /ask` and `POST /documents/{id}/summarize` return an immediate `_progress.html` fragment whose `hx-get` chains a long-poll on the corresponding status endpoint. The status route HOLDS the connection (`webui/progress.py::ProgressRegistry::wait_for_change` — `asyncio.Event` + monotonic `version`) until the phase advances or a ~1 s keepalive — SSE-accurate behaviour without any new vendored JS. The agent + summarizer both expose an opt-in, observe-only progress hook (`answer_query(correlation_id, on_node)` via a `_NodeProgressHandler` LangGraph callback; `summarize_document(correlation_id, on_phase)` is linear → calls the sink directly). CLI/MCP/eval pass neither → byte-identical behaviour; HARD gates untouched.
+
+**Source-preview pane.** Server-rendered page images (`<img loading="lazy">` per page, one PNG per request), NOT an embedded `<iframe>` PDF — the latter rendered blank under the browser's "download PDFs" pref. Works in every browser + is the right affordance for scans/handwriting (the original page sits beside its transcription). The doc route reads page-0 dimensions from the source PDF (`parse.pdf_render.pdf_page_size`) and feeds them as `--pdf-page-aspect` on the `.pdf-pages` container so the placeholder `<img>` has real height before the PNG loads — without that, `loading="lazy"` is effectively eager (every row reads as in-viewport and all N requests fire on initial load).
+
+**Risk.** "Just enough Tailwind" with no build step — addressed by vendoring a hand-curated utility subset. WCAG AA verified via the contrast-floor convention in `webui/CLAUDE.md` (secondary text at `zinc-400`; never `zinc-500/600` for text content).
 
 ---
 
