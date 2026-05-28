@@ -1966,6 +1966,16 @@ async def answer_query(
     except (ConfigurationError, MemexError):
         allow_partial_grounded = True
 
+    # Graph expansion is the param ANDed with the settings kill-switch (default on),
+    # read fail-open — so `MEMEX_AGENTS__GRAPH_EXPANSION_ENABLED=false` disables it
+    # globally (for the earns-its-keep A/B) while an explicit param=False still wins.
+    try:
+        graph_expansion_enabled = (
+            graph_expansion_enabled and get_settings().agents.graph_expansion_enabled
+        )
+    except (ConfigurationError, MemexError):
+        pass
+
     initial = AnswerState(
         query=query,
         token_budget=token_budget,

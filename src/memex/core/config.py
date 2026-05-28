@@ -564,10 +564,27 @@ class AgentsSettings(BaseModel):
     cross-paragraph repetition is removed deterministically by the dedup gate
     (`_dedup_sentences`), NOT by backing off these knobs. See the deck-granularity tracker.
     `MEMEX_AGENTS__REPORT_PACK_CHARS=6000`.
+
+    `graph_expansion_enabled`: the `expand_graph` node (between retrieve and rerank) pulls
+    1-hop "shares-an-entity" neighbour-doc chunks into the candidate pool, per `/ask`.
+    **Default OFF as of 2026-05-28** — a microscope audit proved it does real work for zero
+    answer impact: an A/B (ON vs OFF, N=3) on the two cross-doc corpora (cr350-multidoc,
+    ccna-multidoc) was BYTE-IDENTICAL, and a per-query trace showed the node adds 2-12
+    neighbour chunks every query of which the reranker cites EXACTLY 0 — the neighbours are
+    linked by GENERIC shared entities ('IP', 'HTTP', the course instructor's name), so the
+    cross-encoder correctly ranks them #25-#53 of ~56 (or, on a low-signal query, ties them
+    in the noise but they still go uncited). At this corpus scale (47 docs) hybrid k=50
+    already has near-total recall, so there's no missed-doc for 1-hop expansion to recover
+    (a large-corpus technique, premature here — like flat vector search). The graph STORE
+    is kept (it's the substrate for the on-mission `related_documents` discovery feature —
+    explicit, entity-SPECIFICITY-ranked, user-initiated). ANDed with the `answer_query`
+    param; opt back in for a large entity-rich vault via
+    `MEMEX_AGENTS__GRAPH_EXPANSION_ENABLED=true`. See [[db-audit-2026-05-28]].
     """
 
     artifact_scope_enabled: bool = True
     partial_grounded_answers: bool = True
+    graph_expansion_enabled: bool = False
     report_pack_chars: int = 4_000
     report_coalesce_target: int = Field(default=2, ge=1)
 

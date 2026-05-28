@@ -223,9 +223,12 @@ async def test_expand_graph_pulls_chunks_from_neighbour_docs(
     from memex.index.graph_store import GraphNeighbor
 
     # `expand_graph` calls `get_settings().vault_path`. Stand up a
-    # minimal settings to make that call succeed.
+    # minimal settings to make that call succeed. graph_expansion is OFF by
+    # default (2026-05-28 audit — see config), so this test (which exercises
+    # the expansion mechanism) opts it back IN explicitly.
     monkeypatch.setenv("MEMEX_VAULT_PATH", str(tmp_path))
     monkeypatch.setenv("MEMEX_OBSERVABILITY__LANGFUSE_ENABLED", "false")
+    monkeypatch.setenv("MEMEX_AGENTS__GRAPH_EXPANSION_ENABLED", "true")
     settings = MemexSettings()  # type: ignore[call-arg]
     set_settings(settings)
 
