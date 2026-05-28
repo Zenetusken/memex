@@ -5,6 +5,17 @@
 - **Deciders**: Memex core team
 - **Tags**: agents, summarization, grounding, models, architecture
 
+> **Correction (2026-05-28):** "fact 1" below — *"vLLM guided-JSON enforces list
+> `maxItems` but NOT string `maxLength`"* — is **stale for the pinned stack**
+> (vllm 0.21.0 / xgrammar 0.2.1, past vLLM PR #16516). A live probe confirmed
+> string `max_length` **is** enforced (a 120-char cap honored exactly, force-closed
+> mid-word). The DESIGN here — `maxItems`-bounded lists of SHORT strings — remains
+> correct, but for sharper reasons: a short bounded item ends at a natural
+> boundary (no mid-word guillotine), `maxItems` bounds the COUNT (no runaway), each
+> item is grounding-gated, and map-reduce avoids the whole-doc regurgitation a
+> single big string invites. Read "fact 1" as "a single free-form summary string
+> is the wrong shape," not "max_length is unenforced." See [ADR-0009](0009-remove-free-form-synthesis-baseline.md).
+
 ## Context
 
 "Summarize this document" is the staple LLM request Memex did not yet answer
