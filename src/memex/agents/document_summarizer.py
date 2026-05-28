@@ -178,6 +178,15 @@ _REDUCE_MAX_TOKENS = 1024
 _TABULAR_MIN_TABLES = 4
 _MAX_TABLES_FOR_FIGURES = 24
 _MAX_TABLE_ROWS = 12
+# The Key-figures MAP budget is TIGHTER than the prose `_MAX_SECTION_INPUT_CHARS`
+# (10k): the `summarize_tabular` prompt has a bigger scaffold than `summarize_section`,
+# so the SAME 10k chunk budget rendered to ~4,204 input tokens on the 98-table 10-K and
+# the MAP 400'd (4,204 + 2,048 output > the 6,144 fast window) → the Key-figures section
+# was silently DROPPED on the most table-rich doc we have (caught by the stress test,
+# 2026-05-28). 8k keeps the top-11 SALIENCE-ranked tables at ~3,491 input tokens (+2,048
+# = 5,539, ~600-token margin). The tables are ranked, so the dropped tail is the least
+# figure-rich anyway.
+_TABULAR_MAP_INPUT_CHARS = 8_000
 # Figure-salience (ADR-0008 §7): tables are RANKED, not taken in document order, so
 # the headline data tables (income statement, segment revenue, balance sheet) win
 # over a front-matter fragment on a many-table doc. The score is PURE + deterministic
@@ -299,17 +308,23 @@ def _pack_sections(
     return groups[:_MAX_SECTIONS]
 
 
-def _bound_section_chunks(chunks: list[Chunk]) -> list[Chunk]:
-    """Take a section's chunks up to a fixed char budget (and the chunk-count cap)
+def _bound_section_chunks(
+    chunks: list[Chunk], max_chars: int = _MAX_SECTION_INPUT_CHARS
+) -> list[Chunk]:
+    """Take a section's chunks up to a RENDERED char budget (and the chunk-count cap)
     so a single MAP/GROUND call fits even the SMALLEST window (fast, 6,144). This is
     what makes quality independent of the co-residence mode: the per-call input is
     the same in fast and full. Always keeps at least the first chunk (a lone giant
-    chunk is truncated by the prompt's per-chunk `truncate`, identically per mode)."""
+    chunk is truncated by the prompt's per-chunk `truncate`, identically per mode).
+
+    `max_chars` defaults to the prose-MAP budget; the tabular Key-figures MAP passes a
+    TIGHTER `_TABULAR_MAP_INPUT_CHARS` because its prompt scaffold is bigger (else the
+    same budget overflows — see that constant)."""
     out: list[Chunk] = []
     total = 0
     for c in chunks[:_MAX_SECTION_CHUNKS]:
         clen = _chunk_budget_chars(c)  # text + per-chunk wrapper (mirrors the rendered prompt)
-        if out and total + clen > _MAX_SECTION_INPUT_CHARS:
+        if out and total + clen > max_chars:
             break
         out.append(c)
         total += clen
@@ -940,7 +955,10 @@ async def _key_figures_section(
     enforced by the existing verifier). Returns `(None, tokens)` on a failed map."""
     if not table_chunks:
         return None, 0
-    shown = _bound_section_chunks(table_chunks)
+    # Tighter budget than the prose MAP — the tabular prompt scaffold is bigger, so the
+    # 10k prose budget overflowed the 6,144 window on the 98-table 10-K (the Key-figures
+    # section was then silently dropped). See `_TABULAR_MAP_INPUT_CHARS`.
+    shown = _bound_section_chunks(table_chunks, _TABULAR_MAP_INPUT_CHARS)
     prompt = render_prompt(
         "summarize_tabular",
         chunks=shown,
