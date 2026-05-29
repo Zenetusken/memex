@@ -100,6 +100,22 @@ mirrors `.ans-*`/`.toc-*`), NOT new Tailwind. A zero-grounded summary renders th
 e2e'd (the button → a grounded render). Tests in `test_webui.py` assert the rendered
 zones; keep "Summary"/"Key points"/"Sources"/refusal strings present when restyling.
 
+## Related documents — "explore connections" (`document.html` + `.related-*`, 2026-05-28)
+
+The doc view renders a **"Related documents"** section (just below `#summary-pane`):
+the entity-graph discovery surface that replaced the retired passive `expand_graph`. The
+`document` route fetches `GraphStore.related_documents(doc_id, limit=8)` — neighbours
+ranked by shared-entity SPECIFICITY (IDF, NOT the unranked `neighbors()`; see
+`src/memex/CLAUDE.md` / `index/graph_store.py`) — and passes `related` as a list of
+`{doc_id, title, score, shared_entities}` dicts. The template renders each as a
+title-link (`.related-link`, the one action-blue) + the connecting entities as quiet
+`.related-entity` tags (the "why related"). **Fail-open**: an `ImportError` from
+`GraphStore.open` (ryugraph absent) → `related=[]` → the section is omitted, the doc view
+still renders (mirrors the `/graph` route; NEVER 500s). The graph read uses the documented
+`webui → index/graph_store` edge. Semantic `.related-*` CSS in `style.css` (zinc + the
+action-blue for the link), NOT new Tailwind. No JS. Pinned by `test_webui.py`
+(`test_document_view_renders_related_documents` + `…survives_graph_unavailable`).
+
 ## Live co-residence mode hot-switch (`/resources` + `_resources.html`, ADR-0007, 2026-05-27)
 
 `/resources` shows the active co-residence mode + a comparison table; each non-active
