@@ -82,3 +82,20 @@ def test_limit_caps_results() -> None:
     rows = [(f"d{i}", f"D{i}", f"e{i}", "concept", 2) for i in range(20)]
     out = _rank_related_documents(rows, n_docs=100, limit=5, max_entities=8)
     assert len(out) == 5
+
+
+def test_curated_stopword_excludes_connector_by_name() -> None:
+    """A curated corpus-stopword (by NAME, case-insensitive) is excluded from scoring AND
+    the surfaced shared_entities — a doc connected ONLY by it disappears (ADR-0011)."""
+    rows = [
+        ("only_cr350", "Course Doc", "CR350", "concept", 7),  # below the 0.6 gate, but stopworded
+        ("real", "Real", "DNS spoofing", "concept", 3),
+    ]
+    out = _rank_related_documents(
+        rows, n_docs=47, limit=10, max_entities=8, stopwords=frozenset({"cr350"})
+    )
+    assert [r.doc_id for r in out] == ["real"]
+    assert out[0].shared_entities == ["DNS spoofing"]
+    # Empty stopwords ⇒ the connector survives (CR350 is under the df gate) — regression guard.
+    out2 = _rank_related_documents(rows, n_docs=47, limit=10, max_entities=8)
+    assert "only_cr350" in {r.doc_id for r in out2}

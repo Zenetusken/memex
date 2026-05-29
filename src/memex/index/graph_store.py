@@ -24,6 +24,8 @@ from typing import Any
 import structlog
 from pydantic import BaseModel
 
+from memex.core.config import get_settings
+from memex.core.errors import ConfigurationError
 from memex.index.initialism import (
     derive_initialism,
     initialism_matches,
@@ -192,6 +194,8 @@ def _rank_co_occurring(
     n_docs: int,
     *,
     limit: int,
+    min_shared_docs: int = 2,
+    stopwords: frozenset[str] = frozenset(),
 ) -> list[CoOccurringEntity]:
     """PURE scoring core of `entity_profile`'s co-occurring neighbourhood (separated for
     unit testing). `rows` are `(co_name, co_kind, shared_docs, co_df)` — `shared_docs` =
@@ -200,13 +204,22 @@ def _rank_co_occurring(
     the `shared_docs` term rewards a co-entity that pervades the seed's docs, the IDF term
     rewards SPECIFIC co-entities, and the kind-weight down-weights incidental proper nouns —
     the same noise filter as `_rank_related_documents`, so a generic connector (high df, or
-    person/place) sinks. Excludes near-universal entities (df > the generic fraction)."""
+    person/place) sinks. Excludes near-universal entities (df > the generic fraction).
+
+    Two corpus-noise filters (ADR-0011, the co-occurring noise-reduction pass):
+    `min_shared_docs` is the neighbourhood FLOOR — a co-entity sharing < this many docs with
+    the seed is an incidental single-doc co-mention (the bulk of the noise: ports/sizes), not
+    a recurring neighbour. `stopwords` is a curated set of LOWERCASED names excluded outright
+    (by name, kind-agnostic — a course code like `CR350` has multiple kind-nodes the df-gate
+    + kind-weight can't sink)."""
     if n_docs <= 1:
         return []
     df_cap = _RELATED_GENERIC_ENTITY_DF_FRACTION * n_docs
     out: list[CoOccurringEntity] = []
     for name, kind, shared_docs, df in rows:
-        if df <= 0 or df > df_cap or shared_docs <= 0:
+        if name.strip().lower() in stopwords:
+            continue
+        if df <= 0 or df > df_cap or shared_docs < min_shared_docs:
             continue
         weight = _ENTITY_KIND_WEIGHT.get(kind, _DEFAULT_KIND_WEIGHT)
         score = shared_docs * math.log(n_docs / df) * weight
@@ -270,6 +283,7 @@ def _rank_related_documents(
     *,
     limit: int,
     max_entities: int,
+    stopwords: frozenset[str] = frozenset(),
 ) -> list[RelatedDocument]:
     """PURE scoring core of `GraphStore.related_documents` (separated for unit testing).
 
@@ -288,6 +302,8 @@ def _rank_related_documents(
     df_cap = _RELATED_GENERIC_ENTITY_DF_FRACTION * n_docs
     agg: dict[str, dict[str, Any]] = {}
     for did, title, entity, kind, df in rows:
+        if entity.strip().lower() in stopwords:  # curated corpus-stopword (by name)
+            continue
         if df <= 0 or df > df_cap:  # generic/noise entity → skip
             continue
         weight = _ENTITY_KIND_WEIGHT.get(kind, _DEFAULT_KIND_WEIGHT)
@@ -314,6 +330,24 @@ def _rank_related_documents(
     # Rank by score desc; doc_id as a stable tiebreaker for deterministic output.
     out.sort(key=lambda r: (-r.score, r.doc_id))
     return out[:limit]
+
+
+def _normalize_stopwords(raw: list[str]) -> frozenset[str]:
+    """Lowercase + strip the configured entity-stopword NAMES (drop blanks) for the
+    by-name, kind-agnostic match in the discovery rankers. Empty in ⇒ empty out (off)."""
+    return frozenset(s.strip().lower() for s in raw if s.strip())
+
+
+def _discovery_noise_filters() -> tuple[int, frozenset[str]]:
+    """The co-occurring noise knobs `(min_shared_docs, stopwords)` from settings, FAIL-OPEN
+    to the sensible defaults `(2, frozenset())` when settings aren't initialised — a
+    `GraphStore` opened outside bootstrap (tests, scripts) still ranks. The `2` mirrors the
+    `AgentsSettings.cooccurring_min_shared_docs` / `_rank_co_occurring` default."""
+    try:
+        agents = get_settings().agents
+    except ConfigurationError:
+        return 2, frozenset()
+    return agents.cooccurring_min_shared_docs, _normalize_stopwords(agents.entity_stopwords)
 
 
 def entity_id(name: str, kind: str) -> str:
@@ -506,6 +540,7 @@ class GraphStore:
         and, above `_RELATED_GENERIC_ENTITY_DF_FRACTION` of the corpus, is excluded from
         the surfaced `shared_entities` entirely. So a doc sharing ONE specific concept
         outranks one sharing five generic terms — the meaningful connection wins."""
+        _min_shared, stopwords = _discovery_noise_filters()  # related_documents uses stopwords only
 
         def _run() -> list[RelatedDocument]:
             n_res = self._conn.execute("MATCH (d:Document) RETURN count(d) AS n;")
@@ -529,7 +564,7 @@ class GraphStore:
                 row = result.get_next()
                 rows.append((row[0], row[1], row[2], row[3] or "other", int(row[4])))
             return _rank_related_documents(
-                rows, n_docs, limit=limit, max_entities=max_entities
+                rows, n_docs, limit=limit, max_entities=max_entities, stopwords=stopwords
             )
 
         return await asyncio.to_thread(_run)
@@ -548,6 +583,7 @@ class GraphStore:
         MENTIONS edge is doc-level only, so passages come from FTS at the orchestrator."""
         query_name = name.strip()
         key = query_name.lower()
+        min_shared, stopwords = _discovery_noise_filters()
 
         def _compute_suggestions(exclude_ids: set[str], n_docs: int) -> list[EntitySuggestion]:
             """The deterministic acronym ↔ expansion bridge (ADR-0011). Direction A —
@@ -666,7 +702,13 @@ class GraphStore:
             while co_res.has_next():
                 row = co_res.get_next()
                 co_rows.append((row[0], row[1] or "other", int(row[2]), int(row[3])))
-            cooccurring = _rank_co_occurring(co_rows, n_docs, limit=max_cooccurring)
+            cooccurring = _rank_co_occurring(
+                co_rows,
+                n_docs,
+                limit=max_cooccurring,
+                min_shared_docs=min_shared,
+                stopwords=stopwords,
+            )
 
             return EntityProfile(
                 query_name=query_name,
