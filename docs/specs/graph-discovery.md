@@ -85,7 +85,8 @@ introduce a hallucination or alter a refusal. Independent of the answering agent
     2026-05-28 (`3d00ae7`); see "Co-occurring noise reduction" below.
 - ⏳ citation-chain following (the still-unqueried `CITES` edges) — **DATA-GATED**, scoped as a
   data-first experiment; see "Citation-chain following" below.
-- scope-set suggestions + a "Related" panel in `/ask`.
+- ✅ **a "Related documents" panel in `/ask`** — shipped 2026-05-29 (`ffe23fe`); see "/ask
+  Related panel" below. (scope-set suggestions — the other half — still TODO.)
 - THEN, if discovery-quality is the bottleneck: the [[bert-ner-enrich-scope-2026-05-28]]
   NER swap (sharper, typed entities upstream of the graph).
 
@@ -221,6 +222,30 @@ decision bar:** build chain-following only if real data yields a genuine subgrap
 `GraphStore.citations(doc_id)` (1-hop cites/cited-by) and `citation_paths(doc_id, depth)` over
 `MATCH (d)-[:CITES*1..N]->(o)`, mirroring `related_documents`, surfaced CLI/MCP/webui —
 complementing, not duplicating, the body wikilinks.
+
+## /ask "Related documents" panel (shipped 2026-05-29)
+
+Discovery woven into the answer flow: after an answer renders, the webui `/ask` result shows
+documents the entity graph relates to the docs the answer CITED. **Webui-only + HARD-gate-
+neutral by construction** — computed in the PRESENTATION layer (`webui/app.py::_related_for_answer`,
+wired into `_answer_context`, the single seam feeding `_answer.html` on the long-poll
+completion) from the already-returned `FinalResponse` + a read-only graph query; it NEVER
+touches the agent / answer / refusal path, and the CLI/MCP `ask` payloads are unchanged.
+
+- **Answered-only** (a refusal's `used_chunks` are retrieved-but-ungrounded, not "used").
+- Seeds from the distinct cited `document_id`s (`used_chunks`), expands each via
+  `related_documents`, then merges → dedups by doc_id (keeps the higher-score relation) →
+  **EXCLUDES the docs the answer itself cited** → re-ranks by score → caps. ImportError
+  fail-open → no panel (mirrors the doc-view).
+- Renders below Sources (before the scope note/footer) reusing the doc-view `.related-*`
+  link/tag styling (each related doc a link + its connecting entities as `/entity?name=`
+  traversal tags) + a small `.ans-related` wrapper. Inherits the SHIPPED noise-filtered
+  `related_documents` ranking (specificity + shared-docs floor / stopword).
+
+Pinned by `tests/integration/test_webui.py` (answered panel renders + excludes cited docs;
+graph-unavailable fail-open; refusal → no panel). Live-validated (Chrome e2e): "What is DNS
+used for?" → the panel lists the sibling CR350 lectures with entity tags, the cited Cours 3
+excluded; a counterfactual → no panel.
 
 ## Testing
 

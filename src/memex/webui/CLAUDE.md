@@ -118,6 +118,21 @@ action-blue for the link), NOT new Tailwind. No JS. Pinned by `test_webui.py`
 **The connecting-entity tags are now `/entity?name=` links** (`.related-entity-link`) — the
 organic entry point from any doc into the entity-centric view below.
 
+**The same surface also appears on the `/ask` ANSWER (2026-05-29, `ffe23fe`):** after an
+answer renders, `_answer.html` shows a "Related documents" panel (below Sources, before the
+scope note/footer) of docs related to the ones the answer CITED. It's built in
+**`_related_for_answer(vault_path, response, …)`** and wired into **`_answer_context`** — THE
+single seam feeding `_answer.html` on the long-poll completion (so adding the `related` key
+there covers the answered path; the only other render site is the POST-error 400, which has
+no answer). Answered-only; seeds from the distinct cited `document_id`s (`response.used_chunks`),
+expands each via `related_documents`, merges/dedups/**excludes the cited docs**/re-ranks/caps;
+ImportError fail-open → no panel. Reuses the SAME `.related-*` markup + a small `.ans-related`
+wrapper. **HARD-gate-neutral + webui-only by construction** — presentation-layer, from the
+already-returned `FinalResponse` + a read-only graph read; never touches the agent/answer/
+refusal, and the CLI/MCP `ask` payloads are unchanged. Pinned by `test_webui.py`
+(`test_ask_renders_related_panel_excluding_cited_docs` / `…survives_graph_unavailable` /
+`test_ask_refusal_has_no_related_panel`).
+
 ## Entity-centric discovery view (`/entity` + `entity.html` + `.entity-*`, ADR-0011, 2026-05-28)
 
 The visual surface for "everything about entity X" — the second graph-discovery surface
