@@ -175,7 +175,7 @@ LLM mis-typing a course code as a `concept`. A hand-curated name list doesn't ge
 local-first app run on ANY corpus (one user's `CR350` is a drop in the ocean of the world's
 course codes, product names, and orgs), and the [[bert-ner-enrich-scope-2026-05-28]] OTTER NER
 backend — now the LIVE enrich entity extractor — types entities cleanly UPSTREAM, removing the
-root cause. Fix entity noise at the extractor, not with a curated downstream list.
+root cause (mechanism: spec [`ner-enrich.md`](ner-enrich.md) + [ADR-0012](../adr/0012-otter-bert-ner-enrich-backend.md); A/B [`08-otter-ner-ab.md`](../audits/08-otter-ner-ab.md)). Fix entity noise at the extractor, not with a curated downstream list.
 
 **Why no automated noise-detection helper either (scoped + rejected 2026-05-28 — the analysis
 that pointed at the NER swap).** A "surface stopword candidates" helper was scoped + validated

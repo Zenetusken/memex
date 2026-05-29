@@ -6,7 +6,7 @@
 
 ## How to read this document
 
-This is the engineering counterpart to the [Memex vision document](./memex-vision.md). The vision describes *what* we are building and *why*. This document describes *how* — the stack, the architecture, the patterns, the discipline.
+This is the engineering counterpart to the [Memex vision document](VISION.md). The vision describes *what* we are building and *why*. This document describes *how* — the stack, the architecture, the patterns, the discipline.
 
 Every guideline here traces back to one of the five principles in the vision:
 
@@ -326,6 +326,12 @@ Tests come in four layers. All four run in CI, but they have different cadences.
 Agent evals are the new thing relative to a traditional codebase. They use a fixed corpus in `tests/fixtures/eval-corpus/` with ground-truth question-answer pairs. Each PR run reports: citation precision, refusal rate on out-of-corpus questions, answer faithfulness (LLM-judged with a local judge model, with periodic human spot-checks). Regressions fail the PR.
 
 Use **ragas** for retrieval evals, **a thin in-house framework** for end-to-end. Don't take a dependency on a heavy eval framework you'll only use 10% of.
+
+### Cheap probes before expensive work; record negative results
+
+Before a full HARD-gate eval or a build, run the cheapest decisive measurement that could kill the idea. For a retrieval change that's an **arm-separation / recall probe**: `eval/scoring.py::gold_chunk_recall(retrieved_ids, relevant_ids, k)` isolates retrieval recall@k from rerank + LLM non-determinism, so a single run per kill-switch setting gives a clean before/after (the agent eval, by contrast, scores only the agent's final cited chunks). The 2026-05-29 FTS BM25-on-NL investigation used it to show `union@50 (dense ∪ bm25) == dense@50` on every corpus — the BM25 arm reaches no gold the dense arm misses — so a *real* phrase-wrap bug was proven **benign** and the fix reverted as a dead lever. The same discipline (a GPU-free pre-check) deferred the Cisco security-LLM orchestrator A/B (the failures were retrieval-bound, not orchestrator-bound) and falsified an auto-noise-detection helper.
+
+**Record negative results in the repo, not just memory** — a ROADMAP "tried + reverted" entry, a `docs/audits/NN-*.md` measurement, and/or a do-not-re-fix docstring at the code site (e.g. `index/fts_store.py::search`) — so the next contributor doesn't re-walk the dead path. The contextual-retrieval prefix, the GTE embedder swap, and the BM25 lexical arm are all banked this way.
 
 ---
 

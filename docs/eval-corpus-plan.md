@@ -218,6 +218,8 @@ CER and WER use standard normalization: lowercase, strip leading/trailing whites
 
 Per-category query sets: 30–50 queries each, with chunk-level relevance judgments (binary for v1, graded later).
 
+**Arm-separation recall probe (2026-05-29).** For a retrieval-architecture change (e.g. dense vs BM25 fusion, or an embedder swap), `eval/scoring.py::gold_chunk_recall(retrieved_ids, relevant_ids, k)` gives a deterministic recall@k over a query set's `relevant_chunk_ids` — run `hybrid_search` per ANS query and pass the ranked `chunk_id`s. It isolates the retrieval delta from rerank + LLM non-determinism (unlike the answer eval, which scores only the agent's final cited chunks), so a single run per kill-switch setting is a clean before/after. It proved the BM25 lexical arm recovers no gold chunk the dense embedder misses (`union@50 == dense@50` on every corpus) — the FTS BM25-on-NL dead-lever finding (`docs/audits/09-fts-bm25-arm-separation.md`). Pinned by `tests/unit/test_retrieval_scoring.py`.
+
 ### End-to-end answer quality (per question set)
 
 | Metric | What it measures | Tool |

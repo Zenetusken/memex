@@ -85,10 +85,13 @@ specificity primitive:
     cross-domain false-friends (live: `STP` → the 10-K's 1-doc "Short-term portion"). webui
     "Also see" / "Did you mean?".
   - ✅ **Co-occurring noise reduction** (`3d00ae7`) — a `shared_docs ≥ 2` neighbourhood floor
-    (`cooccurring_min_shared_docs`, kills the ~69% single-doc numeric junk) + an opt-in
-    by-name `entity_stopwords` list (default empty; for the `CR350`-class residue the df-gate
-    + kind-weight miss — `CR350` is stored as 4 kind-nodes). Pure rankers, fail-open. The
-    brittle per-class regexes were deliberately NOT built.
+    (`cooccurring_min_shared_docs`, kills the ~69% single-doc numeric junk). Pure rankers,
+    fail-open. The brittle per-class regexes were deliberately NOT built. **(Update 2026-05-29:
+    a curated by-name `entity_stopwords` list was also added here, then REMOVED — commit
+    `bf44f43`. A hand-curated per-corpus name list (one user's `CR350` course code) doesn't
+    generalise for a local-first app run on arbitrary corpora; the OTTER BERT-NER swap
+    (ADR-0012, now LIVE) types entities cleanly UPSTREAM instead. Only the corpus-agnostic
+    `cooccurring_min_shared_docs` floor was kept.)**
   - **Boundary (asserted, not solved): the original `STP` symptom is an NER problem, not a
     resolution one.** The graph has no `STP`/`Spanning Tree Protocol` entity (NER fragmented
     it to `spanning`), so there is nothing to bridge TO — `STP` stays the honest FTS fallback
@@ -99,6 +102,12 @@ specificity primitive:
 - Deferred (low value now / not yet built): citation-chain following (only ~6 `CITES`
   edges), scope-set suggestions + the `/ask` "Related" panel, a corpus-stopword pass + the
   BERT-NER enrich swap (the real fix for the residual STP/connector-noise NER limitations).
+  - **Update 2026-05-29:** scope-set suggestions + the `/ask` "Related" panel **SHIPPED**
+    (`ffe23fe` + `04ef4e9`, the shared `_related_for_docs`), closing the discovery build-out;
+    and the **BERT-NER enrich swap SHIPPED as the root-cause fix — ADR-0012 (OTTER)** (the
+    curated corpus-stopword pass was tried then removed in favour of it). Still deferred:
+    **citation-chain following** — only ~6 `CITES` edges, structurally data-gated (see
+    `docs/specs/graph-discovery.md` § "Citation-chain following").
 
 ## Alternatives in Detail
 
@@ -114,11 +123,12 @@ Fixes the neighbour-quality half (generic entities), but not the scale half: at 
 
 - The corpus grows large enough (≫ thousands of docs) that hybrid k=50 retrieval demonstrably misses relevant documents — then specificity-ranked `expand_graph` (using `related_documents`, not `neighbors()`) becomes worth an eval-gated re-introduction.
 - Discovery features (entity-centric retrieval, citation chains, the `/ask` "Related" panel) ship and get used — confirming the graph earns its enrich-time keep, or not.
-- A better entity extractor (the [[bert-ner-enrich-scope-2026-05-28]] BERT-NER) sharpens entity specificity enough to materially change the discovery quality.
+- A better entity extractor (the [[bert-ner-enrich-scope-2026-05-28]] BERT-NER) sharpens entity specificity enough to materially change the discovery quality. **— SHIPPED as ADR-0012 (OTTER, 2026-05-29): +103% `related_documents` discovery on the full vault. The open question is now whether discovery quality is still entity-typing-bound after it.**
 
 ## References
 
 - ADR-0005 (RyuGraph replaces Kuzu) — the storage engine; this ADR is about its USE
+- ADR-0012 (OTTER BERT-NER enrich backend) — the root-cause fix for the entity typing/specificity this ADR's Revisit-When #3 named
 - `docs/specs/graph-discovery.md` — the `related_documents` contract
 - The DB meta-audit + the `expand_graph` worth-it measurement ([[db-audit-2026-05-28]] memory)
 - Commits `a52d5fa` (expansion default-off), `ecd8372` (related_documents), `9905965` (entity-type weighting), `2980cf6` (entity-centric retrieval: core+CLI+MCP), `3d96077` (the `/entity` webui view), `f96c797` (acronym ↔ expansion bridge), `ecb6c8d` (bridge edge-case hardening + unicode-initial fix), `3d00ae7` (co-occurring noise reduction: shared-docs floor + entity-stopword list)

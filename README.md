@@ -168,7 +168,7 @@ uv run memex ingest *.pdf                             # batch
 uv run memex ingest ~/Downloads/papers/               # whole folder
 ```
 
-Each PDF goes through: validation → ingest copy → parse (PyMuPDF for born-digital, Docling for scans) → index (chunks → LanceDB + FTS5) → enrich (entity extraction + graph edges via vLLM). All inline, all logged.
+Each PDF goes through: validation → ingest copy → parse (PyMuPDF for born-digital, Docling for scans) → index (chunks → LanceDB + FTS5) → enrich (entity extraction + citation/graph edges — entities via a pluggable NER backend [the LLM by default, the OTTER BERT-NER recommended; see the enrich-NER config below], citations via the LLM). All inline, all logged.
 
 For scanned content add `MEMEX_PARSE_DOCLING_OCR=1`; for born-digital PDFs (PowerPoint exports, LaTeX, Word) leave it off — the PyMuPDF pre-filter handles those at ~3× Docling's speed.
 
@@ -361,6 +361,16 @@ Every knob is set via environment variable or `~/.config/memex/config.toml`. Env
 | `MEMEX_MODELS__CHART_OCR` | `nvidia/NVIDIA-Nemotron-Parse-v1.2` | Chart-OCR backend HF id. Alternatives in tree: `khhuang/chart-to-table` (UniChart, smaller + faster but −1 ANS on prose-heavy corpora), `google/deplot` (legacy P3.3 v6 default; same −1 ANS), `kppkkp/OneChart` (CUDA-asserts on OOD imagery — keep for chart-heavy-only re-attempts). |
 | `MEMEX_PARSE_DOCLING_OCR` | `0` | Set to `1` to force OCR on Docling. Default off (born-digital PDFs don't benefit; +10× wall time for no answer improvement on the canonical test deck). |
 
+### Enrich stage
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `MEMEX_AGENTS__ENRICH_NER_BACKEND` | `llm` | Entity-extraction backend at enrich. `llm` = the orchestrator (Qwen3-8B) extracts entities; `otter` = the span NER `whoisjones/otter-bi-mmbert` (a BERT, runs CPU-side, lazy-loaded once). OTTER types entities far more cleanly (tool/method vs the LLM's generic concept-dump) and roughly doubles graph-discovery yield (+103% `related_documents` on the reference 47-doc vault). **Enrich-graph-only** — citation extraction and the answer path stay on the LLM, so the no-hallucination gate is untouched. Switching backends needs a re-`enrich` (or `reindex`) of existing docs. See [`docs/specs/ner-enrich.md`](docs/specs/ner-enrich.md) + [ADR-0012](docs/adr/0012-otter-bert-ner-enrich-backend.md). |
+| `MEMEX_AGENTS__ENRICH_NER_MODEL` | `whoisjones/otter-bi-mmbert` | HF id for the OTTER NER (consulted only when `backend=otter`). |
+| `MEMEX_AGENTS__ENRICH_NER_THRESHOLD` | `0.05` | OTTER span-confidence floor — the master knob. The model card's 0.1 strangles recall; 0.05 is the A/B-validated sweet spot. |
+| `MEMEX_AGENTS__ENRICH_NER_LABELS` | `union` | OTTER label set: `generic` / `domain` / `union`. `union` (both) is the A/B winner — resolves corpus-dependence. |
+| `MEMEX_AGENTS__ENRICH_NER_DEVICE` | `cpu` | `cpu` or `cuda`. CPU by default; `cuda` is viable during the CLI enrich's pause-vLLM window. |
+
 ### Index stage
 
 | Variable | Default | Purpose |
@@ -436,7 +446,7 @@ The only thing that talks to the network is the *initial model download* (one-ti
 ## 🧪 Run the tests
 
 ```sh
-uv run pytest                  # 913 tests, ~14 seconds, no GPU needed
+uv run pytest                  # ~1030 tests, ~14 seconds, no GPU needed
 uv run pytest tests/unit       # just the pure-function tests
 uv run pytest tests/integration  # full ingest→parse→index→ask flow with faked I/O
 ```
@@ -453,7 +463,7 @@ Integration tests fake the heavy I/O (vLLM, Docling, PyMuPDF worker, LanceDB, se
 | 🔧 The how (engineering rules + stack) | [`docs/GUIDELINES.md`](docs/GUIDELINES.md) |
 | 🗺️ What's done & what's queued | [`docs/ROADMAP.md`](docs/ROADMAP.md) |
 | 🏗️ The architecture blueprint | [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) |
-| 📐 Why we picked what we picked | [`docs/adr/`](docs/adr/) (ADRs 0001–0009) |
+| 📐 Why we picked what we picked | [`docs/adr/`](docs/adr/) (ADRs 0001–0013) |
 | 🚀 Network-facing MCP setup | [`docs/deploy/mcp-http.md`](docs/deploy/mcp-http.md) |
 | 🖥️ systemd deployment (Linux) | [`docs/deploy/systemd.md`](docs/deploy/systemd.md) |
 | 🍎 launchd deployment (macOS dev) | [`docs/deploy/launchd.md`](docs/deploy/launchd.md) |
