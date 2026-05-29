@@ -17,7 +17,9 @@ from memex.index.embed_prompts import (
 )
 from memex.index.fts_store import FTSStore
 from memex.index.graph_store import (
+    CitationLink,
     CoOccurringEntity,
+    DocumentCitations,
     EntityMention,
     EntityProfile,
     EntitySuggestion,
@@ -40,7 +42,9 @@ from memex.index.vector_store import EMBEDDING_DIM, VectorStore
 __all__ = [
     "EMBEDDING_DIM",
     "EMBED_QUERY_PROMPT_NAME",
+    "CitationLink",
     "CoOccurringEntity",
+    "DocumentCitations",
     "EntityMention",
     "EntityProfile",
     "EntitySuggestion",

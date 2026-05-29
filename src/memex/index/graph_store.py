@@ -96,6 +96,26 @@ class GraphNeighbor(BaseModel):
     via: str | None = None  # e.g. shared entity name
 
 
+class CitationLink(BaseModel):
+    """One end of a `CITES` edge — a document this doc cites, or one that cites it. The
+    `surface_text` is the citation surface form recorded on the edge (e.g. the resolved
+    wikilink target / "Cours 4")."""
+
+    doc_id: str
+    title: str
+    surface_text: str
+
+
+class DocumentCitations(BaseModel):
+    """A document's 1-hop `CITES` neighbourhood — the honest "References" discovery surface.
+    `cites` = documents THIS doc references (outgoing CITES); `cited_by` = documents that
+    reference THIS doc (incoming). Transitive chain-following stays data-gated (the vault has
+    too few in-corpus citation edges to traverse — see `docs/specs/graph-discovery.md`)."""
+
+    cites: list[CitationLink] = []
+    cited_by: list[CitationLink] = []
+
+
 # Entity-specificity threshold for `related_documents`: an entity mentioned by MORE than
 # this fraction of the corpus is treated as NOISE (a generic connector like 'IP', 'HTTP',
 # or an author/instructor name that appears everywhere) and excluded from the "why". IDF
@@ -560,6 +580,43 @@ class GraphStore:
                 row = result.get_next()
                 rows.append((row[0], row[1], row[2], row[3] or "other", int(row[4])))
             return _rank_related_documents(rows, n_docs, limit=limit, max_entities=max_entities)
+
+        return await asyncio.to_thread(_run)
+
+    async def citations(self, doc_id: str) -> DocumentCitations:
+        """The document's 1-hop `CITES` neighbourhood — what it cites + what cites it.
+
+        `CITES` edges are Document→Document, written at enrich from the resolved IN-VAULT
+        citations (academic + course cross-references; `enrich/citations.py`). This is the
+        honest "References" discovery surface that finally READS those edges (they were
+        previously write-only — only the body `[[wikilinks]]` consumed the resolution).
+        1-HOP only: transitive citation-chain following stays data-gated until the vault holds
+        a citation-LINKED cluster dense enough to traverse (`docs/specs/graph-discovery.md`).
+        Read-only ⇒ HARD-gate-neutral."""
+
+        def _one(direction: str) -> list[CitationLink]:
+            # `direction` picks the arrow: outgoing = this doc cites others; incoming = cited-by.
+            match = (
+                "MATCH (d:Document {doc_id: $id})-[c:CITES]->(o:Document) "
+                if direction == "out"
+                else "MATCH (o:Document)-[c:CITES]->(d:Document {doc_id: $id}) "
+            )
+            result = self._conn.execute(
+                match
+                + "RETURN o.doc_id AS doc_id, o.title AS title, c.surface_text AS surface "
+                "ORDER BY title;",
+                {"id": doc_id},
+            )
+            out: list[CitationLink] = []
+            while result.has_next():
+                row = result.get_next()
+                out.append(
+                    CitationLink(doc_id=row[0], title=row[1] or row[0], surface_text=row[2] or "")
+                )
+            return out
+
+        def _run() -> DocumentCitations:
+            return DocumentCitations(cites=_one("out"), cited_by=_one("in"))
 
         return await asyncio.to_thread(_run)
 

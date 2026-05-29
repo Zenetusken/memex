@@ -30,7 +30,7 @@ from memex.core.config import get_settings
 from memex.core.errors import ConfigurationError
 from memex.core.scope_sets import ScopeSet, get_scope_set, list_scope_sets
 from memex.core.types import Chunk
-from memex.index.graph_store import GraphNeighbor, RelatedDocument
+from memex.index.graph_store import DocumentCitations, GraphNeighbor, RelatedDocument
 from memex.mcp.auth import BearerAuthMiddleware, validate_bind
 from memex.retrieve import (
     EntityOverview,
@@ -265,6 +265,34 @@ async def related_documents(doc_id: str, limit: int = 10) -> list[RelatedDocumen
     return related
 
 
+async def document_citations(doc_id: str) -> DocumentCitations:
+    """The document's 1-hop citation references: what it cites + what cites it.
+
+    Reads the `CITES` Document→Document edges written at enrich from the resolved IN-VAULT
+    citations (academic + course cross-references). Returns `cites` (documents THIS doc
+    references) + `cited_by` (documents that reference it), each with the citation
+    `surface_text`. This is the honest 1-hop "References" surface — transitive
+    citation-chain following is deferred until the vault holds a citation-linked cluster
+    dense enough to traverse. Returns empty lists if RyuGraph isn't installed.
+    """
+    from memex.index.graph_store import GraphStore
+
+    settings = get_settings()
+    log = logger.bind(tool="document_citations", doc_id=doc_id)
+    log.info("mcp.tool.start")
+    try:
+        store = await GraphStore.open(settings.vault_path)
+    except ImportError as e:
+        log.warning("mcp.graph_unavailable", reason=str(e))
+        return DocumentCitations()
+    try:
+        cites = await store.citations(doc_id)
+    finally:
+        await store.close()
+    log.info("mcp.tool.done", cites=len(cites.cites), cited_by=len(cites.cited_by))
+    return cites
+
+
 async def entity_overview(
     name: str,
     max_docs: int = 50,
@@ -306,6 +334,7 @@ server.tool(name="list_documents")(list_documents_tool)
 server.tool(name="list_scope_sets")(list_scope_sets_tool)
 server.tool()(get_graph_neighbors)
 server.tool()(related_documents)
+server.tool()(document_citations)
 server.tool()(entity_overview)
 
 

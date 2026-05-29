@@ -368,3 +368,33 @@ async def test_clear_mentions_replaces_not_appends(tmp_path: Path) -> None:
         assert {m.doc_id for m in (await graph.entity_profile("BGP")).mentions} == {"doc_a"}
     finally:
         await graph.close()
+
+
+@pytest.mark.asyncio
+async def test_citations_one_hop_references(tmp_path: Path) -> None:
+    """The 1-hop CITES "References" surface: cites (outgoing) + cited_by (incoming), each
+    carrying the edge surface_text, title-ordered. The honest read of the previously
+    write-only CITES edges."""
+    graph = await GraphStore.open(tmp_path)
+    try:
+        for d in ("syllabus", "lec_a", "lec_b"):
+            await graph.upsert_document(d, d.replace("_", " ").title())
+        # syllabus cites two lectures (the resolved in-vault citations)
+        await graph.link_cites("syllabus", "lec_b", "Cours 2", 0.9)
+        await graph.link_cites("syllabus", "lec_a", "Cours 1", 0.9)
+
+        syl = await graph.citations("syllabus")
+        assert [c.doc_id for c in syl.cites] == ["lec_a", "lec_b"]  # title-ordered (Lec A < Lec B)
+        assert syl.cites[0].surface_text == "Cours 1"
+        assert syl.cited_by == []  # nothing cites the syllabus
+
+        lec = await graph.citations("lec_a")
+        assert lec.cites == []
+        assert [c.doc_id for c in lec.cited_by] == ["syllabus"]
+        assert lec.cited_by[0].surface_text == "Cours 1"
+
+        # A doc with no CITES edges → both empty (no crash).
+        none = await graph.citations("lec_b")
+        assert none.cites == [] and [c.doc_id for c in none.cited_by] == ["syllabus"]
+    finally:
+        await graph.close()

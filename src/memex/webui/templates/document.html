@@ -85,6 +85,32 @@
 </section>
 {% endif %}
 
+{% if citations.cites or citations.cited_by %}
+<section class="related-docs mb-5">
+  <h2 class="related-title">References</h2>
+  {% if citations.cites %}
+  <ul class="related-list">
+    {% for c in citations.cites %}
+    <li class="related-item">
+      cites <a class="related-link" href="/documents/{{ c.doc_id }}">{{ c.title }}</a>
+      {% if c.surface_text %}<span class="related-via">as “{{ c.surface_text }}”</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if citations.cited_by %}
+  <ul class="related-list">
+    {% for c in citations.cited_by %}
+    <li class="related-item">
+      cited by <a class="related-link" href="/documents/{{ c.doc_id }}">{{ c.title }}</a>
+      {% if c.surface_text %}<span class="related-via">as “{{ c.surface_text }}”</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>
+{% endif %}
+
 {% if has_preview %}
 <div class="pane-split">
   <div class="pane-scroll">

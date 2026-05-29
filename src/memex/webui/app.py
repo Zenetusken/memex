@@ -808,6 +808,7 @@ def create_app() -> FastAPI:
         # discovery. Optional: a missing/unavailable graph fails OPEN to no section
         # (never 500s the doc view), mirroring the /graph route.
         related: list[dict[str, Any]] = []
+        citations: dict[str, list[dict[str, Any]]] = {"cites": [], "cited_by": []}
         try:
             rstore = await GraphStore.open(settings.vault_path)
         except ImportError as e:
@@ -815,6 +816,11 @@ def create_app() -> FastAPI:
         else:
             try:
                 related = [r.model_dump() for r in await rstore.related_documents(doc_id, limit=8)]
+                cites = await rstore.citations(doc_id)
+                citations = {
+                    "cites": [c.model_dump() for c in cites.cites],
+                    "cited_by": [c.model_dump() for c in cites.cited_by],
+                }
             finally:
                 await rstore.close()
         return templates.TemplateResponse(
@@ -830,6 +836,7 @@ def create_app() -> FastAPI:
                 "preview_pages": preview_pages,
                 "preview_aspect": preview_aspect,
                 "related": related,
+                "citations": citations,
             },
         )
 

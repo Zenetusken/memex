@@ -381,6 +381,43 @@ async def test_ask_enriches_related_documents(
 
 
 @pytest.mark.asyncio
+async def test_document_citations_tool(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The `document_citations` tool surfaces the 1-hop CITES neighbourhood (cites + cited_by)
+    and is fail-open when the graph is unavailable."""
+    from memex.index.graph_store import CitationLink, DocumentCitations
+    from memex.mcp.server import document_citations
+
+    class _FakeStore:
+        @classmethod
+        async def open(cls, vault_path):
+            return cls()
+
+        async def citations(self, doc_id):
+            return DocumentCitations(
+                cites=[CitationLink(doc_id="lec1", title="Lec 1", surface_text="Cours 1")],
+                cited_by=[],
+            )
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr("memex.index.graph_store.GraphStore.open", staticmethod(_FakeStore.open))
+    out = await document_citations("syllabus")
+    assert [c.doc_id for c in out.cites] == ["lec1"]
+    assert out.cites[0].surface_text == "Cours 1"
+    assert out.cited_by == []
+
+    def _boom(vault_path):
+        raise ImportError("no ryugraph")
+
+    monkeypatch.setattr("memex.index.graph_store.GraphStore.open", staticmethod(_boom))
+    empty = await document_citations("syllabus")
+    assert empty.cites == [] and empty.cited_by == []
+
+
+@pytest.mark.asyncio
 async def test_entity_overview_tool_returns_profile_and_passages(
     settings: MemexSettings,
     monkeypatch: pytest.MonkeyPatch,

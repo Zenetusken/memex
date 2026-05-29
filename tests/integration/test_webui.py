@@ -1335,6 +1335,18 @@ async def test_document_view_renders_related_documents(
                 )
             ]
 
+        async def citations(self, doc_id):
+            from memex.index.graph_store import CitationLink, DocumentCitations
+
+            return DocumentCitations(
+                cites=[
+                    CitationLink(
+                        doc_id="ref99-cited-lecture", title="Cited Lecture", surface_text="Cours 4"
+                    )
+                ],
+                cited_by=[],
+            )
+
         async def close(self):
             return None
 
@@ -1348,6 +1360,11 @@ async def test_document_view_renders_related_documents(
     assert "DNS spoofing" in r.text  # the connecting entity (the "why related")
     # The connecting entity is a LINK into the entity-centric view (the entry point).
     assert "/entity?name=DNS" in r.text
+    # The 1-hop CITES "References" section reads the previously write-only CITES edges.
+    assert "References" in r.text
+    assert "Cited Lecture" in r.text
+    assert "/documents/ref99-cited-lecture" in r.text
+    assert "Cours 4" in r.text
 
 
 @pytest.mark.asyncio

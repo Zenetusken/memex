@@ -523,6 +523,26 @@ def register(app: typer.Typer) -> None:
             _print(r)
 
     @app.command()
+    def cites(
+        document: str = _Option(..., "--document", "-d", help="doc_id."),
+    ) -> None:
+        """References: the document's 1-hop CITES neighbourhood — what it cites + what
+        cites it (the resolved IN-VAULT citations). Transitive chain-following is
+        data-gated; this is the honest 1-hop surface."""
+
+        async def _run():
+            from memex.core.config import get_settings
+
+            bootstrap()
+            store = await GraphStore.open(get_settings().vault_path)
+            try:
+                return await store.citations(document)
+            finally:
+                await store.close()
+
+        _print(asyncio.run(_run()))
+
+    @app.command()
     def entity(
         name: str = _Argument(..., help="Entity name (case-insensitive)."),
         max_docs: int = _Option(50, help="Max mentioning documents to list."),
