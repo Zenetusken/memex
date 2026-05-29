@@ -45,6 +45,8 @@ The full set of ADRs lives under [`adr/`](adr/0001-vllm-as-sole-inference-engine
 - **[ADR-0007](adr/0007-co-residence-resource-modes.md)** — Co-residence resource modes (the VRAM-tradeoff policy layer; dynamic-VRAM-manager precursor)
 - **[ADR-0008](adr/0008-document-summarization.md)** — Document summarization (doc-type-aware, structured, grounded map-reduce)
 - **[ADR-0009](adr/0009-remove-free-form-synthesis-baseline.md)** — Remove the free-form synthesis baseline (unwired + unreliable on vLLM; superseded by the structured summarizer)
+- **[ADR-0010](adr/0010-batched-reduce-report-mode.md)** — Multi-paragraph `report` summary mode via a hierarchical reduce (+ granularity tuning, the budget-undercount overflow fix, the cross-paragraph dedup gate)
+- **[ADR-0011](adr/0011-entity-graph-from-expansion-to-discovery.md)** — The entity graph serves discovery (`related_documents`), not retrieval augmentation (`expand_graph` retired, default-off)
 
 ## Building this site locally
 

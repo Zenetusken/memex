@@ -251,6 +251,14 @@ uv run memex remove 2f96ae1c-some-paper --yes  # skip the prompt
 
 Drops the document everywhere — its canonical Markdown, asset dir, manifest, and all derived index state (vector, FTS, tables, graph). Irreversible (the Markdown is the source of truth), so re-add the original source to restore it.
 
+### Explore connections
+
+```sh
+uv run memex related -d 2f96ae1c-some-paper        # documents related to this one
+```
+
+Surfaces the documents most related to this one through the entity graph — ranked by the **specificity** of the entities they share, so a sibling that shares one rare concept beats one that shares five generic terms (a near-universal entity, or an incidental person/place name, is filtered out). Each result shows the connecting entities — the *why*. This is the discovery surface over the graph (ADR-0011); also a "Related documents" section on the web UI document view and the MCP `related_documents` tool. (It is *not* in the `/ask` retrieval path — a measured audit showed 1-hop graph expansion adds nothing to answering at this corpus scale, so it's a deliberate discovery feature, not passive recall-boosting.)
+
 ### Update to a newer Memex
 
 ```sh
@@ -298,6 +306,7 @@ Seven tools are exposed:
 - 📚 `list_documents()` — every doc in the vault
 - 📌 `list_scope_sets()` — every saved document scope set
 - 🌐 `get_graph_neighbors(doc_id)` — one-hop entity neighbors
+- 🔗 `related_documents(doc_id)` — related docs ranked by shared-entity specificity (discovery)
 
 ### Inspect health + breakers
 

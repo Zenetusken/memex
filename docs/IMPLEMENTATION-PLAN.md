@@ -351,7 +351,7 @@ async def rerank_pairs(pairs: list[tuple[str, str]]) -> list[float]: ...
 
 ### 1.9 `memex.mcp` — MCP server
 
-**Responsibility.** Expose the vault to external agents as MCP tools (Part V). The "public API of Memex" per the guidelines. Five v1 tools matching the guidelines: `search`, `get_document`, `list_documents`, `get_graph_neighbors`, `ask`. Runs over stdio for desktop agents; HTTP transport behind a flag.
+**Responsibility.** Expose the vault to external agents as MCP tools (Part V). The "public API of Memex" per the guidelines. The v1 core: `search`, `get_document`, `list_documents`, `get_graph_neighbors`, `ask` — since extended with `summarize` (ADR-0008), `list_scope_sets` (scope-sets), and `related_documents` (the entity-specificity-ranked discovery surface, ADR-0011). Runs over stdio for desktop agents; HTTP transport behind a flag.
 
 **Public interface** (file: `src/memex/mcp/server.py`):
 
@@ -798,7 +798,7 @@ The three interfaces (CLI, MCP, web UI) all call the same backend functions: `in
 A short list of things in the vision that get cut from v1 explicitly, with reasons:
 
 - **Cross-machine sync.** Vision mentions "documents that maintain their own state" as long-horizon. The vault is git-friendly already; users can sync with rsync or git themselves. Building first-class sync requires conflict resolution semantics that are out of scope.
-- **Citation graph reasoning during answering.** The graph index is written in Phase 2 and exposed via `get_graph_neighbors`, but the answering agent does *not* traverse it. Adding graph traversal to the agent loop adds a node and a routing branch and a budget consideration; ship after v1 once the flat retrieval baseline is stable.
+- **Citation graph reasoning during answering.** ~~The graph index is written in Phase 2 and exposed via `get_graph_neighbors`, but the answering agent does *not* traverse it.~~ **RESOLVED with evidence (2026-05-28, [ADR-0011](adr/0011-entity-graph-from-expansion-to-discovery.md)):** graph traversal in the answer loop (`expand_graph`, 1-hop shares-an-entity) WAS built, then a microscope audit proved it adds nothing at this corpus scale (near-total k=50 recall; generic-entity neighbours the reranker discards) → **default-OFF**, env opt-in. The graph's on-mission role is now **explicit discovery** (`related_documents`, entity-specificity-ranked: CLI `memex related` / MCP `related_documents` / webui doc-view; spec `docs/specs/graph-discovery.md`), NOT passive retrieval augmentation. Re-introducing specificity-ranked expansion into the answer path is a documented LARGE-corpus-only hook (where retrieval starts missing docs).
 - **Incremental re-indexing as a true optimization.** Phase 2's watcher re-indexes a single document on edit. It does not partial-re-index a document or do delta embeddings. The "thousand-paper corpus doesn't require a full rebuild" goal is a v1.x deliverable.
 - **Speculative parsing on idle GPU.** Cute, not necessary.
 - **Domain plugins.** No plugin system in v1. Plugins arrive when there's a real second user with a real second domain.
