@@ -37,6 +37,8 @@ import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from memex.core.text import STOPWORDS as _STOP
+from memex.core.text import atomise as _atomise
 from memex.core.types import Chunk
 
 # ── Artifact-type vocabulary (EN + FR). Deliberately omits common nouns that
@@ -156,62 +158,9 @@ _BOUNDARY_FR: frozenset[str] = frozenset(
     }
 )
 # Tokens dropped from a qualifier (articles/connectors + generic corpus words).
-_STOP: frozenset[str] = frozenset(
-    {
-        # FR articles / connectors
-        "de",
-        "du",
-        "des",
-        "d",
-        "l",
-        "la",
-        "le",
-        "les",
-        "au",
-        "aux",
-        "un",
-        "une",
-        "ce",
-        "cette",
-        "ces",
-        "son",
-        "sa",
-        "ses",
-        # EN articles / connectors / filler
-        "the",
-        "a",
-        "an",
-        "of",
-        "in",
-        "on",
-        "for",
-        "to",
-        "and",
-        "or",
-        "this",
-        "that",
-        "with",
-        "from",
-        # generic corpus words that don't disambiguate a document
-        "cours",
-        "course",
-        "paper",
-        "example",
-        "project",
-        "status",
-        "shown",
-        "above",
-        "below",
-        "following",
-        "main",
-        "given",
-        "diagram",
-        "diagramme",
-        "figure",
-        "chart",
-        "page",
-    }
-)
+# `_STOP` (bilingual stopwords) + `_atomise` (diacritics-/hyphen-aware tokenizer) are now
+# shared from `core/text.py` (imported above) so `index/fts_store.py`'s FTS query builder
+# reuses the exact same set/tokenizer without importing UP from `agents/`.
 
 # Max surface words captured as a qualifier (keeps it the artifact name, not a clause).
 _MAX_QUALIFIER_WORDS = 4
@@ -251,19 +200,6 @@ class ResolvedArtifactScope:
 
 
 # ── Detection ──────────────────────────────────────────────────────────────
-
-
-def _atomise(word: str) -> list[str]:
-    """Lowercase a surface word and split it on hyphen/apostrophe into atomic
-    tokens (``coupe-feu`` → ``coupe``, ``feu``; ``d'attaque`` → ``attaque``).
-    FTS5 ``unicode61 remove_diacritics 2`` folds these the same way at index
-    time, so atomic tokens match the indexed terms regardless of accent/hyphen."""
-    out: list[str] = []
-    for part in re.split(r"[-'’]", word.lower()):
-        cleaned = re.sub(r"[^0-9a-zàâäçéèêëîïôöùûüÿœæ]", "", part)
-        if cleaned:
-            out.append(cleaned)
-    return out
 
 
 def _tokens_before(qual: str) -> frozenset[str]:

@@ -14,7 +14,10 @@ from pathlib import Path
 import structlog
 
 from memex.core.sqlite_tuning import apply_sqlite_pragmas
-from memex.core.text import strip_chart_extracted_for_index, strip_superseded_gfm_tables
+from memex.core.text import (
+    strip_chart_extracted_for_index,
+    strip_superseded_gfm_tables,
+)
 from memex.core.types import Chunk
 
 logger = structlog.get_logger(__name__)
@@ -322,16 +325,21 @@ class FTSStore:
         return await asyncio.to_thread(_read)
 
     async def search(self, query: str, *, k: int) -> list[Chunk]:
-        """BM25 phrase-match search over chunks_fts; returns top `k`
-        results joined with chunks_meta. The query is treated as a
-        literal phrase (whitespace + punctuation preserved) so callers
-        get predictable behaviour from natural-language inputs.
+        """BM25 search over chunks_fts; returns top `k` joined with chunks_meta.
+
+        The whole query is wrapped as one FTS5 literal phrase, which matches
+        nothing for a natural-language question — so BM25 contributes 0 to RRF and
+        hybrid retrieval is effectively dense-only. This is intentional and BENIGN:
+        a 2026-05-29 arm-separation probe found BM25 recall is a strict SUBSET of the
+        dense embedder's on every eval corpus (union@50 ceiling == dense@50), so a
+        working lexical arm recovers no gold chunk dense misses. Don't "fix" the
+        phrase wrap without re-measuring (e.g. against a future embedder swap).
         """
-        # FTS5 MATCH treats some punctuation as operators; quote the whole
-        # query to keep it literal. Users can use FTS5 syntax via raw_query.
         cleaned = _normalize_fts_query(query)
         if not cleaned:
             return []
+        # Double-quoted, so FTS5 operator chars (" * : ( ^ AND/OR/NEAR) stay literal
+        # (no "malformed MATCH").
         match = '"' + cleaned.replace('"', '""') + '"'
 
         def _read() -> list[Chunk]:
@@ -386,7 +394,7 @@ class FTSStore:
         cleaned = _normalize_fts_query(query)
         if not cleaned:
             return []
-        match = '"' + cleaned.replace('"', '""') + '"'
+        match = '"' + cleaned.replace('"', '""') + '"'  # literal phrase (see search())
         placeholders = ",".join("?" for _ in doc_ids)
 
         def _read() -> list[Chunk]:

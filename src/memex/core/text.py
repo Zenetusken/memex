@@ -266,3 +266,84 @@ def extract_heading_texts(body: str, *, skip_chart_blocks: bool = True) -> list[
         if text:
             out.append(text)
     return out
+
+
+# Bilingual (FR+EN) stopwords + a diacritics-/hyphen-aware word tokenizer, used by the
+# artifact-scope qualifier resolver (`agents/artifact_scope.py`). Lives in `core/` (rather
+# than `agents/`) so any module may share it without importing UP from `agents/` (the
+# documented import direction). The token shape mirrors the FTS index tokenizer
+# `unicode61 remove_diacritics 2` (folds accents; splits hyphen/apostrophe).
+STOPWORDS: frozenset[str] = frozenset(
+    {
+        # FR articles / connectors
+        "de",
+        "du",
+        "des",
+        "d",
+        "l",
+        "la",
+        "le",
+        "les",
+        "au",
+        "aux",
+        "un",
+        "une",
+        "ce",
+        "cette",
+        "ces",
+        "son",
+        "sa",
+        "ses",
+        # EN articles / connectors / filler
+        "the",
+        "a",
+        "an",
+        "of",
+        "in",
+        "on",
+        "for",
+        "to",
+        "and",
+        "or",
+        "this",
+        "that",
+        "with",
+        "from",
+        # generic corpus words that don't disambiguate a document
+        "cours",
+        "course",
+        "paper",
+        "example",
+        "project",
+        "status",
+        "shown",
+        "above",
+        "below",
+        "following",
+        "main",
+        "given",
+        "diagram",
+        "diagramme",
+        "figure",
+        "chart",
+        "page",
+    }
+)
+
+# Keep only word chars FTS5 `unicode61 remove_diacritics 2` indexes: ASCII alphanumerics +
+# the FR accented letters. Everything else (punctuation, FTS5 operator chars) is dropped.
+_ATOM_KEEP_RE = re.compile(r"[^0-9a-zàâäçéèêëîïôöùûüÿœæ]")
+_ATOM_SPLIT_RE = re.compile(r"[-'’]")
+
+
+def atomise(word: str) -> list[str]:
+    """Lowercase a surface word and split it on hyphen/apostrophe into atomic tokens
+    (``coupe-feu`` → ``coupe``, ``feu``; ``d'attaque`` → ``attaque``). FTS5
+    ``unicode61 remove_diacritics 2`` folds these the same way at index time, so atomic
+    tokens match the indexed terms regardless of accent/hyphen."""
+    out: list[str] = []
+    for part in _ATOM_SPLIT_RE.split(word.lower()):
+        cleaned = _ATOM_KEEP_RE.sub("", part)
+        if cleaned:
+            out.append(cleaned)
+    return out

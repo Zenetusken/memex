@@ -447,3 +447,18 @@ def absent_assertion_violations(summary_text: str, must_not_assert: list[str]) -
     be empty). Returns the offending terms (verbatim, for the report)."""
     norm = _normalize(summary_text)
     return [m for m in must_not_assert if _normalize(m) in norm]
+
+
+def gold_chunk_recall(retrieved_ids: list[str], relevant_ids: list[str], k: int) -> float:
+    """Recall@k of the gold chunks: fraction of `relevant_ids` present in the top-`k`
+    `retrieved_ids`. 1.0 = every gold chunk retrieved within k; 0.0 = none.
+
+    The pure RETRIEVAL-quality metric behind the FTS term-query fix — run `hybrid_search`
+    per ANS query and pass its ranked chunk_ids + the query's `relevant_chunk_ids`. Unlike
+    `run_eval` (which scores only the agent's final CITED chunks, post-rerank/LLM), this
+    isolates the retrieval delta from rerank + LLM non-determinism, so a single run per
+    kill-switch setting suffices for a clean BEFORE/AFTER."""
+    if not relevant_ids:
+        return 1.0  # no gold to recall ⇒ vacuously satisfied
+    topk = set(retrieved_ids[:k])
+    return sum(1 for r in relevant_ids if r in topk) / len(relevant_ids)
