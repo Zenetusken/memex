@@ -141,4 +141,134 @@ def test_gate_excludes_generic_self_and_below_floor() -> None:
 
 
 def test_gate_empty_corpus() -> None:
-    assert _gate_suggestions([_c("e", "Domain Name System", "concept", 1)], n_docs=0, exclude_ids=set()) == []
+    assert _gate_suggestions([_c("e", "Domain Name System", "concept", 3)], n_docs=0, exclude_ids=set()) == []
+
+
+# ---- edge cases: derive_initialism ----
+
+
+def test_derive_lowercase_input_uppercases() -> None:
+    assert derive_initialism("domain name system") == "DNS"
+
+
+def test_derive_normalises_whitespace() -> None:
+    assert derive_initialism("  Domain   Name  System  ") == "DNS"
+
+
+def test_derive_all_connectors_is_none() -> None:
+    assert derive_initialism("of the and") is None  # every token skipped → 0 significant
+
+
+def test_derive_one_significant_word_plus_connectors_is_none() -> None:
+    assert derive_initialism("Bureau of") is None  # only 'Bureau' is significant → 1 word
+
+
+def test_derive_leading_connector_skipped() -> None:
+    assert derive_initialism("the Domain Name System") == "DNS"
+
+
+def test_derive_accented_leading_letter_kept() -> None:
+    # The unicode-aware fix: an accented first letter is TAKEN, not skipped to the next
+    # ASCII char (the old `[0-9a-z]` regex turned "Émetteur" into "m").
+    assert derive_initialism("Émetteur Récepteur") == "ÉR"
+
+
+def test_derive_strips_leading_punctuation_per_token() -> None:
+    assert derive_initialism("Virtual (LAN) Network") == "VLN"  # first ALNUM of "(lan)" is "l"
+
+
+def test_derive_length_boundaries() -> None:
+    assert derive_initialism("Ay Bee") == "AB"  # exactly 2 significant words (min) → ok
+    assert derive_initialism("xx yy zz pp qq rr ss") == "XYZPQRS"  # exactly 7 → ok
+    assert derive_initialism("xx yy zz pp qq rr ss tt") is None  # 8 → over the cap
+
+
+def test_derive_single_letter_connectors_skipped() -> None:
+    # Single-letter tokens that ARE connectors ('a', FR 'd'/'l') drop out — so a string
+    # of bare letters keeps only the non-connectors.
+    assert derive_initialism("a b c d e f g") == "BCEFG"  # 'a' + 'd' are skip-words
+
+
+# ---- edge cases: looks_like_acronym boundaries ----
+
+
+def test_looks_like_acronym_length_boundaries() -> None:
+    assert looks_like_acronym("NETWORK")  # 7 chars uppercase → ok
+    assert not looks_like_acronym("ETHERNET")  # 8 chars → over the cap
+
+
+def test_looks_like_acronym_punctuation_forms() -> None:
+    assert looks_like_acronym("802.1X")  # digit+letter, len 6
+    assert looks_like_acronym("PVST+")  # the '+' family is allowed
+    assert not looks_like_acronym("")  # empty
+    assert not looks_like_acronym("   ")  # whitespace-only
+
+
+# ---- edge cases: initialism_matches alpha-share boundary ----
+
+
+def test_initialism_matches_alpha_share_boundary() -> None:
+    # Exactly 50% alpha passes (≥ threshold): "Apple 1st" → "A1" (1 of 2 alpha).
+    assert derive_initialism("Apple 1st") == "A1"
+    assert initialism_matches("A1", "Apple 1st")
+    # Below 50% fails: "1st 2nd Apple" → "12A" (1 of 3 alpha = 0.33).
+    assert derive_initialism("1st 2nd Apple") == "12A"
+    assert not initialism_matches("12A", "1st 2nd Apple")
+
+
+# ---- edge cases: _gate_suggestions interactions ----
+
+
+def test_gate_relation_preserved() -> None:
+    out = _gate_suggestions([_c("e", "Domain Name System", "concept", 3, "acronym")], n_docs=47, exclude_ids=set())
+    assert out[0].relation == "acronym"
+
+
+def test_gate_floor_short_circuits_before_collision() -> None:
+    # Two DISTINCT names, BOTH below the floor → dropped by the floor (not the collision
+    # path); the result is still [] but for the floor reason. Pinning the order of gates.
+    out = _gate_suggestions(
+        [_c("e1", "Alpha Beta Cee", "concept", 1), _c("e2", "Apple Banana Cherry", "concept", 1)],
+        n_docs=47,
+        exclude_ids=set(),
+    )
+    assert out == []
+
+
+def test_gate_below_floor_sibling_does_not_trigger_false_collision() -> None:
+    # One VALID name (≥floor) + a DIFFERENT below-floor name: the floored-out one must
+    # NOT count toward the collision test, so the valid bridge survives as the lone result.
+    out = _gate_suggestions(
+        [
+            _c("e_valid", "Domain Name System", "concept", 4),
+            _c("e_noise", "Distributed Naming Service", "concept", 1),  # below floor → ignored
+        ],
+        n_docs=47,
+        exclude_ids=set(),
+    )
+    assert [s.name for s in out] == ["Domain Name System"]
+
+
+def test_gate_same_name_max_doc_count_across_floor() -> None:
+    # Same name across two entities, one below floor + one above → deduped to the
+    # above-floor representative (max doc_count).
+    out = _gate_suggestions(
+        [
+            _c("e_low", "Domain Name System", "tool", 1),
+            _c("e_high", "Domain Name System", "concept", 4),
+        ],
+        n_docs=47,
+        exclude_ids=set(),
+    )
+    assert len(out) == 1
+    assert out[0].doc_count == 4
+    assert out[0].kind == "concept"
+
+
+def test_gate_multiple_exclude_ids() -> None:
+    out = _gate_suggestions(
+        [_c("e1", "Domain Name System", "concept", 4), _c("e2", "Domain Name System", "tool", 3)],
+        n_docs=47,
+        exclude_ids={"e1", "e2"},  # both are the exact-resolved entity → nothing to suggest
+    )
+    assert out == []

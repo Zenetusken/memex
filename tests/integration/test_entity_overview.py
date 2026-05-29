@@ -183,6 +183,44 @@ async def test_unknown_entity_falls_back_to_whole_corpus(
 
 
 @pytest.mark.asyncio
+async def test_unresolved_with_suggestions_uses_corpus_fallback(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An UNRESOLVED name that still carries a bridge ('Did you mean?') goes through the
+    whole-corpus FTS fallback (not scoped), and the suggestions ride through untouched."""
+    unresolved = EntityProfile(
+        query_name="DNS", matched_names=[], kinds=[], doc_count=0,
+        mentions=[], cooccurring=[], resolved=False,
+        suggestions=[
+            EntitySuggestion(name="Domain Name System", kind="concept", doc_count=3, relation="acronym")
+        ],
+    )
+
+    class _FakeGraph:
+        @classmethod
+        async def open(cls, vault_path: Any) -> _FakeGraph:
+            return cls()
+
+        async def entity_profile(self, name: str, *, max_docs: int, max_cooccurring: int) -> EntityProfile:
+            return unresolved
+
+        async def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("memex.index.graph_store.GraphStore.open", staticmethod(_FakeGraph.open))
+    fake_fts = _install_fts(monkeypatch)
+
+    from memex.retrieve import entity_overview
+
+    overview = await entity_overview("DNS")
+    assert overview.profile.resolved is False
+    assert overview.passages_scoped is False
+    assert fake_fts.corpus_query == "DNS"  # whole-corpus fallback
+    assert fake_fts.scoped_doc_ids is None
+    assert [s.name for s in overview.profile.suggestions] == ["Domain Name System"]
+
+
+@pytest.mark.asyncio
 async def test_graph_unavailable_fails_open(
     settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -199,5 +237,6 @@ async def test_graph_unavailable_fails_open(
     overview = await entity_overview("STP")
     assert overview.profile.resolved is False  # uniform stand-in
     assert overview.passages_scoped is False
+    assert overview.profile.suggestions == []  # no graph ⇒ no bridge, never a stray suggestion
     assert fake_fts.corpus_query == "STP"
     assert overview.passages  # still got passages

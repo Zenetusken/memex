@@ -200,3 +200,114 @@ async def test_stp_like_honest_miss_no_fabricated_bridge(tmp_path: Path) -> None
         assert stp.suggestions == []  # the design does NOT pretend to resolve STP
     finally:
         await graph.close()
+
+
+@pytest.mark.asyncio
+async def test_bridge_handles_whitespace_and_case(tmp_path: Path) -> None:
+    """A padded, lowercase query ('  dns  ') still resolves exactly AND bridges —
+    `query_name` is stripped and resolution is case-insensitive."""
+    graph = await GraphStore.open(tmp_path)
+    try:
+        await _seed_spec(
+            graph,
+            [
+                ("d1", [("DNS", "concept")]),
+                ("d2", [("DNS", "concept")]),
+                ("d3", [("Domain Name System", "concept")]),
+                ("d4", [("Domain Name System", "concept")]),
+                ("d5", [("routing", "concept")]),
+            ],
+        )
+        prof = await graph.entity_profile("  dns  ")
+        assert prof.resolved is True
+        assert prof.matched_names == ["DNS"]
+        assert [s.name for s in prof.suggestions] == ["Domain Name System"]
+    finally:
+        await graph.close()
+
+
+@pytest.mark.asyncio
+async def test_bridge_dedupes_multi_kind_expansion(tmp_path: Path) -> None:
+    """An expansion that exists under TWO kinds (concept + tool) yields ONE suggestion
+    (the highest-doc representative), not a duplicate per kind."""
+    graph = await GraphStore.open(tmp_path)
+    try:
+        # Each kind of the expansion gets 2 docs so BOTH clear the doc-count floor —
+        # then the dedup (not the floor) is what collapses them to one suggestion.
+        await _seed_spec(
+            graph,
+            [
+                ("d1", [("TLS", "concept")]),
+                ("d2", [("TLS", "concept")]),
+                ("d3", [("Transport Layer Security", "concept")]),
+                ("d4", [("Transport Layer Security", "concept")]),
+                ("d5", [("Transport Layer Security", "tool")]),  # same name, 2nd kind
+                ("d6", [("Transport Layer Security", "tool")]),
+                ("d7", [("routing", "concept")]),
+            ],
+        )
+        prof = await graph.entity_profile("TLS")
+        assert prof.resolved is True
+        exp = [s for s in prof.suggestions if s.name == "Transport Layer Security"]
+        assert len(exp) == 1  # deduped across kinds, not two entries
+    finally:
+        await graph.close()
+
+
+@pytest.mark.asyncio
+async def test_generic_expansion_excluded_from_suggestions(tmp_path: Path) -> None:
+    """An initialism-matching expansion that is near-UNIVERSAL (df > 60% of the corpus)
+    is a generic connector → excluded from suggestions, same filter as co-occurring."""
+    graph = await GraphStore.open(tmp_path)
+    try:
+        # 4 docs → df_cap = 2.4. "Alpha Beta Cee" appears in 3 docs (generic); "ABC" in 1.
+        await _seed_spec(
+            graph,
+            [
+                ("d1", [("ABC", "concept"), ("Alpha Beta Cee", "concept")]),
+                ("d2", [("Alpha Beta Cee", "concept")]),
+                ("d3", [("Alpha Beta Cee", "concept")]),
+                ("d4", [("routing", "concept")]),
+            ],
+        )
+        prof = await graph.entity_profile("ABC")
+        assert prof.resolved is True  # ABC itself resolves
+        assert prof.suggestions == []  # the generic expansion is filtered out
+    finally:
+        await graph.close()
+
+
+@pytest.mark.asyncio
+async def test_resolved_acronym_with_no_expansion_has_no_suggestions(tmp_path: Path) -> None:
+    """The COMMON case: an acronym that resolves but whose expansion isn't in the graph
+    gets a clean empty suggestion list (no fabricated bridge)."""
+    graph = await GraphStore.open(tmp_path)
+    try:
+        await _seed_spec(
+            graph,
+            [
+                ("d1", [("ARP", "concept"), ("DNS", "concept")]),
+                ("d2", [("ARP", "concept")]),
+                ("d3", [("routing", "concept")]),
+            ],
+        )
+        prof = await graph.entity_profile("ARP")  # no "Address Resolution Protocol" seeded
+        assert prof.resolved is True
+        assert prof.suggestions == []
+    finally:
+        await graph.close()
+
+
+@pytest.mark.asyncio
+async def test_blank_query_is_safe(tmp_path: Path) -> None:
+    """A blank / whitespace-only query resolves to nothing, with no suggestions and no
+    crash (the `if not key` short-circuit, before any scan)."""
+    graph = await GraphStore.open(tmp_path)
+    try:
+        await _seed_spec(graph, [("d1", [("DNS", "concept")]), ("d2", [("DNS", "concept")])])
+        prof = await graph.entity_profile("   ")
+        assert prof.resolved is False
+        assert prof.matched_names == []
+        assert prof.suggestions == []
+    finally:
+        await graph.close()

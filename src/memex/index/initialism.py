@@ -65,11 +65,14 @@ def derive_initialism(name: str) -> str | None:
         tok = raw.strip().lower()
         if not tok or tok in _INITIALISM_SKIP:
             continue
-        m = re.search(r"[0-9a-z]", tok)  # first alphanumeric char of the token
-        if m is None:
+        # First alphanumeric char — UNICODE-aware (`str.isalnum`, not an ASCII regex),
+        # so an accented leading letter ("Émetteur" → "É") is taken, not skipped to the
+        # next ASCII char ("m"). The bilingual CR350 corpus has accented entity names.
+        first = next((c for c in tok if c.isalnum()), None)
+        if first is None:
             continue
         significant_words += 1
-        letters.append(m.group(0))
+        letters.append(first)
     if significant_words < 2 or len(letters) < _MIN_INITIALISM_LEN:
         return None
     if len(letters) > _MAX_INITIALISM_LEN:
