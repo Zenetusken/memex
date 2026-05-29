@@ -85,8 +85,10 @@ introduce a hallucination or alter a refusal. Independent of the answering agent
     2026-05-28 (`3d00ae7`); see "Co-occurring noise reduction" below.
 - ⏳ citation-chain following (the still-unqueried `CITES` edges) — **DATA-GATED**, scoped as a
   data-first experiment; see "Citation-chain following" below.
-- ✅ **a "Related documents" panel in `/ask`** — shipped 2026-05-29 (`ffe23fe`); see "/ask
-  Related panel" below. (scope-set suggestions — the other half — still TODO.)
+- ✅ **a "Related documents" panel in `/ask`** + ✅ **scope-set suggestions** — shipped
+  2026-05-29 (`ffe23fe` + `04ef4e9`); see "/ask Related panel" + "Scope-set suggestions"
+  below. This CLOSES the ADR-0011 discovery build-out (citation-chain is data-gated; the
+  BERT-NER swap is the remaining, separately-gated lever).
 - THEN, if discovery-quality is the bottleneck: the [[bert-ner-enrich-scope-2026-05-28]]
   NER swap (sharper, typed entities upstream of the graph).
 
@@ -246,6 +248,26 @@ Pinned by `tests/integration/test_webui.py` (answered panel renders + excludes c
 graph-unavailable fail-open; refusal → no panel). Live-validated (Chrome e2e): "What is DNS
 used for?" → the panel lists the sibling CR350 lectures with entity tags, the cited Cours 3
 excluded; a counterfactual → no panel.
+
+The merge/dedup/exclude/re-rank/cap core is the shared `webui/app.py::_related_for_docs(vault_path,
+seed_ids)` ("graph neighbours of a SET of docs, seed-excluded"), reused by both the panel
+(`_related_for_answer` delegates to it) and the scope-set suggestions below.
+
+## Scope-set suggestions (shipped 2026-05-29)
+
+Discovery woven into the SCOPING flow: the Ask-page scope-picker surfaces documents the graph
+relates to the current selection ("Suggested additions"), each a `scope_doc_ids` checkbox to
+tick-and-add. Two triggers (both feed `_related_for_docs` over the selection): **auto** on
+apply/save (`_scope_picker_context` computes `suggested` from a non-empty `checked_ids` — an
+empty selection does no graph query) and an explicit **"Suggest related"** button
+(`POST /scope-sets/suggest` posts the ticked docs + a count flash). Each suggestion is a
+checkbox + `/entity?name=` why-related tags; once ticked it re-renders as checked in the main
+list and drops out of suggestions. Webui-only + HARD-gate-neutral (a suggestion is just
+another `scope_doc_ids` tick flowing through the unchanged, dedup-ing `resolve_artifact_scope`
+path). Fail-open → no section + a "No related documents found" flash. Pinned by
+`test_webui.py` (auto-on-apply excludes the set's docs; the Suggest button + count flash;
+empty-selection hint; graph-unavailable fail-open). Live-validated (Chrome e2e): applying a
+CR350 set surfaces related CR350 **and** CCNA docs with why-tags.
 
 ## Testing
 
