@@ -84,11 +84,18 @@ specificity primitive:
     rare). Gate: collision-drop (ambiguous → no-op) + a **doc-count floor (≥2)** that kills
     cross-domain false-friends (live: `STP` → the 10-K's 1-doc "Short-term portion"). webui
     "Also see" / "Did you mean?".
+  - ✅ **Co-occurring noise reduction** (`3d00ae7`) — a `shared_docs ≥ 2` neighbourhood floor
+    (`cooccurring_min_shared_docs`, kills the ~69% single-doc numeric junk) + an opt-in
+    by-name `entity_stopwords` list (default empty; for the `CR350`-class residue the df-gate
+    + kind-weight miss — `CR350` is stored as 4 kind-nodes). Pure rankers, fail-open. The
+    brittle per-class regexes were deliberately NOT built.
   - **Boundary (asserted, not solved): the original `STP` symptom is an NER problem, not a
     resolution one.** The graph has no `STP`/`Spanning Tree Protocol` entity (NER fragmented
     it to `spanning`), so there is nothing to bridge TO — `STP` stays the honest FTS fallback
     with zero suggestions. The fix is better entity extraction (the BERT-NER swap), not more
-    resolution heuristics. The sub-60%-df co-occurring connector noise (`CR350`) is the same.
+    resolution heuristics. The per-class co-occurring noise (mis-typed `CR350`, junk ports,
+    FR connectors) is likewise the BERT-NER's job upstream — the floor + list are a pragmatic
+    pass, not the root-cause fix.
 - Deferred (low value now / not yet built): citation-chain following (only ~6 `CITES`
   edges), scope-set suggestions + the `/ask` "Related" panel, a corpus-stopword pass + the
   BERT-NER enrich swap (the real fix for the residual STP/connector-noise NER limitations).
@@ -114,5 +121,5 @@ Fixes the neighbour-quality half (generic entities), but not the scale half: at 
 - ADR-0005 (RyuGraph replaces Kuzu) — the storage engine; this ADR is about its USE
 - `docs/specs/graph-discovery.md` — the `related_documents` contract
 - The DB meta-audit + the `expand_graph` worth-it measurement ([[db-audit-2026-05-28]] memory)
-- Commits `a52d5fa` (expansion default-off), `ecd8372` (related_documents), `9905965` (entity-type weighting), `2980cf6` (entity-centric retrieval: core+CLI+MCP), `3d96077` (the `/entity` webui view), `f96c797` (acronym ↔ expansion bridge), `ecb6c8d` (bridge edge-case hardening + unicode-initial fix)
+- Commits `a52d5fa` (expansion default-off), `ecd8372` (related_documents), `9905965` (entity-type weighting), `2980cf6` (entity-centric retrieval: core+CLI+MCP), `3d96077` (the `/entity` webui view), `f96c797` (acronym ↔ expansion bridge), `ecb6c8d` (bridge edge-case hardening + unicode-initial fix), `3d00ae7` (co-occurring noise reduction: shared-docs floor + entity-stopword list)
 - IMPLEMENTATION-PLAN §"Beyond v1" — "Citation graph reasoning during answering" (the original deferral this ADR closes with evidence)

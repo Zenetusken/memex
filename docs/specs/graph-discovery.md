@@ -81,6 +81,8 @@ introduce a hallucination or alter a refusal. Independent of the answering agent
   2026-05-28; see "Entity-centric retrieval" below.
   - ✅ **acronym ↔ expansion bridge** (the resolution deepening) — shipped 2026-05-28
     (`f96c797` + `ecb6c8d`); see "Acronym ↔ expansion bridge" below.
+  - ✅ **co-occurring noise reduction** (shared-docs floor + opt-in stopword list) — shipped
+    2026-05-28 (`3d00ae7`); see "Co-occurring noise reduction" below.
 - citation-chain following (the still-unqueried `CITES` edges) — only 6 `CITES` edges in the
   reference corpus; low value until citation extraction is richer.
 - scope-set suggestions + a "Related" panel in `/ask`.
@@ -150,14 +152,29 @@ ethos). On a resolved name it adds "Also see"; on an unresolved name, "Did you m
   every real bridge recurs (DNS/TCP/DHCP/ICMP expansions all ≥2 docs). A clean bridge ⇒ 0–1
   suggestion.
 
-**Residual limitations (NOT resolution-layer-fixable — an NER problem):**
-- The original `STP` symptom: enrich stored the concept as the fragment `spanning`, with NO
-  `STP` and NO `Spanning Tree Protocol` entity — so there is nothing to bridge TO. `STP`
-  correctly stays the honest FTS fallback (0 suggestions). Better entity extraction (the
-  [[bert-ner-enrich-scope-2026-05-28]] BERT-NER) is the only real fix.
-- **Co-occurring connector noise:** a corpus-specific generic term below the 60% df bar (the
-  course code `CR350`, df 7/47) still surfaces in the co-occurring set (ranked #2 for `DNS`).
-  Same `related_documents` limitation — a future corpus-stopword pass or the BERT-NER swap.
+### Co-occurring noise reduction (shipped 2026-05-28)
+
+The `_RELATED_GENERIC_ENTITY_DF_FRACTION` (0.6) gate catches near-universal entities but
+misses a term generic WITHIN a doc-family yet below 60% of the whole vault. Probing showed
+the noise is broad — **~69% is single-doc numeric junk** (port/PID numbers, sizes at
+`shared_docs=1`), with the reported `CR350` only ~3%. Two filters (both on the pure rankers,
+threaded from `AgentsSettings` via `_discovery_noise_filters`, fail-open to defaults):
+- **Neighbourhood floor** (`cooccurring_min_shared_docs`, default 2; `_rank_co_occurring`
+  only): a co-entity sharing < N of the seed's docs is an incidental single-doc co-mention,
+  not a recurring neighbour. Kills the bulk, corpus-agnostic. (A single-doc entity then shows
+  no co-occurring set — correct; it has no cross-doc neighbourhood. Tunable to 1.)
+- **Curated stopword list** (`entity_stopwords`, default EMPTY; BOTH rankers): by-NAME,
+  case-insensitive, kind-agnostic — `CR350` is stored as FOUR kind-nodes the df-gate +
+  kind-weight can't sink, so a name match is required. Env-ergonomic via `NoDecode` +
+  comma-split: `MEMEX_AGENTS__ENTITY_STOPWORDS='CR350, Réseautique et sécurité'`.
+
+**Residual (NOT built — an NER problem, deferred to the [[bert-ner-enrich-scope-2026-05-28]]
+swap):** the original `STP` symptom (enrich stored the concept as the fragment `spanning`,
+no `STP`/`Spanning Tree Protocol` entity to bridge TO — `STP` stays the honest FTS fallback);
+and the per-class noise (ports/sizes mis-extracted as entities; `CR350` mis-typed `concept`;
+FR generic connectors like "adresse IP"/"connexion"). The floor + opt-in list are a pragmatic
+pass; better entity extraction upstream is the root-cause fix. A brittle per-class regex set
+(ports/hop/bits/institution) was deliberately NOT built.
 
 **Cypher lesson (caught by the live-graph test — the no-Cypher-in-CI gap ADR-0011 flagged):**
 the mentioning-docs query `RETURN DISTINCT d.doc_id AS doc_id, … ORDER BY d.doc_id` raised a
