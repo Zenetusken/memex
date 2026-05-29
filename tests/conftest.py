@@ -18,6 +18,25 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _isolate_config_toml(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """Make the suite HERMETIC w.r.t. the developer's `~/.config/memex/config.toml`.
+
+    `MemexSettings` bakes `toml_file = ~/.config/memex/config.toml` into `model_config` and
+    reads it on every construction, so a real production config (e.g. an activated
+    `enrich_ner_backend = "otter"`) would silently bleed into tests and change behaviour.
+    Point the TOML source at an empty temp file → pure defaults + the test's own env
+    overrides. (Tests that want a TOML value set it explicitly via init kwargs / env.)
+    """
+    from memex.core.config import MemexSettings
+
+    empty = tmp_path_factory.mktemp("memex_cfg") / "config.toml"
+    empty.write_text("", encoding="utf-8")
+    monkeypatch.setitem(MemexSettings.model_config, "toml_file", str(empty))
+
+
+@pytest.fixture(autouse=True)
 def _disable_langfuse(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MEMEX_OBSERVABILITY__LANGFUSE_ENABLED", "false")
 

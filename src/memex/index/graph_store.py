@@ -195,7 +195,6 @@ def _rank_co_occurring(
     *,
     limit: int,
     min_shared_docs: int = 2,
-    stopwords: frozenset[str] = frozenset(),
 ) -> list[CoOccurringEntity]:
     """PURE scoring core of `entity_profile`'s co-occurring neighbourhood (separated for
     unit testing). `rows` are `(co_name, co_kind, shared_docs, co_df)` — `shared_docs` =
@@ -206,19 +205,17 @@ def _rank_co_occurring(
     the same noise filter as `_rank_related_documents`, so a generic connector (high df, or
     person/place) sinks. Excludes near-universal entities (df > the generic fraction).
 
-    Two corpus-noise filters (ADR-0011, the co-occurring noise-reduction pass):
-    `min_shared_docs` is the neighbourhood FLOOR — a co-entity sharing < this many docs with
-    the seed is an incidental single-doc co-mention (the bulk of the noise: ports/sizes), not
-    a recurring neighbour. `stopwords` is a curated set of LOWERCASED names excluded outright
-    (by name, kind-agnostic — a course code like `CR350` has multiple kind-nodes the df-gate
-    + kind-weight can't sink)."""
+    `min_shared_docs` is the neighbourhood FLOOR (ADR-0011) — a co-entity sharing < this many
+    docs with the seed is an incidental single-doc co-mention (the bulk of the noise:
+    ports/sizes), not a recurring neighbour. Corpus-agnostic; tunable to 1. (The curated
+    by-name `entity_stopwords` band-aid was removed 2026-05-29 — the OTTER NER backend types
+    entities cleanly upstream, so a hand-curated, per-corpus name list no longer earns its
+    keep in a general-purpose app.)"""
     if n_docs <= 1:
         return []
     df_cap = _RELATED_GENERIC_ENTITY_DF_FRACTION * n_docs
     out: list[CoOccurringEntity] = []
     for name, kind, shared_docs, df in rows:
-        if name.strip().lower() in stopwords:
-            continue
         if df <= 0 or df > df_cap or shared_docs < min_shared_docs:
             continue
         weight = _ENTITY_KIND_WEIGHT.get(kind, _DEFAULT_KIND_WEIGHT)
@@ -281,7 +278,6 @@ def _rank_related_documents(
     *,
     limit: int,
     max_entities: int,
-    stopwords: frozenset[str] = frozenset(),
 ) -> list[RelatedDocument]:
     """PURE scoring core of `GraphStore.related_documents` (separated for unit testing).
 
@@ -300,8 +296,6 @@ def _rank_related_documents(
     df_cap = _RELATED_GENERIC_ENTITY_DF_FRACTION * n_docs
     agg: dict[str, dict[str, Any]] = {}
     for did, title, entity, kind, df in rows:
-        if entity.strip().lower() in stopwords:  # curated corpus-stopword (by name)
-            continue
         if df <= 0 or df > df_cap:  # generic/noise entity → skip
             continue
         weight = _ENTITY_KIND_WEIGHT.get(kind, _DEFAULT_KIND_WEIGHT)
@@ -330,22 +324,16 @@ def _rank_related_documents(
     return out[:limit]
 
 
-def _normalize_stopwords(raw: list[str]) -> frozenset[str]:
-    """Lowercase + strip the configured entity-stopword NAMES (drop blanks) for the
-    by-name, kind-agnostic match in the discovery rankers. Empty in ⇒ empty out (off)."""
-    return frozenset(s.strip().lower() for s in raw if s.strip())
-
-
-def _discovery_noise_filters() -> tuple[int, frozenset[str]]:
-    """The co-occurring noise knobs `(min_shared_docs, stopwords)` from settings, FAIL-OPEN
-    to the sensible defaults `(2, frozenset())` when settings aren't initialised — a
-    `GraphStore` opened outside bootstrap (tests, scripts) still ranks. The `2` mirrors the
-    `AgentsSettings.cooccurring_min_shared_docs` / `_rank_co_occurring` default."""
+def _cooccurring_min_shared_docs() -> int:
+    """The co-occurring neighbourhood FLOOR from settings, FAIL-OPEN to the default `2` when
+    settings aren't initialised — a `GraphStore` opened outside bootstrap (tests, scripts)
+    still ranks. Mirrors the `AgentsSettings.cooccurring_min_shared_docs` / `_rank_co_occurring`
+    default. (The curated `entity_stopwords` band-aid was removed 2026-05-29 — the OTTER NER
+    backend types entities cleanly upstream, so a per-corpus name list no longer earns its keep.)"""
     try:
-        agents = get_settings().agents
+        return get_settings().agents.cooccurring_min_shared_docs
     except ConfigurationError:
-        return 2, frozenset()
-    return agents.cooccurring_min_shared_docs, _normalize_stopwords(agents.entity_stopwords)
+        return 2
 
 
 def entity_id(name: str, kind: str) -> str:
@@ -555,7 +543,6 @@ class GraphStore:
         and, above `_RELATED_GENERIC_ENTITY_DF_FRACTION` of the corpus, is excluded from
         the surfaced `shared_entities` entirely. So a doc sharing ONE specific concept
         outranks one sharing five generic terms — the meaningful connection wins."""
-        _min_shared, stopwords = _discovery_noise_filters()  # related_documents uses stopwords only
 
         def _run() -> list[RelatedDocument]:
             n_res = self._conn.execute("MATCH (d:Document) RETURN count(d) AS n;")
@@ -578,9 +565,7 @@ class GraphStore:
             while result.has_next():
                 row = result.get_next()
                 rows.append((row[0], row[1], row[2], row[3] or "other", int(row[4])))
-            return _rank_related_documents(
-                rows, n_docs, limit=limit, max_entities=max_entities, stopwords=stopwords
-            )
+            return _rank_related_documents(rows, n_docs, limit=limit, max_entities=max_entities)
 
         return await asyncio.to_thread(_run)
 
@@ -598,7 +583,7 @@ class GraphStore:
         MENTIONS edge is doc-level only, so passages come from FTS at the orchestrator."""
         query_name = name.strip()
         key = query_name.lower()
-        min_shared, stopwords = _discovery_noise_filters()
+        min_shared = _cooccurring_min_shared_docs()
 
         def _compute_suggestions(exclude_ids: set[str], n_docs: int) -> list[EntitySuggestion]:
             """The deterministic acronym ↔ expansion bridge (ADR-0011). Direction A —
@@ -733,7 +718,6 @@ class GraphStore:
                 n_docs,
                 limit=max_cooccurring,
                 min_shared_docs=min_shared,
-                stopwords=stopwords,
             )
 
             return EntityProfile(

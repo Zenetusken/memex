@@ -77,7 +77,7 @@ def test_zero_shared_docs_skipped() -> None:
     assert _rank_co_occurring([("x", "concept", 0, 2)], n_docs=100, limit=10) == []
 
 
-# ── Co-occurring noise reduction (ADR-0011): the floor + the stopword list ────
+# ── Co-occurring noise reduction (ADR-0011): the shared-docs floor ────
 
 
 def test_shared_docs_floor_drops_single_doc_co_mentions() -> None:
@@ -93,32 +93,3 @@ def test_shared_docs_floor_drops_single_doc_co_mentions() -> None:
     # Tunable down to 1 → the single-doc co-mention comes back.
     out1 = _rank_co_occurring(rows, n_docs=47, limit=10, min_shared_docs=1)
     assert {c.name for c in out1} == {"3389", "TCP"}
-
-
-def test_stopword_drops_name_across_all_kinds() -> None:
-    """A curated stopword excludes the NAME regardless of kind — `CR350` is stored as
-    several kind-nodes the df-gate + kind-weight can't sink, so the match is by name."""
-    rows = [
-        ("CR350", "concept", 6, 7),
-        ("CR350", "org", 6, 7),
-        ("CR350", "other", 6, 7),
-        ("DNS spoofing", "concept", 3, 3),
-    ]
-    out = _rank_co_occurring(rows, n_docs=47, limit=10, stopwords=frozenset({"cr350"}))
-    assert [c.name for c in out] == ["DNS spoofing"]  # every CR350 kind-node gone
-
-
-def test_stopword_is_case_insensitive() -> None:
-    rows = [("Réseautique ET Sécurité", "concept", 4, 4), ("ARP", "concept", 3, 3)]
-    out = _rank_co_occurring(
-        rows, n_docs=47, limit=10, stopwords=frozenset({"réseautique et sécurité"})
-    )
-    assert [c.name for c in out] == ["ARP"]
-
-
-def test_empty_stopwords_is_noop() -> None:
-    """Default empty stopwords ⇒ byte-identical to no filter (the regression guard)."""
-    rows = [("TCP", "concept", 3, 4), ("ARP", "concept", 2, 3)]
-    assert _rank_co_occurring(rows, n_docs=47, limit=10) == _rank_co_occurring(
-        rows, n_docs=47, limit=10, stopwords=frozenset()
-    )

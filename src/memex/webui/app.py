@@ -352,7 +352,7 @@ async def _related_for_docs(
     "graph neighbours of a set of docs". Read-only + HARD-gate-neutral; ImportError fail-open
     → `[]`. Expands the first `seed_limit` seeds (bounds graph calls) but EXCLUDES the full
     seed set from the output. Reuses the SHIPPED noise-filtered `related_documents` ranking
-    (specificity + shared-docs floor / stopword), so callers inherit it."""
+    (specificity + shared-docs floor), so callers inherit it."""
     if not seed_ids:
         return []
     exclude = set(seed_ids)  # never suggest a doc already in the selection / citation set

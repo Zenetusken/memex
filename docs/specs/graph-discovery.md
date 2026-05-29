@@ -81,7 +81,7 @@ introduce a hallucination or alter a refusal. Independent of the answering agent
   2026-05-28; see "Entity-centric retrieval" below.
   - ✅ **acronym ↔ expansion bridge** (the resolution deepening) — shipped 2026-05-28
     (`f96c797` + `ecb6c8d`); see "Acronym ↔ expansion bridge" below.
-  - ✅ **co-occurring noise reduction** (shared-docs floor + opt-in stopword list) — shipped
+  - ✅ **co-occurring noise reduction** (shared-docs floor; the curated `entity_stopwords` list was later REMOVED 2026-05-29 — see below) — shipped
     2026-05-28 (`3d00ae7`); see "Co-occurring noise reduction" below.
 - ⏳ citation-chain following (the still-unqueried `CITES` edges) — **DATA-GATED**, scoped as a
   data-first experiment; see "Citation-chain following" below.
@@ -161,38 +161,31 @@ The `_RELATED_GENERIC_ENTITY_DF_FRACTION` (0.6) gate catches near-universal enti
 misses a term generic WITHIN a doc-family yet below 60% of the whole vault. Probing showed
 the noise is broad — **~69% is single-doc numeric junk** (port/PID numbers, sizes at
 `shared_docs=1`), with the reported `CR350` only ~3%. Two filters (both on the pure rankers,
-threaded from `AgentsSettings` via `_discovery_noise_filters`, fail-open to defaults):
+from `AgentsSettings` via `_cooccurring_min_shared_docs`, fail-open to the default):
 - **Neighbourhood floor** (`cooccurring_min_shared_docs`, default 2; `_rank_co_occurring`
   only): a co-entity sharing < N of the seed's docs is an incidental single-doc co-mention,
-  not a recurring neighbour. Kills the bulk, corpus-agnostic. (A single-doc entity then shows
-  no co-occurring set — correct; it has no cross-doc neighbourhood. Tunable to 1.)
-- **Curated stopword list** (`entity_stopwords`, default EMPTY; BOTH rankers): by-NAME,
-  case-insensitive, kind-agnostic — `CR350` is stored as FOUR kind-nodes the df-gate +
-  kind-weight can't sink, so a name match is required. Env-ergonomic via `NoDecode` +
-  comma-split: `MEMEX_AGENTS__ENTITY_STOPWORDS='CR350, Réseautique et sécurité'`.
+  not a recurring neighbour. Kills the bulk; corpus-AGNOSTIC + structural (zero per-corpus
+  tuning) → it scales to any vault. (A single-doc entity then shows no co-occurring set —
+  correct; it has no cross-doc neighbourhood. Tunable to 1.)
 
-**Residual (NOT built — an NER problem, deferred to the [[bert-ner-enrich-scope-2026-05-28]]
-swap):** the original `STP` symptom (enrich stored the concept as the fragment `spanning`,
-no `STP`/`Spanning Tree Protocol` entity to bridge TO — `STP` stays the honest FTS fallback);
-and the per-class noise (ports/sizes mis-extracted as entities; `CR350` mis-typed `concept`;
-FR generic connectors like "adresse IP"/"connexion"). The floor + opt-in list are a pragmatic
-pass; better entity extraction upstream is the root-cause fix. A brittle per-class regex set
-(ports/hop/bits/institution) was deliberately NOT built.
+**The curated `entity_stopwords` list was REMOVED 2026-05-29** (with `_normalize_stopwords`,
+the `stopwords` param on both rankers, the `NoDecode` import, and the `config.toml` entry). It
+was a by-name, per-corpus exclusion (`CR350`, `Réseautique et sécurité`) — a band-aid for the
+LLM mis-typing a course code as a `concept`. A hand-curated name list doesn't generalise to a
+local-first app run on ANY corpus (one user's `CR350` is a drop in the ocean of the world's
+course codes, product names, and orgs), and the [[bert-ner-enrich-scope-2026-05-28]] OTTER NER
+backend — now the LIVE enrich entity extractor — types entities cleanly UPSTREAM, removing the
+root cause. Fix entity noise at the extractor, not with a curated downstream list.
 
-**Why no automated noise-detection helper (scoped + rejected 2026-05-28).** A "surface
-stopword candidates" helper was scoped and validated against the live graph — verdict: don't
-build it, **no structural signal can auto-classify noise.** Co-occurrence degree, degree÷df,
-and the df-band all FAIL because noise and signal have identical statistical profiles in a
-topically-coherent corpus (`CR350` ranks between `TCP`/`DNS`/`IP` — a generic connector and a
-central concept both co-occur with everything). Kind-weight already handles `person`/`place`
-but `CR350` is mis-typed `concept`. Document-title overlap is the only real discriminator yet
-high-precision / low-recall (`CR350` → 8 doc titles vs 0 for TCP/DNS/IP/ARP, but it misses the
-course title and the FR connectors). So a helper could only NARROW (→ the ~126 multi-doc
-entities) + flag for human judgment, never decide — low leverage once the handful of offenders
-is curated. The real auto-fix is the [[bert-ner-enrich-scope-2026-05-28]] BERT-NER swap (typed,
-clean entities upstream). **Manual curation recipe** (for the occasional curator, until then):
-inspect entities with `df ≥ 2` ranked by co-occurrence degree + doc-title overlap, and add the
-administrative names (course codes, instructor, series titles) to `entity_stopwords`.
+**Why no automated noise-detection helper either (scoped + rejected 2026-05-28 — the analysis
+that pointed at the NER swap).** A "surface stopword candidates" helper was scoped + validated
+against the live graph: **no structural signal can auto-classify noise.** Co-occurrence degree,
+degree÷df, and the df-band all FAIL because noise and signal have identical statistical
+profiles in a topically-coherent corpus (`CR350` ranks between `TCP`/`DNS`/`IP`). Document-title
+overlap is the only real discriminator, and it's high-precision / low-recall. The conclusion —
+you cannot separate "administrative connector" from "central concept" by graph STRUCTURE, only
+by SEMANTICS/TYPING — is exactly what motivated the OTTER swap (typed, clean entities upstream),
+now shipped.
 
 **Cypher lesson (caught by the live-graph test — the no-Cypher-in-CI gap ADR-0011 flagged):**
 the mentioning-docs query `RETURN DISTINCT d.doc_id AS doc_id, … ORDER BY d.doc_id` raised a
@@ -242,7 +235,7 @@ touches the agent / answer / refusal path, and the CLI/MCP `ask` payloads are un
 - Renders below Sources (before the scope note/footer) reusing the doc-view `.related-*`
   link/tag styling (each related doc a link + its connecting entities as `/entity?name=`
   traversal tags) + a small `.ans-related` wrapper. Inherits the SHIPPED noise-filtered
-  `related_documents` ranking (specificity + shared-docs floor / stopword).
+  `related_documents` ranking (specificity + shared-docs floor).
 
 Pinned by `tests/integration/test_webui.py` (answered panel renders + excludes cited docs;
 graph-unavailable fail-open; refusal → no panel). Live-validated (Chrome e2e): "What is DNS

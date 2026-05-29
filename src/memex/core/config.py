@@ -16,12 +16,11 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
-    NoDecode,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
     TomlConfigSettingsSource,
@@ -582,21 +581,17 @@ class AgentsSettings(BaseModel):
     param; opt back in for a large entity-rich vault via
     `MEMEX_AGENTS__GRAPH_EXPANSION_ENABLED=true`. See [[db-audit-2026-05-28]].
 
-    `cooccurring_min_shared_docs` / `entity_stopwords`: noise filters for the entity-graph
-    DISCOVERY ranking (the `memex entity` / `/entity` "Co-occurring concepts" neighbourhood;
-    ADR-0011). The `_RELATED_GENERIC_ENTITY_DF_FRACTION` (0.6) gate catches near-universal
-    entities but MISSES a term generic within a doc-family yet below 60% of the whole vault.
-    `cooccurring_min_shared_docs` (default 2) is a neighbourhood FLOOR — a co-entity sharing
-    only 1 doc with the seed is an incidental single-doc co-mention (live: ~69% of the noise
-    — port/PID numbers, sizes — sat at `shared_docs=1`), so requiring ≥2 keeps "what RECURS
-    alongside X". Corpus-agnostic; tunable to 1. `entity_stopwords` (default EMPTY ⇒ off) is
-    a curated, by-NAME (case-insensitive, kind-agnostic) exclusion list for the residue the
-    floor can't catch — a course code like `CR350` (df 7/47, `shared_docs=6`, stored as FOUR
-    kind-nodes so kind-weighting can't sink it). Both apply only to read-only discovery
-    (HARD-gate-neutral). The brittle per-class noise (ports/sizes mis-extracted as entities,
-    `CR350` mis-typed `concept`) is the [[bert-ner-enrich-scope-2026-05-28]] swap's job
-    upstream — these are a pragmatic pass, not the root-cause fix.
-    `MEMEX_AGENTS__ENTITY_STOPWORDS='CR350,Réseautique et sécurité'`.
+    `cooccurring_min_shared_docs`: the entity-graph DISCOVERY-ranking neighbourhood FLOOR (the
+    `memex entity` / `/entity` "Co-occurring concepts" list; ADR-0011). The
+    `_RELATED_GENERIC_ENTITY_DF_FRACTION` (0.6) gate catches near-universal entities; this
+    floor catches the OTHER bulk — a co-entity sharing only 1 doc with the seed is an
+    incidental single-doc co-mention (~69% of the noise — port/PID numbers, sizes — sat at
+    `shared_docs=1`), so requiring ≥2 keeps "what RECURS alongside X". Corpus-AGNOSTIC,
+    structural, zero per-corpus tuning; tunable to 1. Read-only discovery (HARD-gate-neutral).
+    (The curated by-name `entity_stopwords` band-aid was REMOVED 2026-05-29: a hand-curated,
+    per-corpus name list — e.g. one user's `CR350` course code — doesn't generalise to a
+    local-first app run on arbitrary corpora, and the OTTER NER backend types entities cleanly
+    upstream, so it no longer earns its keep. See [[bert-ner-enrich-scope-2026-05-28]].)
     """
 
     artifact_scope_enabled: bool = True
@@ -605,19 +600,6 @@ class AgentsSettings(BaseModel):
     report_pack_chars: int = 4_000
     report_coalesce_target: int = Field(default=2, ge=1)
     cooccurring_min_shared_docs: int = Field(default=2, ge=1)
-    # `NoDecode` stops pydantic-settings from JSON-decoding the env value, so the
-    # before-validator below receives the raw string and can comma-split it — the
-    # ergonomic env override `MEMEX_AGENTS__ENTITY_STOPWORDS='CR350, Foo'` then works
-    # (a native list from TOML / programmatic callers still passes straight through).
-    entity_stopwords: Annotated[list[str], NoDecode] = Field(default_factory=list)
-
-    @field_validator("entity_stopwords", mode="before")
-    @classmethod
-    def _split_entity_stopwords(cls, v: object) -> object:
-        """Accept a comma-separated STRING as well as a native list (blanks dropped)."""
-        if isinstance(v, str):
-            return [s.strip() for s in v.split(",") if s.strip()]
-        return v
 
     # OTTER NER backend — the gated BERT-NER enrich swap ([[bert-ner-enrich-scope-2026-05-28]]).
     # `enrich_ner_backend="otter"` replaces the LLM (Qwen3-8B) entity extractor with the span

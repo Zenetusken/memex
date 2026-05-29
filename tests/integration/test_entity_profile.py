@@ -15,7 +15,6 @@ import pytest
 
 pytest.importorskip("ryugraph")  # optional backend — skip the whole module without it
 
-from memex.core.config import MemexSettings, set_settings
 from memex.index.graph_store import GraphStore
 
 # Six docs so the generic-entity df exclusion (df > 0.6·N = 3.6) keeps the
@@ -295,62 +294,6 @@ async def test_resolved_acronym_with_no_expansion_has_no_suggestions(tmp_path: P
         prof = await graph.entity_profile("ARP")  # no "Address Resolution Protocol" seeded
         assert prof.resolved is True
         assert prof.suggestions == []
-    finally:
-        await graph.close()
-
-
-@pytest.mark.asyncio
-async def test_entity_stopword_excludes_cooccurring_on_real_graph(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """End-to-end on a real graph: a curated `entity_stopwords` (via env → MemexSettings →
-    the ranker) removes a multi-kind `CR350`-shaped connector from the co-occurring set —
-    across ALL its kind-nodes — while the real neighbour (TCP) stays. Without it, CR350
-    surfaces (it's under the df-gate and clears the floor)."""
-    graph = await GraphStore.open(tmp_path)
-    try:
-        await _seed_spec(
-            graph,
-            [
-                (
-                    "d1",
-                    [
-                        ("DNS", "concept"),
-                        ("CR350", "concept"),
-                        ("CR350", "org"),
-                        ("TCP", "concept"),
-                    ],
-                ),
-                (
-                    "d2",
-                    [
-                        ("DNS", "concept"),
-                        ("CR350", "concept"),
-                        ("CR350", "org"),
-                        ("TCP", "concept"),
-                    ],
-                ),
-                ("d3", [("DNS", "concept"), ("CR350", "concept")]),
-                ("d4", [("TCP", "concept")]),
-                ("d5", [("routing", "concept")]),
-                ("d6", [("switching", "concept")]),
-            ],
-        )
-        # Fail-open default (no stopword) → CR350 surfaces (shared_docs ≥ 2, under df-gate).
-        before = await graph.entity_profile("DNS")
-        assert "CR350" in {c.name for c in before.cooccurring}
-
-        # Configure the stopword via env → the ranker drops every CR350 kind-node.
-        monkeypatch.setenv("MEMEX_VAULT_PATH", str(tmp_path))
-        monkeypatch.setenv("MEMEX_AGENTS__ENTITY_STOPWORDS", "CR350")
-        set_settings(MemexSettings())  # type: ignore[call-arg]
-        try:
-            after = await graph.entity_profile("DNS")
-        finally:
-            set_settings(None)
-        names = {c.name for c in after.cooccurring}
-        assert "CR350" not in names
-        assert "TCP" in names  # the real neighbour is untouched
     finally:
         await graph.close()
 
