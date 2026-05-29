@@ -83,8 +83,8 @@ introduce a hallucination or alter a refusal. Independent of the answering agent
     (`f96c797` + `ecb6c8d`); see "Acronym ↔ expansion bridge" below.
   - ✅ **co-occurring noise reduction** (shared-docs floor + opt-in stopword list) — shipped
     2026-05-28 (`3d00ae7`); see "Co-occurring noise reduction" below.
-- citation-chain following (the still-unqueried `CITES` edges) — only 6 `CITES` edges in the
-  reference corpus; low value until citation extraction is richer.
+- ⏳ citation-chain following (the still-unqueried `CITES` edges) — **DATA-GATED**, scoped as a
+  data-first experiment; see "Citation-chain following" below.
 - scope-set suggestions + a "Related" panel in `/ask`.
 - THEN, if discovery-quality is the bottleneck: the [[bert-ner-enrich-scope-2026-05-28]]
   NER swap (sharper, typed entities upstream of the graph).
@@ -196,6 +196,31 @@ the mentioning-docs query `RETURN DISTINCT d.doc_id AS doc_id, … ORDER BY d.do
 ryugraph binder error — after a `DISTINCT` projection `d` is out of scope, so `ORDER BY` must
 reference the projected **alias** (`ORDER BY doc_id`). The "de-risked" Cypher in the plan
 wasn't run WITH the `DISTINCT`; `tests/integration/test_entity_profile.py` now would catch it.
+
+## Citation-chain following — data-first (⏳ pending data, scoped 2026-05-29)
+
+Traversing the `CITES` Document→Document edges ("what cites this / what does this cite",
+transitively) is an ADR-0011 build-out item — but it has **no data to run on yet**, and the
+blocker is DATA, not engineering. Measured on the live graph (`scripts/citation_graph_audit.py`):
+**6 CITES edges**, all course cross-references from ONE syllabus → 6 lectures — a **depth-1
+star** with **zero multi-hop paths** (`CITES*2..4` → 0) and **0 academic citations**. Only 7 of
+47 docs touch CITES; `DEFINES`/`RELATES_TO` are unpopulated (0 each). Chain-following is
+structurally impossible here, and those 6 refs are already clickable `[[wikilinks]]` in the body.
+
+**The make-or-break data condition:** `CITES` is Document→Document WITHIN the vault
+(`enrich/citations.py` resolves a citation surface form against OTHER vault docs → `link_cites`).
+So a **lone paper yields ZERO edges** — its references aren't in-vault to resolve against. Real
+density+depth needs a **citation-LINKED cluster** (a survey + several papers it cites, all
+ingested). The academic resolver already works (pinned by `test_enrich_resolves_citations_against_vault_docs`).
+
+**The experiment** (curator-gated on a user-provided cluster): back up the vault → `memex ingest`
+the cluster → re-run `scripts/citation_graph_audit.py` → compare to the baseline. **Pre-registered
+decision bar:** build chain-following only if real data yields a genuine subgraph — roughly
+**≥15 CITES edges, ≥5 docs with edges, and ≥1 multi-hop chain** — else stay deferred (an honest
+1-hop "References" surface is the fallback). **Pre-registered design IF the bar clears:**
+`GraphStore.citations(doc_id)` (1-hop cites/cited-by) and `citation_paths(doc_id, depth)` over
+`MATCH (d)-[:CITES*1..N]->(o)`, mirroring `related_documents`, surfaced CLI/MCP/webui —
+complementing, not duplicating, the body wikilinks.
 
 ## Testing
 
