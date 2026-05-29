@@ -115,6 +115,32 @@ still renders (mirrors the `/graph` route; NEVER 500s). The graph read uses the 
 `webui → index/graph_store` edge. Semantic `.related-*` CSS in `style.css` (zinc + the
 action-blue for the link), NOT new Tailwind. No JS. Pinned by `test_webui.py`
 (`test_document_view_renders_related_documents` + `…survives_graph_unavailable`).
+**The connecting-entity tags are now `/entity?name=` links** (`.related-entity-link`) — the
+organic entry point from any doc into the entity-centric view below.
+
+## Entity-centric discovery view (`/entity` + `entity.html` + `.entity-*`, ADR-0011, 2026-05-28)
+
+The visual surface for "everything about entity X" — the second graph-discovery surface
+(spec `docs/specs/graph-discovery.md`). `GET /entity?name=` calls `entity_overview` (the
+**`webui → retrieve` boundary edge**, documented like `webui → parse`; imported at module
+top so `test_webui.py` can monkeypatch `memex.webui.app.entity_overview`) and renders
+`entity.html` (a full page, `{% extends base %}` — NOT an HTMX partial). Three states:
+**resolved** → the graph profile (the "in graph" badge + kind chips + true `doc_count`; the
+co-occurring neighbourhood, **each tag a `/entity?name=` link so the user TRAVERSES the
+graph**; the mentioning docs as links) + the scoped passages by human title › section;
+**unknown name** → a quiet "not a known entity" badge (colour + label, never colour alone) +
+an explanatory note (acronym-vs-expansion) + the whole-corpus FTS passages (no co-occurring
+section); **empty name** → just the lookup form. A header **"Entities" nav link** (`base.html`)
++ the doc-view related-entity tags are the entry points. Fail-open is inherited from the
+orchestrator (a missing graph never raises — the route doesn't even catch). `_passage_refs`
+is the passage view-model (title › section + `?page=N#slug` href + a bounded ~480-char
+preview), mirroring `_source_view`. **No JS** (a GET `<form>`). Semantic `.entity-*` CSS in
+`style.css` (zinc + the single action-blue; secondary text floors at zinc-400 for AA; the
+co-occurring tags + mention links hover to the action-blue), NOT new Tailwind. Live-validated
+(Chrome e2e): `DNS` → the full resolved profile + a coherent co-occurring cluster; `STP` →
+the graceful FTS fallback. Pinned by `test_webui.py` (`test_entity_view_renders_resolved_profile`
+/ `…unknown_falls_back_to_fts` / `test_entity_lookup_form_renders_without_name` + the
+related-tag-is-`/entity`-link assertion).
 
 ## Live co-residence mode hot-switch (`/resources` + `_resources.html`, ADR-0007, 2026-05-27)
 

@@ -1,10 +1,12 @@
-# Spec: Graph Discovery — `related_documents` ("explore connections")
+# Spec: Graph Discovery — `related_documents` + entity-centric retrieval
 
 Status: shipped 2026-05-28. Decision record: [ADR-0011](../adr/0011-entity-graph-from-expansion-to-discovery.md).
 
-The explicit, user-initiated "what else in my corpus relates to this document" surface
-over the entity graph — the on-mission successor to the retired passive `expand_graph`
-(ADR-0011). A graph read, not a retrieval/answer-path operation.
+The explicit, user-initiated discovery surfaces over the entity graph — the on-mission
+successor to the retired passive `expand_graph` (ADR-0011). Graph reads, not
+retrieval/answer-path operations. Two surfaces: **`related_documents`** ("what else in my
+corpus relates to THIS document", below) and **entity-centric retrieval** ("everything about
+entity X", further down). Both reuse one specificity primitive and are HARD-gate-neutral.
 
 ## Entry point
 
@@ -75,11 +77,69 @@ introduce a hallucination or alter a refusal. Independent of the answering agent
 ## Build-out (in leverage order — ADR-0011 / db-audit)
 
 - ✅ **`/graph` Cytoscape viz on `related_documents`** (specificity edges) — shipped.
-- entity-centric retrieval ("everything about entity X across the corpus") — a new query mode.
-- citation-chain following (the still-unqueried `CITES` edges).
+- ✅ **entity-centric retrieval ("everything about entity X across the corpus")** — shipped
+  2026-05-28; see "Entity-centric retrieval" below.
+- citation-chain following (the still-unqueried `CITES` edges) — only 6 `CITES` edges in the
+  reference corpus; low value until citation extraction is richer.
 - scope-set suggestions + a "Related" panel in `/ask`.
 - THEN, if discovery-quality is the bottleneck: the [[bert-ner-enrich-scope-2026-05-28]]
   NER swap (sharper, typed entities upstream of the graph).
+
+## Entity-centric retrieval — "everything about entity X" (shipped 2026-05-28)
+
+The second discovery surface: given an entity NAME, surface its corpus-wide profile. The
+genuinely-graph capability `expand_graph` never was — and read-only, so HARD-gate-neutral
+by construction (never touches the answer/refusal path; passages are for browsing, never
+injected into a grounding pool).
+
+```python
+# index/graph_store.py — the GRAPH half (identity + docs + neighbourhood)
+async def entity_profile(self, name, *, max_docs=50, max_cooccurring=15) -> EntityProfile
+# EntityProfile { query_name; matched_names: list[str]; kinds: list[str]; doc_count;
+#                 mentions: list[EntityMention]; cooccurring: list[CoOccurringEntity]; resolved }
+
+# retrieve/entity.py — the ORCHESTRATOR (graph + FTS)
+async def entity_overview(name, *, max_docs=50, max_cooccurring=15, passages_k=10) -> EntityOverview
+# EntityOverview { profile: EntityProfile; passages: list[Chunk]; passages_scoped: bool }
+```
+
+**The graph-UNIQUE value** (without these it's a search reskin): canonical identity (resolve
+a free-text name → its kind(s) + true corpus `doc_count`); the **authoritative MENTIONS doc
+set** (which docs discuss X, from the graph not fuzzy retrieval); **co-occurring entities** —
+the concept neighbourhood, ranked by the SAME specificity filter as `related_documents`
+(`_rank_co_occurring`: `shared_docs × ln(N/df) × kind_weight`, generic-df exclusion +
+proper-noun down-weight; the `shared_docs` multiplier — a co-entity in more of the seed's docs
+ranks higher — is the new term). **Passages come from FTS** (the `MENTIONS` edge is doc-level
+only, no chunk granularity) — scoped to the mentioning docs when resolved.
+
+**Resolution UX:** exact **case-insensitive name match**, aggregating across kinds (one name
+can be `concept` in one doc, `tool` in another → `kinds` is a list). Unknown name OR graph
+unavailable → `resolved=False` + a **whole-corpus FTS fallback** (`passages_scoped=False`) —
+the honest "not a known entity, here's what text search finds." An entity in many docs:
+`doc_count` is the true total; `mentions` capped at `max_docs` (honest "mentioned in N,
+showing 50"). Fail-open throughout (ImportError → the fallback); a runtime graph error
+deliberately surfaces (it's a bug, not the optional-dependency case).
+
+**Surfaces:** CLI `memex entity <name> [--max-docs N] [--cooccurring N] [-k N]`; MCP
+`entity_overview(name, …)` tool; webui `GET /entity?name=` (the lookup view — co-occurring
+tags are `/entity?name=` links to TRAVERSE the neighbourhood, the doc-view "Related documents"
+connecting-entity tags link in too).
+
+**Live findings (47-doc CR350 vault), both motivating the deferred CONTAINS/alias fallback:**
+- **Acronym-resolution gap:** typing `STP` resolves nothing — enrich stored the concept as
+  `spanning`, not the acronym or its expansion. Exact-match is correct (no false identity);
+  the FTS fallback returns the right passages and the webui surfaces an explanatory note. The
+  acronyms enrich DID store (`DNS`, `TCP`, `HTTP`, `ICMP`, `UDP`, `ARP`) resolve cleanly.
+- **Co-occurring connector noise:** a corpus-specific generic term below the 60% df bar (the
+  course code `CR350`, df 7/47) still surfaces (ranked #2 for `DNS`). Same limitation
+  `related_documents` has — the df-fraction gate doesn't catch a connector that's generic in
+  MEANING but not near-universal. A future corpus-stopword pass or the BERT-NER swap addresses it.
+
+**Cypher lesson (caught by the live-graph test — the no-Cypher-in-CI gap ADR-0011 flagged):**
+the mentioning-docs query `RETURN DISTINCT d.doc_id AS doc_id, … ORDER BY d.doc_id` raised a
+ryugraph binder error — after a `DISTINCT` projection `d` is out of scope, so `ORDER BY` must
+reference the projected **alias** (`ORDER BY doc_id`). The "de-risked" Cypher in the plan
+wasn't run WITH the `DISTINCT`; `tests/integration/test_entity_profile.py` now would catch it.
 
 ## Testing
 
@@ -89,4 +149,13 @@ introduce a hallucination or alter a refusal. Independent of the answering agent
 - `tests/integration/test_webui.py` — the doc-view "Related documents" section renders +
   survives an unavailable graph (fail-open).
 - `tests/integration/test_mcp_server.py` — the `related_documents` tool returns the ranked
-  list + is fail-open; the tool-registration smoke includes it.
+  list + is fail-open; the tool-registration smoke includes it (+ `entity_overview`).
+- **Entity-centric:** `tests/unit/test_entity_profile.py` (the pure `_rank_co_occurring`:
+  specific-beats-generic, shared_docs multiplier, generic-df exclusion, proper-noun
+  down-weight, formula, limit/empty); `tests/integration/test_entity_overview.py` (the
+  orchestrator with fakes: resolved→scoped passages / unknown→whole-corpus fallback /
+  ImportError→fail-open); `tests/integration/test_entity_profile.py` (**opt-in real
+  ryugraph** via `importorskip` — seeds a graph, runs the live Cypher: identity +
+  cross-kind aggregation + co-occurring rank + unknown→unresolved; the gap that caught the
+  `ORDER BY`-after-`DISTINCT` binder bug); `tests/integration/test_webui.py` (the `/entity`
+  view: resolved render / unknown fallback / lookup form / related-tag-is-entity-link).

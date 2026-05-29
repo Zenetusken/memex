@@ -60,6 +60,27 @@ This is the difference between *passive recall-boosting in the RAG path* (which 
 - The enrich write path (entity/citation extraction → graph) is unchanged.
 - `expand_graph` short-circuits when a scope is active (artifact-scope / doc-picker), as before; default-off just makes that the universal case.
 
+## Build-out status (updated 2026-05-28)
+
+The discovery build-out the Decision promised, shipped same-day from the validated
+specificity primitive:
+
+- ✅ **`/graph` Cytoscape viz** now consumes `related_documents` (specificity edges).
+- ✅ **Entity-centric retrieval** — "everything about entity X" (`GraphStore.entity_profile`
+  + the `retrieve/entity.py::entity_overview` orchestrator + pure `_rank_co_occurring`; CLI
+  `memex entity`, MCP `entity_overview`, webui `/entity`). Identity + the authoritative
+  MENTIONS doc set + the co-occurring concept neighbourhood (graph) + scoped passages (FTS);
+  unknown name → whole-corpus FTS fallback. Read-only ⇒ HARD-gate-neutral by construction.
+  Spec `docs/specs/graph-discovery.md`. The opt-in **real-ryugraph integration test** closed
+  the "no live Cypher in CI" gap this ADR flagged — and immediately earned its keep by
+  catching a binder bug (`ORDER BY d.doc_id` after a `DISTINCT` projection drops `d` from
+  scope → must `ORDER BY` the alias). Live-validated on the 47-doc vault; surfaced two known
+  limitations that motivate the deferred CONTAINS/alias resolution + a corpus-stopword pass:
+  the acronym-resolution gap (`STP` stored as `spanning`) and a sub-60%-df connector (`CR350`)
+  still ranking in the co-occurring set.
+- Deferred (low value now / not yet built): citation-chain following (only ~6 `CITES`
+  edges), scope-set suggestions + the `/ask` "Related" panel, the BERT-NER enrich swap.
+
 ## Alternatives in Detail
 
 ### Retire the graph entirely
@@ -81,5 +102,5 @@ Fixes the neighbour-quality half (generic entities), but not the scale half: at 
 - ADR-0005 (RyuGraph replaces Kuzu) — the storage engine; this ADR is about its USE
 - `docs/specs/graph-discovery.md` — the `related_documents` contract
 - The DB meta-audit + the `expand_graph` worth-it measurement ([[db-audit-2026-05-28]] memory)
-- Commits `a52d5fa` (expansion default-off), `ecd8372` (related_documents), `9905965` (entity-type weighting)
+- Commits `a52d5fa` (expansion default-off), `ecd8372` (related_documents), `9905965` (entity-type weighting), `2980cf6` (entity-centric retrieval: core+CLI+MCP), `3d96077` (the `/entity` webui view)
 - IMPLEMENTATION-PLAN §"Beyond v1" — "Citation graph reasoning during answering" (the original deferral this ADR closes with evidence)
