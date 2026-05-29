@@ -96,6 +96,25 @@ class GraphNeighbor(BaseModel):
 # linked on these generic entities, unranked, and added nothing — see db-audit-2026-05-28).
 _RELATED_GENERIC_ENTITY_DF_FRACTION = 0.6
 
+# Entity-TYPE weights for `related_documents` (multiply the IDF). The df-exclusion above
+# catches near-universal entities, but a PROPER-NOUN connector can be specific (low df)
+# yet topically INCIDENTAL — the course instructor ('person', df≈7/47, well under the
+# 60% bar) or a country ('place', 'Vietnam') that two docs both happen to mention. So
+# topical types (concept/method/tool) keep full weight, orgs/other are halved (sometimes
+# meaningful — 'NVIDIA', 'IRS'), and person/place are heavily down-weighted (rarely the
+# REASON two docs relate). Down-weight, not exclude: a person/place that's genuinely the
+# strongest shared signal still counts, just less — and it sinks in the surfaced "why".
+_ENTITY_KIND_WEIGHT: dict[str, float] = {
+    "concept": 1.0,
+    "method": 1.0,
+    "tool": 1.0,
+    "org": 0.5,
+    "other": 0.5,
+    "person": 0.25,
+    "place": 0.25,
+}
+_DEFAULT_KIND_WEIGHT = 0.5
+
 
 class RelatedDocument(BaseModel):
     """A document related to a seed doc via SHARED ENTITIES, ranked by the SPECIFICITY of
@@ -110,7 +129,7 @@ class RelatedDocument(BaseModel):
 
 
 def _rank_related_documents(
-    rows: list[tuple[str, str, str, int]],
+    rows: list[tuple[str, str, str, str, int]],
     n_docs: int,
     *,
     limit: int,
@@ -118,25 +137,31 @@ def _rank_related_documents(
 ) -> list[RelatedDocument]:
     """PURE scoring core of `GraphStore.related_documents` (separated for unit testing).
 
-    `rows` are `(neighbour_doc_id, neighbour_title, shared_entity, entity_df)` tuples —
-    one per (neighbour, shared-entity) pair, where `entity_df` is how many documents in
-    the corpus mention that entity. Scores each neighbour by Σ `ln(n_docs / df)` (IDF)
-    over its shared entities, EXCLUDING near-universal entities (df above
-    `_RELATED_GENERIC_ENTITY_DF_FRACTION` of the corpus — the generic-connector noise the
-    retired passive expansion fell for). Returns the top-`limit` neighbours, each with its
-    connecting entities most-specific-first (capped at `max_entities`)."""
+    `rows` are `(neighbour_doc_id, neighbour_title, shared_entity, entity_kind, entity_df)`
+    tuples — one per (neighbour, shared-entity) pair, where `entity_df` is how many
+    documents in the corpus mention that entity. Scores each neighbour by
+    Σ `ln(n_docs / df) × kind_weight` over its shared entities: IDF rewards specific
+    (rare) entities, the `_ENTITY_KIND_WEIGHT` multiplier down-weights incidental
+    proper-noun types (person/place). Near-universal entities (df above
+    `_RELATED_GENERIC_ENTITY_DF_FRACTION` of the corpus) are excluded outright — the
+    generic-connector noise the retired passive expansion fell for. Returns the top-`limit`
+    neighbours, each with its connecting entities most-significant-first (capped at
+    `max_entities`)."""
     if n_docs <= 1:
         return []
     df_cap = _RELATED_GENERIC_ENTITY_DF_FRACTION * n_docs
     agg: dict[str, dict[str, Any]] = {}
-    for did, title, entity, df in rows:
+    for did, title, entity, kind, df in rows:
         if df <= 0 or df > df_cap:  # generic/noise entity → skip
             continue
-        idf = math.log(n_docs / df)
+        weight = _ENTITY_KIND_WEIGHT.get(kind, _DEFAULT_KIND_WEIGHT)
+        contribution = math.log(n_docs / df) * weight
+        if contribution <= 0:  # a fully-discounted or zero-IDF entity adds nothing
+            continue
         rec = agg.setdefault(did, {"title": title or did, "score": 0.0, "ents": []})
-        rec["score"] = float(rec["score"]) + idf
+        rec["score"] = float(rec["score"]) + contribution
         ents: list[tuple[float, str]] = rec["ents"]
-        ents.append((idf, entity))
+        ents.append((contribution, entity))
     out: list[RelatedDocument] = [
         RelatedDocument(
             doc_id=did,
@@ -360,13 +385,13 @@ class GraphStore:
                 "MATCH (e)<-[:MENTIONS]-(m:Document) "
                 "WITH other, e, count(DISTINCT m) AS df "
                 "RETURN other.doc_id AS doc_id, other.title AS title, "
-                "e.name AS entity, df;",
+                "e.name AS entity, e.kind AS kind, df;",
                 {"id": doc_id},
             )
-            rows: list[tuple[str, str, str, int]] = []
+            rows: list[tuple[str, str, str, str, int]] = []
             while result.has_next():
                 row = result.get_next()
-                rows.append((row[0], row[1], row[2], int(row[3])))
+                rows.append((row[0], row[1], row[2], row[3] or "other", int(row[4])))
             return _rank_related_documents(
                 rows, n_docs, limit=limit, max_entities=max_entities
             )
