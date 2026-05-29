@@ -338,53 +338,56 @@ def _passage_refs(passages: list[Chunk]) -> list[dict[str, str]]:
     return out
 
 
-async def _related_for_answer(
+async def _related_for_docs(
     vault_path: Path,
-    response: FinalResponse,
+    seed_ids: list[str],
     *,
     seed_limit: int = 5,
     per_seed: int = 8,
     out_limit: int = 6,
 ) -> list[dict[str, Any]]:
-    """The /ask "Related documents" panel (ADR-0011 discovery, webui-only): documents the
-    entity graph relates to the docs THIS answer cited. Read-only + HARD-gate-neutral —
-    derived from the already-returned `FinalResponse` + a graph read, NEVER touches the agent
-    / answer / refusal path (the CLI/MCP `ask` payloads are unchanged).
-
-    Answered-only — a refusal's `used_chunks` are retrieved-but-ungrounded, not "used". Seeds
-    from the distinct cited doc_ids (first-seen, capped at `seed_limit`), expands each via
-    `related_documents`, then merges → dedups by doc_id → EXCLUDES the docs the answer itself
-    cited → re-ranks by score → caps at `out_limit`. Fail-open: a missing graph → `[]`
-    (mirrors the doc-view's related fetch). Reuses the SHIPPED, noise-filtered
-    `related_documents` ranking (specificity + stopword/df), so the panel inherits it."""
-    if not response.answered:
+    """Aggregate `related_documents` over a SET of seed docs → the merged, deduped,
+    seed-EXCLUDED, re-ranked, capped list (as dicts). The shared core behind the /ask
+    "Related documents" panel and the scope-picker "Suggested additions" — both are just
+    "graph neighbours of a set of docs". Read-only + HARD-gate-neutral; ImportError fail-open
+    → `[]`. Expands the first `seed_limit` seeds (bounds graph calls) but EXCLUDES the full
+    seed set from the output. Reuses the SHIPPED noise-filtered `related_documents` ranking
+    (specificity + shared-docs floor / stopword), so callers inherit it."""
+    if not seed_ids:
         return []
-    cited = {c.document_id for c in response.used_chunks}  # never suggest an already-cited doc
-    seeds: list[str] = []
-    for c in response.used_chunks:
-        if c.document_id not in seeds:
-            seeds.append(c.document_id)
-    seeds = seeds[:seed_limit]
-    if not seeds:
-        return []
+    exclude = set(seed_ids)  # never suggest a doc already in the selection / citation set
     try:
         store = await GraphStore.open(vault_path)
     except ImportError as e:
-        logger.warning("webui.ask_related_unavailable", reason=str(e))
+        logger.warning("webui.related_unavailable", reason=str(e))
         return []
     merged: dict[str, RelatedDocument] = {}
     try:
-        for doc_id in seeds:
+        for doc_id in seed_ids[:seed_limit]:
             for r in await store.related_documents(doc_id, limit=per_seed):
-                if r.doc_id in cited:
+                if r.doc_id in exclude:
                     continue
                 prev = merged.get(r.doc_id)
-                if prev is None or r.score > prev.score:
+                if prev is None or r.score > prev.score:  # dedup keeps the higher-score relation
                     merged[r.doc_id] = r
     finally:
         await store.close()
     ranked = sorted(merged.values(), key=lambda r: (-r.score, r.doc_id))[:out_limit]
     return [r.model_dump() for r in ranked]
+
+
+async def _related_for_answer(vault_path: Path, response: FinalResponse) -> list[dict[str, Any]]:
+    """The /ask "Related documents" panel (ADR-0011, webui-only): graph neighbours of the docs
+    THIS answer cited. Answered-only (a refusal's `used_chunks` are retrieved-but-ungrounded,
+    not "used"). Delegates to the shared `_related_for_docs` — HARD-gate-neutral, derived from
+    the already-returned `FinalResponse`, never touches the agent/answer/refusal path."""
+    if not response.answered:
+        return []
+    seeds: list[str] = []
+    for c in response.used_chunks:
+        if c.document_id not in seeds:
+            seeds.append(c.document_id)
+    return await _related_for_docs(vault_path, seeds)
 
 
 async def _answer_context(
@@ -507,6 +510,32 @@ def create_app() -> FastAPI:
         ctx = await _scope_picker_context(
             settings.vault_path, checked_ids=checked, flash=flash, picker_open=True
         )
+        return templates.TemplateResponse(request, "_scope_picker.html", ctx)
+
+    @app.post("/scope-sets/suggest", response_class=HTMLResponse)
+    async def scope_set_suggest(
+        request: Request,
+        scope_doc_ids: list[str] = Form([]),  # noqa: B008  # FastAPI Form default sentinel
+    ) -> HTMLResponse:
+        """Suggest documents the entity graph relates to the currently-ticked selection
+        (ADR-0011 "docs related to your current selection"). Re-renders the picker — the
+        ticks stay checked, and a "Suggested additions" section appears. The suggestions are
+        computed inside `_scope_picker_context` from `checked_ids`; we just read the count
+        for the flash. Read-only + HARD-gate-neutral (the agent never sees this)."""
+        settings = get_settings()
+        ctx = await _scope_picker_context(
+            settings.vault_path, checked_ids=scope_doc_ids, flash=None, picker_open=True
+        )
+        n = len(ctx["suggested"])  # type: ignore[arg-type]  # reason: list[dict] from the context
+        if not scope_doc_ids:
+            ctx["scope_flash"] = {"kind": "error", "text": "Tick one or more documents, then Suggest related."}
+        elif n:
+            ctx["scope_flash"] = {
+                "kind": "ok",
+                "text": f"{n} related document{'' if n == 1 else 's'} — tick any to add to your scope.",
+            }
+        else:
+            ctx["scope_flash"] = {"kind": "ok", "text": "No related documents found for your selection."}
         return templates.TemplateResponse(request, "_scope_picker.html", ctx)
 
     @app.post("/scope-sets/apply", response_class=HTMLResponse)
@@ -1293,9 +1322,15 @@ async def _scope_picker_context(
     picker_open: bool,
 ) -> dict[str, Any]:
     """Build the context the scope-picker renders from: title-sorted vault docs,
-    the saved scope sets, the ticked checkboxes, an optional flash, and whether
-    the `<details>` opens. Shared by the index page and the three `/scope-sets`
-    HTMX routes.
+    the saved scope sets, the ticked checkboxes, an optional flash, whether the
+    `<details>` opens, and `suggested` (docs the entity graph relates to the current
+    selection — ADR-0011 "scope-set suggestions", below). Shared by the index page and
+    the four `/scope-sets` HTMX routes.
+
+    `suggested` is computed from `checked_ids` (empty selection ⇒ no graph query): the
+    apply/save/suggest routes re-render with a non-empty selection, so suggestions appear
+    there automatically; the index page + delete pass `[]` and compute nothing. Read-only +
+    fail-open (a missing graph → []) — HARD-gate-neutral scoping UX, never the answer path.
 
     A corrupt `scope_sets.json` would raise `VaultIntegrityError` from
     `list_scope_sets`; we swallow it to an empty list (+ a warning) so a damaged
@@ -1313,12 +1348,14 @@ async def _scope_picker_context(
         logger.warning("webui.scope_sets_unreadable", error=str(e)[:200])
         saved = []
     scope_sets: list[dict[str, object]] = [{"name": s.name, "count": len(s.doc_ids)} for s in saved]
+    suggested = await _related_for_docs(vault_path, checked_ids) if checked_ids else []
     return {
         "documents": docs,
         "scope_sets": scope_sets,
         "checked_ids": checked_ids,
         "scope_flash": flash,
         "picker_open": picker_open,
+        "suggested": suggested,
     }
 
 

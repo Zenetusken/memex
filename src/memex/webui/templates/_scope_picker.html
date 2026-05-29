@@ -33,6 +33,30 @@
   </div>
   {% endif %}
 
+  {# Scope-set suggestions (ADR-0011): docs the entity graph relates to the current
+     selection. Each is a `scope_doc_ids` checkbox — tick to add to the scope. (A suggested
+     doc also appears unchecked in the full list below; the scope path dedups a doubled
+     value, and once ticked it re-renders as checked there + drops out of suggestions.) #}
+  {% if suggested %}
+  <div class="scope-suggest">
+    <span class="scope-suggest-label">Suggested additions
+      <span class="scope-picker-hint">— related to your selection; tick to add</span></span>
+    <ul class="scope-suggest-list">
+      {% for d in suggested %}
+      <li class="scope-suggest-item">
+        <label class="scope-picker-label">
+          <input type="checkbox" name="scope_doc_ids" value="{{ d.doc_id }}">
+          <span class="scope-picker-title">{{ d.title }}</span>
+        </label>
+        {% if d.shared_entities %}
+        <span class="related-via">via{% for e in d.shared_entities[:4] %} <a class="related-entity related-entity-link" href="/entity?name={{ e | urlencode }}" title="Explore {{ e }} across the vault">{{ e }}</a>{% endfor %}</span>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
   <ul class="scope-picker-list">
     {% for d in documents %}
     <li class="scope-picker-item">
@@ -52,5 +76,9 @@
             hx-post="/scope-sets"
             hx-target="#scope-picker" hx-swap="outerHTML"
             title="Save the ticked documents as a reusable set">Save as set</button>
+    <button type="button" class="scope-set-suggestbtn"
+            hx-post="/scope-sets/suggest"
+            hx-target="#scope-picker" hx-swap="outerHTML"
+            title="Suggest documents related to the ticked ones">Suggest related</button>
   </div>
 </details>

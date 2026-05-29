@@ -757,6 +757,91 @@ async def test_scope_set_save_apply_delete_round_trip(
     assert "My Set" not in r.text
 
 
+# ----- Scope-set suggestions ("docs related to your selection", ADR-0011) -----
+
+
+class _SuggestFake:
+    """A fake GraphStore whose related_documents returns one fixed suggestion regardless of
+    seed — for the scope-picker suggestion tests."""
+
+    @classmethod
+    async def open(cls, vault_path: object) -> _SuggestFake:
+        return cls()
+
+    async def related_documents(self, doc_id: str, *, limit: int = 10, max_entities: int = 8):
+        from memex.index.graph_store import RelatedDocument
+
+        return [
+            RelatedDocument(
+                doc_id="rel-doc-1", title="Related Suggestion", score=5.0, shared_entities=["DNS spoofing"]
+            )
+        ]
+
+    async def close(self) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_scope_apply_auto_suggests_related(
+    settings: MemexSettings, client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Applying a saved set auto-surfaces "Suggested additions" — docs the graph relates to
+    the set — each tick-able + with `/entity?name=` why-related tags."""
+    a = await ingest_markdown_passthrough("# A\n\nAlpha.\n", source_stem="alpha s")
+    b = await ingest_markdown_passthrough("# B\n\nBeta.\n", source_stem="beta s")
+    monkeypatch.setattr("memex.webui.app.GraphStore.open", staticmethod(_SuggestFake.open))
+    client.post("/scope-sets", data={"set_name": "S", "scope_doc_ids": [a.doc_id, b.doc_id]})
+    r = client.post("/scope-sets/apply", data={"name": "S"})
+    assert r.status_code == 200
+    assert "Suggested additions" in r.text
+    assert "Related Suggestion" in r.text  # the graph-related doc
+    assert "/entity?name=DNS" in r.text  # the why-related entity is a traversal link
+
+
+@pytest.mark.asyncio
+async def test_scope_suggest_button_from_ticked_docs(
+    settings: MemexSettings, client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The "Suggest related" button (POST /scope-sets/suggest) surfaces suggestions for the
+    posted ticks + a count flash."""
+    a = await ingest_markdown_passthrough("# A\n\nAlpha.\n", source_stem="alpha t")
+    monkeypatch.setattr("memex.webui.app.GraphStore.open", staticmethod(_SuggestFake.open))
+    r = client.post("/scope-sets/suggest", data={"scope_doc_ids": [a.doc_id]})
+    assert r.status_code == 200
+    assert "Suggested additions" in r.text
+    assert "Related Suggestion" in r.text
+    assert "related document" in r.text  # the count flash
+
+
+@pytest.mark.asyncio
+async def test_scope_suggest_empty_selection_flashes(
+    settings: MemexSettings, client: TestClient
+) -> None:
+    """Suggest with NO ticks → a hint flash, no suggestions section, no 500."""
+    await ingest_markdown_passthrough("# A\n\nAlpha.\n", source_stem="alpha e")
+    r = client.post("/scope-sets/suggest", data={})
+    assert r.status_code == 200
+    assert "Suggested additions" not in r.text
+    assert "Tick one or more documents" in r.text
+
+
+@pytest.mark.asyncio
+async def test_scope_suggest_survives_graph_unavailable(
+    settings: MemexSettings, client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Graph absent (ImportError) → no suggestions, the picker still renders (fail-open)."""
+    a = await ingest_markdown_passthrough("# A\n\nAlpha.\n", source_stem="alpha u")
+
+    def _boom(vault_path: object) -> object:
+        raise ImportError("ryugraph not installed")
+
+    monkeypatch.setattr("memex.webui.app.GraphStore.open", staticmethod(_boom))
+    r = client.post("/scope-sets/suggest", data={"scope_doc_ids": [a.doc_id]})
+    assert r.status_code == 200
+    assert "Suggested additions" not in r.text
+    assert "No related documents" in r.text
+
+
 @pytest.mark.asyncio
 async def test_scope_set_save_empty_name_flashes_error(
     settings: MemexSettings, client: TestClient
