@@ -1143,10 +1143,10 @@ async def test_graph_renders_with_inline_data(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """We don't need a real RyuGraph install — patch `GraphStore.open`
-    to return an in-memory fake whose `.neighbors()` returns a fixed
-    list. The graph page should embed that data in its
-    `<script id="graph-data">` tag for Cytoscape to pick up."""
-    from memex.index.graph_store import GraphNeighbor
+    to return an in-memory fake whose `.related_documents()` returns a fixed
+    ranked list. The graph page should embed that data (nodes + entity-labelled
+    edges) in its `<script id="graph-data">` tag for Cytoscape to pick up."""
+    from memex.index.graph_store import RelatedDocument
 
     ref = await ingest_markdown_passthrough("# Center\n\nThe centerpiece.\n", source_stem="center")
 
@@ -1155,19 +1155,19 @@ async def test_graph_renders_with_inline_data(
         async def open(cls, vault_path):
             return cls()
 
-        async def neighbors(self, doc_id, limit=50):
+        async def related_documents(self, doc_id, *, limit=10, max_entities=8):
             return [
-                GraphNeighbor(
+                RelatedDocument(
                     doc_id="abc12345-neighbor-a",
                     title="Neighbor A",
-                    relation="shares_entity",
-                    via="reflexivity",
+                    score=3.9,
+                    shared_entities=["reflexivity", "methodology"],
                 ),
-                GraphNeighbor(
+                RelatedDocument(
                     doc_id="def67890-neighbor-b",
                     title="Neighbor B",
-                    relation="shares_entity",
-                    via="methodology",
+                    score=1.2,
+                    shared_entities=["methodology"],
                 ),
             ]
 
@@ -1185,7 +1185,7 @@ async def test_graph_renders_with_inline_data(
     assert "abc12345-neighbor-a" in r.text
     assert "Neighbor A" in r.text
     assert "def67890-neighbor-b" in r.text
-    assert "reflexivity" in r.text
+    assert "reflexivity" in r.text  # a connecting entity → edge label (the "why")
     assert 'id="graph-data"' in r.text
     assert "cytoscape" in r.text  # CDN script reference
 

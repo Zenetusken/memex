@@ -1081,9 +1081,12 @@ def create_app() -> FastAPI:
         doc_id: str,
         limit: int = 50,
     ) -> HTMLResponse:
-        """Render the one-hop neighbourhood for `doc_id` (Cytoscape.js
-        client-side). Returns `graph_available=False` + a fallback
-        panel when ryugraph isn't installed."""
+        """Render the related-document neighbourhood for `doc_id` (Cytoscape.js
+        client-side). Uses `related_documents` — neighbours ranked by shared-entity
+        SPECIFICITY (ADR-0011), each edge labelled with the connecting entities (the
+        "why") — NOT the raw unranked `neighbors()` (which surfaced generic connectors
+        like an instructor's name). Returns `graph_available=False` + a fallback panel
+        when ryugraph isn't installed."""
         # GraphStore is re-exported at module top (see the import at the
         # head of this file) as a test seam — `tests/integration/test_webui.py`
         # monkeypatches `memex.webui.app.GraphStore.open`. This re-export
@@ -1097,7 +1100,7 @@ def create_app() -> FastAPI:
         except VaultIntegrityError as e:
             raise HTTPException(status_code=404, detail=str(e)) from e
 
-        neighbors: list[dict[str, Any]] = []
+        related: list[dict[str, Any]] = []
         graph_available = True
         try:
             store = await GraphStore.open(settings.vault_path)
@@ -1110,42 +1113,32 @@ def create_app() -> FastAPI:
             graph_available = False
         else:
             try:
-                raw = await store.neighbors(doc_id, limit=limit)
-                neighbors = [n.model_dump() for n in raw]
+                related = [
+                    r.model_dump() for r in await store.related_documents(doc_id, limit=limit)
+                ]
             finally:
                 await store.close()
 
         title = doc.frontmatter.title or doc_id
         nodes: list[dict[str, Any]] = [{"id": doc_id, "title": title, "kind": "center"}]
         edges: list[dict[str, Any]] = []
-        seen_neighbor_ids: set[str] = {doc_id}
-        for n in neighbors:
-            other_id = n["doc_id"]
-            if other_id in seen_neighbor_ids:
-                # The graph store may return multiple edges per neighbor
-                # (one per shared entity). Keep the first as a node;
-                # accumulate the rest as additional edges.
-                edges.append(
-                    {
-                        "source": doc_id,
-                        "target": other_id,
-                        "label": n.get("via") or n.get("relation", ""),
-                    }
-                )
-                continue
-            seen_neighbor_ids.add(other_id)
+        # One node + one edge per related doc (already specificity-ranked + deduped by
+        # related_documents). The edge label is the connecting entities — the "why" —
+        # most-specific first, a few shown.
+        for r in related:
             nodes.append(
                 {
-                    "id": other_id,
-                    "title": n.get("title") or other_id,
+                    "id": r["doc_id"],
+                    "title": r["title"] or r["doc_id"],
                     "kind": "neighbor",
                 }
             )
+            shared: list[str] = r.get("shared_entities") or []
             edges.append(
                 {
                     "source": doc_id,
-                    "target": other_id,
-                    "label": n.get("via") or n.get("relation", ""),
+                    "target": r["doc_id"],
+                    "label": ", ".join(shared[:3]) if shared else "shares entities",
                 }
             )
 

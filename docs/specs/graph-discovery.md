@@ -55,6 +55,9 @@ deduped-by-name, most-significant-first, capped at `max_entities`.
   `.related-*` CSS): each related doc as a title-link + its connecting entities as quiet
   tags (the "why related"). Fail-open: an `ImportError` from `GraphStore.open` omits the
   section, never 500s the doc view.
+- **webui `/graph`** — the Cytoscape neighbourhood viz consumes `related_documents` (was
+  raw unranked `neighbors`): one node + one edge per related doc, the edge labelled with
+  the connecting entities (most-specific first). Same fail-open.
 
 ## What this is NOT
 
@@ -69,13 +72,14 @@ deduped-by-name, most-significant-first, capped at `max_entities`.
 A read-only discovery surface — it never touches the answer/refusal path, so it cannot
 introduce a hallucination or alter a refusal. Independent of the answering agent entirely.
 
-## Build-out (deferred, in leverage order — ADR-0011 / db-audit)
+## Build-out (in leverage order — ADR-0011 / db-audit)
 
-Point the existing `/graph` Cytoscape viz at `related_documents` (specificity edges) →
-entity-centric retrieval ("everything about entity X") → citation-chain following (the
-still-unqueried `CITES` edges) → scope-set suggestions + a "Related" panel in `/ask`. The
-[[bert-ner-enrich-scope-2026-05-28]] NER swap (sharper entities upstream) gates behind
-discovery-quality proving the bottleneck.
+- ✅ **`/graph` Cytoscape viz on `related_documents`** (specificity edges) — shipped.
+- entity-centric retrieval ("everything about entity X across the corpus") — a new query mode.
+- citation-chain following (the still-unqueried `CITES` edges).
+- scope-set suggestions + a "Related" panel in `/ask`.
+- THEN, if discovery-quality is the bottleneck: the [[bert-ner-enrich-scope-2026-05-28]]
+  NER swap (sharper, typed entities upstream of the graph).
 
 ## Testing
 
