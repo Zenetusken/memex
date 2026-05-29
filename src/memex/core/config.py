@@ -619,6 +619,20 @@ class AgentsSettings(BaseModel):
             return [s.strip() for s in v.split(",") if s.strip()]
         return v
 
+    # OTTER NER backend — the gated BERT-NER enrich swap ([[bert-ner-enrich-scope-2026-05-28]]).
+    # `enrich_ner_backend="otter"` replaces the LLM (Qwen3-8B) entity extractor with the span
+    # NER `whoisjones/otter-bi-mmbert` at enrich (citations stay on the LLM); default "llm" =
+    # unchanged behaviour. The A/B-validated operating config is threshold 0.05 + "union"
+    # labels (+103% `related_documents` discovery on the 47-doc vault, cleaner typing; see
+    # `scripts/entity_ner_ab_audit.py`). CPU by default; "cuda" is viable during the CLI
+    # enrich's pause-vLLM window. `enrich_ner_labels`: generic|domain|union (union = winner).
+    enrich_ner_backend: Literal["llm", "otter"] = "llm"
+    enrich_ner_model: str = "whoisjones/otter-bi-mmbert"
+    enrich_ner_device: Literal["cuda", "cpu"] = "cpu"
+    enrich_ner_threshold: float = Field(default=0.05, ge=0.0, le=1.0)
+    enrich_ner_labels: Literal["generic", "domain", "union"] = "union"
+    enrich_ner_max_seq_length: int = Field(default=512, ge=64)
+
 
 class MemexSettings(BaseSettings):
     """Top-level settings. Construct once at startup; treat as immutable."""

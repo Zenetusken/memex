@@ -47,6 +47,7 @@ from memex.enrich.entities import (
     dedupe,
     merge_entities,
 )
+from memex.enrich.ner_otter import extract_chunk_entities, otter_backend_enabled
 from memex.index.chunker import chunk_document
 from memex.index.graph_store import GraphStore
 from memex.models.client import complete_structured
@@ -144,42 +145,51 @@ async def _extract_with_fallback[T: BaseModel](
 
 
 async def _extract_chunk(chunk: Chunk, title: str) -> tuple[list[Entity], list[CitationCandidate]]:
-    """One LLM call for entities, one for citations, in parallel — each with a
-    compact-schema fallback (`_extract_with_fallback`) so a dense chunk that
-    truncates the full extraction still enriches with its top items rather
-    than being dropped. Both calls go through `complete_structured`, generic
-    over its `schema` parameter, so pyright keeps the chain typed.
-    """
-    entity_prompt = render_prompt(_ENTITY_PROMPT_NAME, document_title=title, passage=chunk.text)
-    citation_prompt = render_prompt(_CITATION_PROMPT_NAME, document_title=title, passage=chunk.text)
+    """Entities + citations for one chunk, in parallel.
 
-    entity_task = _extract_with_fallback(
-        prompt=entity_prompt,
-        full_schema=EntityList,
-        compact_schema=EntityListCompact,
-        prompt_tag=f"{_ENTITY_PROMPT_NAME}@{_ENTITY_PROMPT_VERSION}",
-    )
+    Entities come from the LLM (with a compact-schema fallback so a dense chunk that
+    truncates still enriches with its top items) OR, when `enrich_ner_backend="otter"`,
+    from the OTTER span NER (`ner_otter.extract_chunk_entities`, returning `list[Entity]`
+    directly — the same shape `merge_entities` produces, so the document-level dedupe +
+    graph write are unchanged). Citations ALWAYS stay on the LLM (OTTER does NER only).
+    The LLM calls go through `complete_structured`, generic over `schema`, so pyright
+    keeps the chain typed.
+    """
+    citation_prompt = render_prompt(_CITATION_PROMPT_NAME, document_title=title, passage=chunk.text)
     citation_task = _extract_with_fallback(
         prompt=citation_prompt,
         full_schema=CitationList,
         compact_schema=CitationListCompact,
         prompt_tag=f"{_CITATION_PROMPT_NAME}@{_CITATION_PROMPT_VERSION}",
     )
-    entity_raw, citation_raw = await asyncio.gather(entity_task, citation_task)
-    # `complete_structured` is typed to return the schema instance (the compact
-    # variants subclass the full schema), so this can only fire if a test fake
-    # breaks the contract — surface explicitly rather than crash.
-    if not isinstance(entity_raw, EntityList):  # type: ignore[reportUnnecessaryIsInstance]  # runtime contract guard
-        raise ModelCallError(
-            "Entity extraction returned unexpected payload type",
-            context={"got": type(entity_raw).__name__, "expected": "EntityList"},
+
+    if otter_backend_enabled():
+        entities, citation_raw = await asyncio.gather(extract_chunk_entities(chunk), citation_task)
+    else:
+        entity_prompt = render_prompt(_ENTITY_PROMPT_NAME, document_title=title, passage=chunk.text)
+        entity_task = _extract_with_fallback(
+            prompt=entity_prompt,
+            full_schema=EntityList,
+            compact_schema=EntityListCompact,
+            prompt_tag=f"{_ENTITY_PROMPT_NAME}@{_ENTITY_PROMPT_VERSION}",
         )
+        entity_raw, citation_raw = await asyncio.gather(entity_task, citation_task)
+        # `complete_structured` is typed to return the schema instance (the compact
+        # variants subclass the full schema), so this can only fire if a test fake
+        # breaks the contract — surface explicitly rather than crash.
+        if not isinstance(entity_raw, EntityList):  # type: ignore[reportUnnecessaryIsInstance]  # runtime contract guard
+            raise ModelCallError(
+                "Entity extraction returned unexpected payload type",
+                context={"got": type(entity_raw).__name__, "expected": "EntityList"},
+            )
+        entities = merge_entities(chunk, entity_raw)
+
     if not isinstance(citation_raw, CitationList):  # type: ignore[reportUnnecessaryIsInstance]  # runtime contract guard
         raise ModelCallError(
             "Citation extraction returned unexpected payload type",
             context={"got": type(citation_raw).__name__, "expected": "CitationList"},
         )
-    return merge_entities(chunk, entity_raw), list(citation_raw.citations)
+    return entities, list(citation_raw.citations)
 
 
 async def enrich_document(doc_id: str) -> EnrichResult:
