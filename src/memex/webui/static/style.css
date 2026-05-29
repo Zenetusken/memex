@@ -511,6 +511,15 @@ html { scroll-behavior: smooth; }
   color: rgb(161 161 170);                    /* zinc-400 (AA) */
 }
 
+/* /ask "Related documents" discovery panel (ADR-0011) — entity-graph neighbours of the docs
+   the answer cited. Reuses the doc-view `.related-*` tag/link styling; this wrapper just
+   spaces + rules off the section like the other `.ans-*` zones. */
+.ans-related {
+  margin-top: 1.25rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid rgb(39 39 42);     /* zinc-800 — matches .ans-footer */
+}
+
 /* Report-mode faithfulness (ADR-0010) — a quiet inform-only line under the footer.
    Same restraint/zinc-400-AA as the footer; never coloured as a pass/fail. */
 .summary-confidence {

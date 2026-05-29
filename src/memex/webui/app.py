@@ -74,7 +74,7 @@ from memex.core.scope_sets import (
 from memex.core.types import Chunk
 from memex.daemon import restart as daemon_restart
 from memex.daemon import status as daemon_status
-from memex.index.graph_store import GraphStore
+from memex.index.graph_store import GraphStore, RelatedDocument
 from memex.index.pipeline import retitle_document
 from memex.models.registry import ModelNotConfigured, get_registry
 
@@ -338,13 +338,62 @@ def _passage_refs(passages: list[Chunk]) -> list[dict[str, str]]:
     return out
 
 
+async def _related_for_answer(
+    vault_path: Path,
+    response: FinalResponse,
+    *,
+    seed_limit: int = 5,
+    per_seed: int = 8,
+    out_limit: int = 6,
+) -> list[dict[str, Any]]:
+    """The /ask "Related documents" panel (ADR-0011 discovery, webui-only): documents the
+    entity graph relates to the docs THIS answer cited. Read-only + HARD-gate-neutral —
+    derived from the already-returned `FinalResponse` + a graph read, NEVER touches the agent
+    / answer / refusal path (the CLI/MCP `ask` payloads are unchanged).
+
+    Answered-only — a refusal's `used_chunks` are retrieved-but-ungrounded, not "used". Seeds
+    from the distinct cited doc_ids (first-seen, capped at `seed_limit`), expands each via
+    `related_documents`, then merges → dedups by doc_id → EXCLUDES the docs the answer itself
+    cited → re-ranks by score → caps at `out_limit`. Fail-open: a missing graph → `[]`
+    (mirrors the doc-view's related fetch). Reuses the SHIPPED, noise-filtered
+    `related_documents` ranking (specificity + stopword/df), so the panel inherits it."""
+    if not response.answered:
+        return []
+    cited = {c.document_id for c in response.used_chunks}  # never suggest an already-cited doc
+    seeds: list[str] = []
+    for c in response.used_chunks:
+        if c.document_id not in seeds:
+            seeds.append(c.document_id)
+    seeds = seeds[:seed_limit]
+    if not seeds:
+        return []
+    try:
+        store = await GraphStore.open(vault_path)
+    except ImportError as e:
+        logger.warning("webui.ask_related_unavailable", reason=str(e))
+        return []
+    merged: dict[str, RelatedDocument] = {}
+    try:
+        for doc_id in seeds:
+            for r in await store.related_documents(doc_id, limit=per_seed):
+                if r.doc_id in cited:
+                    continue
+                prev = merged.get(r.doc_id)
+                if prev is None or r.score > prev.score:
+                    merged[r.doc_id] = r
+    finally:
+        await store.close()
+    ranked = sorted(merged.values(), key=lambda r: (-r.score, r.doc_id))[:out_limit]
+    return [r.model_dump() for r in ranked]
+
+
 async def _answer_context(
     vault_path: Path, response: FinalResponse, scope_source: str
 ) -> dict[str, object]:
     """Build the `_answer.html` context from a FinalResponse — scope-doc titles
-    (#256), the source-by-title view-model, and the scope-source label. Shared by
-    the long-poll status route so the rendered answer is identical to the old
-    synchronous path."""
+    (#256), the source-by-title view-model, the scope-source label, and the
+    "Related documents" discovery panel (ADR-0011). Shared by the long-poll status
+    route so the rendered answer is identical to the old synchronous path."""
     scope_docs = [
         {"doc_id": d, "title": await read_document_title(vault_path, d)}
         for d in response.artifact_scope_doc_ids
@@ -357,6 +406,7 @@ async def _answer_context(
         "scope_source": scope_source,
         "chunk_refs": chunk_refs,
         "doc_titles": doc_titles,
+        "related": await _related_for_answer(vault_path, response),
     }
 
 

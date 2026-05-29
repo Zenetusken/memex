@@ -64,6 +64,25 @@
 </div>
 {% endif %}
 
+{# Discovery (ADR-0011): documents the entity graph relates to the docs this answer cited.
+   Read-only + HARD-gate-neutral — derived from used_chunks + a graph read, never the agent.
+   `related` is [] on a refusal/empty graph, so this whole block is then omitted. #}
+{% if related %}
+<section class="ans-related">
+  <p class="ans-eyebrow">Related documents</p>
+  <ul class="related-list">
+    {% for r in related %}
+    <li class="related-item">
+      <a class="related-link" href="/documents/{{ r.doc_id }}">{{ r.title }}</a>
+      {% if r.shared_entities %}
+      <span class="related-via">via{% for e in r.shared_entities[:5] %} <a class="related-entity related-entity-link" href="/entity?name={{ e | urlencode }}" title="Explore {{ e }} across the vault">{{ e }}</a>{% endfor %}</span>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
 {% if scope_docs %}
 <p class="ans-scope" role="note">
   <span class="ans-scope-label">{% if scope_source == "selected" %}Scoped to your selected document{{ "s" if scope_docs|length > 1 else "" }}:{% else %}Scoped to the document{{ "s" if scope_docs|length > 1 else "" }} you named:{% endif %}</span>

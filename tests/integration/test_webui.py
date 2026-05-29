@@ -1285,6 +1285,135 @@ async def test_document_view_survives_graph_unavailable(
     assert "Related documents" not in r.text  # section omitted, page still renders
 
 
+# ----- /ask "Related documents" discovery panel (ADR-0011) -----
+
+
+def _answered_two_docs() -> FinalResponse:
+    """An answer that CITES two docs (aaaa1111 + bbbb2222) but surfaces only aaaa1111 in its
+    claim/wikilink — so bbbb2222 appears on the page ONLY if the related panel wrongly keeps
+    it (it's a cited doc → must be excluded)."""
+    return FinalResponse(
+        answered=True,
+        summary="Two-source answer.",
+        claims=[CitedClaim(claim="A fact.", source_chunk_id="aaaa1111#h1", confidence="high")],
+        used_chunks=[
+            Chunk(chunk_id="aaaa1111#h1", document_id="aaaa1111", document_title="Doc A", text="a"),
+            Chunk(chunk_id="bbbb2222#h1", document_id="bbbb2222", document_title="Doc B", text="b"),
+        ],
+        wikilinks=["[[aaaa1111#History]]"],
+        correlation_id="01HZRELATED000000000000000",
+        tokens_used=10,
+        nodes_traversed=4,
+        regenerate_attempts=0,
+    )
+
+
+class _RelatedFake:
+    """A fake GraphStore whose related_documents returns per-seed lists — one of which
+    includes a CITED doc (bbbb2222) to prove the exclusion."""
+
+    @classmethod
+    async def open(cls, vault_path: object) -> _RelatedFake:
+        return cls()
+
+    async def related_documents(self, doc_id: str, *, limit: int = 10, max_entities: int = 8):
+        from memex.index.graph_store import RelatedDocument
+
+        if doc_id == "aaaa1111":
+            return [
+                RelatedDocument(doc_id="cccc3333-sibling", title="Sibling C", score=3.9, shared_entities=["DNS spoofing"]),
+                RelatedDocument(doc_id="bbbb2222", title="Doc B", score=2.0, shared_entities=["x"]),  # CITED → excluded
+            ]
+        if doc_id == "bbbb2222":
+            return [
+                RelatedDocument(doc_id="cccc3333-sibling", title="Sibling C", score=4.5, shared_entities=["firewall"]),
+                RelatedDocument(doc_id="dddd4444-other", title="Doc D", score=1.0, shared_entities=["y"]),
+            ]
+        return []
+
+    async def close(self) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_ask_renders_related_panel_excluding_cited_docs(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The answered /ask shows a "Related documents" panel — entity-graph neighbours of the
+    cited docs (merged across them), each a doc link + `/entity?name=` connecting-entity
+    tags — and EXCLUDES the docs the answer itself cited."""
+
+    async def _fake(question: str, **_kw: Any) -> FinalResponse:
+        return _answered_two_docs()
+
+    monkeypatch.setattr("memex.webui.app.answer_query", _fake)
+    monkeypatch.setattr("memex.webui.app.GraphStore.open", staticmethod(_RelatedFake.open))
+
+    text = await _ask_to_completion(client.app, "a two-source question?")
+    assert "Related documents" in text
+    assert "Sibling C" in text  # the merged neighbour
+    assert "/documents/cccc3333-sibling" in text
+    assert "/documents/dddd4444-other" in text
+    # dedup keeps the HIGHER-score relation (bbbb2222's cccc3333 @4.5, entity "firewall"),
+    # and its connecting entity is a `/entity?name=` traversal link.
+    assert "/entity?name=firewall" in text
+    # bbbb2222 is a CITED doc (in used_chunks, not surfaced via claim/wikilink) → the panel
+    # must NOT list it as a related doc.
+    assert "/documents/bbbb2222" not in text
+
+
+@pytest.mark.asyncio
+async def test_ask_related_panel_survives_graph_unavailable(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Graph absent (ImportError) → no panel, the answer still renders (fail-open)."""
+
+    async def _fake(question: str, **_kw: Any) -> FinalResponse:
+        return _answered_two_docs()
+
+    def _boom(vault_path: object) -> object:
+        raise ImportError("ryugraph not installed")
+
+    monkeypatch.setattr("memex.webui.app.answer_query", _fake)
+    monkeypatch.setattr("memex.webui.app.GraphStore.open", staticmethod(_boom))
+
+    text = await _ask_to_completion(client.app, "a question?")
+    assert "Two-source answer." in text  # the answer rendered
+    assert "Related documents" not in text  # panel omitted, no 500
+
+
+@pytest.mark.asyncio
+async def test_ask_refusal_has_no_related_panel(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refusal gets no related panel — `_related_for_answer` is answered-only (a refusal's
+    chunks were retrieved, not 'used')."""
+
+    async def _fake(question: str, **_kw: Any) -> FinalResponse:
+        return FinalResponse(
+            answered=False,
+            refusal_reason="Not in the corpus.",
+            used_chunks=[
+                Chunk(chunk_id="aaaa1111#h1", document_id="aaaa1111", document_title="Doc A", text="a"),
+            ],
+            correlation_id="01HZREFUSE0000000000000000",
+            tokens_used=5,
+            nodes_traversed=3,
+            regenerate_attempts=0,
+        )
+
+    # GraphStore.open should never be reached on the answered-only path; make it loud if it is.
+    def _boom(vault_path: object) -> object:
+        raise AssertionError("related must not be computed on a refusal")
+
+    monkeypatch.setattr("memex.webui.app.answer_query", _fake)
+    monkeypatch.setattr("memex.webui.app.GraphStore.open", staticmethod(_boom))
+
+    text = await _ask_to_completion(client.app, "a counterfactual?")
+    assert "Refused" in text
+    assert "Related documents" not in text
+
+
 # ----- Entity-centric discovery view (/entity, ADR-0011) -----
 
 
