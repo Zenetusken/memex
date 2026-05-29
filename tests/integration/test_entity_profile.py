@@ -312,8 +312,24 @@ async def test_entity_stopword_excludes_cooccurring_on_real_graph(
         await _seed_spec(
             graph,
             [
-                ("d1", [("DNS", "concept"), ("CR350", "concept"), ("CR350", "org"), ("TCP", "concept")]),
-                ("d2", [("DNS", "concept"), ("CR350", "concept"), ("CR350", "org"), ("TCP", "concept")]),
+                (
+                    "d1",
+                    [
+                        ("DNS", "concept"),
+                        ("CR350", "concept"),
+                        ("CR350", "org"),
+                        ("TCP", "concept"),
+                    ],
+                ),
+                (
+                    "d2",
+                    [
+                        ("DNS", "concept"),
+                        ("CR350", "concept"),
+                        ("CR350", "org"),
+                        ("TCP", "concept"),
+                    ],
+                ),
                 ("d3", [("DNS", "concept"), ("CR350", "concept")]),
                 ("d4", [("TCP", "concept")]),
                 ("d5", [("routing", "concept")]),
@@ -375,5 +391,37 @@ async def test_blank_query_is_safe(tmp_path: Path) -> None:
         assert prof.resolved is False
         assert prof.matched_names == []
         assert prof.suggestions == []
+    finally:
+        await graph.close()
+
+
+@pytest.mark.asyncio
+async def test_clear_mentions_replaces_not_appends(tmp_path: Path) -> None:
+    """`clear_mentions` removes a doc's outgoing MENTIONS (so a re-enrich REPLACES its
+    entities, not appends) while leaving the entity NODES and OTHER docs' edges intact —
+    the load-bearing precondition for the OTTER NER backend switch."""
+    graph = await GraphStore.open(tmp_path)
+    try:
+        await _seed_spec(
+            graph,
+            [
+                ("doc_a", [("STP", "concept"), ("ARP", "concept")]),
+                ("doc_b", [("STP", "concept")]),
+            ],
+        )
+        assert (await graph.entity_profile("STP")).doc_count == 2  # doc_a + doc_b
+
+        await graph.clear_mentions("doc_a")
+
+        after = await graph.entity_profile("STP")
+        assert after.resolved is True  # node survives (still mentioned by doc_b)
+        assert {m.doc_id for m in after.mentions} == {"doc_b"}  # doc_a's STP edge cleared
+        arp = await graph.entity_profile("ARP")
+        assert "doc_a" not in {m.doc_id for m in arp.mentions}  # doc_a's ARP edge cleared too
+
+        # Re-link doc_a with a DIFFERENT entity → replace semantics (the OTTER swap shape).
+        eid = await graph.upsert_entity("BGP", "concept")
+        await graph.link_mentions("doc_a", eid, 0.9)
+        assert {m.doc_id for m in (await graph.entity_profile("BGP")).mentions} == {"doc_a"}
     finally:
         await graph.close()

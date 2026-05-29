@@ -226,9 +226,7 @@ def _rank_co_occurring(
         if score <= 0:
             continue
         out.append(
-            CoOccurringEntity(
-                name=name, kind=kind, shared_docs=shared_docs, score=round(score, 4)
-            )
+            CoOccurringEntity(name=name, kind=kind, shared_docs=shared_docs, score=round(score, 4))
         )
     out.sort(key=lambda c: (-c.score, c.name))
     return out[:limit]
@@ -321,9 +319,9 @@ def _rank_related_documents(
             score=round(float(rec["score"]), 4),
             # most-specific first; dedup by name (the same name can have >1 entity node
             # — e.g. different `kind` — and a doubled "why" tag reads as sloppy).
-            shared_entities=list(
-                dict.fromkeys(e for _idf, e in sorted(rec["ents"], reverse=True))
-            )[:max_entities],
+            shared_entities=list(dict.fromkeys(e for _idf, e in sorted(rec["ents"], reverse=True)))[
+                :max_entities
+            ],
         )
         for did, rec in agg.items()
     ]
@@ -447,6 +445,23 @@ class GraphStore:
             )
 
         await asyncio.to_thread(_run)
+
+    async def clear_mentions(self, doc_id: str) -> None:
+        """Delete a document's outgoing MENTIONS edges so a re-enrich REPLACES (not appends)
+        its entities. Entity nodes are left in place (an orphan with no MENTIONS is invisible
+        to the discovery queries; `memex doctor` prunes them) and other documents' edges are
+        untouched. Without this, re-enriching with a changed entity set — notably the OTTER
+        NER backend (`enrich_ner_backend="otter"`), whose entities differ wholesale from the
+        LLM's — would leave the prior extractor's stale MENTIONS alongside the new ones."""
+
+        def _run() -> None:
+            self._conn.execute(
+                "MATCH (:Document {doc_id: $id})-[m:MENTIONS]->() DELETE m;",
+                {"id": doc_id},
+            )
+
+        await asyncio.to_thread(_run)
+        logger.info("graph.clear_mentions", doc_id=doc_id)
 
     async def link_cites(
         self,
@@ -632,8 +647,13 @@ class GraphStore:
         def _run() -> EntityProfile:
             if not key:
                 return EntityProfile(
-                    query_name=query_name, matched_names=[], kinds=[], doc_count=0,
-                    mentions=[], cooccurring=[], resolved=False,
+                    query_name=query_name,
+                    matched_names=[],
+                    kinds=[],
+                    doc_count=0,
+                    mentions=[],
+                    cooccurring=[],
+                    resolved=False,
                 )
             # A — resolve (case-insensitive) + identity. One row per (entity, kind);
             # doc_count is the entity's own mention count (summed across the matched ids).
@@ -662,8 +682,14 @@ class GraphStore:
 
             if not ids:
                 return EntityProfile(
-                    query_name=query_name, matched_names=[], kinds=[], doc_count=0,
-                    mentions=[], cooccurring=[], resolved=False, suggestions=suggestions,
+                    query_name=query_name,
+                    matched_names=[],
+                    kinds=[],
+                    doc_count=0,
+                    mentions=[],
+                    cooccurring=[],
+                    resolved=False,
+                    suggestions=suggestions,
                 )
 
             # B — distinct docs mentioning the entity (TRUE total, then the capped list).

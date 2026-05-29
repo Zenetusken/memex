@@ -318,6 +318,10 @@ async def enrich_document(doc_id: str) -> EnrichResult:
     if graph is not None:
         try:
             await graph.upsert_document(doc_id, title)
+            # REPLACE, don't append: clear this doc's prior MENTIONS so a re-enrich (esp. a
+            # backend switch to OTTER, whose entity set differs wholesale) doesn't leave the
+            # previous extractor's stale entities alongside the new ones.
+            await graph.clear_mentions(doc_id)
             for ent in entities:
                 eid = await graph.upsert_entity(ent.name, ent.kind)
                 await graph.link_mentions(doc_id, eid, ent.confidence)

@@ -68,6 +68,10 @@ class _FakeGraphStore:
     async def link_mentions(self, doc_id: str, entity_id_: str, confidence: float) -> None:
         self.mentions.append((doc_id, entity_id_, confidence))
 
+    async def clear_mentions(self, doc_id: str) -> None:
+        # Mirror the real replace-semantics: drop this doc's prior MENTIONS.
+        self.mentions = [m for m in self.mentions if m[0] != doc_id]
+
     async def link_cites(
         self,
         from_doc_id: str,
