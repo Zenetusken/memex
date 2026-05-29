@@ -79,6 +79,8 @@ introduce a hallucination or alter a refusal. Independent of the answering agent
 - ✅ **`/graph` Cytoscape viz on `related_documents`** (specificity edges) — shipped.
 - ✅ **entity-centric retrieval ("everything about entity X across the corpus")** — shipped
   2026-05-28; see "Entity-centric retrieval" below.
+  - ✅ **acronym ↔ expansion bridge** (the resolution deepening) — shipped 2026-05-28
+    (`f96c797` + `ecb6c8d`); see "Acronym ↔ expansion bridge" below.
 - citation-chain following (the still-unqueried `CITES` edges) — only 6 `CITES` edges in the
   reference corpus; low value until citation extraction is richer.
 - scope-set suggestions + a "Related" panel in `/ask`.
@@ -125,15 +127,37 @@ deliberately surfaces (it's a bug, not the optional-dependency case).
 tags are `/entity?name=` links to TRAVERSE the neighbourhood, the doc-view "Related documents"
 connecting-entity tags link in too).
 
-**Live findings (47-doc CR350 vault), both motivating the deferred CONTAINS/alias fallback:**
-- **Acronym-resolution gap:** typing `STP` resolves nothing — enrich stored the concept as
-  `spanning`, not the acronym or its expansion. Exact-match is correct (no false identity);
-  the FTS fallback returns the right passages and the webui surfaces an explanatory note. The
-  acronyms enrich DID store (`DNS`, `TCP`, `HTTP`, `ICMP`, `UDP`, `ARP`) resolve cleanly.
+### Acronym ↔ expansion bridge (shipped 2026-05-28)
+
+`DNS` and `Domain Name System` are SEPARATE entity_ids — so an exact-match resolver
+fragments one concept across two profiles. The bridge connects them, deterministically and
+**SUGGEST-only** (never an identity merge — the profile's `doc_count`/`matched_names`/passages
+stay EXACTLY the exact-match's; the bridge is a link, matching the project's no-false-identity
+ethos). On a resolved name it adds "Also see"; on an unresolved name, "Did you mean?".
+
+- **Mechanism = INITIALISM, not substring CONTAINS.** Pure `index/initialism.py`:
+  `derive_initialism` (first unicode-alnum char of each significant word, skipping EN+FR
+  connectors; "Domain Name System" → "DNS"), `looks_like_acronym`, `initialism_matches`.
+  CONTAINS was rejected — the probe showed it is noisy for popular acronyms (`dns` → 34
+  substring hits incl. "DNS Spoofing") and useless for rare ones (`stp` → only "NISTPRIV").
+- **Two directions in `entity_profile`:** query is acronym-shaped → a bounded entity-name
+  scan for expansions whose initials match; query is multi-word → derive its initialism +
+  exact-probe the bare acronym. Both run on the resolved AND unresolved paths.
+- **Conservative gate `_gate_suggestions`** (pure, unit-tested): collision-drop (≥2 DISTINCT
+  names → ambiguous → no-op, the #256 rule); generic + self exclusion; and a **doc-count
+  floor (≥2)** that kills cross-domain initialism FALSE-FRIENDS — live, query `STP` matched
+  the 10-K's 1-doc "Short-term portion" (a coincidental initialism), now floored out, while
+  every real bridge recurs (DNS/TCP/DHCP/ICMP expansions all ≥2 docs). A clean bridge ⇒ 0–1
+  suggestion.
+
+**Residual limitations (NOT resolution-layer-fixable — an NER problem):**
+- The original `STP` symptom: enrich stored the concept as the fragment `spanning`, with NO
+  `STP` and NO `Spanning Tree Protocol` entity — so there is nothing to bridge TO. `STP`
+  correctly stays the honest FTS fallback (0 suggestions). Better entity extraction (the
+  [[bert-ner-enrich-scope-2026-05-28]] BERT-NER) is the only real fix.
 - **Co-occurring connector noise:** a corpus-specific generic term below the 60% df bar (the
-  course code `CR350`, df 7/47) still surfaces (ranked #2 for `DNS`). Same limitation
-  `related_documents` has — the df-fraction gate doesn't catch a connector that's generic in
-  MEANING but not near-universal. A future corpus-stopword pass or the BERT-NER swap addresses it.
+  course code `CR350`, df 7/47) still surfaces in the co-occurring set (ranked #2 for `DNS`).
+  Same `related_documents` limitation — a future corpus-stopword pass or the BERT-NER swap.
 
 **Cypher lesson (caught by the live-graph test — the no-Cypher-in-CI gap ADR-0011 flagged):**
 the mentioning-docs query `RETURN DISTINCT d.doc_id AS doc_id, … ORDER BY d.doc_id` raised a
@@ -159,3 +183,12 @@ wasn't run WITH the `DISTINCT`; `tests/integration/test_entity_profile.py` now w
   cross-kind aggregation + co-occurring rank + unknown→unresolved; the gap that caught the
   `ORDER BY`-after-`DISTINCT` binder bug); `tests/integration/test_webui.py` (the `/entity`
   view: resolved render / unknown fallback / lookup form / related-tag-is-entity-link).
+- **Acronym bridge:** `tests/unit/test_initialism.py` (the pure `derive_initialism` /
+  `looks_like_acronym` / `initialism_matches` + the `_gate_suggestions` gate — derivation +
+  connector/accent/length/alpha-share boundaries, collision-drop, doc-count floor ordering,
+  dedup-max, generic/self exclusion); `tests/integration/test_entity_profile.py` (real
+  ryugraph: both bridge directions, ambiguous-not-bridged, the STP honest-miss, multi-kind
+  dedup, generic-expansion exclusion, whitespace/case, blank query); `test_entity_overview.py`
+  (suggestions survive the orchestrator + passages stay exact-scoped; unresolved-with-bridge
+  uses the corpus fallback); `test_mcp_server.py` (the suggestion serialises);
+  `test_webui.py` ("Also see" / "Did you mean?" render; the honest no-bridge STP view).

@@ -74,12 +74,24 @@ specificity primitive:
   Spec `docs/specs/graph-discovery.md`. The opt-in **real-ryugraph integration test** closed
   the "no live Cypher in CI" gap this ADR flagged — and immediately earned its keep by
   catching a binder bug (`ORDER BY d.doc_id` after a `DISTINCT` projection drops `d` from
-  scope → must `ORDER BY` the alias). Live-validated on the 47-doc vault; surfaced two known
-  limitations that motivate the deferred CONTAINS/alias resolution + a corpus-stopword pass:
-  the acronym-resolution gap (`STP` stored as `spanning`) and a sub-60%-df connector (`CR350`)
-  still ranking in the co-occurring set.
+  scope → must `ORDER BY` the alias). Live-validated on the 47-doc vault.
+  - ✅ **Acronym ↔ expansion bridge** (`f96c797` + edge-hardening `ecb6c8d`, the resolution
+    deepening) — `DNS` ↔ `Domain Name System` were separate entity_ids; the bridge connects
+    them **SUGGEST-only** (no identity merge — `doc_count`/passages stay the exact-match's;
+    decided SUGGEST-over-MERGE: a merge of an ambiguous initialism would assert a false
+    identity, which the whole project posture rejects). Deterministic **initialism** match
+    (`index/initialism.py`), NOT substring CONTAINS (noisy for popular acronyms, useless for
+    rare). Gate: collision-drop (ambiguous → no-op) + a **doc-count floor (≥2)** that kills
+    cross-domain false-friends (live: `STP` → the 10-K's 1-doc "Short-term portion"). webui
+    "Also see" / "Did you mean?".
+  - **Boundary (asserted, not solved): the original `STP` symptom is an NER problem, not a
+    resolution one.** The graph has no `STP`/`Spanning Tree Protocol` entity (NER fragmented
+    it to `spanning`), so there is nothing to bridge TO — `STP` stays the honest FTS fallback
+    with zero suggestions. The fix is better entity extraction (the BERT-NER swap), not more
+    resolution heuristics. The sub-60%-df co-occurring connector noise (`CR350`) is the same.
 - Deferred (low value now / not yet built): citation-chain following (only ~6 `CITES`
-  edges), scope-set suggestions + the `/ask` "Related" panel, the BERT-NER enrich swap.
+  edges), scope-set suggestions + the `/ask` "Related" panel, a corpus-stopword pass + the
+  BERT-NER enrich swap (the real fix for the residual STP/connector-noise NER limitations).
 
 ## Alternatives in Detail
 
@@ -102,5 +114,5 @@ Fixes the neighbour-quality half (generic entities), but not the scale half: at 
 - ADR-0005 (RyuGraph replaces Kuzu) — the storage engine; this ADR is about its USE
 - `docs/specs/graph-discovery.md` — the `related_documents` contract
 - The DB meta-audit + the `expand_graph` worth-it measurement ([[db-audit-2026-05-28]] memory)
-- Commits `a52d5fa` (expansion default-off), `ecd8372` (related_documents), `9905965` (entity-type weighting), `2980cf6` (entity-centric retrieval: core+CLI+MCP), `3d96077` (the `/entity` webui view)
+- Commits `a52d5fa` (expansion default-off), `ecd8372` (related_documents), `9905965` (entity-type weighting), `2980cf6` (entity-centric retrieval: core+CLI+MCP), `3d96077` (the `/entity` webui view), `f96c797` (acronym ↔ expansion bridge), `ecb6c8d` (bridge edge-case hardening + unicode-initial fix)
 - IMPLEMENTATION-PLAN §"Beyond v1" — "Citation graph reasoning during answering" (the original deferral this ADR closes with evidence)

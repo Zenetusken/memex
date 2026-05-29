@@ -142,6 +142,16 @@ the graceful FTS fallback. Pinned by `test_webui.py` (`test_entity_view_renders_
 / `…unknown_falls_back_to_fts` / `test_entity_lookup_form_renders_without_name` + the
 related-tag-is-`/entity`-link assertion).
 
+**Acronym ↔ expansion suggestions (2026-05-28).** `entity.html` renders `profile.suggestions`
+(the deterministic initialism bridge — see `src/memex/CLAUDE.md`) as an **"Also see"** block
+on the resolved path (above co-occurring) and a **"Did you mean?"** block on the unresolved
+path (alongside the "not a known entity" note), each a `/entity?name={{ s.name|urlencode }}`
+traversal link. Semantic `.entity-suggestion-*` CSS — a blue-TINTED border (`rgb(37 99 235 /
+0.4)`) distinguishes a bridge ("same concept, other name") from the plain zinc co-occurring
+tags. When `suggestions==[]` (e.g. the true `STP` miss) NOTHING renders — the honest FTS
+fallback is unchanged. Pinned by `test_webui.py` (`…renders_did_you_mean_when_unresolved`,
+`…unknown_with_no_bridge_stays_honest`, + the "Also see" assertion in the resolved test).
+
 ## Live co-residence mode hot-switch (`/resources` + `_resources.html`, ADR-0007, 2026-05-27)
 
 `/resources` shows the active co-residence mode + a comparison table; each non-active
