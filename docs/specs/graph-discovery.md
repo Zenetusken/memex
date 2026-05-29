@@ -176,6 +176,21 @@ FR generic connectors like "adresse IP"/"connexion"). The floor + opt-in list ar
 pass; better entity extraction upstream is the root-cause fix. A brittle per-class regex set
 (ports/hop/bits/institution) was deliberately NOT built.
 
+**Why no automated noise-detection helper (scoped + rejected 2026-05-28).** A "surface
+stopword candidates" helper was scoped and validated against the live graph — verdict: don't
+build it, **no structural signal can auto-classify noise.** Co-occurrence degree, degree÷df,
+and the df-band all FAIL because noise and signal have identical statistical profiles in a
+topically-coherent corpus (`CR350` ranks between `TCP`/`DNS`/`IP` — a generic connector and a
+central concept both co-occur with everything). Kind-weight already handles `person`/`place`
+but `CR350` is mis-typed `concept`. Document-title overlap is the only real discriminator yet
+high-precision / low-recall (`CR350` → 8 doc titles vs 0 for TCP/DNS/IP/ARP, but it misses the
+course title and the FR connectors). So a helper could only NARROW (→ the ~126 multi-doc
+entities) + flag for human judgment, never decide — low leverage once the handful of offenders
+is curated. The real auto-fix is the [[bert-ner-enrich-scope-2026-05-28]] BERT-NER swap (typed,
+clean entities upstream). **Manual curation recipe** (for the occasional curator, until then):
+inspect entities with `df ≥ 2` ranked by co-occurrence degree + doc-title overlap, and add the
+administrative names (course codes, instructor, series titles) to `entity_stopwords`.
+
 **Cypher lesson (caught by the live-graph test — the no-Cypher-in-CI gap ADR-0011 flagged):**
 the mentioning-docs query `RETURN DISTINCT d.doc_id AS doc_id, … ORDER BY d.doc_id` raised a
 ryugraph binder error — after a `DISTINCT` projection `d` is out of scope, so `ORDER BY` must
