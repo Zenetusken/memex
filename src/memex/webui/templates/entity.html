@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Memex — {% if name %}{{ name }}{% else %}Entities{% endif %}{% endblock %}
+{% block content %}
+
+{# Entity-centric discovery (ADR-0011): identity + co-occurring neighbourhood +
+   mentioning docs come from the entity GRAPH; the quoted passages come from
+   full-text SEARCH of those documents. The two sources are deliberately distinct. #}
+
+<form action="/entity" method="get" class="entity-lookup" role="search">
+  <input
+    type="text"
+    name="name"
+    value="{{ name }}"
+    placeholder="An entity — e.g. DNS, TCP, a person, a method"
+    aria-label="Entity name"
+    class="entity-lookup-input"
+    autofocus>
+  <button type="submit" class="entity-lookup-btn">Explore</button>
+</form>
+
+{% if overview is none %}
+  <p class="entity-hint">
+    Look up everything the vault knows about an entity: which documents mention it,
+    the concepts it co-occurs with, and representative passages.
+  </p>
+{% else %}
+  {% set p = overview.profile %}
+  <header class="entity-head">
+    <h1 class="entity-name">{{ name }}</h1>
+    {% if p.resolved %}
+      <span class="entity-badge entity-badge-known">in graph</span>
+      {% for k in p.kinds %}<span class="entity-kind">{{ k }}</span>{% endfor %}
+      <span class="entity-doccount">mentioned in {{ p.doc_count }} document{{ '' if p.doc_count == 1 else 's' }}</span>
+    {% else %}
+      <span class="entity-badge entity-badge-unknown">not a known entity</span>
+    {% endif %}
+  </header>
+
+  {% if p.resolved %}
+    {% if p.cooccurring %}
+    <section class="entity-section">
+      <h2 class="entity-section-title">Co-occurring concepts</h2>
+      <p class="entity-section-note">What else appears in the documents that mention {{ name }} — ranked by specificity (rare, on-topic concepts first). From the graph.</p>
+      <ul class="entity-cooccur">
+        {% for co in p.cooccurring %}
+        <li>
+          <a class="entity-cooccur-tag" href="/entity?name={{ co.name | urlencode }}" title="{{ co.kind }} · shared in {{ co.shared_docs }} of {{ name }}'s documents">
+            {{ co.name }}<span class="entity-cooccur-meta">{{ co.kind }} · {{ co.shared_docs }}</span>
+          </a>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+
+    {% if p.mentions %}
+    <section class="entity-section">
+      <h2 class="entity-section-title">Mentioned in</h2>
+      <ul class="entity-mentions">
+        {% for m in p.mentions %}
+        <li><a class="entity-mention-link" href="/documents/{{ m.doc_id }}">{{ m.title }}</a></li>
+        {% endfor %}
+      </ul>
+      {% if p.doc_count > p.mentions|length %}
+      <p class="entity-section-note">Showing {{ p.mentions|length }} of {{ p.doc_count }}.</p>
+      {% endif %}
+    </section>
+    {% endif %}
+  {% else %}
+    <p class="entity-hint">
+      <strong>{{ name }}</strong> isn't a distinct entity in the graph (it may be
+      phrased differently there, e.g. an acronym vs its expansion). Showing what
+      full-text search finds across the whole vault.
+    </p>
+  {% endif %}
+
+  <section class="entity-section">
+    <h2 class="entity-section-title">
+      Passages
+      {% if overview.passages_scoped %}<span class="entity-section-note-inline">from the {{ p.doc_count }} mentioning document{{ '' if p.doc_count == 1 else 's' }}</span>{% else %}<span class="entity-section-note-inline">full-text search across the vault</span>{% endif %}
+    </h2>
+    {% if passages %}
+    <ul class="entity-passages">
+      {% for pa in passages %}
+      <li class="entity-passage">
+        <a class="entity-passage-source" href="{{ pa.href }}">{{ pa.title }}{% if pa.section %} <span class="entity-passage-section">› {{ pa.section }}</span>{% endif %}</a>
+        <p class="entity-passage-text">{{ pa.text }}</p>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="entity-hint">No passages found.</p>
+    {% endif %}
+  </section>
+{% endif %}
+
+{% endblock %}

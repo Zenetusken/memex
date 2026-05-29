@@ -77,7 +77,7 @@
     <li class="related-item">
       <a class="related-link" href="/documents/{{ r.doc_id }}">{{ r.title }}</a>
       {% if r.shared_entities %}
-      <span class="related-via">via{% for e in r.shared_entities[:5] %} <span class="related-entity">{{ e }}</span>{% endfor %}</span>
+      <span class="related-via">via{% for e in r.shared_entities[:5] %} <a class="related-entity related-entity-link" href="/entity?name={{ e | urlencode }}" title="Explore {{ e }} across the vault">{{ e }}</a>{% endfor %}</span>
       {% endif %}
     </li>
     {% endfor %}

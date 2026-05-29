@@ -577,6 +577,102 @@ html { scroll-behavior: smooth; }
   border-radius: 0.25rem;
   color: rgb(212 212 216);                 /* zinc-300 */
 }
+.related-entity-link { color: rgb(212 212 216); text-decoration: none; }  /* zinc-300; the tag itself carries the border */
+.related-entity-link:hover { border-color: rgb(37 99 235); color: rgb(96 165 250); }  /* blue-600 border / blue-400 text */
+
+/* ── Entity-centric discovery view (/entity, ADR-0011, 2026-05-28) ────────────
+   "Everything about entity X": graph identity + co-occurring neighbourhood +
+   mentioning docs + FTS passages. Same zinc + single action-blue language as
+   .related-* / .ans-*. Co-occurring tags are LINKS (traverse the neighbourhood). */
+.entity-lookup { display: flex; gap: 0.5rem; margin: 0 0 1.25rem; max-width: 38rem; }
+.entity-lookup-input {
+  flex: 1;
+  background: rgb(9 9 11);                  /* zinc-950 */
+  border: 1px solid rgb(63 63 70);          /* zinc-700 */
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.7rem;
+  color: rgb(244 244 245);                  /* zinc-100 */
+  font-size: 0.9rem;
+}
+.entity-lookup-input:focus { outline: none; border-color: rgb(37 99 235); }  /* blue-600 */
+.entity-lookup-btn {
+  background: rgb(37 99 235);               /* blue-600 — the single action accent */
+  color: rgb(255 255 255);
+  border: none;
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.95rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.entity-lookup-btn:hover { background: rgb(29 78 216); }  /* blue-700 */
+.entity-hint { color: rgb(161 161 170); font-size: 0.9rem; max-width: 42rem; line-height: 1.5; }  /* zinc-400 */
+
+.entity-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem; margin: 0.5rem 0 1.5rem; }
+.entity-name { font-size: 1.6rem; font-weight: 600; color: rgb(244 244 245); margin: 0; }  /* zinc-100 */
+.entity-badge {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.08rem 0.4rem;
+  border-radius: 0.25rem;
+  border: 1px solid transparent;
+}
+.entity-badge-known { color: rgb(147 197 253); border-color: rgb(37 99 235 / 0.5); background: rgb(37 99 235 / 0.1); }  /* blue-300 on a blue tint */
+.entity-badge-unknown { color: rgb(212 212 216); border-color: rgb(63 63 70); }  /* zinc-300 / zinc-700 — quiet, label carries meaning */
+.entity-kind {
+  font-size: 0.75rem;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid rgb(39 39 42);          /* zinc-800 */
+  border-radius: 0.25rem;
+  color: rgb(212 212 216);                  /* zinc-300 */
+}
+.entity-doccount { color: rgb(161 161 170); font-size: 0.85rem; }  /* zinc-400 */
+
+.entity-section { margin: 0 0 1.75rem; }
+.entity-section-title {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgb(161 161 170);                  /* zinc-400 — eyebrow, mirrors .related-title */
+  margin: 0 0 0.5rem;
+}
+.entity-section-note { color: rgb(161 161 170); font-size: 0.82rem; margin: 0 0 0.6rem; max-width: 42rem; line-height: 1.45; }  /* zinc-400 */
+.entity-section-note-inline { text-transform: none; letter-spacing: 0; font-weight: 400; color: rgb(161 161 170); margin-left: 0.4rem; }  /* zinc-400 */
+
+.entity-cooccur { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.entity-cooccur-tag {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding: 0.18rem 0.5rem;
+  border: 1px solid rgb(39 39 42);          /* zinc-800 */
+  border-radius: 0.3rem;
+  color: rgb(212 212 216);                  /* zinc-300 */
+  text-decoration: none;
+  font-size: 0.88rem;
+}
+.entity-cooccur-tag:hover { border-color: rgb(37 99 235); color: rgb(96 165 250); }  /* blue-600 / blue-400 — it's a traversal link */
+.entity-cooccur-meta { color: rgb(161 161 170); font-size: 0.72rem; }  /* zinc-400 */
+
+.entity-mentions { list-style: none; padding: 0; margin: 0; }
+.entity-mentions li { padding: 0.3rem 0; border-top: 1px solid rgb(39 39 42); }  /* zinc-800 divider */
+.entity-mentions li:first-child { border-top: none; }
+.entity-mention-link { color: rgb(96 165 250); text-decoration: none; }  /* blue-400 */
+.entity-mention-link:hover { text-decoration: underline; }
+
+.entity-passages { list-style: none; padding: 0; margin: 0; }
+.entity-passage { padding: 0.6rem 0; border-top: 1px solid rgb(39 39 42); }  /* zinc-800 */
+.entity-passage:first-child { border-top: none; }
+.entity-passage-source { color: rgb(96 165 250); text-decoration: none; font-size: 0.88rem; }  /* blue-400 */
+.entity-passage-source:hover { text-decoration: underline; }
+.entity-passage-section { color: rgb(161 161 170); }  /* zinc-400 */
+.entity-passage-text {
+  color: rgb(212 212 216);                  /* zinc-300 */
+  font-size: 0.86rem;
+  line-height: 1.5;
+  margin: 0.3rem 0 0;
+  white-space: pre-wrap;
+}
 
 /* ── Ask-page document scope-picker (the doc-picker, 2026-05-27) ──────────────
    A quiet <details> disclosure of the vault's documents; ticking some scopes the

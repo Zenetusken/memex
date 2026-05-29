@@ -25,6 +25,8 @@ Routes:
                                           present)
 - `GET  /documents/{id}/source`         — serve the source file with
                                           its detected media-type
+- `GET  /entity?name=`                  — entity-centric discovery (ADR-0011):
+                                          graph profile + co-occurring + passages
 - `GET  /documents/{id}/edit`           — HTMX partial: edit textarea
 - `GET  /documents/{id}/body`           — HTMX partial: view-mode body
 - `POST /documents/{id}/review`         — accept an edit, write through
@@ -69,6 +71,7 @@ from memex.core.scope_sets import (
     list_scope_sets,
     save_scope_set,
 )
+from memex.core.types import Chunk
 from memex.daemon import restart as daemon_restart
 from memex.daemon import status as daemon_status
 from memex.index.graph_store import GraphStore
@@ -85,6 +88,12 @@ from memex.parse.pdf_render import (
     pdf_page_size,
     render_pdf_page_png,
 )
+
+# webui → retrieve boundary edge (documented, like webui → parse / daemon): the
+# entity view is entity-centric DISCOVERY (ADR-0011) — graph identity + co-occurring
+# neighbourhood + FTS passages. Read-only + HARD-gate-neutral; `entity_overview` is
+# the orchestrator that composes GraphStore + FTSStore (fail-open when ryugraph absent).
+from memex.retrieve import entity_overview
 from memex.vault.store import (
     VaultDocument,
     hash_bytes,
@@ -297,6 +306,36 @@ def _source_view(response: FinalResponse) -> tuple[dict[str, dict[str, str]], di
         }
         doc_titles[c.document_id] = title
     return chunk_refs, doc_titles
+
+
+_ENTITY_PASSAGE_PREVIEW_CHARS = 480
+
+
+def _passage_refs(passages: list[Chunk]) -> list[dict[str, str]]:
+    """View-model for the entity view's representative passages: each `Chunk` →
+    `{title, section, href, text}` rendered by HUMAN title › section (mirrors
+    `_source_view`), with the body truncated to a preview (the doc link reads on).
+    The href carries `?page=N#slug` so the click lands on the source page+section."""
+    out: list[dict[str, str]] = []
+    for c in passages:
+        section = clean_heading_text(c.heading_path[-1]) if c.heading_path else ""
+        href = f"/documents/{c.document_id}"
+        if c.page is not None:
+            href = f"{href}?page={c.page}"
+        if section:
+            href = f"{href}#{slugify_heading(section)}"
+        text = c.text.strip()
+        if len(text) > _ENTITY_PASSAGE_PREVIEW_CHARS:
+            text = text[:_ENTITY_PASSAGE_PREVIEW_CHARS].rstrip() + "…"
+        out.append(
+            {
+                "title": c.document_title or c.document_id,
+                "section": section,
+                "href": href,
+                "text": text,
+            }
+        )
+    return out
 
 
 async def _answer_context(
@@ -726,6 +765,32 @@ def create_app() -> FastAPI:
                 "preview_pages": preview_pages,
                 "preview_aspect": preview_aspect,
                 "related": related,
+            },
+        )
+
+    @app.get("/entity", response_class=HTMLResponse)
+    async def entity(request: Request, name: str = "") -> HTMLResponse:
+        """Entity-centric DISCOVERY (ADR-0011): "everything about entity X". An empty
+        `name` renders just the lookup form; a name resolves to its graph profile
+        (canonical identity + the authoritative mentioning-doc set + the co-occurring
+        concept neighbourhood — each co-entity links back here to traverse) plus
+        representative FTS passages. An unknown name → the honest whole-corpus FTS
+        fallback (`resolved=False`). Read-only + fail-open (the orchestrator never
+        raises on a missing graph); the co-occurring + mentions come from the graph,
+        the passages from full-text search — the template says so."""
+        name = name.strip()
+        if not name:
+            return templates.TemplateResponse(
+                request, "entity.html", {"name": "", "overview": None, "passages": []}
+            )
+        overview = await entity_overview(name)
+        return templates.TemplateResponse(
+            request,
+            "entity.html",
+            {
+                "name": name,
+                "overview": overview,
+                "passages": _passage_refs(overview.passages),
             },
         )
 

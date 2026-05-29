@@ -1261,6 +1261,8 @@ async def test_document_view_renders_related_documents(
     assert "Sibling Lecture" in r.text
     assert "/documents/abc12345-sibling-lecture" in r.text
     assert "DNS spoofing" in r.text  # the connecting entity (the "why related")
+    # The connecting entity is a LINK into the entity-centric view (the entry point).
+    assert "/entity?name=DNS" in r.text
 
 
 @pytest.mark.asyncio
@@ -1281,6 +1283,110 @@ async def test_document_view_survives_graph_unavailable(
     r = client.get(f"/documents/{ref.doc_id}")
     assert r.status_code == 200
     assert "Related documents" not in r.text  # section omitted, page still renders
+
+
+# ----- Entity-centric discovery view (/entity, ADR-0011) -----
+
+
+def _entity_overview_resolved() -> object:
+    from memex.index.graph_store import CoOccurringEntity, EntityMention, EntityProfile
+    from memex.retrieve import EntityOverview
+
+    return EntityOverview(
+        profile=EntityProfile(
+            query_name="DNS",
+            matched_names=["DNS"],
+            kinds=["concept", "tool"],
+            doc_count=2,
+            mentions=[
+                EntityMention(doc_id="aaaa1111-cours-3", title="CR350 — Cours 3"),
+                EntityMention(doc_id="bbbb2222-cours-6", title="CR350 — Cours 6"),
+            ],
+            cooccurring=[
+                CoOccurringEntity(name="TCP", kind="concept", shared_docs=2, score=12.3),
+                CoOccurringEntity(name="DHCP", kind="concept", shared_docs=1, score=5.1),
+            ],
+            resolved=True,
+        ),
+        passages=[
+            Chunk(
+                chunk_id="aaaa1111-cours-3#abc",
+                document_id="aaaa1111-cours-3",
+                document_title="CR350 — Cours 3",
+                text="DNS resolves names to addresses.",
+                heading_path=["Services", "DNS"],
+            )
+        ],
+        passages_scoped=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_entity_view_renders_resolved_profile(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A resolved entity renders identity (kinds + doc_count), the co-occurring
+    neighbourhood (each a /entity traversal link), the mentioning docs, and scoped
+    passages by human title › section."""
+
+    async def _fake(name: str, **_kw: object) -> object:
+        assert name == "DNS"
+        return _entity_overview_resolved()
+
+    monkeypatch.setattr("memex.webui.app.entity_overview", _fake)
+    r = client.get("/entity", params={"name": "DNS"})
+    assert r.status_code == 200
+    assert "in graph" in r.text  # the resolved badge
+    assert "mentioned in 2 documents" in r.text
+    assert "Co-occurring concepts" in r.text
+    assert "TCP" in r.text
+    assert "/entity?name=TCP" in r.text  # the co-entity is a traversal link
+    assert "CR350 — Cours 3" in r.text  # a mentioning doc
+    assert "/documents/aaaa1111-cours-3" in r.text
+    assert "DNS resolves names to addresses." in r.text  # a scoped passage
+    assert "from the 2 mentioning documents" in r.text  # passages_scoped note
+
+
+@pytest.mark.asyncio
+async def test_entity_view_unknown_falls_back_to_fts(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unknown name → the honest whole-corpus FTS fallback (resolved=False),
+    NOT a pretend profile."""
+    from memex.index.graph_store import EntityProfile
+    from memex.retrieve import EntityOverview
+
+    async def _fake(name: str, **_kw: object) -> object:
+        return EntityOverview(
+            profile=EntityProfile(
+                query_name=name, matched_names=[], kinds=[], doc_count=0,
+                mentions=[], cooccurring=[], resolved=False,
+            ),
+            passages=[
+                Chunk(
+                    chunk_id="z#1", document_id="zzzz9999-mod-5", document_title="Module 5",
+                    text="Spanning Tree Protocol prevents loops.", heading_path=["STP"],
+                )
+            ],
+            passages_scoped=False,
+        )
+
+    monkeypatch.setattr("memex.webui.app.entity_overview", _fake)
+    r = client.get("/entity", params={"name": "STP"})
+    assert r.status_code == 200
+    assert "not a known entity" in r.text
+    assert "full-text search across the vault" in r.text  # the unscoped passages note
+    assert "Spanning Tree Protocol prevents loops." in r.text
+    assert "Co-occurring concepts" not in r.text  # no graph neighbourhood on a miss
+
+
+def test_entity_lookup_form_renders_without_name(client: TestClient) -> None:
+    """GET /entity with no name → just the lookup form (no profile, never errors)."""
+    r = client.get("/entity")
+    assert r.status_code == 200
+    assert 'name="name"' in r.text  # the lookup input
+    assert "in graph" not in r.text
+    assert "Co-occurring concepts" not in r.text
 
 
 # ----- Inline title rename (metadata-only retitle) -----
