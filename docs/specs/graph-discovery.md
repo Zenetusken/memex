@@ -83,14 +83,35 @@ introduce a hallucination or alter a refusal. Independent of the answering agent
     (`f96c797` + `ecb6c8d`); see "Acronym ↔ expansion bridge" below.
   - ✅ **co-occurring noise reduction** (shared-docs floor; the curated `entity_stopwords` list was later REMOVED 2026-05-29 — see below) — shipped
     2026-05-28 (`3d00ae7`); see "Co-occurring noise reduction" below.
-- ⏳ citation-chain following (the still-unqueried `CITES` edges) — **DATA-GATED**, scoped as a
-  data-first experiment; see "Citation-chain following" below.
+- ✅ **CITES 1-hop "References"** (`citations()`; `memex cites` / MCP `document_citations` /
+  webui) — shipped 2026-05-29 (`38647e7`); reads the previously write-only CITES edges. Transitive
+  chain-following stays ⏳ **DATA-GATED**; see "Citations" below.
 - ✅ **a "Related documents" panel in `/ask`** + ✅ **scope-set suggestions** — shipped
   2026-05-29 (`ffe23fe` + `04ef4e9`); see "/ask Related panel" + "Scope-set suggestions"
   below. This CLOSES the ADR-0011 discovery build-out (citation-chain is data-gated; the
   BERT-NER swap is the remaining, separately-gated lever).
+- ✅ **MCP/CLI parity for the answer's related docs + attested-chunk passages** — shipped
+  2026-05-29 (`ac4b1ba` + `8acaad3`, the NER-leverage build-out). `FinalResponse.related_documents`
+  (the /ask panel's data on MCP/CLI too, via the shared `retrieve/related.py`); `entity_overview`
+  passages now prefer the EXACT attested chunk (the MENTIONS `chunk_id`) over an FTS name-search,
+  with graceful FTS fallback. See [[ner-leverage-buildout-2026-05-29]].
 - THEN, if discovery-quality is the bottleneck: the [[bert-ner-enrich-scope-2026-05-28]]
-  NER swap (sharper, typed entities upstream of the graph).
+  NER swap (sharper, typed entities upstream of the graph) — **SHIPPED (OTTER, ADR-0012)**.
+
+### Measured-and-NOT-pursued levers (NER-leverage audit, 2026-05-29)
+
+A code-grounded audit asked whether the NER/entities are fully leveraged. Three levers were
+MEASURED and deliberately NOT shipped (see [[ner-leverage-buildout-2026-05-29]]):
+- **Confidence-weighted discovery ranking** — the OTTER MENTIONS confidence varies (mean .256,
+  stdev .20) and re-weighting materially reshuffles `related_documents`, but it measures
+  extraction-TYPICALITY, not topical-SPECIFICITY; without a labelled should-relate gold set its
+  quality valence is unprovable, so it's NOT wired into the (validated IDF×kind) ranker.
+- **Entity signal in the `/ask` retrieve/rerank path** — CONCLUSIVE no headroom at 47 docs:
+  58/58 ANS gold DOCS are already in dense@50, so a doc-level entity-overlap signal recovers
+  nothing (converges with the db-audit's "1-hop expansion cites 0" + the BM25 arm-separation).
+  And it would touch the HARD gate. Revisit only at large-corpus scale.
+- **`DEFINES`/`RELATES_TO` edges + OTTER∪LLM fusion** — deferred (need a relation-extraction
+  stage OTTER isn't / OTTER-alone already wins; graph-only payoff at this scale).
 
 ## Entity-centric retrieval — "everything about entity X" (shipped 2026-05-28)
 
@@ -193,10 +214,20 @@ ryugraph binder error — after a `DISTINCT` projection `d` is out of scope, so 
 reference the projected **alias** (`ORDER BY doc_id`). The "de-risked" Cypher in the plan
 wasn't run WITH the `DISTINCT`; `tests/integration/test_entity_profile.py` now would catch it.
 
-## Citation-chain following — data-first (⏳ pending data, scoped 2026-05-29)
+## Citations — the 1-hop "References" surface ✅ + chain-following (data-first ⏳)
 
-Traversing the `CITES` Document→Document edges ("what cites this / what does this cite",
-transitively) is an ADR-0011 build-out item — but it has **no data to run on yet**, and the
+**1-hop References — SHIPPED 2026-05-29 (`GraphStore.citations(doc_id)` → `DocumentCitations
+{cites, cited_by}`).** The `CITES` Document→Document edges (written at enrich from the resolved
+in-vault citations) were WRITE-ONLY — only the body `[[wikilinks]]` consumed the resolution, no
+query READ the edges. `citations()` reads them: `cites` (what this doc references) + `cited_by`
+(what references it), each a `CitationLink` with the edge surface_text. Surfaces: `memex cites -d`,
+MCP `document_citations`, webui doc-view "References" (reuses `.related-*`, fail-open). Read-only ⇒
+HARD-gate-neutral. Live: 10 CITES edges (the CR350 syllabus `cites`=6 lectures, each lecture
+`cited_by`=1). This is the honest 1-hop fallback the chain-following deferral named.
+
+**Transitive chain-following — still data-first (⏳ pending data).**
+Traversing the `CITES` edges TRANSITIVELY ("what cites this / what does this cite", multi-hop) is
+an ADR-0011 build-out item — but it has **no data to run on yet**, and the
 blocker is DATA, not engineering. Measured on the live graph (`scripts/citation_graph_audit.py`):
 **6 CITES edges**, all course cross-references from ONE syllabus → 6 lectures — a **depth-1
 star** with **zero multi-hop paths** (`CITES*2..4` → 0) and **0 academic citations**. Only 7 of
@@ -213,10 +244,10 @@ ingested). The academic resolver already works (pinned by `test_enrich_resolves_
 the cluster → re-run `scripts/citation_graph_audit.py` → compare to the baseline. **Pre-registered
 decision bar:** build chain-following only if real data yields a genuine subgraph — roughly
 **≥15 CITES edges, ≥5 docs with edges, and ≥1 multi-hop chain** — else stay deferred (an honest
-1-hop "References" surface is the fallback). **Pre-registered design IF the bar clears:**
-`GraphStore.citations(doc_id)` (1-hop cites/cited-by) and `citation_paths(doc_id, depth)` over
-`MATCH (d)-[:CITES*1..N]->(o)`, mirroring `related_documents`, surfaced CLI/MCP/webui —
-complementing, not duplicating, the body wikilinks.
+1-hop "References" surface is the fallback — **now shipped, above**). **Pre-registered design
+IF the bar clears:** `citation_paths(doc_id, depth)` over `MATCH (d)-[:CITES*1..N]->(o)`,
+mirroring `related_documents`, surfaced CLI/MCP/webui — building on the shipped 1-hop
+`citations()`, complementing (not duplicating) the body wikilinks.
 
 ## /ask "Related documents" panel (shipped 2026-05-29)
 

@@ -255,10 +255,13 @@ Drops the document everywhere — its canonical Markdown, asset dir, manifest, a
 
 ```sh
 uv run memex related -d 2f96ae1c-some-paper        # documents related to this one
+uv run memex cites -d 2f96ae1c-some-paper          # references: what it cites + what cites it
 uv run memex entity "DNS"                          # everything across the corpus about an entity
 ```
 
 `memex related` surfaces the documents most related to this one through the entity graph — ranked by the **specificity** of the entities they share, so a sibling that shares one rare concept beats one that shares five generic terms (a near-universal entity, or an incidental person/place name, is filtered out). Each result shows the connecting entities — the *why*. Also a "Related documents" section on the web UI document view and the MCP `related_documents` tool.
+
+`memex cites` is the citation view: a document's 1-hop **References** — what it cites and what cites it (the resolved in-vault citations, with the citation surface form). It's the honest one-hop surface; transitive citation-chain following is deferred until the vault holds a citation-linked cluster dense enough to traverse. Also a "References" section on the web UI document view and the MCP `document_citations` tool.
 
 `memex entity <name>` is the entity-centric view: given an entity name it returns its graph **profile** — canonical kind(s), how many documents mention it, the documents themselves, and the **co-occurring concepts** (ranked by the same specificity filter) — plus representative **passages** from full-text search of those documents. It also bridges **acronym ↔ expansion**: looking up `DNS` surfaces an "Also see → Domain Name System" link (and vice versa) when both forms exist as separate entities — a deterministic initialism match, suggested as a link, never a silent identity merge. An unknown name falls back honestly to a whole-corpus text search (with a "Did you mean?" if a bridge exists). Also the web UI `/entity` page (co-occurring concepts and bridges are links, so you can walk the graph) and the MCP `entity_overview` tool. *Documents and co-occurring concepts come from the entity graph; quoted passages come from full-text search.*
 
@@ -303,15 +306,16 @@ For remote / network access, point at the HTTP transport with the bearer token f
 }
 ```
 
-Seven tools are exposed:
+Ten tools are exposed:
 - 🔎 `search(query, k)` — hybrid retrieval over the vault
-- ❓ `ask(question, scope_doc_ids?, scope_set?)` — full grounded answering agent
+- ❓ `ask(question, scope_doc_ids?, scope_set?)` — full grounded answering agent (the answer also carries `related_documents`: graph neighbours of the cited docs)
 - 📝 `summarize(doc_id, instruction?, detail?)` — structured grounded document summary
 - 📄 `get_document(doc_id)` — canonical markdown + frontmatter
 - 📚 `list_documents()` — every doc in the vault
 - 📌 `list_scope_sets()` — every saved document scope set
 - 🌐 `get_graph_neighbors(doc_id)` — one-hop entity neighbors
 - 🔗 `related_documents(doc_id)` — related docs ranked by shared-entity specificity (discovery)
+- 📎 `document_citations(doc_id)` — 1-hop "References": what this doc cites + what cites it (discovery)
 - 🧭 `entity_overview(name)` — an entity's profile (kind(s), mentioning docs, co-occurring concepts) + passages (discovery)
 
 ### Inspect health + breakers
