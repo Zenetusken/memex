@@ -41,10 +41,15 @@ class _FakeFTS:
     def __init__(self) -> None:
         self.scoped_doc_ids: list[str] | None = None
         self.corpus_query: str | None = None
+        self.attested_ids: list[str] | None = None
 
     @classmethod
     async def open(cls, vault_path: Any) -> _FakeFTS:
         return cls()
+
+    async def chunks_by_ids(self, chunk_ids: list[str]) -> list[Chunk]:
+        self.attested_ids = chunk_ids
+        return [_chunk(cid, cid.split("#")[0], f"attested passage {cid}") for cid in chunk_ids]
 
     async def search_in_docs(self, query: str, *, doc_ids: list[str], k: int) -> list[Chunk]:
         self.scoped_doc_ids = doc_ids
@@ -104,7 +109,51 @@ async def test_resolved_entity_scopes_passages_to_mention_docs(
     assert overview.passages_scoped is True
     assert fake_fts.scoped_doc_ids == ["d1", "d2"]  # scoped to the mentioning docs
     assert fake_fts.corpus_query is None  # the corpus fallback was NOT used
+    assert fake_fts.attested_ids is None  # no chunk_id on these mentions → NOT the attested path
     assert overview.passages
+
+
+@pytest.mark.asyncio
+async def test_resolved_with_attested_chunks_prefers_them(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the resolved entity's mentions carry attested chunk_ids, passages come from THOSE
+    exact chunks (highest provenance) — not an FTS name-search."""
+    profile = EntityProfile(
+        query_name="Firewall",
+        matched_names=["Firewall"],
+        kinds=["tool"],
+        doc_count=2,
+        mentions=[
+            EntityMention(doc_id="d1", title="Doc 1", chunk_id="d1#aa"),
+            EntityMention(doc_id="d2", title="Doc 2", chunk_id="d2#bb"),
+        ],
+        cooccurring=[],
+        resolved=True,
+    )
+
+    class _FakeGraph:
+        @classmethod
+        async def open(cls, vault_path: Any) -> _FakeGraph:
+            return cls()
+
+        async def entity_profile(self, name: str, *, max_docs: int, max_cooccurring: int) -> EntityProfile:
+            return profile
+
+        async def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("memex.index.graph_store.GraphStore.open", staticmethod(_FakeGraph.open))
+    fake_fts = _install_fts(monkeypatch)
+
+    from memex.retrieve import entity_overview
+
+    overview = await entity_overview("Firewall")
+    assert overview.passages_scoped is True
+    assert fake_fts.attested_ids == ["d1#aa", "d2#bb"]  # fetched the attested chunks
+    assert fake_fts.scoped_doc_ids is None  # the FTS name-search path was NOT taken
+    assert fake_fts.corpus_query is None
+    assert [c.chunk_id for c in overview.passages] == ["d1#aa", "d2#bb"]
 
 
 @pytest.mark.asyncio

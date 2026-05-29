@@ -49,6 +49,7 @@ class _FakeGraphStore:
         self.documents: dict[str, str] = {}
         self.entities: dict[str, tuple[str, str]] = {}
         self.mentions: list[tuple[str, str, float]] = []
+        self.mention_chunk_ids: list[str | None] = []  # representative attested chunk per MENTIONS
         self.cites: list[tuple[str, str, str, float]] = []
         self.deleted: list[str] = []
         self.closed = False
@@ -65,12 +66,21 @@ class _FakeGraphStore:
         self.entities[eid] = (name, kind)
         return eid
 
-    async def link_mentions(self, doc_id: str, entity_id_: str, confidence: float) -> None:
+    async def link_mentions(
+        self, doc_id: str, entity_id_: str, confidence: float, chunk_id: str | None = None
+    ) -> None:
         self.mentions.append((doc_id, entity_id_, confidence))
+        self.mention_chunk_ids.append(chunk_id)
 
     async def clear_mentions(self, doc_id: str) -> None:
         # Mirror the real replace-semantics: drop this doc's prior MENTIONS.
-        self.mentions = [m for m in self.mentions if m[0] != doc_id]
+        keep = [
+            (m, c)
+            for m, c in zip(self.mentions, self.mention_chunk_ids, strict=True)
+            if m[0] != doc_id
+        ]
+        self.mentions = [m for m, _ in keep]
+        self.mention_chunk_ids = [c for _, c in keep]
 
     async def link_cites(
         self,
@@ -173,6 +183,9 @@ async def test_enrich_extracts_entities_and_writes_graph(
     assert len(fake_graph.entities) == 2
     assert len(fake_graph.mentions) >= 2
     assert all(doc == ref.doc_id for (doc, _, _) in fake_graph.mentions)
+    # Each MENTIONS edge carries a REPRESENTATIVE attested chunk_id (where the entity was
+    # found) — a real chunk_id of THIS doc, not None (the entities came from real chunks).
+    assert all(cid is not None and cid.startswith(ref.doc_id) for cid in fake_graph.mention_chunk_ids)
 
     # Manifest now has the enrich section.
     manifest = await read_manifest(settings.vault_path, ref.doc_id)

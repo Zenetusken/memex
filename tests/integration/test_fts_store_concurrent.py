@@ -215,3 +215,24 @@ async def test_concurrent_upsert_and_delete_interleaved(tmp_path: Path) -> None:
         assert r.document_id in {"doc-0", "doc-1", "doc-2"}
 
     await store.close()
+
+
+@pytest.mark.asyncio
+async def test_chunks_by_ids_returns_input_order_skips_missing(tmp_path: Path) -> None:
+    """The targeted by-id fetch (entity-attested passages): returns the requested chunks in
+    INPUT order, and silently skips ids not present (a stale/un-indexed attested chunk_id)."""
+    vault_path = tmp_path / "vault"
+    vault_path.mkdir(parents=True)
+    store = await FTSStore.open(vault_path)
+    await store.upsert(
+        [
+            _chunk("d1#a", "d1", "alpha body"),
+            _chunk("d1#b", "d1", "bravo body"),
+            _chunk("d2#c", "d2", "charlie body"),
+        ]
+    )
+    # Requested out of insertion order + one missing id → input order, missing dropped.
+    out = await store.chunks_by_ids(["d2#c", "d1#a", "ghost#x"])
+    assert [c.chunk_id for c in out] == ["d2#c", "d1#a"]
+    assert out[0].text == "charlie body"
+    assert await store.chunks_by_ids([]) == []

@@ -324,7 +324,10 @@ async def enrich_document(doc_id: str) -> EnrichResult:
             await graph.clear_mentions(doc_id)
             for ent in entities:
                 eid = await graph.upsert_entity(ent.name, ent.kind)
-                await graph.link_mentions(doc_id, eid, ent.confidence)
+                # A representative attested chunk (the first the entity was found in; dedupe
+                # unions chunk_ids first-seen-first) so discovery can surface the exact passage.
+                rep_chunk = ent.chunk_ids[0] if ent.chunk_ids else None
+                await graph.link_mentions(doc_id, eid, ent.confidence, chunk_id=rep_chunk)
             for cit in resolved:
                 # Ensure the target document node exists before linking.
                 await graph.upsert_document(cit.target_doc_id, cit.target_title)

@@ -1,10 +1,13 @@
 """Entity-centric retrieval — "everything across my corpus about entity X" (ADR-0011).
 
 The orchestrator that composes the entity GRAPH (canonical identity + the authoritative
-mentioning-doc set + the co-occurring concept neighbourhood) with FULL-TEXT SEARCH (the
-quoted passages — the MENTIONS edge is doc-level only, so the graph can't supply text).
-This is the genuinely-graph discovery surface, not a search reskin: the profile is what
-BM25 can't give, the passages are what the graph can't.
+mentioning-doc set + the co-occurring concept neighbourhood) with the quoted PASSAGES. The
+passages come, best-provenance first, from: (1) the ATTESTED chunks — the exact chunks the
+NER found the entity in, carried on the MENTIONS edge as a representative `chunk_id` and
+fetched by id (2026-05-29); (2) an FTS name-search scoped to the mentioning docs (for edges
+written before the chunk_id column, or un-migrated graphs); (3) a whole-corpus FTS search
+(unknown name). This is the genuinely-graph discovery surface, not a search reskin: the
+profile is what BM25 can't give, and the attested passages point at the exact mention site.
 
 Read-only + HARD-gate-neutral: it never touches the answer/refusal path, only graph + BM25
 reads. Lives in `retrieve/` (the FTS+vector composition layer; `retrieve/ → index/` is a
@@ -72,14 +75,26 @@ async def entity_overview(
         finally:
             await store.close()
 
-    # FTS: the passages. Scoped to the mentioning docs when the entity resolved; otherwise
-    # a whole-corpus search (the honest "not a known entity, here's what text search finds").
+    # PASSAGES — three tiers, best-provenance first:
+    #  (1) the ATTESTED chunks: the exact chunks the NER found the entity in (the MENTIONS
+    #      edges' representative chunk_ids) — highest provenance, no text search needed;
+    #  (2) FTS name-search SCOPED to the mentioning docs (resolved, but no attested chunk —
+    #      a graph enriched before the chunk_id column, or un-migrated edges);
+    #  (3) a whole-corpus FTS search (unknown name / no graph) — the honest fallback.
+    attested = (
+        [m.chunk_id for m in profile.mentions if m.chunk_id]
+        if (profile and profile.resolved)
+        else []
+    )
     scope_doc_ids = (
         [m.doc_id for m in profile.mentions] if (profile and profile.resolved) else []
     )
     fts = await FTSStore.open(vault_path)
     try:
-        if scope_doc_ids:
+        if attested:
+            passages = (await fts.chunks_by_ids(attested))[:passages_k]
+            scoped = True
+        elif scope_doc_ids:
             passages = await fts.search_in_docs(name, doc_ids=scope_doc_ids, k=passages_k)
             scoped = True
         else:

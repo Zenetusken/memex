@@ -28,9 +28,16 @@ CREATE NODE TABLE IF NOT EXISTS Citation (
     PRIMARY KEY (citation_id)
 );
 
+// `chunk_id` (added 2026-05-29): a REPRESENTATIVE chunk the entity was attested in (where the
+// NER found it), so discovery can surface the exact passage rather than a fresh FTS name-search.
+// EXISTING graphs created before this column are migrated by a guarded
+// `ALTER TABLE MENTIONS ADD chunk_id STRING` in `GraphStore.open` (CREATE IF NOT EXISTS won't add
+// a column to a pre-existing table). Old edges keep a NULL chunk_id => callers fall back to FTS.
+// Populated on (re-)enrich.
 CREATE REL TABLE IF NOT EXISTS MENTIONS (
     FROM Document TO Entity,
-    confidence DOUBLE
+    confidence DOUBLE,
+    chunk_id STRING
 );
 
 CREATE REL TABLE IF NOT EXISTS CITES (

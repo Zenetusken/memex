@@ -19,7 +19,7 @@ import math
 import re
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import structlog
 from pydantic import BaseModel
@@ -151,10 +151,13 @@ _DEFAULT_KIND_WEIGHT = 0.5
 
 
 class EntityMention(BaseModel):
-    """A document that mentions the queried entity (from the MENTIONS edge)."""
+    """A document that mentions the queried entity (from the MENTIONS edge). `chunk_id` is a
+    REPRESENTATIVE attested chunk (where the NER found the entity), `None` for edges written
+    before the column existed (→ the consumer falls back to an FTS name-search for passages)."""
 
     doc_id: str
     title: str
+    chunk_id: str | None = None
 
 
 class CoOccurringEntity(BaseModel):
@@ -396,6 +399,16 @@ class GraphStore:
                 if key not in _schema_applied_paths:
                     for stmt in _SCHEMA_STATEMENTS:
                         conn.execute(stmt)
+                    # Migrate graphs created before MENTIONS.chunk_id existed: CREATE IF NOT
+                    # EXISTS won't add a column to a pre-existing table, so ALTER it. Guarded
+                    # (a fresh graph already has the column from the CREATE above) — RyuGraph
+                    # raises "already has property" on the no-op, which we swallow; any other
+                    # error re-raises (a real schema problem, not the idempotent case).
+                    try:
+                        conn.execute("ALTER TABLE MENTIONS ADD chunk_id STRING;")
+                    except RuntimeError as e:
+                        if "already has property" not in str(e):
+                            raise
                     _schema_applied_paths.add(key)
             return conn
 
@@ -429,20 +442,25 @@ class GraphStore:
         await asyncio.to_thread(_run)
         return eid
 
-    async def link_mentions(self, doc_id: str, entity_id_: str, confidence: float) -> None:
-        """Insert or update a `(Document)-[MENTIONS]->(Entity)` edge
-        with the extractor's confidence score. Idempotent on the
+    async def link_mentions(
+        self, doc_id: str, entity_id_: str, confidence: float, chunk_id: str | None = None
+    ) -> None:
+        """Insert or update a `(Document)-[MENTIONS]->(Entity)` edge with the extractor's
+        confidence score + a REPRESENTATIVE attested `chunk_id` (where the entity was found;
+        `None` leaves it unset → callers fall back to FTS). Idempotent on the
         `(doc_id, entity_id)` pair."""
 
         def _run() -> None:
             self._conn.execute(
                 "MATCH (d:Document {doc_id: $doc_id}), "
                 "(e:Entity {entity_id: $entity_id}) "
-                "MERGE (d)-[r:MENTIONS]->(e) SET r.confidence = $confidence;",
+                "MERGE (d)-[r:MENTIONS]->(e) "
+                "SET r.confidence = $confidence, r.chunk_id = $chunk_id;",
                 {
                     "doc_id": doc_id,
                     "entity_id": entity_id_,
                     "confidence": confidence,
+                    "chunk_id": chunk_id,
                 },
             )
 
@@ -736,18 +754,21 @@ class GraphStore:
             )
             doc_count = int(dc_res.get_next()[0]) if dc_res.has_next() else 0
             m_res = self._conn.execute(
-                "MATCH (e:Entity)<-[:MENTIONS]-(d:Document) WHERE e.entity_id IN $ids "
-                "RETURN DISTINCT d.doc_id AS doc_id, d.title AS title "
-                # ORDER BY the projected ALIAS, not d.doc_id: after a DISTINCT
-                # projection ryugraph drops `d` from scope (caught by the live
-                # entity_profile test — the no-Cypher-in-CI gap ADR-0011 flagged).
+                "MATCH (e:Entity)<-[r:MENTIONS]-(d:Document) WHERE e.entity_id IN $ids "
+                # `collect(r.chunk_id)` groups by the non-aggregated keys (doc_id, title) — so
+                # it dedups docs (replacing the old DISTINCT) AND gathers the doc's attested
+                # chunk_ids; we take the first non-null as the representative. ORDER BY the
+                # projected ALIAS (after the implicit GROUP-BY projection ryugraph drops `d`).
+                "RETURN d.doc_id AS doc_id, d.title AS title, collect(r.chunk_id) AS chunk_ids "
                 "ORDER BY doc_id LIMIT $max_docs;",
                 {"ids": ids, "max_docs": max_docs},
             )
             mentions: list[EntityMention] = []
             while m_res.has_next():
                 row = m_res.get_next()
-                mentions.append(EntityMention(doc_id=row[0], title=row[1] or row[0]))
+                cids = cast("list[str | None]", row[2] or [])  # the dynamic ryugraph LIST
+                rep = next((c for c in cids if c), None)  # first non-null attested chunk
+                mentions.append(EntityMention(doc_id=row[0], title=row[1] or row[0], chunk_id=rep))
 
             # C — co-occurring entities (the concept neighbourhood), with each co-entity's
             # global doc-frequency for the specificity rank. Mirrors related_documents' Cypher.

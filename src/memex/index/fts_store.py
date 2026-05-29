@@ -324,6 +324,44 @@ class FTSStore:
 
         return await asyncio.to_thread(_read)
 
+    async def chunks_by_ids(self, chunk_ids: list[str]) -> list[Chunk]:
+        """Fetch specific chunks by id, in the INPUT order (missing ids skipped). The
+        targeted by-id primitive — e.g. the entity-attested passages (the MENTIONS edge's
+        representative chunk_id, where the NER actually found the entity) without a
+        full per-document scan or a text search."""
+        if not chunk_ids:
+            return []
+
+        def _read() -> list[Chunk]:
+            placeholders = ",".join("?" for _ in chunk_ids)
+            rows = self._db.execute(
+                f"""
+                SELECT
+                  f.chunk_id, m.document_id, m.document_title, f.text,
+                  m.page, m.char_start, m.char_end, m.heading_path
+                FROM chunks_meta m
+                JOIN chunks_fts f ON f.chunk_id = m.chunk_id
+                WHERE m.chunk_id IN ({placeholders})
+                """,
+                tuple(chunk_ids),
+            ).fetchall()
+            by_id = {
+                r[0]: Chunk(
+                    chunk_id=r[0],
+                    document_id=r[1],
+                    document_title=r[2],
+                    text=r[3],
+                    page=r[4],
+                    char_start=r[5],
+                    char_end=r[6],
+                    heading_path=r[7].split(" > ") if r[7] else [],
+                )
+                for r in rows
+            }
+            return [by_id[c] for c in chunk_ids if c in by_id]  # input order; skip missing
+
+        return await asyncio.to_thread(_read)
+
     async def search(self, query: str, *, k: int) -> list[Chunk]:
         """BM25 search over chunks_fts; returns top `k` joined with chunks_meta.
 

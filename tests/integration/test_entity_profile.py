@@ -398,3 +398,48 @@ async def test_citations_one_hop_references(tmp_path: Path) -> None:
         assert none.cites == [] and [c.doc_id for c in none.cited_by] == ["syllabus"]
     finally:
         await graph.close()
+
+
+@pytest.mark.asyncio
+async def test_mention_chunk_id_round_trips(tmp_path: Path) -> None:
+    """A representative attested chunk_id on the MENTIONS edge round-trips into
+    EntityMention.chunk_id; an edge written without one reads back as None (→ FTS fallback)."""
+    graph = await GraphStore.open(tmp_path)
+    try:
+        await graph.upsert_document("d1", "Doc 1")
+        eid = await graph.upsert_entity("Firewall", "tool")
+        await graph.link_mentions("d1", eid, 0.9, chunk_id="d1#abc123")
+        eid2 = await graph.upsert_entity("VLAN", "concept")
+        await graph.link_mentions("d1", eid2, 0.5)  # no chunk_id
+
+        assert (await graph.entity_profile("Firewall")).mentions[0].chunk_id == "d1#abc123"
+        assert (await graph.entity_profile("VLAN")).mentions[0].chunk_id is None
+    finally:
+        await graph.close()
+
+
+@pytest.mark.asyncio
+async def test_mentions_chunk_id_migration_on_preexisting_graph(tmp_path: Path) -> None:
+    """A graph created BEFORE the chunk_id column (CREATE without it) is migrated by the
+    guarded ALTER in GraphStore.open — then chunk_id is writable + readable. Mirrors the
+    live-vault migration."""
+    import ryugraph  # optional backend, already importorskip'd at module top
+
+    path = tmp_path / ".memex" / "graph.ryu"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Raw-create the OLD schema (MENTIONS WITHOUT chunk_id), as a pre-column version would.
+    conn = ryugraph.Connection(ryugraph.Database(str(path)))
+    conn.execute("CREATE NODE TABLE Document(doc_id STRING, title STRING, PRIMARY KEY(doc_id));")
+    conn.execute("CREATE NODE TABLE Entity(entity_id STRING, name STRING, kind STRING, PRIMARY KEY(entity_id));")
+    conn.execute("CREATE REL TABLE MENTIONS(FROM Document TO Entity, confidence DOUBLE);")
+    conn.execute("CREATE (d:Document {doc_id:'old', title:'Old'});")
+    del conn  # close the raw handle before GraphStore opens the same path
+
+    # GraphStore.open must ALTER-add chunk_id (CREATE IF NOT EXISTS won't), then it's usable.
+    graph = await GraphStore.open(tmp_path)
+    try:
+        eid = await graph.upsert_entity("BGP", "concept")
+        await graph.link_mentions("old", eid, 0.8, chunk_id="old#zzz")  # would error pre-migration
+        assert (await graph.entity_profile("BGP")).mentions[0].chunk_id == "old#zzz"
+    finally:
+        await graph.close()
