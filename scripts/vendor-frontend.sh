@@ -41,4 +41,26 @@ fi
 mv "$HTMX_OUT.tmp" "$HTMX_OUT"
 echo "[vendor] ok: htmx ${HTMX_VERSION} ($(wc -c < "$HTMX_OUT") bytes)"
 
+# ----- Cytoscape 3.30.4 (the /graph/{id} neighbourhood viz) -----
+CYTO_VERSION="3.30.4"
+CYTO_URL="https://unpkg.com/cytoscape@${CYTO_VERSION}/dist/cytoscape.min.js"
+CYTO_SHA384="H3uzGzTfGHUAumB8+s4GEdfFwzAceN9wCCndN8AXubWKFIPuBSWKKtWDx7RhSf/z"
+CYTO_OUT="$STATIC/cytoscape.min.js"
+
+echo "[vendor] fetching cytoscape ${CYTO_VERSION} → $CYTO_OUT"
+curl --fail --silent --show-error --location \
+    --output "$CYTO_OUT.tmp" \
+    "$CYTO_URL"
+
+ACTUAL_CYTO_SHA384="$(openssl dgst -sha384 -binary "$CYTO_OUT.tmp" | openssl base64 -A)"
+if [[ "$ACTUAL_CYTO_SHA384" != "$CYTO_SHA384" ]]; then
+    echo "[vendor] FAIL: cytoscape SHA-384 mismatch" >&2
+    echo "[vendor]   expected: $CYTO_SHA384" >&2
+    echo "[vendor]   actual:   $ACTUAL_CYTO_SHA384" >&2
+    rm -f "$CYTO_OUT.tmp"
+    exit 1
+fi
+mv "$CYTO_OUT.tmp" "$CYTO_OUT"
+echo "[vendor] ok: cytoscape ${CYTO_VERSION} ($(wc -c < "$CYTO_OUT") bytes)"
+
 echo "[vendor] done. The webui now renders fully offline."

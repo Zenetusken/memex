@@ -9,17 +9,21 @@
   <link rel="stylesheet" href="/static/tailwind.css">
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/htmx.min.js" defer></script>
-  {# HTMX 2 ignores 4xx responses by default. /review returns 409
-     Conflict with a diff panel on stale-sha edits — opt-in to
-     swapping 4xx so the panel renders instead of being dropped. #}
+  {# Vendored HTMX is 1.9.10, which does NOT swap responses with status >= 400 by
+     default (the 2.x `responseHandling` config does not exist here, so it was a no-op).
+     Several routes intentionally return a RENDERED partial with an error status:
+     /review returns 409 with the stale-sha conflict diff panel, and the summarize/mode/
+     ask error paths return 400/503 with an `.ans-flash-error` / `.mode-flash-error`
+     banner. Opt those in via `htmx:beforeSwap` so the body renders instead of being
+     dropped. #}
   <script>
-    document.addEventListener("htmx:configRequest", function () {
-      if (window.htmx && window.htmx.config) {
-        window.htmx.config.responseHandling = [
-          {code: "204", swap: false},
-          {code: "[23]..", swap: true},
-          {code: "[45]..", swap: true, error: true},
-        ];
+    // Attach to `document` (not document.body, which is still null in <head>); htmx
+    // events bubble up to document.
+    document.addEventListener("htmx:beforeSwap", function (evt) {
+      var status = evt.detail.xhr.status;
+      if (status === 409 || status === 400 || status === 503) {
+        evt.detail.shouldSwap = true;
+        evt.detail.isError = false;
       }
     });
   </script>

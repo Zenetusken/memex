@@ -146,7 +146,33 @@ textarea { resize: vertical; }
 .cursor-pointer { cursor: pointer; }
 .resize-y { resize: vertical; }
 .transition { transition-property: color, background-color, border-color, opacity, transform; transition-duration: 150ms; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); }
-.focus\:outline-none:focus { outline: 2px solid transparent; outline-offset: 2px; }
+/* Suppress the default outline ONLY for mouse focus (`:not(:focus-visible)`) so the
+   global keyboard `:focus-visible` ring (style.css) still shows on TAB — otherwise this
+   transparent outline beat the ring on the ask box / body editor / title input. */
+.focus\:outline-none:focus:not(:focus-visible) { outline: 2px solid transparent; outline-offset: 2px; }
 .hover\:bg-zinc-900:hover { background-color: rgb(24 24 27); }
 .hover\:text-zinc-100:hover { color: rgb(244 244 245); }
 .hover\:text-zinc-300:hover { color: rgb(212 212 216); }
+
+/* ----- 2026-05-29 webui meta-audit: utilities used in templates/graph.js that were
+   missing from the vendored subset (the 409 conflict panel rendered its buttons
+   unstyled, the title-edit input lost its padding, the graph inspector's hierarchy
+   no-op'd). ----- */
+.inline { display: inline; }
+.inline-block { display: inline-block; }
+.break-all { word-break: break-all; }
+.overflow-x-auto { overflow-x: auto; }
+.leading-snug { line-height: 1.375; }
+.leading-tight { line-height: 1.25; }
+.px-2 { padding-left: 0.5rem; padding-right: 0.5rem; }
+.py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+.pt-1 { padding-top: 0.25rem; }
+.space-y-1\.5 > * + * { margin-top: 0.375rem; }
+.bg-zinc-800 { background-color: rgb(39 39 42); }
+.bg-red-900\/60 { background-color: rgb(127 29 29 / 0.6); }
+.border-red-700 { border-color: rgb(185 28 28); }
+.text-red-50 { color: rgb(254 242 242); }
+.text-blue-400 { color: rgb(96 165 250); }
+.hover\:bg-zinc-700:hover { background-color: rgb(63 63 70); }
+.hover\:bg-red-800:hover { background-color: rgb(153 27 27); }
+.hover\:text-zinc-200:hover { color: rgb(228 228 231); }

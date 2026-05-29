@@ -2,8 +2,8 @@
 # FastAPI route handlers are decorated with `@app.get`/`@app.post`
 # which registers them in the ASGI app's route table. Pyright can't
 # introspect the decorator's side effect and flags every route
-# handler as "not accessed." All 10 routes in this module are
-# reached via the FastAPI dispatcher.
+# handler as "not accessed." Every route in this module is
+# reached via the FastAPI dispatcher (the count is `git grep -c "@app\."`).
 
 """Local FastAPI + HTMX web UI — see IMPLEMENTATION-PLAN §1.10.
 
@@ -342,6 +342,16 @@ def _passage_refs(passages: list[Chunk]) -> list[dict[str, str]]:
     return out
 
 
+async def _safe_doc_title(vault_path: Path, doc_id: str) -> str:
+    """Read a doc's title, FAIL-OPEN to the doc_id. A single doc with corrupt frontmatter
+    must not 500 a whole listing page (the Ask landing / Documents list / scope-picker)."""
+    try:
+        return await read_document_title(vault_path, doc_id)
+    except VaultIntegrityError as e:
+        logger.warning("webui.title_unreadable", doc_id=doc_id, reason=str(e))
+        return doc_id
+
+
 async def _related_for_docs(
     vault_path: Path,
     seed_ids: list[str],
@@ -384,7 +394,7 @@ async def _answer_context(
     "Related documents" discovery panel (ADR-0011). Shared by the long-poll status
     route so the rendered answer is identical to the old synchronous path."""
     scope_docs = [
-        {"doc_id": d, "title": await read_document_title(vault_path, d)}
+        {"doc_id": d, "title": await _safe_doc_title(vault_path, d)}
         for d in response.artifact_scope_doc_ids
     ]
     chunk_refs, doc_titles = _source_view(response)
@@ -743,7 +753,7 @@ def create_app() -> FastAPI:
         settings = get_settings()
         docs: list[dict[str, str]] = []
         async for ref in list_documents(settings.vault_path):
-            title = await read_document_title(settings.vault_path, ref.doc_id)
+            title = await _safe_doc_title(settings.vault_path, ref.doc_id)
             docs.append(
                 {
                     "doc_id": ref.doc_id,
@@ -1332,7 +1342,7 @@ async def _scope_picker_context(
     docs: list[dict[str, str]] = []
     async for ref in list_documents(vault_path):
         docs.append(
-            {"doc_id": ref.doc_id, "title": await read_document_title(vault_path, ref.doc_id)}
+            {"doc_id": ref.doc_id, "title": await _safe_doc_title(vault_path, ref.doc_id)}
         )
     docs.sort(key=lambda d: d["title"].lower())
     try:

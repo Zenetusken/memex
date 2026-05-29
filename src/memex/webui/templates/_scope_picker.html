@@ -8,7 +8,7 @@
   </summary>
 
   {% if scope_flash %}
-  <p class="scope-flash scope-flash-{{ scope_flash.kind }}" role="status">{{ scope_flash.text }}</p>
+  <p class="scope-flash scope-flash-{{ scope_flash.kind }}" role="{{ 'alert' if scope_flash.kind == 'error' else 'status' }}">{{ scope_flash.text }}</p>
   {% endif %}
 
   {% if scope_sets %}

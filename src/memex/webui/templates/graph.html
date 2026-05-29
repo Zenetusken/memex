@@ -50,10 +50,10 @@
 <div class="graph-stats">
   <div><span>vault</span><span class="font-mono text-zinc-400">{{ document.ref.doc_id }}</span></div>
   <div><span>neighbors</span><span class="text-zinc-400">{{ neighbor_count }}</span></div>
-  <div class="ml-auto text-zinc-700">scroll to zoom · drag to pan</div>
+  <div class="ml-auto text-zinc-400">scroll to zoom · drag to pan</div>
 </div>
 
 <script id="graph-data" type="application/json">{{ graph_data | tojson }}</script>
-<script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js" defer></script>
+<script src="/static/cytoscape.min.js" defer></script>
 <script src="/static/graph.js" defer></script>
 {% endblock %}

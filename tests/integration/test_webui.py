@@ -1272,7 +1272,9 @@ async def test_graph_renders_with_inline_data(
     assert "def67890-neighbor-b" in r.text
     assert "reflexivity" in r.text  # a connecting entity → edge label (the "why")
     assert 'id="graph-data"' in r.text
-    assert "cytoscape" in r.text  # CDN script reference
+    # cytoscape is VENDORED (air-gap rule) — referenced locally, never from a CDN.
+    assert "/static/cytoscape.min.js" in r.text
+    assert "unpkg.com" not in r.text and "cdn" not in r.text.lower()
 
 
 @pytest.mark.asyncio

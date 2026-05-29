@@ -29,6 +29,7 @@ a:focus-visible,
 button:focus-visible,
 textarea:focus-visible,
 input:focus-visible,
+select:focus-visible,
 summary:focus-visible {
   outline: 2px solid rgb(59 130 246);   /* blue-500 */
   outline-offset: 2px;
@@ -603,7 +604,8 @@ html { scroll-behavior: smooth; }
   color: rgb(244 244 245);                  /* zinc-100 */
   font-size: 0.9rem;
 }
-.entity-lookup-input:focus { outline: none; border-color: rgb(37 99 235); }  /* blue-600 */
+.entity-lookup-input:focus:not(:focus-visible) { outline: none; }
+.entity-lookup-input:focus { border-color: rgb(37 99 235); }  /* blue-600; keyboard ring kept via :focus-visible */
 .entity-lookup-btn {
   background: rgb(37 99 235);               /* blue-600 — the single action accent */
   color: rgb(255 255 255);
@@ -834,7 +836,8 @@ html { scroll-behavior: smooth; }
   border: 1px solid rgb(63 63 70);         /* zinc-700 */
   border-radius: 0.25rem;
 }
-.scope-set-name:focus { outline: none; border-color: rgb(37 99 235); }  /* blue-600 */
+.scope-set-name:focus:not(:focus-visible) { outline: none; }
+.scope-set-name:focus { border-color: rgb(37 99 235); }  /* blue-600; keyboard ring kept via :focus-visible */
 .scope-set-name::placeholder { color: rgb(161 161 170); }  /* zinc-400 (AA) */
 .scope-set-savebtn,
 .scope-set-suggestbtn {
@@ -936,11 +939,6 @@ html { scroll-behavior: smooth; }
 .mode-table-name { color: rgb(212 212 216); }   /* zinc-300 */
 .mode-row-active td { background: rgb(37 99 235 / 0.07); }   /* blue-600 tint */
 .mode-row-active .mode-table-name { color: rgb(147 197 253); font-weight: 600; }  /* blue-300 */
-.mode-switch-cmd {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.7rem;
-  color: rgb(161 161 170);                 /* zinc-400 — AA on zinc-950 */
-}
 .mode-howto { margin-top: 1.25rem; font-size: 0.8125rem; color: rgb(161 161 170); line-height: 1.5; }
 .mode-howto code { color: rgb(161 161 170); }  /* zinc-400 */
 
@@ -976,14 +974,15 @@ html { scroll-behavior: smooth; }
   border: 1px solid rgb(63 63 70);         /* zinc-700 */
   border-radius: 0.25rem;
 }
-.summary-detail:focus { outline: none; border-color: rgb(37 99 235); }  /* blue-600 */
+.summary-detail:focus:not(:focus-visible) { outline: none; }
+.summary-detail:focus { border-color: rgb(37 99 235); }  /* blue-600; keyboard ring kept via :focus-visible */
 .summary-sections { margin-top: 0.5rem; border-top: 1px solid rgb(39 39 42); padding-top: 0.6rem; }
 .summary-sections-toggle {
   cursor: pointer;
   font-size: 0.6875rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: rgb(161 161 170);                 /* zinc-500 — mirrors .ans-eyebrow */
+  color: rgb(161 161 170);                 /* zinc-400 (AA) — mirrors .ans-eyebrow */
   user-select: none;
 }
 .summary-sections-toggle:hover { color: rgb(212 212 216); }   /* zinc-300 */

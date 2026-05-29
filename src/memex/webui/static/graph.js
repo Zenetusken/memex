@@ -19,6 +19,14 @@
   const container = document.getElementById('cy');
   if (!container) return;
 
+  // Degrade quietly if the (vendored) cytoscape bundle didn't load, instead of
+  // throwing a ReferenceError and leaving a blank canvas with no explanation.
+  if (typeof window.cytoscape !== 'function') {
+    container.innerHTML =
+      '<div class="graph-unavailable">graph renderer unavailable — run <code>scripts/vendor-frontend.sh</code></div>';
+    return;
+  }
+
   const elements = [
     ...data.nodes.map(n => ({
       data: n,
@@ -169,14 +177,14 @@
     if (edges.length) {
       edgesHtml = `
         <div class="tick-rule"></div>
-        <div class="text-[0.625rem] uppercase tracking-widest text-zinc-500 mb-2">
+        <div class="uppercase tracking-widest text-zinc-400 mb-2" style="font-size:0.625rem">
           incident edges (${edges.length})
         </div>
         <ul class="space-y-1.5">
           ${edges.map(e => `
             <li class="text-xs">
               <span class="font-mono text-zinc-400">${escapeHtml(e.label || '—')}</span>
-              <span class="text-zinc-600">→</span>
+              <span class="text-zinc-400">→</span>
               <a href="/documents/${encodeURIComponent(e.other_id)}"
                  class="text-zinc-300 hover:text-blue-300">${escapeHtml(e.other)}</a>
             </li>
@@ -186,7 +194,7 @@
     } else {
       edgesHtml = `
         <div class="tick-rule"></div>
-        <p class="text-xs text-zinc-500 italic">no incident edges.</p>
+        <p class="text-xs text-zinc-400 italic">no incident edges.</p>
       `;
     }
 
@@ -198,14 +206,14 @@
       <dl>
         <div class="dl-row"><dt>doc_id</dt><dd>${safeId}</dd></div>
         ${node.kind !== 'center'
-          ? `<div class="dl-row"><dt>relation</dt><dd class="!font-sans !text-zinc-400">shares entity</dd></div>`
+          ? `<div class="dl-row"><dt>relation</dt><dd style="font-family:ui-sans-serif,system-ui,sans-serif;color:rgb(161 161 170)">shares entity</dd></div>`
           : ''}
       </dl>
       ${node.kind !== 'center'
         ? `<a href="/documents/${encodeURIComponent(safeId)}"
               class="mt-4 inline-block text-xs text-blue-400 hover:text-blue-300">open document →</a>`
         : `<a href="/graph/${encodeURIComponent(safeId)}"
-              class="mt-4 inline-block text-xs text-zinc-500 hover:text-zinc-300">re-center on this →</a>`
+              class="mt-4 inline-block text-xs text-zinc-400 hover:text-zinc-300">re-center on this →</a>`
       }
       ${edgesHtml}
     `;

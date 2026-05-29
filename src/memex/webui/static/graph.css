@@ -48,7 +48,7 @@
   font-size: 0.625rem;
   text-transform: uppercase;
   letter-spacing: 0.12em;
-  color: rgb(113 113 122);
+  color: rgb(161 161 170);   /* zinc-400 — AA readable (was zinc-500, sub-AA) */
   padding: 0.85rem 1rem;
   border-bottom: 1px solid rgb(39 39 42);
   display: flex;
@@ -85,12 +85,29 @@
   display: flex;
   gap: 1.5rem;
   font-size: 0.7rem;
-  color: rgb(113 113 122);
+  color: rgb(161 161 170);   /* zinc-400 — AA readable (was zinc-500) */
   padding-top: 0.5rem;
   font-variant-numeric: tabular-nums;
 }
 .graph-stats > div > span:first-child {
-  color: rgb(82 82 91);
+  color: rgb(161 161 170);   /* zinc-400 — AA readable (was zinc-600, 2.57:1) */
   margin-right: 0.4rem;
   text-transform: lowercase;
+}
+
+/* Shown in #cy if the vendored cytoscape bundle failed to load (graph.js null-guard) —
+   degrades to a readable note instead of a blank canvas + console ReferenceError. */
+.graph-unavailable {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 2rem;
+  text-align: center;
+  color: rgb(161 161 170);   /* zinc-400 */
+  font-size: 0.85rem;
+}
+.graph-unavailable code {
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  color: rgb(212 212 216);
 }

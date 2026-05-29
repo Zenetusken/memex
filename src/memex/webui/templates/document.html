@@ -46,8 +46,10 @@
     <form class="flex items-center gap-1.5"
           hx-post="/documents/{{ document.ref.doc_id }}/summarize"
           hx-target="#summary-pane"
-          hx-swap="innerHTML">
-      <select name="detail" class="summary-detail" title="Summary length / detail">
+          hx-swap="innerHTML"
+          hx-disabled-elt="button[name='go']">
+      <select name="detail" class="summary-detail" aria-label="Summary detail level"
+              title="Summary length / detail">
         <option value="brief">brief</option>
         <option value="standard" selected>standard</option>
         <option value="detailed">detailed</option>
@@ -70,7 +72,7 @@
 {# Explore connections: documents linked by SPECIFIC shared entities (IDF-ranked),
    not generic co-occurrence. Omitted when the graph is empty/unavailable. #}
 {% if related %}
-<section class="related-docs mb-5">
+<section class="mb-5">
   <h2 class="related-title">Related documents</h2>
   <ul class="related-list">
     {% for r in related %}
@@ -86,7 +88,7 @@
 {% endif %}
 
 {% if citations.cites or citations.cited_by %}
-<section class="related-docs mb-5">
+<section class="mb-5">
   <h2 class="related-title">References</h2>
   {% if citations.cites %}
   <ul class="related-list">

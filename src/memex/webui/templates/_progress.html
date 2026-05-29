@@ -6,6 +6,7 @@
    result fragment (no hx-trigger) → the polling chain stops by itself. The route
    builds poll_url (incl. the next version) + the optional eyebrow `detail`. #}
 <div class="progress"
+     aria-live="polite"
      hx-get="{{ poll_url }}"
      hx-trigger="load"
      hx-target="this"
