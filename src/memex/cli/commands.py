@@ -511,6 +511,29 @@ def register(app: typer.Typer) -> None:
             _print(r)
 
     @app.command()
+    def entity(
+        name: str = _Argument(..., help="Entity name (case-insensitive)."),
+        max_docs: int = _Option(50, help="Max mentioning documents to list."),
+        cooccurring: int = _Option(15, help="Max co-occurring entities to surface."),
+        k: int = _Option(10, "--passages", "-k", help="Max passages (full-text) to return."),
+    ) -> None:
+        """Everything about an entity: its graph profile (kind(s), the documents that
+        mention it, the co-occurring concept neighbourhood) + representative passages.
+        Documents + co-occurring concepts come from the entity graph; the passages come
+        from full-text search of those documents. An unknown name falls back to a
+        whole-corpus text search (`resolved=False`)."""
+
+        async def _run():
+            from memex.retrieve import entity_overview
+
+            bootstrap()
+            return await entity_overview(
+                name, max_docs=max_docs, max_cooccurring=cooccurring, passages_k=k
+            )
+
+        _print(asyncio.run(_run()))
+
+    @app.command()
     def doctor() -> None:
         """Health check: vault integrity, daemon reachability, breaker state."""
 

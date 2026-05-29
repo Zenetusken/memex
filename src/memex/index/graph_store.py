@@ -128,6 +128,75 @@ class RelatedDocument(BaseModel):
     shared_entities: list[str]  # the connecting entities, most-specific first
 
 
+class EntityMention(BaseModel):
+    """A document that mentions the queried entity (from the MENTIONS edge)."""
+
+    doc_id: str
+    title: str
+
+
+class CoOccurringEntity(BaseModel):
+    """An entity that co-occurs with the queried entity in shared documents — the concept
+    NEIGHBOURHOOD. Ranked by `shared_docs × IDF × kind_weight` (the same specificity model
+    as `RelatedDocument`, so generic connectors like 'IP' / an instructor's name are
+    filtered/down-weighted), most-significant first."""
+
+    name: str
+    kind: str
+    shared_docs: int  # how many of the entity's docs ALSO mention this co-entity
+    score: float
+
+
+class EntityProfile(BaseModel):
+    """The canonical graph identity of an entity name across the corpus (entity-centric
+    discovery, ADR-0011). `query_name` is what the user asked; `matched_names`/`kinds` are
+    what the case-insensitive resolution actually found (a name can be a `concept` in one
+    doc and a `tool` in another, hence lists). `resolved=False` ⇒ the name is not a known
+    entity in the graph (the surface then falls back to whole-corpus full-text search)."""
+
+    query_name: str
+    matched_names: list[str]
+    kinds: list[str]
+    doc_count: int  # TRUE total of distinct docs mentioning the entity (mentions may be capped)
+    mentions: list[EntityMention]
+    cooccurring: list[CoOccurringEntity]
+    resolved: bool
+
+
+def _rank_co_occurring(
+    rows: list[tuple[str, str, int, int]],
+    n_docs: int,
+    *,
+    limit: int,
+) -> list[CoOccurringEntity]:
+    """PURE scoring core of `entity_profile`'s co-occurring neighbourhood (separated for
+    unit testing). `rows` are `(co_name, co_kind, shared_docs, co_df)` — `shared_docs` =
+    how many of the seed entity's docs also mention the co-entity, `co_df` = how many docs
+    in the whole corpus mention it. Score = `shared_docs × ln(n_docs / co_df) × kind_weight`:
+    the `shared_docs` term rewards a co-entity that pervades the seed's docs, the IDF term
+    rewards SPECIFIC co-entities, and the kind-weight down-weights incidental proper nouns —
+    the same noise filter as `_rank_related_documents`, so a generic connector (high df, or
+    person/place) sinks. Excludes near-universal entities (df > the generic fraction)."""
+    if n_docs <= 1:
+        return []
+    df_cap = _RELATED_GENERIC_ENTITY_DF_FRACTION * n_docs
+    out: list[CoOccurringEntity] = []
+    for name, kind, shared_docs, df in rows:
+        if df <= 0 or df > df_cap or shared_docs <= 0:
+            continue
+        weight = _ENTITY_KIND_WEIGHT.get(kind, _DEFAULT_KIND_WEIGHT)
+        score = shared_docs * math.log(n_docs / df) * weight
+        if score <= 0:
+            continue
+        out.append(
+            CoOccurringEntity(
+                name=name, kind=kind, shared_docs=shared_docs, score=round(score, 4)
+            )
+        )
+    out.sort(key=lambda c: (-c.score, c.name))
+    return out[:limit]
+
+
 def _rank_related_documents(
     rows: list[tuple[str, str, str, str, int]],
     n_docs: int,
@@ -394,6 +463,107 @@ class GraphStore:
                 rows.append((row[0], row[1], row[2], row[3] or "other", int(row[4])))
             return _rank_related_documents(
                 rows, n_docs, limit=limit, max_entities=max_entities
+            )
+
+        return await asyncio.to_thread(_run)
+
+    async def entity_profile(
+        self, name: str, *, max_docs: int = 50, max_cooccurring: int = 15
+    ) -> EntityProfile:
+        """The canonical graph profile of an entity NAME across the corpus (entity-centric
+        discovery, ADR-0011). Resolves `name` case-insensitively (aggregating across kinds —
+        a name can be a `concept` in one doc, a `tool` in another), then returns its identity
+        (matched names, kind(s), true doc_count), the documents that mention it (capped at
+        `max_docs`), and its co-occurring entity neighbourhood (ranked by `_rank_co_occurring`,
+        same specificity filter as `related_documents`). `resolved=False` (+ empty lists) when
+        the name is not a known entity — the caller (`retrieve.entity.entity_overview`) then
+        falls back to whole-corpus full-text search. The quoted PASSAGES are NOT here: the
+        MENTIONS edge is doc-level only, so passages come from FTS at the orchestrator."""
+        query_name = name.strip()
+        key = query_name.lower()
+
+        def _run() -> EntityProfile:
+            empty = EntityProfile(
+                query_name=query_name,
+                matched_names=[],
+                kinds=[],
+                doc_count=0,
+                mentions=[],
+                cooccurring=[],
+                resolved=False,
+            )
+            if not key:
+                return empty
+            # A — resolve (case-insensitive) + identity. One row per (entity, kind);
+            # doc_count is the entity's own mention count (summed across the matched ids).
+            res = self._conn.execute(
+                "MATCH (e:Entity) WHERE lower(e.name) = $name "
+                "OPTIONAL MATCH (e)<-[:MENTIONS]-(d:Document) "
+                "RETURN e.entity_id AS entity_id, e.name AS name, e.kind AS kind, "
+                "count(DISTINCT d) AS doc_count;",
+                {"name": key},
+            )
+            ids: list[str] = []
+            names: list[str] = []
+            kinds: list[str] = []
+            while res.has_next():
+                row = res.get_next()
+                ids.append(row[0])
+                if row[1] and row[1] not in names:
+                    names.append(row[1])
+                if row[2] and row[2] not in kinds:
+                    kinds.append(row[2])
+            if not ids:
+                return empty
+            n_res = self._conn.execute("MATCH (d:Document) RETURN count(d) AS n;")
+            n_docs = int(n_res.get_next()[0]) if n_res.has_next() else 0
+
+            # B — distinct docs mentioning the entity (TRUE total, then the capped list).
+            dc_res = self._conn.execute(
+                "MATCH (e:Entity)<-[:MENTIONS]-(d:Document) WHERE e.entity_id IN $ids "
+                "RETURN count(DISTINCT d) AS n;",
+                {"ids": ids},
+            )
+            doc_count = int(dc_res.get_next()[0]) if dc_res.has_next() else 0
+            m_res = self._conn.execute(
+                "MATCH (e:Entity)<-[:MENTIONS]-(d:Document) WHERE e.entity_id IN $ids "
+                "RETURN DISTINCT d.doc_id AS doc_id, d.title AS title "
+                # ORDER BY the projected ALIAS, not d.doc_id: after a DISTINCT
+                # projection ryugraph drops `d` from scope (caught by the live
+                # entity_profile test — the no-Cypher-in-CI gap ADR-0011 flagged).
+                "ORDER BY doc_id LIMIT $max_docs;",
+                {"ids": ids, "max_docs": max_docs},
+            )
+            mentions: list[EntityMention] = []
+            while m_res.has_next():
+                row = m_res.get_next()
+                mentions.append(EntityMention(doc_id=row[0], title=row[1] or row[0]))
+
+            # C — co-occurring entities (the concept neighbourhood), with each co-entity's
+            # global doc-frequency for the specificity rank. Mirrors related_documents' Cypher.
+            co_res = self._conn.execute(
+                "MATCH (e:Entity)<-[:MENTIONS]-(d:Document)-[:MENTIONS]->(co:Entity) "
+                "WHERE e.entity_id IN $ids AND NOT co.entity_id IN $ids "
+                "WITH co, count(DISTINCT d) AS shared_docs "
+                "MATCH (co)<-[:MENTIONS]-(m:Document) "
+                "WITH co, shared_docs, count(DISTINCT m) AS df "
+                "RETURN co.name AS name, co.kind AS kind, shared_docs, df;",
+                {"ids": ids},
+            )
+            co_rows: list[tuple[str, str, int, int]] = []
+            while co_res.has_next():
+                row = co_res.get_next()
+                co_rows.append((row[0], row[1] or "other", int(row[2]), int(row[3])))
+            cooccurring = _rank_co_occurring(co_rows, n_docs, limit=max_cooccurring)
+
+            return EntityProfile(
+                query_name=query_name,
+                matched_names=names,
+                kinds=kinds,
+                doc_count=doc_count,
+                mentions=mentions,
+                cooccurring=cooccurring,
+                resolved=True,
             )
 
         return await asyncio.to_thread(_run)

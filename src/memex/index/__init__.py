@@ -16,7 +16,14 @@ from memex.index.embed_prompts import (
     native_prompts_enabled,
 )
 from memex.index.fts_store import FTSStore
-from memex.index.graph_store import GraphNeighbor, GraphStore, RelatedDocument
+from memex.index.graph_store import (
+    CoOccurringEntity,
+    EntityMention,
+    EntityProfile,
+    GraphNeighbor,
+    GraphStore,
+    RelatedDocument,
+)
 from memex.index.pipeline import (
     IndexResult,
     ReindexReport,
@@ -32,6 +39,9 @@ from memex.index.vector_store import EMBEDDING_DIM, VectorStore
 __all__ = [
     "EMBEDDING_DIM",
     "EMBED_QUERY_PROMPT_NAME",
+    "CoOccurringEntity",
+    "EntityMention",
+    "EntityProfile",
     "FTSStore",
     "GraphNeighbor",
     "GraphStore",

@@ -32,7 +32,8 @@ from memex.core.scope_sets import ScopeSet, get_scope_set, list_scope_sets
 from memex.core.types import Chunk
 from memex.index.graph_store import GraphNeighbor, RelatedDocument
 from memex.mcp.auth import BearerAuthMiddleware, validate_bind
-from memex.retrieve import cross_encoder_rerank, hybrid_search
+from memex.retrieve import EntityOverview, cross_encoder_rerank, hybrid_search
+from memex.retrieve import entity_overview as _entity_overview
 from memex.vault.store import (
     DocumentRef,
     VaultDocument,
@@ -251,6 +252,37 @@ async def related_documents(doc_id: str, limit: int = 10) -> list[RelatedDocumen
     return related
 
 
+async def entity_overview(
+    name: str,
+    max_docs: int = 50,
+    max_cooccurring: int = 15,
+    passages_k: int = 10,
+) -> EntityOverview:
+    """Everything about an entity across the corpus: its graph profile + passages.
+
+    Resolves the entity `name` (case-insensitive) in the entity graph and returns an
+    `EntityOverview`: the `profile` (the kind(s) it resolves to, the TRUE count of
+    documents that mention it, the `mentions` doc list, and the `cooccurring` concept
+    neighbourhood ranked by shared-entity specificity), plus representative `passages`.
+    Documents + co-occurring concepts come from the entity graph; the passages come from
+    full-text search of those documents (`passages_scoped=True`). An unknown name (or an
+    unavailable graph) yields `profile.resolved=False` and a whole-corpus full-text
+    fallback (`passages_scoped=False`) — the honest "not a known entity, here's what text
+    search finds." Fail-open; never raises on a missing graph.
+    """
+    log = logger.bind(tool="entity_overview", name_len=len(name))
+    log.info("mcp.tool.start")
+    overview = await _entity_overview(
+        name, max_docs=max_docs, max_cooccurring=max_cooccurring, passages_k=passages_k
+    )
+    log.info(
+        "mcp.tool.done",
+        resolved=overview.profile.resolved,
+        passages=len(overview.passages),
+    )
+    return overview
+
+
 # Register with FastMCP. We do this after defining the functions so the
 # above docstrings show up verbatim in MCP tool-introspection responses.
 server.tool()(search)
@@ -261,6 +293,7 @@ server.tool(name="list_documents")(list_documents_tool)
 server.tool(name="list_scope_sets")(list_scope_sets_tool)
 server.tool()(get_graph_neighbors)
 server.tool()(related_documents)
+server.tool()(entity_overview)
 
 
 # ----- Transports -----

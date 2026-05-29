@@ -5,12 +5,15 @@ GUIDELINES.md Part IV "Hybrid retrieval" and `retrieve/rerank.py` for
 the backend dispatch.
 """
 
+from memex.retrieve.entity import EntityOverview, entity_overview
 from memex.retrieve.fusion import reciprocal_rank_fusion
 from memex.retrieve.hybrid import hybrid_search, hybrid_search_in_docs
 from memex.retrieve.rerank import cross_encoder_rerank
 
 __all__ = [
+    "EntityOverview",
     "cross_encoder_rerank",
+    "entity_overview",
     "hybrid_search",
     "hybrid_search_in_docs",
     "reciprocal_rank_fusion",

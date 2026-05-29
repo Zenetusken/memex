@@ -267,8 +267,8 @@ async def test_get_document_404_on_unknown_doc(
         await get_document("nonexistent-doc")
 
 
-def test_server_has_registered_the_five_tools() -> None:
-    """Smoke: the FastMCP server has the five tools we expect."""
+def test_server_has_registered_the_core_tools() -> None:
+    """Smoke: the FastMCP server has the tools we expect registered."""
     from memex.mcp.server import server
 
     # FastMCP exposes registered tools via `_tool_manager`; if the API
@@ -282,6 +282,7 @@ def test_server_has_registered_the_five_tools() -> None:
         "list_documents",
         "get_graph_neighbors",
         "related_documents",
+        "entity_overview",
     } <= names
 
 
@@ -321,6 +322,46 @@ async def test_related_documents_tool_returns_ranked_list(
 
     monkeypatch.setattr("memex.index.graph_store.GraphStore.open", staticmethod(_boom))
     assert await related_documents("some-doc") == []
+
+
+@pytest.mark.asyncio
+async def test_entity_overview_tool_returns_profile_and_passages(
+    settings: MemexSettings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The `entity_overview` MCP tool surfaces the orchestrator's EntityOverview
+    (graph profile + FTS passages) as a typed pydantic model across the boundary."""
+    from memex.index.graph_store import CoOccurringEntity, EntityMention, EntityProfile
+    from memex.mcp import server as srv
+    from memex.retrieve import EntityOverview
+
+    overview = EntityOverview(
+        profile=EntityProfile(
+            query_name="STP",
+            matched_names=["STP"],
+            kinds=["concept"],
+            doc_count=2,
+            mentions=[EntityMention(doc_id="d1", title="Doc 1")],
+            cooccurring=[
+                CoOccurringEntity(name="ARP", kind="concept", shared_docs=2, score=1.39)
+            ],
+            resolved=True,
+        ),
+        passages=[Chunk(chunk_id="d1#a", document_id="d1", document_title="Doc 1", text="STP …")],
+        passages_scoped=True,
+    )
+
+    async def _fake(name: str, **_kw: object) -> EntityOverview:
+        assert name == "STP"
+        return overview
+
+    monkeypatch.setattr(srv, "_entity_overview", _fake)
+    out = await srv.entity_overview("STP")
+    assert isinstance(out, EntityOverview)
+    assert out.profile.resolved is True
+    assert out.passages_scoped is True
+    assert [c.name for c in out.profile.cooccurring] == ["ARP"]
+    assert [p.chunk_id for p in out.passages] == ["d1#a"]
 
 
 # ----- HTTP transport: bind validation + auth wiring -----
