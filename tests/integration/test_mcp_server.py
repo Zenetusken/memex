@@ -325,6 +325,62 @@ async def test_related_documents_tool_returns_ranked_list(
 
 
 @pytest.mark.asyncio
+async def test_ask_enriches_related_documents(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`ask` enriches its response with graph neighbours of the CITED docs (parity with the
+    webui /ask panel) — excluding the cited docs themselves, and fail-open when no graph."""
+    from memex.index.graph_store import RelatedDocument
+    from memex.mcp.server import ask
+
+    async def _fake_answer(question: str, **_kw: Any) -> FinalResponse:
+        return FinalResponse(
+            answered=True,
+            summary="ok",
+            used_chunks=[
+                Chunk(chunk_id="d1#a", document_id="d1", document_title="D1", text="t"),
+                Chunk(chunk_id="d2#b", document_id="d2", document_title="D2", text="t"),
+            ],
+            correlation_id="01HZTESTRELATEDASK00000000",
+            tokens_used=1,
+            nodes_traversed=1,
+            regenerate_attempts=0,
+        )
+
+    class _FakeStore:
+        @classmethod
+        async def open(cls, vault_path):
+            return cls()
+
+        async def related_documents(self, doc_id, *, limit=10, max_entities=8):
+            if doc_id == "d1":
+                return [
+                    RelatedDocument(doc_id="sib", title="Sibling", score=3.0, shared_entities=["DNS"]),
+                    RelatedDocument(doc_id="d2", title="D2", score=9.0, shared_entities=["x"]),  # cited → excluded
+                ]
+            return []
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr("memex.mcp.server.answer_query", _fake_answer)
+    monkeypatch.setattr("memex.index.graph_store.GraphStore.open", staticmethod(_FakeStore.open))
+    resp = await ask("q")
+    ids = [r.doc_id for r in resp.related_documents]
+    assert "sib" in ids  # the neighbour surfaces
+    assert "d1" not in ids and "d2" not in ids  # the cited docs are excluded
+
+    # Fail-open: graph absent → empty related, the answer still returns.
+    def _boom(vault_path):
+        raise ImportError("no ryugraph")
+
+    monkeypatch.setattr("memex.index.graph_store.GraphStore.open", staticmethod(_boom))
+    resp2 = await ask("q")
+    assert resp2.answered is True
+    assert resp2.related_documents == []
+
+
+@pytest.mark.asyncio
 async def test_entity_overview_tool_returns_profile_and_passages(
     settings: MemexSettings,
     monkeypatch: pytest.MonkeyPatch,

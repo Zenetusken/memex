@@ -32,7 +32,12 @@ from memex.core.scope_sets import ScopeSet, get_scope_set, list_scope_sets
 from memex.core.types import Chunk
 from memex.index.graph_store import GraphNeighbor, RelatedDocument
 from memex.mcp.auth import BearerAuthMiddleware, validate_bind
-from memex.retrieve import EntityOverview, cross_encoder_rerank, hybrid_search
+from memex.retrieve import (
+    EntityOverview,
+    cross_encoder_rerank,
+    hybrid_search,
+    related_documents_for_answer,
+)
 from memex.retrieve import entity_overview as _entity_overview
 from memex.vault.store import (
     DocumentRef,
@@ -110,10 +115,18 @@ async def ask(
     merged = list(dict.fromkeys(scope_ids))  # ordered de-dup of doc + set overlap
     log.info("mcp.tool.start", scope_doc_ids=merged, scope_set=scope_set or "")
     response = await answer_query(question, scope_doc_ids=merged or None)
+    # "Explore connections" parity with the webui /ask panel: enrich the response with the
+    # graph neighbours of the cited docs (read-only, post-grounding, fail-open → []).
+    response.related_documents = await related_documents_for_answer(
+        get_settings().vault_path,
+        [c.document_id for c in response.used_chunks],
+        answered=response.answered,
+    )
     log.info(
         "mcp.tool.done",
         answered=response.answered,
         correlation_id=response.correlation_id,
+        related=len(response.related_documents),
     )
     return response
 

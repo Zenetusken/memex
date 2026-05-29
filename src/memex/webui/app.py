@@ -74,7 +74,7 @@ from memex.core.scope_sets import (
 from memex.core.types import Chunk
 from memex.daemon import restart as daemon_restart
 from memex.daemon import status as daemon_status
-from memex.index.graph_store import GraphStore, RelatedDocument
+from memex.index.graph_store import GraphStore
 from memex.index.pipeline import retitle_document
 from memex.models.registry import ModelNotConfigured, get_registry
 
@@ -93,7 +93,11 @@ from memex.parse.pdf_render import (
 # entity view is entity-centric DISCOVERY (ADR-0011) — graph identity + co-occurring
 # neighbourhood + FTS passages. Read-only + HARD-gate-neutral; `entity_overview` is
 # the orchestrator that composes GraphStore + FTSStore (fail-open when ryugraph absent).
-from memex.retrieve import entity_overview
+from memex.retrieve import (
+    entity_overview,
+    related_documents_for_answer,
+    related_documents_for_seeds,
+)
 from memex.vault.store import (
     VaultDocument,
     hash_bytes,
@@ -353,41 +357,23 @@ async def _related_for_docs(
     → `[]`. Expands the first `seed_limit` seeds (bounds graph calls) but EXCLUDES the full
     seed set from the output. Reuses the SHIPPED noise-filtered `related_documents` ranking
     (specificity + shared-docs floor), so callers inherit it."""
-    if not seed_ids:
-        return []
-    exclude = set(seed_ids)  # never suggest a doc already in the selection / citation set
-    try:
-        store = await GraphStore.open(vault_path)
-    except ImportError as e:
-        logger.warning("webui.related_unavailable", reason=str(e))
-        return []
-    merged: dict[str, RelatedDocument] = {}
-    try:
-        for doc_id in seed_ids[:seed_limit]:
-            for r in await store.related_documents(doc_id, limit=per_seed):
-                if r.doc_id in exclude:
-                    continue
-                prev = merged.get(r.doc_id)
-                if prev is None or r.score > prev.score:  # dedup keeps the higher-score relation
-                    merged[r.doc_id] = r
-    finally:
-        await store.close()
-    ranked = sorted(merged.values(), key=lambda r: (-r.score, r.doc_id))[:out_limit]
+    ranked = await related_documents_for_seeds(
+        vault_path, seed_ids, seed_limit=seed_limit, per_seed=per_seed, out_limit=out_limit
+    )
     return [r.model_dump() for r in ranked]
 
 
 async def _related_for_answer(vault_path: Path, response: FinalResponse) -> list[dict[str, Any]]:
-    """The /ask "Related documents" panel (ADR-0011, webui-only): graph neighbours of the docs
-    THIS answer cited. Answered-only (a refusal's `used_chunks` are retrieved-but-ungrounded,
-    not "used"). Delegates to the shared `_related_for_docs` — HARD-gate-neutral, derived from
-    the already-returned `FinalResponse`, never touches the agent/answer/refusal path."""
-    if not response.answered:
-        return []
-    seeds: list[str] = []
-    for c in response.used_chunks:
-        if c.document_id not in seeds:
-            seeds.append(c.document_id)
-    return await _related_for_docs(vault_path, seeds)
+    """The /ask "Related documents" panel (ADR-0011): graph neighbours of the docs THIS answer
+    cited, as template dicts. Delegates to the shared `retrieve.related_documents_for_answer`
+    (the same core MCP/CLI use) — HARD-gate-neutral, derived from the already-returned
+    `FinalResponse`, never touches the agent/answer/refusal path."""
+    ranked = await related_documents_for_answer(
+        vault_path,
+        [c.document_id for c in response.used_chunks],
+        answered=response.answered,
+    )
+    return [r.model_dump() for r in ranked]
 
 
 async def _answer_context(

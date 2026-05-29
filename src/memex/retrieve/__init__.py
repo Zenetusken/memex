@@ -8,6 +8,10 @@ the backend dispatch.
 from memex.retrieve.entity import EntityOverview, entity_overview
 from memex.retrieve.fusion import reciprocal_rank_fusion
 from memex.retrieve.hybrid import hybrid_search, hybrid_search_in_docs
+from memex.retrieve.related import (
+    related_documents_for_answer,
+    related_documents_for_seeds,
+)
 from memex.retrieve.rerank import cross_encoder_rerank
 
 __all__ = [
@@ -17,4 +21,6 @@ __all__ = [
     "hybrid_search",
     "hybrid_search_in_docs",
     "reciprocal_rank_fusion",
+    "related_documents_for_answer",
+    "related_documents_for_seeds",
 ]

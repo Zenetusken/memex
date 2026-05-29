@@ -62,7 +62,7 @@ from memex.agents.artifact_scope import (
     resolve_scope,
 )
 from memex.core.errors import AnswerStateInvariantError
-from memex.core.types import Chunk, StoredTable, TableQueryResult
+from memex.core.types import Chunk, RelatedDocument, StoredTable, TableQueryResult
 from memex.core.wikilinks import format_wikilink
 from memex.models.client import complete_structured
 from memex.observability.tracing import (
@@ -442,6 +442,14 @@ class FinalResponse(BaseModel):
     # range" → refuse). HARD-gate-neutral — derived from state, never alters
     # answered/claims/refusal. (ADR-0004: observable at every layer.)
     artifact_scope_doc_ids: list[str] = []
+
+    # "Explore connections" discovery: documents the entity graph relates to the docs THIS
+    # answer cited. The AGENT leaves this empty `[]` — populating it would add a graph open to
+    # every `answer_query` (incl. the eval path). The SURFACES (MCP/CLI `ask`, webui /ask panel)
+    # enrich it post-hoc from `used_chunks` via `retrieve.related_documents_for_answer`, a
+    # read-only graph query. HARD-gate-neutral by construction (never alters
+    # answered/claims/refusal). Empty on a refusal (cited nothing) or when no graph is present.
+    related_documents: list[RelatedDocument] = []
 
     # Observability fields — always populated, useful for trace correlation.
     correlation_id: str

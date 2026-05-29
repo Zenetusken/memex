@@ -404,9 +404,21 @@ def register(app: typer.Typer) -> None:
                 scope_ids.extend(found.doc_ids)
             # Ordered de-dup so --doc + --scope-set overlap collapses cleanly.
             merged = list(dict.fromkeys(scope_ids))
-            return await answer_query(
+            response = await answer_query(
                 query, token_budget=token_budget, scope_doc_ids=merged or None
             )
+            # "Explore connections" parity with the webui /ask panel + MCP: enrich the
+            # response with the graph neighbours of the cited docs (read-only, post-grounding,
+            # fail-open → []). Off the agent path, so the eval/answer contract is unchanged.
+            from memex.core.config import get_settings
+            from memex.retrieve import related_documents_for_answer
+
+            response.related_documents = await related_documents_for_answer(
+                get_settings().vault_path,
+                [c.document_id for c in response.used_chunks],
+                answered=response.answered,
+            )
+            return response
 
         _print(asyncio.run(_run()))
 

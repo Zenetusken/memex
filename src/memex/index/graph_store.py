@@ -26,6 +26,7 @@ from pydantic import BaseModel
 
 from memex.core.config import get_settings
 from memex.core.errors import ConfigurationError
+from memex.core.types import RelatedDocument
 from memex.index.initialism import (
     derive_initialism,
     initialism_matches,
@@ -124,16 +125,9 @@ _ENTITY_KIND_WEIGHT: dict[str, float] = {
 _DEFAULT_KIND_WEIGHT = 0.5
 
 
-class RelatedDocument(BaseModel):
-    """A document related to a seed doc via SHARED ENTITIES, ranked by the SPECIFICITY of
-    those entities (IDF — a rare shared entity is a strong topical signal; a near-universal
-    one is noise). The on-mission "explore connections" discovery surface, vs the retired
-    passive `expand_graph` which linked on generic entities, unranked, and never helped."""
-
-    doc_id: str
-    title: str
-    score: float  # Σ IDF(entity) over the shared, non-generic entities — higher = stronger
-    shared_entities: list[str]  # the connecting entities, most-specific first
+# `RelatedDocument` is defined in `core/types` (it crosses index→retrieve→agents/mcp/cli/webui)
+# and imported above; re-exported in `__all__` so existing
+# `from memex.index.graph_store import RelatedDocument` call sites keep working.
 
 
 class EntityMention(BaseModel):

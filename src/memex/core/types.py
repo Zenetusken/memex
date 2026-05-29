@@ -123,3 +123,20 @@ class GeneratedSQL(BaseModel):
 
     sql: str = Field(max_length=600)
     target_table_id: str = Field(max_length=16)
+
+
+class RelatedDocument(BaseModel):
+    """A document related to a seed doc via SHARED ENTITIES, ranked by the SPECIFICITY of
+    those entities (IDF — a rare shared entity is a strong topical signal; a near-universal
+    one is noise). The on-mission "explore connections" discovery surface, vs the retired
+    passive `expand_graph` which linked on generic entities, unranked, and never helped.
+
+    Lives in `core/types` (not `index/graph_store`) because it crosses module boundaries —
+    produced by `index/graph_store::related_documents`, aggregated by `retrieve/related`, and
+    surfaced on `FinalResponse` for MCP/CLI/webui parity. Re-exported from `index.graph_store`
+    for back-compat."""
+
+    doc_id: str
+    title: str
+    score: float  # Σ IDF(entity) over the shared, non-generic entities — higher = stronger
+    shared_entities: list[str]  # the connecting entities, most-specific first
