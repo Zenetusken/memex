@@ -24,6 +24,12 @@ from typing import Any
 import structlog
 from pydantic import BaseModel
 
+from memex.index.initialism import (
+    derive_initialism,
+    initialism_matches,
+    looks_like_acronym,
+)
+
 logger = structlog.get_logger(__name__)
 
 _SCHEMA_PATH = Path(__file__).parent / "schemas" / "graph.cypher"
@@ -147,12 +153,29 @@ class CoOccurringEntity(BaseModel):
     score: float
 
 
+class EntitySuggestion(BaseModel):
+    """A deterministic acronym ↔ expansion bridge candidate for a queried name —
+    surfaced as a traversal LINK ("Also see" / "Did you mean?"), NEVER a forced
+    identity merge (the project resolves identity exactly; see ADR-0011 + the
+    SUGGEST-over-MERGE decision). `relation` is the bridge direction for the UI
+    label: `expansion` = the query was an acronym and this is its multi-word form
+    (`DNS` → `Domain Name System`); `acronym` = the reverse."""
+
+    name: str
+    kind: str
+    doc_count: int  # distinct docs mentioning the suggested entity (for ranking + display)
+    relation: str  # "expansion" | "acronym"
+
+
 class EntityProfile(BaseModel):
     """The canonical graph identity of an entity name across the corpus (entity-centric
     discovery, ADR-0011). `query_name` is what the user asked; `matched_names`/`kinds` are
     what the case-insensitive resolution actually found (a name can be a `concept` in one
     doc and a `tool` in another, hence lists). `resolved=False` ⇒ the name is not a known
-    entity in the graph (the surface then falls back to whole-corpus full-text search)."""
+    entity in the graph (the surface then falls back to whole-corpus full-text search).
+    `suggestions` are acronym ↔ expansion bridge links (deterministic initialism match) —
+    populated on BOTH the resolved ("Also see") and unresolved ("Did you mean?") paths, and
+    empty when no real bridge exists (e.g. `STP` whose expansion isn't in the graph)."""
 
     query_name: str
     matched_names: list[str]
@@ -161,6 +184,7 @@ class EntityProfile(BaseModel):
     mentions: list[EntityMention]
     cooccurring: list[CoOccurringEntity]
     resolved: bool
+    suggestions: list[EntitySuggestion] = []
 
 
 def _rank_co_occurring(
@@ -195,6 +219,49 @@ def _rank_co_occurring(
         )
     out.sort(key=lambda c: (-c.score, c.name))
     return out[:limit]
+
+
+_MAX_SUGGESTIONS = 3  # defensive cap; collision-drop already bounds a clean bridge to ≤1
+# A suggested bridge must be attested in ≥ this many docs. A 1-doc entity is the weakest
+# possible attestation, and that's exactly where cross-domain initialism FALSE-FRIENDS live
+# (live: query "STP" → the 10-K's "Short-term portion", 1 doc — a coincidental initialism,
+# not the networking concept). Every confirmed-real bridge recurs (DNS/TCP/DHCP/ICMP
+# expansions all ≥2 docs), so the floor kills the noise without dropping a true bridge.
+_MIN_SUGGESTION_DOC_COUNT = 2
+
+
+def _gate_suggestions(
+    candidates: list[tuple[str, str, str, int, str]],
+    n_docs: int,
+    *,
+    exclude_ids: set[str],
+) -> list[EntitySuggestion]:
+    """PURE gate for `entity_profile`'s acronym ↔ expansion suggestions (unit-tested,
+    mirrors `_rank_co_occurring`). `candidates` are `(entity_id, name, kind, doc_count,
+    relation)` rows that already matched the bridge (an initialism match in one
+    direction). Conservatively: drop the exact-resolved entity itself (`exclude_ids`),
+    drop barely-attested entities (`doc_count < _MIN_SUGGESTION_DOC_COUNT` — the
+    cross-domain false-friend floor), drop near-universal generics (`doc_count > the
+    generic fraction`), collapse same-name-different-kind into ONE suggestion (the
+    highest-doc representative — NOT a collision), then **drop everything if ≥2 DISTINCT
+    names survive** (an ambiguous initialism → conservative no-op, the #256 rule — we
+    don't guess which expansion the user meant). So a clean bridge yields 0 or 1 suggestion."""
+    if n_docs <= 0:
+        return []
+    df_cap = _RELATED_GENERIC_ENTITY_DF_FRACTION * n_docs
+    by_name: dict[str, EntitySuggestion] = {}
+    for entity_id_, name, kind, doc_count, relation in candidates:
+        if entity_id_ in exclude_ids or doc_count < _MIN_SUGGESTION_DOC_COUNT or doc_count > df_cap:
+            continue
+        key = name.lower()
+        prev = by_name.get(key)
+        if prev is None or doc_count > prev.doc_count:
+            by_name[key] = EntitySuggestion(
+                name=name, kind=kind, doc_count=doc_count, relation=relation
+            )
+    if len(by_name) > 1:  # ambiguous bridge → conservative no-op
+        return []
+    return sorted(by_name.values(), key=lambda s: (-s.doc_count, s.name))[:_MAX_SUGGESTIONS]
 
 
 def _rank_related_documents(
@@ -482,18 +549,56 @@ class GraphStore:
         query_name = name.strip()
         key = query_name.lower()
 
+        def _compute_suggestions(exclude_ids: set[str], n_docs: int) -> list[EntitySuggestion]:
+            """The deterministic acronym ↔ expansion bridge (ADR-0011). Direction A —
+            query IS acronym-shaped: scan entity names, keep those whose derived
+            initialism equals the query (the EXPANSION). Direction B — query is
+            multi-word: derive its initialism + exact-probe the bare-acronym entity
+            (the ACRONYM). The pure `_gate_suggestions` then drops self/generic/zero-doc
+            and ambiguous-collision candidates. Empty when no real bridge exists."""
+            if n_docs <= 0 or not query_name:
+                return []
+            candidates: list[tuple[str, str, str, int, str]] = []
+            if looks_like_acronym(query_name):
+                # Direction A. A bounded full-name scan (initials can't be derived in
+                # Cypher); ~entity-count rows, only on an acronym-shaped query, on a
+                # human-driven discovery surface — invisible at this scale.
+                scan = self._conn.execute(
+                    "MATCH (e:Entity) "
+                    "OPTIONAL MATCH (e)<-[:MENTIONS]-(d:Document) "
+                    "RETURN e.entity_id AS entity_id, e.name AS name, e.kind AS kind, "
+                    "count(DISTINCT d) AS doc_count;"
+                )
+                while scan.has_next():
+                    row = scan.get_next()
+                    cand_name = row[1] or ""
+                    if initialism_matches(query_name, cand_name):
+                        candidates.append(
+                            (row[0], cand_name, row[2] or "other", int(row[3]), "expansion")
+                        )
+            else:
+                derived = derive_initialism(query_name)
+                if derived is not None:
+                    probe = self._conn.execute(
+                        "MATCH (e:Entity) WHERE lower(e.name) = $acr "
+                        "OPTIONAL MATCH (e)<-[:MENTIONS]-(d:Document) "
+                        "RETURN e.entity_id AS entity_id, e.name AS name, e.kind AS kind, "
+                        "count(DISTINCT d) AS doc_count;",
+                        {"acr": derived.lower()},
+                    )
+                    while probe.has_next():
+                        row = probe.get_next()
+                        candidates.append(
+                            (row[0], row[1] or derived, row[2] or "other", int(row[3]), "acronym")
+                        )
+            return _gate_suggestions(candidates, n_docs, exclude_ids=exclude_ids)
+
         def _run() -> EntityProfile:
-            empty = EntityProfile(
-                query_name=query_name,
-                matched_names=[],
-                kinds=[],
-                doc_count=0,
-                mentions=[],
-                cooccurring=[],
-                resolved=False,
-            )
             if not key:
-                return empty
+                return EntityProfile(
+                    query_name=query_name, matched_names=[], kinds=[], doc_count=0,
+                    mentions=[], cooccurring=[], resolved=False,
+                )
             # A — resolve (case-insensitive) + identity. One row per (entity, kind);
             # doc_count is the entity's own mention count (summed across the matched ids).
             res = self._conn.execute(
@@ -513,10 +618,17 @@ class GraphStore:
                     names.append(row[1])
                 if row[2] and row[2] not in kinds:
                     kinds.append(row[2])
-            if not ids:
-                return empty
             n_res = self._conn.execute("MATCH (d:Document) RETURN count(d) AS n;")
             n_docs = int(n_res.get_next()[0]) if n_res.has_next() else 0
+            # Suggestions run on BOTH paths (the unresolved "Did you mean?" case is the
+            # most valuable); exclude the exact-resolved ids so we never suggest the match.
+            suggestions = _compute_suggestions(set(ids), n_docs)
+
+            if not ids:
+                return EntityProfile(
+                    query_name=query_name, matched_names=[], kinds=[], doc_count=0,
+                    mentions=[], cooccurring=[], resolved=False, suggestions=suggestions,
+                )
 
             # B — distinct docs mentioning the entity (TRUE total, then the capped list).
             dc_res = self._conn.execute(
@@ -564,6 +676,7 @@ class GraphStore:
                 mentions=mentions,
                 cooccurring=cooccurring,
                 resolved=True,
+                suggestions=suggestions,
             )
 
         return await asyncio.to_thread(_run)

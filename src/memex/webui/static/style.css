@@ -654,6 +654,26 @@ html { scroll-behavior: smooth; }
 .entity-cooccur-tag:hover { border-color: rgb(37 99 235); color: rgb(96 165 250); }  /* blue-600 / blue-400 — it's a traversal link */
 .entity-cooccur-meta { color: rgb(161 161 170); font-size: 0.72rem; }  /* zinc-400 */
 
+/* Acronym <-> expansion bridge links ("Also see" / "Did you mean?", ADR-0011).
+   A subtle blue-tinted border distinguishes them from the plain co-occurring tags
+   (they're the SAME concept under another name, a stronger link); the action-blue
+   on hover marks the traversal, as everywhere. */
+.entity-suggestions { margin-bottom: 1.25rem; }
+.entity-suggestion-list { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.entity-suggestion-tag {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding: 0.18rem 0.5rem;
+  border: 1px solid rgb(37 99 235 / 0.4);   /* blue-600 @ 40% — a hint stronger than the zinc cooccur tag */
+  border-radius: 0.3rem;
+  color: rgb(212 212 216);                  /* zinc-300 */
+  text-decoration: none;
+  font-size: 0.88rem;
+}
+.entity-suggestion-tag:hover { border-color: rgb(37 99 235); color: rgb(96 165 250); }  /* blue-600 / blue-400 */
+.entity-suggestion-meta { color: rgb(161 161 170); font-size: 0.72rem; }  /* zinc-400 */
+
 .entity-mentions { list-style: none; padding: 0; margin: 0; }
 .entity-mentions li { padding: 0.3rem 0; border-top: 1px solid rgb(39 39 42); }  /* zinc-800 divider */
 .entity-mentions li:first-child { border-top: none; }

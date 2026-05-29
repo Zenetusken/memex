@@ -1289,7 +1289,12 @@ async def test_document_view_survives_graph_unavailable(
 
 
 def _entity_overview_resolved() -> object:
-    from memex.index.graph_store import CoOccurringEntity, EntityMention, EntityProfile
+    from memex.index.graph_store import (
+        CoOccurringEntity,
+        EntityMention,
+        EntityProfile,
+        EntitySuggestion,
+    )
     from memex.retrieve import EntityOverview
 
     return EntityOverview(
@@ -1307,6 +1312,11 @@ def _entity_overview_resolved() -> object:
                 CoOccurringEntity(name="DHCP", kind="concept", shared_docs=1, score=5.1),
             ],
             resolved=True,
+            suggestions=[
+                EntitySuggestion(
+                    name="Domain Name System", kind="concept", doc_count=3, relation="expansion"
+                )
+            ],
         ),
         passages=[
             Chunk(
@@ -1345,6 +1355,67 @@ async def test_entity_view_renders_resolved_profile(
     assert "/documents/aaaa1111-cours-3" in r.text
     assert "DNS resolves names to addresses." in r.text  # a scoped passage
     assert "from the 2 mentioning documents" in r.text  # passages_scoped note
+    # The acronym↔expansion bridge surfaces as an "Also see" traversal link.
+    assert "Also see" in r.text
+    assert "Domain Name System" in r.text
+    assert "/entity?name=Domain" in r.text  # urlencoded link into the expansion's profile
+
+
+@pytest.mark.asyncio
+async def test_entity_view_renders_did_you_mean_when_unresolved(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unresolved name that HAS a bridge surfaces 'Did you mean?' + the link."""
+    from memex.index.graph_store import EntityProfile, EntitySuggestion
+    from memex.retrieve import EntityOverview
+
+    async def _fake(name: str, **_kw: object) -> object:
+        return EntityOverview(
+            profile=EntityProfile(
+                query_name=name, matched_names=[], kinds=[], doc_count=0,
+                mentions=[], cooccurring=[], resolved=False,
+                suggestions=[
+                    EntitySuggestion(name="Domain Name System", kind="concept", doc_count=3, relation="acronym")
+                ],
+            ),
+            passages=[Chunk(chunk_id="z#1", document_id="z", document_title="Z", text="…")],
+            passages_scoped=False,
+        )
+
+    monkeypatch.setattr("memex.webui.app.entity_overview", _fake)
+    r = client.get("/entity", params={"name": "DNS"})
+    assert r.status_code == 200
+    assert "not a known entity" in r.text
+    assert "Did you mean" in r.text
+    assert "/entity?name=Domain" in r.text
+
+
+@pytest.mark.asyncio
+async def test_entity_unknown_with_no_bridge_stays_honest(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The STP UI invariant: an unresolved name with NO bridge shows the honest
+    'not a known entity' note and NO 'Did you mean?' block (no fabricated suggestion)."""
+    from memex.index.graph_store import EntityProfile
+    from memex.retrieve import EntityOverview
+
+    async def _fake(name: str, **_kw: object) -> object:
+        return EntityOverview(
+            profile=EntityProfile(
+                query_name=name, matched_names=[], kinds=[], doc_count=0,
+                mentions=[], cooccurring=[], resolved=False, suggestions=[],
+            ),
+            passages=[Chunk(chunk_id="z#1", document_id="z", document_title="Z",
+                            text="Spanning Tree Protocol prevents loops.")],
+            passages_scoped=False,
+        )
+
+    monkeypatch.setattr("memex.webui.app.entity_overview", _fake)
+    r = client.get("/entity", params={"name": "STP"})
+    assert r.status_code == 200
+    assert "not a known entity" in r.text
+    assert "Did you mean" not in r.text  # no fabricated bridge
+    assert "Spanning Tree Protocol prevents loops." in r.text  # the honest FTS fallback
 
 
 @pytest.mark.asyncio

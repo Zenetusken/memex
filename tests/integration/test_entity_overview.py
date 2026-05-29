@@ -17,7 +17,7 @@ import pytest
 
 from memex.core.config import MemexSettings, set_settings
 from memex.core.types import Chunk
-from memex.index.graph_store import EntityMention, EntityProfile
+from memex.index.graph_store import EntityMention, EntityProfile, EntitySuggestion
 
 
 @pytest.fixture
@@ -105,6 +105,49 @@ async def test_resolved_entity_scopes_passages_to_mention_docs(
     assert fake_fts.scoped_doc_ids == ["d1", "d2"]  # scoped to the mentioning docs
     assert fake_fts.corpus_query is None  # the corpus fallback was NOT used
     assert overview.passages
+
+
+@pytest.mark.asyncio
+async def test_suggestions_survive_orchestrator_and_passages_stay_scoped(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A resolved profile carrying `suggestions` (the acronym↔expansion bridge) passes
+    through the orchestrator untouched, AND the FTS passages stay scoped to the EXACT
+    mention docs — a suggestion is a link, never a passage-scope-widener."""
+    profile = EntityProfile(
+        query_name="DNS",
+        matched_names=["DNS"],
+        kinds=["concept"],
+        doc_count=1,
+        mentions=[EntityMention(doc_id="d1", title="Doc 1")],
+        cooccurring=[],
+        resolved=True,
+        suggestions=[
+            EntitySuggestion(name="Domain Name System", kind="concept", doc_count=3, relation="expansion")
+        ],
+    )
+
+    class _FakeGraph:
+        @classmethod
+        async def open(cls, vault_path: Any) -> _FakeGraph:
+            return cls()
+
+        async def entity_profile(self, name: str, *, max_docs: int, max_cooccurring: int) -> EntityProfile:
+            return profile
+
+        async def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("memex.index.graph_store.GraphStore.open", staticmethod(_FakeGraph.open))
+    fake_fts = _install_fts(monkeypatch)
+
+    from memex.retrieve import entity_overview
+
+    overview = await entity_overview("DNS")
+    assert [s.name for s in overview.profile.suggestions] == ["Domain Name System"]
+    assert overview.passages_scoped is True
+    assert fake_fts.scoped_doc_ids == ["d1"]  # scoped to the EXACT mention, not the suggestion's docs
+    assert fake_fts.corpus_query is None
 
 
 @pytest.mark.asyncio

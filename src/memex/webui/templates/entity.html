@@ -37,6 +37,22 @@
   </header>
 
   {% if p.resolved %}
+    {% if p.suggestions %}
+    <section class="entity-section entity-suggestions">
+      <h2 class="entity-section-title">Also see</h2>
+      <p class="entity-section-note">Other forms of this name in the graph — acronym ↔ expansion.</p>
+      <ul class="entity-suggestion-list">
+        {% for s in p.suggestions %}
+        <li>
+          <a class="entity-suggestion-tag" href="/entity?name={{ s.name | urlencode }}" title="{{ s.kind }} · mentioned in {{ s.doc_count }} document{{ '' if s.doc_count == 1 else 's' }}">
+            {{ s.name }}<span class="entity-suggestion-meta">{{ s.kind }} · {{ s.doc_count }}</span>
+          </a>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+
     {% if p.cooccurring %}
     <section class="entity-section">
       <h2 class="entity-section-title">Co-occurring concepts</h2>
@@ -72,6 +88,20 @@
       phrased differently there, e.g. an acronym vs its expansion). Showing what
       full-text search finds across the whole vault.
     </p>
+    {% if p.suggestions %}
+    <section class="entity-section entity-suggestions">
+      <h2 class="entity-section-title">Did you mean?</h2>
+      <ul class="entity-suggestion-list">
+        {% for s in p.suggestions %}
+        <li>
+          <a class="entity-suggestion-tag" href="/entity?name={{ s.name | urlencode }}" title="{{ s.kind }} · mentioned in {{ s.doc_count }} document{{ '' if s.doc_count == 1 else 's' }}">
+            {{ s.name }}<span class="entity-suggestion-meta">{{ s.kind }} · {{ s.doc_count }}</span>
+          </a>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
   {% endif %}
 
   <section class="entity-section">

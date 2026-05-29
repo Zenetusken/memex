@@ -331,7 +331,12 @@ async def test_entity_overview_tool_returns_profile_and_passages(
 ) -> None:
     """The `entity_overview` MCP tool surfaces the orchestrator's EntityOverview
     (graph profile + FTS passages) as a typed pydantic model across the boundary."""
-    from memex.index.graph_store import CoOccurringEntity, EntityMention, EntityProfile
+    from memex.index.graph_store import (
+        CoOccurringEntity,
+        EntityMention,
+        EntityProfile,
+        EntitySuggestion,
+    )
     from memex.mcp import server as srv
     from memex.retrieve import EntityOverview
 
@@ -346,6 +351,9 @@ async def test_entity_overview_tool_returns_profile_and_passages(
                 CoOccurringEntity(name="ARP", kind="concept", shared_docs=2, score=1.39)
             ],
             resolved=True,
+            suggestions=[
+                EntitySuggestion(name="Spanning Tree Protocol", kind="concept", doc_count=3, relation="expansion")
+            ],
         ),
         passages=[Chunk(chunk_id="d1#a", document_id="d1", document_title="Doc 1", text="STP …")],
         passages_scoped=True,
@@ -361,6 +369,7 @@ async def test_entity_overview_tool_returns_profile_and_passages(
     assert out.profile.resolved is True
     assert out.passages_scoped is True
     assert [c.name for c in out.profile.cooccurring] == ["ARP"]
+    assert [s.name for s in out.profile.suggestions] == ["Spanning Tree Protocol"]  # bridge serializes
     assert [p.chunk_id for p in out.passages] == ["d1#a"]
 
 
