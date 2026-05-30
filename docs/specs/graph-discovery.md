@@ -46,7 +46,30 @@ The pure scoring core `_rank_related_documents(rows, n_docs, *, limit, max_entit
 takes `(neighbour_doc_id, title, entity, kind, df)` rows and is unit-tested without a graph
 (`tests/unit/test_related_documents.py`). The Cypher returns the per-(neighbour,entity) df
 via a nested `MATCH (e)<-[:MENTIONS]-(m:Document)` count; `shared_entities` is
-deduped-by-name, most-significant-first, capped at `max_entities`.
+deduped-by-name, most-significant-first, capped at `max_entities`. Both `related_documents`
+and `related_bridges` (below) draw from one shared `_fetch_shared_entity_rows(doc_id)`.
+
+### Bridges — the entity-grouped lens (`related_bridges` / `_rank_bridges`, 2026-05-29)
+
+`GraphStore.related_bridges(doc_id, *, limit_bridges=24, max_docs_per_bridge=50, max_via=5)`
+**inverts the same rows**: instead of grouping shared entities under each related DOC, it
+groups related docs under each shared ENTITY — the bridging concept. It answers a subtly
+different question than `related_documents` ("which docs are related"): **"which CONCEPTS are
+this document's connective tissue, and to what do they connect"**. Powers the `/graph` concept
+lens. Returns `DocumentBridge{entity, kind, doc_count, strength, docs: list[BridgeDoc]}` where
+`BridgeDoc{doc_id, title, score, via_entities}`; `doc_count` is the literal "bridges N", and
+each doc carries its OVERALL relatedness `score` (identical to its `RelatedDocument.score`) plus
+its OTHER connecting entities (`via_entities`, the "·via" tags).
+
+**Ranking — `strength = mean(IDF×kind_weight) × ln(1 + doc_count)`.** Per-edge SPECIFICITY
+dominates; fan-out enters LOGARITHMICALLY. This is the load-bearing choice: a *linear* × fan-out
+(the first cut) made breadth win and surfaced exactly the generic networking terms the view
+should bury (on a CCNA module the top "bridges" were `network`/`IP`/`IPv4`); the log damping
+sinks a near-generic entity shared by many docs (`IP`, df just under the 0.6 cutoff) below a
+specific concept shared by a few, so the top became `OSI`/`ACL`/`routing table`/`ARP`/`SNMP`/
+`DHCP`. Same generic-df exclusion + kind weights as `related_documents`. The pure
+`_rank_bridges` is unit-tested without a graph (`tests/unit/test_related_bridges.py`, incl. the
+log-damping proof). Same fail-open + HARD-gate-neutrality as the rest of this surface.
 
 ## Surfaces
 
@@ -57,9 +80,13 @@ deduped-by-name, most-significant-first, capped at `max_entities`.
   `.related-*` CSS): each related doc as a title-link + its connecting entities as quiet
   tags (the "why related"). Fail-open: an `ImportError` from `GraphStore.open` omits the
   section, never 500s the doc view.
-- **webui `/graph`** — the Cytoscape neighbourhood viz consumes `related_documents` (was
-  raw unranked `neighbors`): one node + one edge per related doc, the edge labelled with
-  the connecting entities (most-specific first). Same fail-open.
+- **webui `/graph`** — the server-rendered **"Bridges" view** (redesigned 2026-05-29, `b48f8b2`,
+  replacing the Cytoscape node-link "hairball" — a 1-hop neighbourhood is a STAR with no
+  topology to draw, so a node-link diagram encodes nothing and reads as "all equally related").
+  Two no-JS lenses toggled by `?group=`: **concept** (default) groups related docs UNDER the
+  bridging ENTITY (`related_bridges` / `_rank_bridges`, see below); **document** is the flat
+  strength-ranked neighbour list (`related_documents`). Same fail-open. Drops cytoscape from
+  this page (air-gap + maintenance win). See `src/memex/webui/CLAUDE.md` § "Connections view".
 
 ## What this is NOT
 
@@ -76,7 +103,9 @@ introduce a hallucination or alter a refusal. Independent of the answering agent
 
 ## Build-out (in leverage order — ADR-0011 / db-audit)
 
-- ✅ **`/graph` Cytoscape viz on `related_documents`** (specificity edges) — shipped.
+- ✅ **`/graph` neighbourhood viz** — shipped on `related_documents` (specificity edges), then
+  **redesigned 2026-05-29 (`b48f8b2`) as the server-rendered "Bridges" view** (Cytoscape dropped;
+  concept lens = `related_bridges`, document lens = `related_documents`). See "Bridges view" below.
 - ✅ **entity-centric retrieval ("everything about entity X across the corpus")** — shipped
   2026-05-28; see "Entity-centric retrieval" below.
   - ✅ **acronym ↔ expansion bridge** (the resolution deepening) — shipped 2026-05-28

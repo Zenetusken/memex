@@ -396,13 +396,13 @@ async def serve_http(host: str = "127.0.0.1", port: int = 7424) -> None: ...
 - `GET /documents/{doc_id}/summarize/status?cid=&v=N` — long-polls the summarizer's phase advance; renders `_summary.html` on completion
 - `GET /documents/{doc_id}/source` — serves the original file (inline `Content-Disposition` for the pane header `download` link)
 - `GET /documents/{doc_id}/source/page/{n}` — rasterises a **0-based** page to PNG (`parse.pdf_render`, pypdfium2-light, lock-serialized — pypdfium2 is NOT thread-safe)
-- `GET /graph` — Cytoscape.js page; data fetched from `/api/graph/{doc_id}/neighbors`
+- `GET /graph/{doc_id}` — the document-connections "Bridges" page (server-rendered/ranked, `?group=concept|document`; Cytoscape was dropped 2026-05-29 — a 1-hop star has no topology to draw)
 - `POST /documents/{doc_id}/review` — apply a manual correction (delegates to `vault.write_document` after merging)
 - `GET /resources` + `POST /resources/mode` — co-residence mode comparison + live hot-switch (ADR-0007 §"Runtime transitions")
 - `POST /scope-sets`, `POST /scope-sets/apply`, `POST /scope-sets/delete` — saved-scope-set CRUD (re-rendered partial)
 - `GET /healthz` — for `memex daemon status` polling
 
-**Dependencies.** `fastapi`, `uvicorn`, `jinja2` (already pulled in via prompts), HTMX as a vendored `static/htmx.min.js`, Tailwind as a hand-curated utility subset at `static/tailwind.css`. No build step, no React, no CDN. Cytoscape.js the same way for the graph view.
+**Dependencies.** `fastapi`, `uvicorn`, `jinja2` (already pulled in via prompts), HTMX as a vendored `static/htmx.min.js`, Tailwind as a hand-curated utility subset at `static/tailwind.css`. No build step, no React, no CDN. (Cytoscape.js was vendored the same way for an earlier `/graph` viz; the 2026-05-29 "Bridges" redesign dropped it — the connections page is now pure server-rendered HTML/CSS, zero scripts.)
 
 **Minimum viable (shipped).** Every endpoint above except `/graph` (Phase 3+).
 

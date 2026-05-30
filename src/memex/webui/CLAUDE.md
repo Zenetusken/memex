@@ -135,6 +135,45 @@ refusal, and the CLI/MCP `ask` payloads are unchanged. Pinned by `test_webui.py`
 (`test_ask_renders_related_panel_excluding_cited_docs` / `…survives_graph_unavailable` /
 `test_ask_refusal_has_no_related_panel`).
 
+## Connections view — the "Bridges" page (`/graph` + `graph.html` + `graph.css`, 2026-05-29, `b48f8b2`)
+
+`GET /graph/{doc_id}` is the document-neighbourhood view, **redesigned from the Cytoscape
+node-link "hairball" to a server-rendered, ranked, no-JS page**. The diagnosis (design panel +
+the codebase record): a 1-hop neighbourhood is a **STAR** — no clusters, no paths between
+leaves — so a node-link diagram spends its whole visual budget (position, edges, pan/zoom)
+encoding a topology that doesn't exist, and draws ~45 identical grey spokes that read as "all
+equally related" when the data is a sharp specificity RANKING. **Cytoscape is dropped from this
+page** (air-gap + maintenance win; `static/cytoscape.min.js` + `static/graph.js` stay vendored
+on disk but UNREFERENCED — `graph.css` keeps its retired `.cy-canvas`/`.inspector-*` block ONLY
+so `graph.js`'s classes stay covered by `scripts/check-tailwind-coverage.py`).
+
+Two **lenses** over the same graph data, toggled by `?group=` (plain `<a>` links → shareable
+URL, no JS):
+- **concept** (default) — `GraphStore.related_bridges(doc_id)`: related docs grouped UNDER the
+  bridging ENTITY that connects them. Each bridge is a native `<details>` (top 2 `open`, rest
+  collapsed) showing the entity (a `/entity?name=` traversal link) + the kind chip
+  (`.entity-kind`) + a right-aligned strength bar + "bridges N", then its docs (`.related-link`)
+  with their "·via" entity tags. The route splits multi-doc bridges (the headline) from
+  single-doc ones (a folded `.bridge-tail` disclosure); if there are no multi-doc bridges the
+  singles are promoted. Ranked by `strength = mean(IDF×kind_weight) × ln(1 + doc_count)` — see
+  `src/memex/CLAUDE.md` / `docs/specs/graph-discovery.md` for why the fan-out is log-damped.
+- **document** — `related_documents` rendered as a flat strength-ranked rail (`.rail-*`): a
+  left strength bar + the doc-title link + its connecting entities. The Ranked-Rail design as
+  the alternate lens.
+
+The route computes proportional bar percentages (ordinal sugar — the count/rank are the honest
+signal, so the % is never printed; WCAG 1.4.1). **Fail-open**: an `ImportError` from
+`GraphStore.open` → `graph_available=False` + the amber "graph store unavailable" panel; an
+empty neighbourhood → a quiet "No related documents found" note; a `VaultIntegrityError` on the
+doc → 404. Semantic `.bridge-*` / `.rail-*` / `.lens-*` CSS in `graph.css` (zinc + the one blue
+accent — the strength-bar fill is a quieted blue, like `.ans-answer`'s structural rule;
+secondary text floors at zinc-400). Reuses the shipped `.related-entity-link` / `.entity-kind`
+markup; NOT new Tailwind. The `webui → index/graph_store` test-seam edge is unchanged
+(`test_webui.py` monkeypatches `GraphStore.open`; the fake provides BOTH `related_documents` +
+`related_bridges`). Live-verified in Chrome (both lenses legible, clean console — the page ships
+zero scripts). Pinned by `test_webui.py` (`test_graph_renders_bridges_view` /
+`test_graph_document_lens_renders_ranked_list` / `…shows_unavailable…` / `…404s…`).
+
 ## Entity-centric discovery view (`/entity` + `entity.html` + `.entity-*`, ADR-0011, 2026-05-28)
 
 The visual surface for "everything about entity X" — the second graph-discovery surface

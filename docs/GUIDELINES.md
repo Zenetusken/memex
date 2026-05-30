@@ -418,7 +418,7 @@ A minimal FastAPI app with server-rendered HTML and HTMX for interactivity. No S
 
 Why HTMX and not React/Svelte: this is a local-only application running on the user's machine. Bundle size doesn't matter, but build complexity does. HTMX gives us all the interactivity we need (search, document preview, graph zoom) for less than 50KB of frontend code total, with no build step.
 
-The UI's job is the *visual* parts of the workflow that CLI can't do well: side-by-side preview of source PDF and extracted Markdown for review, graph visualization (Cytoscape.js), and document-level annotation correction.
+The UI's job is the *visual* parts of the workflow that CLI can't do well: side-by-side preview of source PDF and extracted Markdown for review, the document-connections view (the `/graph` "Bridges" page — server-rendered/ranked since 2026-05-29; Cytoscape was dropped because a 1-hop neighbourhood is a star with no topology to draw), and document-level annotation correction.
 
 Dark mode is the default. Light mode is supported. The aesthetic is closer to a developer tool (Linear, Raycast) than a consumer notes app.
 

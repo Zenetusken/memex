@@ -65,7 +65,10 @@ This is the difference between *passive recall-boosting in the RAG path* (which 
 The discovery build-out the Decision promised, shipped same-day from the validated
 specificity primitive:
 
-- ✅ **`/graph` Cytoscape viz** now consumes `related_documents` (specificity edges).
+- ✅ **`/graph` neighbourhood viz** — first consumed `related_documents` as a Cytoscape node-link
+  viz; **redesigned 2026-05-29 (`b48f8b2`) to the server-rendered "Bridges" view** (Cytoscape
+  dropped: a 1-hop neighbourhood is a STAR with no topology to draw). Adds the entity-grouped
+  `related_bridges` (concept lens, `_rank_bridges`) beside `related_documents` (document lens).
 - ✅ **Entity-centric retrieval** — "everything about entity X" (`GraphStore.entity_profile`
   + the `retrieve/entity.py::entity_overview` orchestrator + pure `_rank_co_occurring`; CLI
   `memex entity`, MCP `entity_overview`, webui `/entity`). Identity + the authoritative
