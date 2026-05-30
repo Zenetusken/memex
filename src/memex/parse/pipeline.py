@@ -981,6 +981,102 @@ def _collapse_toc_leaders(markdown: str) -> str:
     return "\n".join(out)
 
 
+# ----- Heading-hierarchy normalizer (audit-10 step 3, W2/W15) -----
+#
+# Both engines recover a heading's level from FONT SIZE (PyMuPDF span size, Docling bbox
+# height), which is noisy: born-digital standards whose subsections share the body's heading
+# font collapse to a flat wall of H2 (NIST: 82×H2), and a dense doc spreads near-continuous
+# heights into 5 tiers that bottom out at H6. When a heading carries a SECTION NUMBER, that
+# number is an AUTHORITATIVE, engine-independent depth signal — `1` → a top section, `1.1` →
+# one level deeper, `1.1.1` → deeper still — so we override the font-derived level with the
+# number's depth. Unnumbered headings keep their engine level, a masthead title with no H1 is
+# promoted, and a final monotonic-nesting clamp forbids a level skipping more than one deeper
+# than its predecessor (an `H2 → H5` jump becomes `H2 → H3`). Engine-agnostic, so it fixes
+# BOTH worker outputs from one place; it ONLY rewrites the `#`-count, never heading text.
+_HEADING_RE: Final[re.Pattern[str]] = re.compile(r"^(#{1,6})[ \t]+(.*)$")
+_HEADING_BOLD_WRAP_RE: Final[re.Pattern[str]] = re.compile(r"^\*\*(.*?)\*\*\s*$")
+# A leading section number: 1–2 digits per dot-group (so a 4-digit YEAR like "2023" is NOT
+# mistaken for a section), an optional trailing `.`/`)`, then whitespace. "1 ", "1.2 ",
+# "1.2.3. ", "4) " all match; "2023 Results" does not.
+_SECTION_NUM_RE: Final[re.Pattern[str]] = re.compile(r"^(\d{1,2}(?:\.\d{1,2})*)[.)]?\s")
+_ITEM_HEADING_RE: Final[re.Pattern[str]] = re.compile(
+    r"^(?:Item|Section|Part)\s+\d+[A-Za-z]?[.:)]", re.IGNORECASE
+)
+_APPENDIX_HEADING_RE: Final[re.Pattern[str]] = re.compile(r"^Appendix\s+[A-Z0-9]", re.IGNORECASE)
+
+
+def _heading_inner_text(text: str) -> str:
+    """The heading's text with a single surrounding bold wrap removed, for number detection
+    (both workers emit `## **1.1 History**`). Only unwraps a wrap spanning the WHOLE line."""
+    m = _HEADING_BOLD_WRAP_RE.match(text.strip())
+    return m.group(1).strip() if m else text.strip()
+
+
+def _authoritative_heading_level(inner: str) -> int | None:
+    """The level a heading's own text DICTATES, independent of font size — or None to keep the
+    engine level. A section number sets depth = dot-groups + 1 (`1`→H2, `1.1`→H3, `1.1.1`→H4);
+    `Item N`/`Section N`/`Part N`/`Appendix X` labels anchor at H2. Capped at H6."""
+    m = _SECTION_NUM_RE.match(inner)
+    if m:
+        return min(1 + len(m.group(1).split(".")), 6)
+    if _ITEM_HEADING_RE.match(inner) or _APPENDIX_HEADING_RE.match(inner):
+        return 2
+    return None
+
+
+def normalize_heading_levels(markdown: str) -> str:
+    """Re-derive heading `#`-levels from section-number depth + a monotonic-nesting guard.
+
+    Engine-agnostic (runs in `_finalize_body` on both PyMuPDF and Docling output). For each
+    `#`-heading: use the level its SECTION NUMBER dictates if it has one, else keep the
+    engine-recovered level. Then, if the doc has no H1 and its first heading is an unnumbered
+    masthead, promote that first heading to H1. Finally clamp the sequence so no heading nests
+    more than one level below its predecessor. Fence-aware (a `# ` inside ```code``` is inert).
+    Only the hash count changes — heading TEXT (incl. any bold wrap) is preserved verbatim.
+    """
+    lines = markdown.split("\n")
+    # Pass 1 — locate headings (fence-aware), recording their line index, current level, and
+    # the level their own text dictates.
+    parsed: list[tuple[int, int, int | None]] = []  # (line_idx, current_level, auth_level)
+    in_fence = False
+    for i, line in enumerate(lines):
+        if _FENCE_LINE_RE.match(line):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        m = _HEADING_RE.match(line)
+        if not m:
+            continue
+        current = len(m.group(1))
+        auth = _authoritative_heading_level(_heading_inner_text(m.group(2)))
+        parsed.append((i, current, auth))
+
+    if not parsed:
+        return markdown
+
+    targets = [auth if auth is not None else current for _, current, auth in parsed]
+    # Masthead → H1: a doc whose headings never reach H1 and whose FIRST heading is an
+    # unnumbered title (no authoritative level) gets that title promoted, so the tree has a root.
+    if not any(current == 1 for _, current, _ in parsed) and parsed[0][2] is None:
+        targets[0] = 1
+
+    # Monotonic-nesting clamp: forbid descending more than one level at a step (the first
+    # heading is never clamped — a tree may legitimately start at H2).
+    prev = 0
+    for k, lvl in enumerate(targets):
+        if prev and lvl > prev + 1:
+            lvl = prev + 1
+        lvl = max(1, min(lvl, 6))
+        targets[k] = lvl
+        prev = lvl
+
+    for (line_idx, _current, _auth), lvl in zip(parsed, targets, strict=True):
+        text = _HEADING_RE.match(lines[line_idx]).group(2)  # type: ignore[union-attr]  # matched in pass 1
+        lines[line_idx] = "#" * lvl + " " + text
+    return "\n".join(lines)
+
+
 def _finalize_body(markdown: str) -> str:
     """Engine-agnostic post-parse finalize of the body that is WRITTEN TO THE VAULT.
 
@@ -993,12 +1089,13 @@ def _finalize_body(markdown: str) -> str:
     reproduces the exact pre-split input the chunker used to see, so chunk_ids are stable
     and no re-embed is needed. See `docs/audits/10-raw-md-output-audit.md` (W1).
 
-    The engine-agnostic content scrubber lives here (audit-10 step 2+): it currently collapses
-    TOC dot-leader pagination artifacts. The result is the bytes written to disk, so EVERY
+    The engine-agnostic content scrubbers live here (audit-10 step 2+): collapse TOC dot-leader
+    pagination artifacts, then normalize the heading hierarchy (section-number depth + masthead
+    promotion + monotonic-nesting guard). The result is the bytes written to disk, so EVERY
     consumer of the parsed body (the vault `body=`, the `_bootstrap_ref` content hash, and the
     `markdown_bytes` manifest/log count) is threaded from this one value.
     """
-    return _collapse_toc_leaders(markdown)
+    return normalize_heading_levels(_collapse_toc_leaders(markdown))
 
 
 async def _parse_with_docling(

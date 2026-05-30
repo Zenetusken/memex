@@ -86,10 +86,16 @@ def test_uniform_heights_all_level_1() -> None:
     assert all(h.level == 1 for h in hs)
 
 
-def test_caps_at_level_5() -> None:
+def test_caps_at_level_4() -> None:
+    # audit-10 step 3b: many near-continuous heading heights (the dense 10-K) must NOT spread
+    # to level 5 (H6). The level is capped at 4 → `#####` (H5) is the deepest docling emits — four
+    # header layers (H2–H5) below the H1 document title; the long tail of small-height (largely
+    # mis-detected) headers all collapse onto the cap rather than bottoming out at mass-H6. Deeper
+    # NUMBERED structure is recovered by the engine-agnostic `normalize_heading_levels` from the
+    # section number, and the monotonic guard refines the rest.
     hs = [_FakeHeader(float(s)) for s in (30, 26, 22, 18, 14, 10)]
     _recover_heading_levels(_FakeDoc(list(hs)))
-    assert [h.level for h in hs] == [1, 2, 3, 4, 5, 5]  # 6th tier capped
+    assert [h.level for h in hs] == [1, 2, 3, 4, 4, 4]  # tiers ≥5 all clamp to the level-4 cap
 
 
 def test_header_without_prov_is_skipped() -> None:

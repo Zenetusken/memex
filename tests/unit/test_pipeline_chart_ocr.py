@@ -208,3 +208,103 @@ def test_collapse_toc_leaders_strips_pagination_artifacts() -> None:
     assert _collapse_toc_leaders("plain prose, no leaders") == "plain prose, no leaders"
     fenced = "```\nx = a ...... b\n```"
     assert _collapse_toc_leaders(fenced) == fenced  # literal dots in code untouched
+
+
+# ======================================================================
+# audit-10 step 3 (W2/W15): engine-agnostic heading-hierarchy normalizer
+# ======================================================================
+
+
+def test_normalize_section_number_depth_builds_a_tree() -> None:
+    """A flat wall of H2 (born-digital standard whose subsections share the heading font)
+    gets re-nested by SECTION-NUMBER depth: `N`→H2, `N.N`→H3, `N.N.N`→H4. Bold-wrapped
+    heading text (as both workers emit) is detected and preserved verbatim."""
+    from memex.parse.pipeline import normalize_heading_levels
+
+    md = (
+        "## **1 Introduction**\n\n"
+        "## **1.1 History**\n\n"
+        "## **1.1.1 Origins**\n\n"
+        "## **2 Tenets**\n"
+    )
+    out = normalize_heading_levels(md).split("\n")
+    assert out[0] == "## **1 Introduction**"  # N → H2
+    assert out[2] == "### **1.1 History**"  # N.N → H3 (text kept incl. bold)
+    assert out[4] == "#### **1.1.1 Origins**"  # N.N.N → H4
+    assert out[6] == "## **2 Tenets**"  # back to H2
+
+
+def test_normalize_masthead_promoted_when_no_h1() -> None:
+    """A doc whose headings never reach H1 and whose first heading is an unnumbered masthead
+    gets that title promoted to H1; numbered sections nest beneath by their number."""
+    from memex.parse.pipeline import normalize_heading_levels
+
+    md = "## Generative Text Embeddings\n\n## Abstract\n\n## **3.1 Model Architecture**\n"
+    out = normalize_heading_levels(md).split("\n")
+    assert out[0] == "# Generative Text Embeddings"  # masthead → H1
+    assert out[2] == "## Abstract"  # unnumbered section keeps engine level
+    assert out[4] == "### **3.1 Model Architecture**"  # N.N → H3
+
+
+def test_normalize_does_not_promote_when_h1_present() -> None:
+    """An existing H1 (e.g. NIST's duplicated masthead) means no masthead promotion — the
+    first heading keeps H1 and the rest nest by number."""
+    from memex.parse.pipeline import normalize_heading_levels
+
+    md = "# Zero Trust Architecture\n\n## **1 Introduction**\n\n## **1.1 History**\n"
+    out = normalize_heading_levels(md).split("\n")
+    assert out[0] == "# Zero Trust Architecture"  # untouched H1
+    assert out[2] == "## **1 Introduction**"
+    assert out[4] == "### **1.1 History**"
+
+
+def test_normalize_item_and_appendix_anchor_at_h2() -> None:
+    """10-K `Item N.` / `Appendix X` labels anchor at H2 regardless of the font-derived level
+    (the mass-H6 case): the normalizer overrides the engine level for these."""
+    from memex.parse.pipeline import normalize_heading_levels
+
+    md = "###### Item 1. Business\n\n###### Item 7A. Market Risk\n\n###### Appendix A: Glossary\n"
+    out = [ln for ln in normalize_heading_levels(md).split("\n") if ln.startswith("#")]
+    assert out == ["## Item 1. Business", "## Item 7A. Market Risk", "## Appendix A: Glossary"]
+
+
+def test_normalize_monotonic_guard_clamps_jumps() -> None:
+    """A level that nests more than one deeper than its predecessor is clamped (H2 → H5
+    becomes H2 → H3, then the next H6 → H4). An explicit H1 keeps masthead promotion out of
+    the way so the clamp is isolated."""
+    from memex.parse.pipeline import normalize_heading_levels
+
+    md = "# Doc Title\n\n## Overview\n\n##### Buried Subsection\n\n###### Deeper Still\n"
+    out = [ln for ln in normalize_heading_levels(md).split("\n") if ln.startswith("#")]
+    assert out == ["# Doc Title", "## Overview", "### Buried Subsection", "#### Deeper Still"]
+
+
+def test_normalize_leaves_code_fences_inert() -> None:
+    """A `#`-comment inside a fenced code block is not a heading and is left untouched."""
+    from memex.parse.pipeline import normalize_heading_levels
+
+    md = "## **1 Setup**\n\n```python\n# this is a comment, not a heading\nx = 1\n```\n"
+    out = normalize_heading_levels(md)
+    assert "## **1 Setup**" in out
+    assert "# this is a comment, not a heading" in out  # unchanged inside the fence
+
+
+def test_normalize_year_prefix_is_not_a_section_number() -> None:
+    """A 4-digit year leading a title must NOT be read as a section number (→ would force H2);
+    the heading keeps its engine level."""
+    from memex.parse.pipeline import normalize_heading_levels
+
+    # With a proper H2 parent the year-led heading KEEPS its engine level (H3); had "2023" been
+    # read as a section number it would have been forced to H2 (the visible distinction).
+    md = "# Annual Report\n\n## Financials\n\n### 2023 Results and Outlook\n"
+    out = normalize_heading_levels(md).split("\n")
+    assert out[0] == "# Annual Report"
+    assert out[2] == "## Financials"
+    assert out[4] == "### 2023 Results and Outlook"  # year not mistaken for a section number
+
+
+def test_normalize_no_headings_is_noop() -> None:
+    from memex.parse.pipeline import normalize_heading_levels
+
+    body = "Just prose.\n\nMore prose, no headings at all.\n"
+    assert normalize_heading_levels(body) == body

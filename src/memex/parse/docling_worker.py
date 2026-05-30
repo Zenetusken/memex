@@ -111,10 +111,18 @@ def _recover_heading_levels(doc: Any) -> int:
     if not headers:
         return 0
 
-    # Distinct buckets, largest first → levels 1..5. The serializer emits
-    # `level + 1` hashes, so cap at 5 → `######`, markdown's deepest.
+    # Distinct buckets, largest first → levels 1..N. The serializer emits `level + 1` hashes,
+    # so level 4 → `#####` (H5). CAP at 4 (audit-10 step 3b): a near-continuous height range on
+    # a dense doc (the 10-K) otherwise spreads headers across 5 tiers and dumps the many
+    # small-height ones (largely mis-detected table labels) at level 5 → mass-H6. The cap is 4,
+    # not 3, because H1 is reserved for the document TITLE (the `TitleItem`, emitted as `#`), so
+    # section headers get FOUR layers below it (H2–H5); the long tail of tiny heights collapses
+    # onto the H5 cap instead of bottoming out at mass-H6. Deeper NUMBERED structure is recovered
+    # authoritatively from the section number by the engine-agnostic normalizer in
+    # `_finalize_body`, and the monotonic-nesting guard there refines the rest. The residual
+    # over-detection (short non-prose labels tagged as headers) is the deeper W11 problem.
     tiers = sorted({bucket for _, bucket in headers}, reverse=True)
-    level_of = {bucket: min(i + 1, 5) for i, bucket in enumerate(tiers)}
+    level_of = {bucket: min(i + 1, 4) for i, bucket in enumerate(tiers)}
     for item, bucket in headers:
         item.level = level_of[bucket]
     return len(headers)

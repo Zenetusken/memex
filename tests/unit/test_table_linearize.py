@@ -283,13 +283,14 @@ def _big_linearized_table(n_rows: int = 80) -> str:
 
 def test_finalize_body_keeps_the_vault_md_clean() -> None:
     """audit-10 W1: the canonical `.md` is content-only — `_finalize_body` does NOT
-    inject `[table-rows]` (the linearization moved to index time)."""
+    inject `[table-rows]` (the linearization moved to index time). The step-3 heading
+    normalizer leaves an already-rooted tree (H1 title + H2 section) untouched."""
     from memex.parse.pipeline import _finalize_body
 
-    body = "## Revenue\n\n| Metric | 2024 |\n|---|---|\n| Compute | 100 |\n"
+    body = "# Annual Report\n\n## Revenue\n\n| Metric | 2024 |\n|---|---|\n| Compute | 100 |\n"
     out = _finalize_body(body)
     assert "[table-rows]" not in out
-    assert out == body  # pass-through (clean content only)
+    assert out == body  # pass-through (clean content, already-rooted headings)
 
 
 def test_index_rederivation_is_retrieval_neutral() -> None:
