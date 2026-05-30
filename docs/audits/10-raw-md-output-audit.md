@@ -134,4 +134,26 @@ lets us choose **per-arm** what dense vs. BM25 each consume (the future fix for 
   - **Rollout:** the vault re-process (re-parse all → clean `.md`) is batched after the remaining
     parse-stage fixes (steps 2–9) to avoid re-parsing 47 docs repeatedly. The code is live + idempotent
     on existing docs in the meantime.
-- ⏭ Next: step 2 (shared finalize scrubber: classifier labels, image-marker enrich, page furniture, …).
+- ✅ **Step 2 (W3/W4/W7/W16-rstrip) — Docling image-marker enrichment + content-only scrub** (2026-05-30).
+  Source-fixed in `docling_worker` (`enrich_image_markers` + `clean_docling_markdown`, run on the doc-level
+  AND per-page markdown): the PictureClassifier label is folded INTO the kept `<!-- image -->` marker as
+  `kind=` metadata (decision D2 — marker stays for rich-view insertion + W9 gap visibility) and the bare
+  label paragraph dropped (~946 noise lines); over-escaped HTML entities decoded (W7); lines rstripped
+  (W16). `_IMAGE_PLACEHOLDER_RE` made tolerant of `<!-- image: kind=… -->` so the chart-OCR stitch +
+  figure-count alignment are unchanged. **Validation:** 1066 tests (+5) + ruff/pyright clean; deterministic
+  on real output (CUDA 244→10, ENSA-3 67→0, 10-K 75→0 bare labels + 109→0 entities); a **live re-parse of a
+  Docling deck** (srwe-16) produced 14 enriched `kind=` markers / 0 bare labels / 0 `[table-rows]`, confirmed
+  in the webui raw view; vault restored pristine.
+- ✅ **Step 2b (W8) — repeating page-furniture strip in `pymupdf_worker`** (2026-05-30).
+  `strip_repeating_page_furniture` drops running headers/footers + page numbers that recur in the
+  page-boundary BAND (first/last `_FURNITURE_BAND`=3 non-blank lines) on ≥ max(3, 0.5×n_pages) pages, OR
+  are bare page numbers. POSITION-AWARE (only the band occurrence removed → legit mid-page text kept),
+  structural lines (heading/table/list/code) never furniture, page/markdown records kept in lockstep.
+  **Validation:** 1073 tests (+7) + ruff/pyright clean; an **adversarial cross-doc audit** of EVERY removed
+  line across all 5 born-digital docs found **0 real false-positives** (NIST 162 stripped = the two-line
+  header ×56 + page numbers; gte/guidelines 0; the one "suspicious" hit was pymupdf4llm's own
+  `==> picture omitted <==` placeholder — correctly removed noise). A **live NIST re-parse** took the ×56
+  running header + page numbers → 0, confirmed in the webui raw view; vault restored pristine.
+  - **Deferred:** docling-deck running-header furniture (decks rarely have them) + a multi-line-aware band
+    for docling, if a deck case appears.
+- ⏭ Next: step 3 (heading-hierarchy normalizer: section-number depth + monotonic nesting + masthead→H1).

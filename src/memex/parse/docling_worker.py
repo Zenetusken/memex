@@ -232,6 +232,76 @@ def _demote_prose_headings(markdown: str) -> tuple[str, int]:
     return "\n".join(out), demoted
 
 
+# docling_core's PictureClassifier prettified labels (sentence-cased enum values). The
+# markdown serializer emits the top-1 class as a BARE paragraph after a `<!-- image -->`
+# placeholder (~946 such lines vault-wide: Logo / Icon / Photograph / Line chart / …). We
+# fold the label INTO the marker as `kind=` metadata and drop the bare paragraph — the marker
+# itself STAYS (the rich view inserts the real image there + it marks a figure gap; audit-10
+# W3/W4 + decision D2). Matched case-insensitively; the slug = lowercased label, spaces→`-`.
+_DOCLING_PICTURE_LABELS: frozenset[str] = frozenset(
+    {
+        "logo", "icon", "photograph", "picture", "natural image", "pictogram",
+        "line chart", "bar chart", "pie chart", "scatter plot", "box plot",
+        "flow chart", "engineering drawing", "diagram", "screenshot",
+        "screenshot from computer", "table", "signature", "stamp", "map",
+        "geographical map", "remote sensing", "bar code", "qr code", "calendar",
+        "chemistry molecular structure", "chemistry markush structure", "other",
+    }
+)
+
+_IMAGE_MARKER_RE = re.compile(r"^<!--\s*image\s*-->$", re.IGNORECASE)
+
+# HTML entities docling over-escapes into prose/headings/cells (audit-10 W7). Targeted (not a
+# full html.unescape) so a rare legit `&copy;`-style entity isn't transformed unexpectedly.
+_HTML_ENTITY_UNESCAPES = (
+    ("&amp;", "&"),
+    ("&lt;", "<"),
+    ("&gt;", ">"),
+    ("&#39;", "'"),
+    ("&quot;", '"'),
+)
+
+
+def enrich_image_markers(markdown: str) -> tuple[str, int]:
+    """Fold a docling PictureClassifier label paragraph into its preceding `<!-- image -->`
+    marker as `kind=` metadata, dropping the bare label line. The marker STAYS (rich-view
+    image insertion + figure-gap visibility, decision D2). Only a KNOWN classifier label (the
+    closed `_DOCLING_PICTURE_LABELS` set) is folded; any other following paragraph is left
+    untouched (so real content after an image is never eaten). Returns `(markdown, folded)`.
+    Idempotent: an already-`kind=`-tagged marker doesn't match `_IMAGE_MARKER_RE`."""
+    lines = markdown.split("\n")
+    out: list[str] = []
+    folded = 0
+    i = 0
+    n = len(lines)
+    while i < n:
+        if _IMAGE_MARKER_RE.match(lines[i].strip()):
+            j = i + 1
+            while j < n and not lines[j].strip():  # skip the blank gap to the next paragraph
+                j += 1
+            if j < n and lines[j].strip().lower() in _DOCLING_PICTURE_LABELS:
+                slug = lines[j].strip().lower().replace(" ", "-")
+                out.append(f"<!-- image: kind={slug} -->")
+                folded += 1
+                i = j + 1  # consume the blank gap + the bare label line
+                continue
+        out.append(lines[i])
+        i += 1
+    return "\n".join(out), folded
+
+
+def clean_docling_markdown(markdown: str) -> str:
+    """Content-only finalize of the docling markdown OUTPUT (audit-10 step 2 — the source-stage
+    scrubber, run in the worker that produces the artifact). (1) fold classifier labels into
+    image markers + drop the bare label (W3/W4); (2) decode the HTML entities docling
+    over-escapes (W7); (3) rstrip trailing whitespace (W16). Pure-sync; runs on the doc-level
+    AND per-page markdown so both stay consistent for the VLM-escalation re-stitch."""
+    md, _ = enrich_image_markers(markdown)
+    for ent, ch in _HTML_ENTITY_UNESCAPES:
+        md = md.replace(ent, ch)
+    return "\n".join(line.rstrip() for line in md.split("\n"))
+
+
 # Data-chart PictureClassifier class names (docling_core's snake_case labels).
 # These figures are chart-OCR's domain, NOT the VLM's: a chart-dominant page
 # should route to chart-OCR (structured extraction), not get VLM page-
@@ -369,6 +439,13 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
     markdown, demoted = _demote_prose_headings(markdown)
     if demoted:
         print(f"docling: demoted {demoted} prose headings (fallback)", file=sys.stderr)
+    # audit-10 step 2: fold classifier labels into image markers, decode over-escaped HTML
+    # entities, rstrip — a content-only finalize of the docling OUTPUT (the source stage).
+    _enriched_pre = markdown.count("<!-- image: kind=")
+    markdown = clean_docling_markdown(markdown)
+    _enriched = markdown.count("<!-- image: kind=") - _enriched_pre
+    if _enriched:
+        print(f"docling: enriched {_enriched} image markers with classifier kind", file=sys.stderr)
 
     pages: list[dict[str, Any]] = []
     page_areas: dict[int, float] = {}
@@ -402,6 +479,7 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
         try:
             raw_page_md: Any = doc.export_to_markdown(page_no=page_no)
             page_md, _ = _demote_prose_headings(raw_page_md)
+            page_md = clean_docling_markdown(page_md)  # same content-only finalize (step 2)
         except Exception:
             page_md = ""
         # Docling exposes a per-DOCUMENT ConfidenceReport (parse/layout/

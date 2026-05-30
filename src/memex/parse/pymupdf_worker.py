@@ -299,6 +299,82 @@ def _remap_heading_levels(page_md: str, page: Any, size_to_level: dict[int, int]
     return "\n".join(out)
 
 
+# A bare page-number / "Page N (of M)" line in the boundary band is furniture even though
+# each page's number differs (so it can't be caught by repeat-frequency). Roman numerals are
+# deliberately NOT matched here — `mix`/`did`/`lid` are all-[ivxlcdm] false-friends.
+_PAGE_NUMBER_RE = re.compile(r"^(?:\d{1,4}|[Pp]age\s+\d{1,4}(?:\s+of\s+\d{1,4})?)$")
+# A markdown-structural boundary line is NEVER furniture (heading / table / code / list / quote).
+_FURNITURE_STRUCTURAL_PREFIXES = ("#", "|", "```", "- ", "* ", "> ", "[", "<!--")
+_MAX_FURNITURE_LEN = 90
+
+
+def _is_furniture_candidate(text: str) -> bool:
+    s = text.strip()
+    if not s or len(s) > _MAX_FURNITURE_LEN:
+        return False
+    return not s.startswith(_FURNITURE_STRUCTURAL_PREFIXES)
+
+
+# A running header/footer can be MULTIPLE lines (e.g. NIST stacks "NIST SP 800-207" over
+# "ZERO TRUST ARCHITECTURE"). Look at a BAND of the first/last N non-blank lines, not just the
+# single boundary line. N=3 is robust for up-to-3-line headers; the high recurrence threshold +
+# structural-line exclusion keep it from catching real body content (which is unique per page).
+_FURNITURE_BAND = 3
+
+
+def _page_band_indices(md: str) -> list[int]:
+    """Sorted indices of the first N and last N NON-BLANK lines of `md` (the header/footer band)."""
+    lines = md.split("\n")
+    nonblank = [i for i, ln in enumerate(lines) if ln.strip()]
+    if not nonblank:
+        return []
+    return sorted(set(nonblank[:_FURNITURE_BAND] + nonblank[-_FURNITURE_BAND:]))
+
+
+def strip_repeating_page_furniture(
+    pages: list[str], *, min_repeat: int = 3, min_fraction: float = 0.5
+) -> tuple[list[str], int]:
+    """Strip running headers/footers + page numbers that recur in the PAGE-BOUNDARY BAND across
+    many pages (audit-10 W8 — e.g. NIST's two-line header repeated ×56 interleaved mid-prose).
+
+    `pages` is the per-page markdown list. A band line (in the first/last `_FURNITURE_BAND`
+    non-blank lines of a page) is furniture when it (a) recurs in the band on >= max(`min_repeat`,
+    `min_fraction` × n_pages) pages, OR (b) is a bare page number. Stripping is POSITION-AWARE —
+    only the band occurrence is removed, so a legitimate mid-page occurrence of the same text is
+    untouched — and markdown-structural lines (headings/tables/lists/code) are never furniture.
+    Pure-sync; returns `(cleaned_pages, lines_stripped)`. A short doc (< `min_repeat` pages) is
+    returned unchanged."""
+    if len(pages) < min_repeat:
+        return pages, 0
+    counts: dict[str, int] = {}
+    for md in pages:
+        lines = md.split("\n")
+        seen: set[str] = set()
+        for idx in _page_band_indices(md):
+            txt = lines[idx].strip()
+            if _is_furniture_candidate(txt) and txt not in seen:  # dedup within a page
+                counts[txt] = counts.get(txt, 0) + 1
+                seen.add(txt)
+    threshold = max(min_repeat, int(min_fraction * len(pages)))
+    repeating = {t for t, c in counts.items() if c >= threshold}
+
+    stripped = 0
+    out: list[str] = []
+    for md in pages:
+        lines = md.split("\n")
+        drop: set[int] = set()
+        for idx in _page_band_indices(md):
+            txt = lines[idx].strip()
+            if txt in repeating or (_is_furniture_candidate(txt) and _PAGE_NUMBER_RE.match(txt)):
+                drop.add(idx)
+        if drop:
+            stripped += len(drop)
+            out.append("\n".join(ln for i, ln in enumerate(lines) if i not in drop).strip("\n"))
+        else:
+            out.append(md)
+    return out, stripped
+
+
 def _safe_meta(doc: Any, key: str) -> str | None:
     md = getattr(doc, "metadata", None) or {}
     val = md.get(key)
@@ -623,6 +699,24 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
                 }
             )
             markdown_parts.append(fallback)
+
+        # audit-10 W8: drop running headers/footers + page numbers that recur at the page
+        # boundary (e.g. a header repeated on most pages, interleaved mid-prose once stitched).
+        # `pages` and `markdown_parts` are 1:1 (appended together); keep them in lockstep, and
+        # drop any page that became empty after the strip (so page→offset mapping stays right,
+        # same discipline as the empty-page handling above).
+        cleaned_parts, furniture_n = strip_repeating_page_furniture(markdown_parts)
+        if furniture_n:
+            kept_pages: list[dict[str, Any]] = []
+            kept_parts: list[str] = []
+            for rec, part in zip(pages, cleaned_parts, strict=True):
+                if part:
+                    rec["markdown"] = part
+                    rec["char_count"] = len(part)
+                    kept_pages.append(rec)
+                    kept_parts.append(part)
+            pages, markdown_parts = kept_pages, kept_parts
+            print(f"pymupdf: stripped {furniture_n} repeating page-furniture lines", file=sys.stderr)
 
         joined = "\n\n".join(p for p in markdown_parts if p)
         signals = _collect_signals(doc, joined)

@@ -17,6 +17,8 @@ from memex.parse.docling_worker import (
     _demote_prose_headings,
     _looks_like_prose_heading,
     _recover_heading_levels,
+    clean_docling_markdown,
+    enrich_image_markers,
 )
 
 
@@ -244,3 +246,58 @@ def test_reclassify_long_prose_without_punct() -> None:
 
 def test_reclassify_empty_doc() -> None:
     assert _demote_misdetected_headers(_FakeDoc([]), text_item_cls=_FakeTextItem) == 0
+
+
+# ======================================================================
+# audit-10 step 2: image-marker enrichment + content-only docling scrub
+# ======================================================================
+
+
+def test_enrich_folds_classifier_label_into_marker() -> None:
+    """A bare `<!-- image -->` followed (across a blank line) by a known PictureClassifier
+    label folds the label into the marker as `kind=` and drops the bare label line."""
+    md = "Intro\n\n<!-- image -->\n\nLine chart\n\nNext para\n"
+    out, folded = enrich_image_markers(md)
+    assert folded == 1
+    assert "<!-- image: kind=line-chart -->" in out
+    assert "\nLine chart\n" not in out  # the bare label paragraph is gone
+    assert "Next para" in out  # real content after preserved
+
+
+def test_enrich_keeps_marker_when_no_known_label_follows() -> None:
+    """An image marker followed by REAL content (not a classifier label) keeps the bare
+    marker and never eats the content (figure-gap visibility, decision D2)."""
+    md = "<!-- image -->\n\n## A real heading\n"
+    out, folded = enrich_image_markers(md)
+    assert folded == 0
+    assert "<!-- image -->" in out
+    assert "## A real heading" in out
+
+
+def test_enrich_multiword_label_slug_and_idempotent() -> None:
+    md = "<!-- image -->\n\nScreenshot from computer\n"
+    out, folded = enrich_image_markers(md)
+    assert "<!-- image: kind=screenshot-from-computer -->" in out and folded == 1
+    # already-tagged markers don't re-match → idempotent
+    again, folded2 = enrich_image_markers(out)
+    assert again == out and folded2 == 0
+
+
+def test_clean_docling_markdown_unescapes_entities_and_rstrips() -> None:
+    md = "## Compute &amp; Networking   \n\nx &lt; y &gt; z  \n\n<!-- image -->\n\nLogo\n"
+    out = clean_docling_markdown(md)
+    assert "Compute & Networking" in out
+    assert "x < y > z" in out
+    assert "<!-- image: kind=logo -->" in out
+    assert "   \n" not in out and "  \n" not in out  # trailing whitespace stripped
+
+
+def test_image_placeholder_re_matches_both_bare_and_enriched() -> None:
+    """The chart-OCR stitch regex must match the enriched marker too (one placeholder either
+    way → figure-count alignment unchanged)."""
+    from memex.parse.pipeline import _IMAGE_PLACEHOLDER_RE
+
+    assert _IMAGE_PLACEHOLDER_RE.findall("a <!-- image --> b <!-- image: kind=line-chart --> c") == [
+        "<!-- image -->",
+        "<!-- image: kind=line-chart -->",
+    ]

@@ -680,7 +680,13 @@ async def derive_title(vault_path: Path, doc_id: str) -> str:
     return doc_id
 
 
-_IMAGE_PLACEHOLDER_RE: Final[re.Pattern[str]] = re.compile(r"<!--\s*image\s*-->", re.IGNORECASE)
+# Matches the bare `<!-- image -->` AND the enriched `<!-- image: kind=line-chart -->` form
+# (docling_worker folds the PictureClassifier label into the marker, audit-10 step 2). The
+# optional `: …` keeps chart-OCR stitching + the figure-count alignment working on both forms
+# (one placeholder either way, so the count is unchanged).
+_IMAGE_PLACEHOLDER_RE: Final[re.Pattern[str]] = re.compile(
+    r"<!--\s*image(?::[^>]*)?\s*-->", re.IGNORECASE
+)
 
 
 async def _vllm_reachable(base_url: str, timeout_s: float = 2.0) -> bool:
