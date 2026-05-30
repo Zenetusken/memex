@@ -20,6 +20,13 @@ from pathlib import Path
 
 import pytest
 
+from memex.core.table_linearize import (
+    header_all_value_like,
+    header_has_prose_cell,
+    linearize_gfm_tables,
+    nearest_heading_text,
+    parse_gfm_table,
+)
 from memex.core.text import (
     looks_like_value,
     strip_chart_extracted_for_index,
@@ -33,13 +40,6 @@ from memex.index.chunker import (
     chunk_document,
 )
 from memex.index.fts_store import FTSStore
-from memex.parse.table_linearize import (
-    header_all_value_like,
-    header_has_prose_cell,
-    linearize_gfm_tables,
-    nearest_heading_text,
-    parse_gfm_table,
-)
 from memex.vault.store import DocumentRef, Frontmatter, VaultDocument
 
 
@@ -279,6 +279,29 @@ def _big_linearized_table(n_rows: int = 80) -> str:
         for i in range(n_rows)
     )
     return linearize_gfm_tables(f"## Financial Statements\n\n{header}\n{rows}\n")
+
+
+def test_finalize_body_keeps_the_vault_md_clean() -> None:
+    """audit-10 W1: the canonical `.md` is content-only — `_finalize_body` does NOT
+    inject `[table-rows]` (the linearization moved to index time)."""
+    from memex.parse.pipeline import _finalize_body
+
+    body = "## Revenue\n\n| Metric | 2024 |\n|---|---|\n| Compute | 100 |\n"
+    out = _finalize_body(body)
+    assert "[table-rows]" not in out
+    assert out == body  # pass-through (clean content only)
+
+
+def test_index_rederivation_is_retrieval_neutral() -> None:
+    """audit-10 W1: re-deriving the linearization at INDEX time from the CLEAN vault
+    body reproduces exactly the body the chunker used to see when `[table-rows]` lived
+    in the `.md` — so chunk_ids (and embeddings) are unchanged. Idempotent, so a
+    not-yet-re-parsed (still-polluted) `.md` re-derives to the same bytes too."""
+    clean = "## Revenue\n\n| Metric | 2024 | 2025 |\n|---|---|---|\n| Compute | 10 | 20 |\n"
+    assert "[table-rows]" not in clean
+    indexed = linearize_gfm_tables(clean)  # exactly what index/pipeline.py now feeds the chunker
+    assert "[table-rows]" in indexed  # retrieval still co-locates each cell with its label
+    assert linearize_gfm_tables(indexed) == indexed  # idempotent → stable across migration
 
 
 def test_contract_b_raw_table_and_block_in_separate_chunks() -> None:

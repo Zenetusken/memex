@@ -40,6 +40,7 @@ from memex.core.manifest import (
     read_manifest,
     update_manifest,
 )
+from memex.core.table_linearize import linearize_gfm_tables
 from memex.core.types import Chunk
 from memex.index.chunker import chunk_document
 from memex.index.embed_prompts import (
@@ -194,7 +195,15 @@ async def index_document(doc_id: str, *, force: bool = False) -> IndexResult:
     page_char_counts: list[tuple[int, int]] | None = None
     if prior_manifest is not None and prior_manifest.parse is not None:
         page_char_counts = [(p.page, p.char_count) for p in prior_manifest.parse.pages]
-    new_chunks = chunk_document(doc, page_char_counts=page_char_counts)
+    # Re-derive the `[table-rows]` linearization here (NOT in the vault `.md`, which is
+    # content-only since audit-10). `linearize_gfm_tables` is idempotent, so this is the
+    # SAME input the chunker saw when the `.md` carried the blocks — chunk_ids stay stable
+    # whether the on-disk `.md` is already clean (new parse) or still-polluted (pre-migration).
+    # The chunk text thus still co-locates each cell with its column label for BM25/dense
+    # retrieval, while the vault file (and the webui raw view) stay clean. Page offsets are
+    # navigation-grade and unchanged (same linearized body the chunker always saw).
+    indexed_doc = doc.model_copy(update={"body": linearize_gfm_tables(doc.body)})
+    new_chunks = chunk_document(indexed_doc, page_char_counts=page_char_counts)
     new_by_id = {c.chunk_id: c for c in new_chunks}
     new_ids = set(new_by_id.keys())
 

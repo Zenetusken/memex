@@ -1,0 +1,137 @@
+# Audit 10 — Raw-markdown output quality (precursor to the rich document view)
+
+**Date:** 2026-05-30
+**Scope:** the parsed `vault/documents/{doc_id}.md` — the canonical "raw" output that is the source of
+truth and the substrate for retrieval/embeddings. **Goal:** make the raw `.md` a perfectly-structured
+source-of-truth (clean headers / sections / blocks) and harden extraction + retrieval, as the precursor
+to a **rich document view** (original PDF / clean raw markdown / rich rendering, side-by-side or toggled).
+**Method:** a structured multi-agent audit over a 7-doc representative set spanning every parse path
+(`.claude/workflows/raw-md-audit.js`), cross-checked against vault-wide artifact scans over all 47 docs.
+
+## Governing mandates (from the user)
+
+1. **Fix at the source.** Prefer fixing the parse worker / pipeline emission over post-processing. A
+   post-processing/render-time strip is a fallback only, never the recommended fix.
+2. **Structured output.** Findings are produced and tracked as structured data (the workflow schema).
+3. **Keep the `<!-- image -->` marker.** It is load-bearing — the rich view inserts the actual image at
+   the marker programmatically, and it gives figure-loss (W9) a visible anchor. Do **not** drop image
+   markers; *enrich* them (carry the figure type + an asset/page reference) instead.
+
+## Scorecard (structural quality of the raw `.md`, 0–10)
+
+| Score | Doc | Engine | Headline issue |
+|------:|-----|--------|----------------|
+| **8.5** | cs-notes-1 | scan-VLM (whole-doc) | clean baseline — zero derived pollution, clean nested headings. **Proof the target is reachable.** |
+| 5.5 | NIST SP 800-207 | pymupdf | flat outline (82×H2 / 0×H3); **all 12 figures silently lost**; running header repeated ×56; corrupt acronyms table (every row keyed `API=`) |
+| 5.5 | gte-2308.03281 | pymupdf | **all display equations dropped** (dangling lead-ins); two-column order scrambled (5.1→5.3→5.2); flat `##` |
+| 4.5 | ENSA-3 deck | docling + per-page VLM | clean content buried under pollution; VLM narrates a decorative meme + a medallion as course content; leaked ` ```markdown ` fence |
+| 3.5 | 10-K (annual report) | docling | 445×H6 vs 9×H1; `[table-rows]` ≈ half the file; layout graphic → garbled, duplicated table; VLM fences trap the only correct headings as code |
+| 3.5 | IRS W-9 | pymupdf + chart_ocr | **the form is structurally destroyed** — whole page wrapped in `[chart-text]`, two-column order scrambled to run-on prose |
+| 2.5 | CUDA deck | docling (VLM disabled) | lowest S/N — ~245 bare classifier labels + ~120 empty placeholders + uniform-H6 titles + 10× build-animation duplication |
+
+## Vault-wide breadth (47 docs — the true scope; per-doc sample counts undercount)
+
+| Artifact | Vault-wide | Root stage |
+|---|---|---|
+| `[table-rows]` derived blocks | **362 occ / 42 docs** | `table_linearize` via `_finalize_body` |
+| `<!-- image -->` placeholders | **1053 occ / 39 docs** | `docling_worker` |
+| classifier-label lines (`Logo`×649, `Icon`×206, `Bar chart`×37, `Photograph`×34, `Line chart`×20) | **~946 lines** | `docling_worker` (PictureClassifier) |
+| ` ```markdown ` fence-wrapper leak | **81 wrappers / 30 docs** | `vlm_backend` per-page path |
+| `[chart-extracted]` blocks | 20 occ / 7 docs | `chart_ocr` via `_stitch_chart_extractions` |
+| mass-H6 (docling) / flat-H2 (pymupdf) | pervasive | heading-level recovery |
+
+## The keystone architectural finding — the `.md` conflates source-of-truth with retrieval substrate
+
+`parse/pipeline.py::_finalize_body` (`linearize_gfm_tables`) and `_stitch_chart_extractions` write derived,
+retrieval-oriented blocks **into the canonical `.md`** at all three parse paths, right before write. This
+single design choice causes three problems at once:
+
+1. **"raw isn't clean."** In table-heavy docs the derived blocks are ~half the file.
+2. **Embedding noise (verified).** The dense path embeds `c.text` *including* these blocks
+   (`index/pipeline.py:197` chunks `doc.body`; `:132` embeds `document_input(chunk_title(c), c.text)`).
+   So tables are encoded twice (GFM + `[table-rows]`), and `<!-- image -->` / `Logo` tokens dilute the
+   300M mean-pooled EmbeddingGemma vector (which the contextual-retrieval negative result proved is
+   noise-sensitive). Meanwhile BM25 (`_strip_for_fts`) sees a *different* stripped variant — a latent
+   **dense/BM25 asymmetry**.
+3. **Fence-injection.** Derived blocks get stitched *inside* leaked ` ```markdown ` fences.
+
+**Fix (source):** make the canonical `.md` content-only; re-derive the linearization at **index time**.
+`linearize_gfm_tables` is pure, and the chunker already strips/handles `[chart-extracted]`, so the index
+layer can both clean and re-derive. This is **retrieval-neutral by construction**: because the current
+`.md` *is* `linearize_gfm_tables(clean_body)`, linearizing the clean body at index time reproduces the
+exact same chunk input → identical chunk_ids → no re-embed, while the vault file becomes clean. It also
+lets us choose **per-arm** what dense vs. BM25 each consume (the future fix for the embedding noise).
+
+## Recorded design decisions
+
+- **D1 — Two representations, split at the write boundary.** Canonical `.md` = clean content only
+  (structured headings, GFM tables, prose, enriched image markers). Retrieval substrate (`[table-rows]`,
+  chart-OCR text, per-arm noise stripping) is derived at **index time**, never written to the vault `.md`.
+- **D2 — Keep + enrich the `<!-- image -->` marker.** The marker stays in the clean `.md` (rich-view image
+  insertion + W9 figure-gap visibility). Enrich it to carry the figure type and an asset/page reference
+  (e.g. `<!-- image: kind=line-chart page=12 -->`) so (a) the classifier label stops leaking as prose
+  (W3) and (b) the rich view can resolve the marker to the real rendered page/figure.
+- **D3 — Make loss visible.** Figures/equations dropped by born-digital parsing (W9) must leave an
+  explicit placeholder + truthful manifest counters, so a quality gate can catch silent loss.
+
+## Weakness map (17 weaknesses, prioritized; all source-fixable)
+
+| ID | Sev | Title | Root stage | Source fix (summary) |
+|----|-----|-------|------------|----------------------|
+| **W1** | crit | `[table-rows]`/`[chart-extracted]` derived blocks baked into the `.md` | architectural (`_finalize_body`/`_stitch_chart_extractions`) | clean `.md`; re-derive at index time (see keystone). **← step 1** |
+| **W2** | crit | heading hierarchy flattened to one level / collapsed to H6 | docling/pymupdf size→level remap | one shared normalizer; use the dotted section-number as authoritative depth; monotonic nesting; masthead→H1 |
+| **W3** | high | PictureClassifier labels emitted as bare prose (~946 lines) | docling_worker | never emit the class string as body text; fold it into the (kept) image marker as `kind=` metadata (D2) |
+| **W4** | med | bare `<!-- image -->` placeholders with no payload | docling_worker | **keep** the marker (D2) but attach caption/kind/asset ref; drop only true duplicates |
+| **W5** | crit | per-page VLM ` ```markdown ` fence-wrap traps headings/tables as code (81/30) | vlm_backend | apply the per-page fence unwrap to **every** VLM-escalated page, page-boundary-anchored, before linearization |
+| **W6** | high | VLM narrates decorative imagery / visual styling / restatement | vlm_backend prompt | tighten prompt: transcribe instructional text only; skip decorative imagery; semantic diagram content, no styling; once each; no editorial notes |
+| **W7** | med | HTML entities leaked un-decoded (`&amp;` `&gt;`) | docling_worker / finalize | html-unescape before emitting markdown |
+| **W8** | med | running headers/footers/page-numbers not stripped (NIST ×56) | pymupdf/docling | repeating top/bottom y-band detection; drop before body + table assembly |
+| **W9** | crit | born-digital figures & equations **silently dropped**, manifest says 0 | pymupdf_worker | detect figure/formula regions → explicit placeholder (D3) or escalate to VLM/OCR-LaTeX; populate manifest counts from emitted artifacts |
+| **W10** | high | two-column reading order scrambled; forms destroyed | pymupdf_worker | (column, y) block ordering by bbox x-midpoint; block-level paragraph join; key:value adjacency for forms |
+| **W11** | high | layout graphics / infographics / bit-rulers mis-detected as tables | docling_worker | tighten table-vs-figure: mostly-empty / <2 data cols / identical headers / header-in-cells → figure or bullets |
+| **W12** | high | linearizer corrupts data (empty-corner / headerless → wrong keys; furniture as keys) | table_linearize / pymupdf | positional keys for headerless tables; row-label column for empty corner; exclude caption/furniture from header rows |
+| **W13** | high | animated slide-build duplication; figure/seam re-emission | docling_worker / vlm seam | near-duplicate collapse for animation build-up; de-dup VLM/Docling page seams |
+| **W14** | med | code-fence misuse (pull-quotes fenced; code line-breaks collapsed) | docling/vlm | pull-quotes → blockquote; preserve code line breaks from text-layer geometry |
+| **W15** | med | real titles emitted as plain paragraphs; no doc H1; filename-slug titles | docling/pymupdf | promote title frames + masthead→H1; set frontmatter title from masthead not slug |
+| **W16** | low | block hygiene (redundant heading-bold, mixed bullets, inline footnotes, trailing ws, empty frontmatter) | all | shared scrubber: strip heading-bold, normalize bullets→`-`, rstrip, footnote defs, drop empty frontmatter |
+| **W17** | low | glyph-spacing / OCR space-join / ref-ID digit-drop | vlm/docling/chart_ocr | prefer text-layer over OCR where present; residual OCR drift accepted |
+
+## Recommended sequence (all source-level)
+
+1. **Architectural split — `[table-rows]` off the `.md`, re-derive at index** (W1). Retrieval-neutral;
+   unblocks the clean raw view for all docs at once; de-noises a future embedding pass; removes the
+   inside-fence injection mode. **← in progress.** (`[chart-extracted]` follows as step 1b — it needs the
+   chart-OCR output persisted for index-time re-attachment, since it is not re-derivable from clean text.)
+2. **Shared finalize scrubber** (W3, W4-enrich, W7, W8, W16) — one pass across all 3 parse paths.
+3. **Heading-hierarchy normalizer** (W2, W15) — section-number depth + monotonic nesting → a real TOC.
+4. **VLM fence unwrap (W5) → VLM prompt tightening (W6)** — measure VLM-corpus HARD gates multi-run.
+5. **Table detection + linearizer logic** (W11, W12).
+6. **Dedup (W13) → reading-order/code-fence (W10, W14) → content-loss escalation + manifest truth (W9).**
+
+## Validation discipline
+
+- Parse-output changes require a **vault re-process** (back up first — the vault is not git-tracked) and
+  are **retrieval-gated** with `gold_chunk_recall` + the answer-eval HARD gates (refusal_cf / zero-halluc),
+  measured multi-run for borderline counterfactuals (eval non-determinism rule).
+- Step 1 is retrieval-neutral *by construction* (identical chunk input) — validated by unit tests that the
+  `.md` carries no `[table-rows]` while the indexed chunk text does, plus the full suite.
+
+## Status
+
+- ✅ Audit complete (this doc). Reusable workflow: `.claude/workflows/raw-md-audit.js`.
+- ✅ **Step 1 (W1) — `[table-rows]` relocated off the canonical `.md`** (2026-05-30). Moved
+  `linearize_gfm_tables` → `core/table_linearize.py` (also fixes a latent `index→parse`
+  import); `parse/pipeline.py::_finalize_body` now emits a content-only body; `index/pipeline.py`
+  re-derives the linearization before chunking. **Retrieval-neutral by construction** (new chunker
+  input `= linearize(clean) =` the old `.md`) + idempotent (so a not-yet-re-parsed `.md` re-derives
+  to identical bytes). **Validation:** 1061 unit/integration tests (+2 regression) + ruff/pyright
+  clean; 47/47 vault docs idempotent (re-index can't double-linearize); a live NIST re-parse proved
+  `.md` clean (−7,567 chars) with `linearize(clean) == old .md` byte-identical; webui raw view
+  confirmed 0 `[table-rows]` / 9 tables preserved; vault restored pristine.
+  - **`[chart-extracted]` (step 1b, deferred):** not re-derivable from clean text (it is OCR'd from
+    images), so it needs the chart-OCR output persisted (manifest sidecar) for index-time
+    re-attachment, or to be rendered as clean content. 20 occ / 7 docs.
+  - **Rollout:** the vault re-process (re-parse all → clean `.md`) is batched after the remaining
+    parse-stage fixes (steps 2–9) to avoid re-parsing 47 docs repeatedly. The code is live + idempotent
+    on existing docs in the meantime.
+- ⏭ Next: step 2 (shared finalize scrubber: classifier labels, image-marker enrich, page furniture, …).

@@ -29,14 +29,14 @@ from pathlib import Path
 import structlog
 
 from memex.core.sqlite_tuning import apply_sqlite_pragmas
-from memex.core.types import StoredTable
-from memex.parse.table_linearize import (
+from memex.core.table_linearize import (
     GFM_TABLE_RE,
     header_all_value_like,
     header_has_prose_cell,
     nearest_heading_text,
     parse_gfm_table,
 )
+from memex.core.types import StoredTable
 
 logger = structlog.get_logger(__name__)
 

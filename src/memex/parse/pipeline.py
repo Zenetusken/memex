@@ -73,7 +73,6 @@ from memex.parse.pymupdf_backend import (
 from memex.parse.pymupdf_backend import (
     convert as pymupdf_convert,
 )
-from memex.parse.table_linearize import linearize_gfm_tables
 from memex.parse.vlm_backend import (
     VLMUnavailable,
 )
@@ -954,21 +953,23 @@ def _stitch_chart_extractions(
 
 
 def _finalize_body(markdown: str) -> str:
-    """Apply the engine-agnostic post-parse markdown transforms.
+    """Engine-agnostic post-parse finalize of the body that is WRITTEN TO THE VAULT.
 
-    Currently just `linearize_gfm_tables` (Table-RAG Phase 1): appends a
-    markdown-KV `[table-rows]` block after every well-formed GFM table so a
-    value cell co-locates with its column label in the retrieval+answer
-    payload. Engine-agnostic — both Docling and PyMuPDF emit GFM the
-    linearizer parses, and it runs on the post-header-recovery markdown so the
-    GFM header it reads is the corrected one.
+    **The canonical `.md` is content-only (audit-10, 2026-05-30).** The `[table-rows]`
+    KV linearization (Table-RAG Phase 1) is a retrieval aid, NOT document content, so it
+    is no longer written into the source-of-truth `.md` — it would pollute the raw view
+    and the embedding input (a table is otherwise encoded twice). It is re-derived at
+    INDEX time instead (`index/pipeline.py` runs `linearize_gfm_tables` on the body before
+    chunking), which is retrieval-NEUTRAL by construction: linearizing the clean body
+    reproduces the exact pre-split input the chunker used to see, so chunk_ids are stable
+    and no re-embed is needed. See `docs/audits/10-raw-md-output-audit.md` (W1).
 
-    The result is the bytes written to disk, so EVERY consumer of the parsed
-    body (the vault `body=`, the `_bootstrap_ref` content hash, and the
-    `markdown_bytes` manifest/log count) must be threaded from this one value
-    — otherwise the content hash + byte count would disagree with the `.md`.
+    This is currently a pass-through (the home for the future content-only finalize
+    scrubber — audit-10 step 2). The result is the bytes written to disk, so EVERY consumer
+    of the parsed body (the vault `body=`, the `_bootstrap_ref` content hash, and the
+    `markdown_bytes` manifest/log count) is threaded from this one value.
     """
-    return linearize_gfm_tables(markdown)
+    return markdown
 
 
 async def _parse_with_docling(
