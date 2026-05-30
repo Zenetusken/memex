@@ -1226,14 +1226,21 @@ def create_app() -> FastAPI:
     async def graph(
         request: Request,
         doc_id: str,
-        limit: int = 50,
+        group: str = "concept",
     ) -> HTMLResponse:
-        """Render the related-document neighbourhood for `doc_id` (Cytoscape.js
-        client-side). Uses `related_documents` — neighbours ranked by shared-entity
-        SPECIFICITY (ADR-0011), each edge labelled with the connecting entities (the
-        "why") — NOT the raw unranked `neighbors()` (which surfaced generic connectors
-        like an instructor's name). Returns `graph_available=False` + a fallback panel
-        when ryugraph isn't installed."""
+        """Render `doc_id`'s related-document neighbourhood as a server-rendered, ranked
+        "Bridges" view (the redesign that retired the Cytoscape hairball — a 1-hop star has
+        no topology to draw; the signal is a specificity RANKING + the entities that explain
+        WHY). Two lenses over the SAME graph data, toggled by `?group=`:
+
+          - `concept` (default) — `related_bridges`: related docs grouped UNDER the bridging
+            ENTITY that connects them, ranked by Σ IDF×kind_weight (a rare concept shared by
+            many docs wins). Answers "which concepts are this doc's connective tissue".
+          - `document` — `related_documents`: the neighbours as a flat list ranked by
+            shared-entity specificity, each with a strength bar + the connecting entities.
+
+        Both rank by the SAME ADR-0011 specificity model (NOT the unranked `neighbors()`).
+        Returns `graph_available=False` + a fallback panel when ryugraph isn't installed."""
         # GraphStore is re-exported at module top (see the import at the
         # head of this file) as a test seam — `tests/integration/test_webui.py`
         # monkeypatches `memex.webui.app.GraphStore.open`. This re-export
@@ -1241,61 +1248,62 @@ def create_app() -> FastAPI:
         # + core` import-direction rule documented in `src/memex/CLAUDE.md`,
         # and is justified by the testability win.
         doc_id = _validate_doc_id(doc_id)
+        group = group if group in ("concept", "document") else "concept"
         settings = get_settings()
         try:
             doc = await read_document(settings.vault_path, doc_id)
         except VaultIntegrityError as e:
             raise HTTPException(status_code=404, detail=str(e)) from e
 
+        bridges: list[dict[str, Any]] = []
         related: list[dict[str, Any]] = []
         graph_available = True
         try:
             store = await GraphStore.open(settings.vault_path)
         except ImportError as e:
-            logger.warning(
-                "webui.graph_unavailable",
-                doc_id=doc_id,
-                reason=str(e),
-            )
+            logger.warning("webui.graph_unavailable", doc_id=doc_id, reason=str(e))
             graph_available = False
         else:
             try:
+                # Both lenses share one graph open — the document lens drives the header
+                # count + the alternate view; the bridge lens is the default render.
                 related = [
-                    r.model_dump() for r in await store.related_documents(doc_id, limit=limit)
+                    r.model_dump() for r in await store.related_documents(doc_id, limit=50)
                 ]
+                bridges = [b.model_dump() for b in await store.related_bridges(doc_id)]
             finally:
                 await store.close()
 
-        title = doc.frontmatter.title or doc_id
-        nodes: list[dict[str, Any]] = [{"id": doc_id, "title": title, "kind": "center"}]
-        edges: list[dict[str, Any]] = []
-        # One node + one edge per related doc (already specificity-ranked + deduped by
-        # related_documents). The edge label is the connecting entities — the "why" —
-        # most-specific first, a few shown.
-        for r in related:
-            nodes.append(
-                {
-                    "id": r["doc_id"],
-                    "title": r["title"] or r["doc_id"],
-                    "kind": "neighbor",
-                }
-            )
-            shared: list[str] = r.get("shared_entities") or []
-            edges.append(
-                {
-                    "source": doc_id,
-                    "target": r["doc_id"],
-                    "label": ", ".join(shared[:3]) if shared else "shares entities",
-                }
-            )
+        # Proportional strength bars (ordinal sugar — the count / rank are the honest signal,
+        # so the % is never printed; WCAG 1.4.1: bar length is never the SOLE carrier).
+        if related:
+            max_score = max((r["score"] for r in related), default=0.0) or 1.0
+            for r in related:
+                r["bar_pct"] = round(100 * float(r["score"]) / max_score)
+        if bridges:
+            max_strength = max((b["strength"] for b in bridges), default=0.0) or 1.0
+            for b in bridges:
+                b["bar_pct"] = round(100 * float(b["strength"]) / max_strength)
+        # Split the ranked bridges: multi-doc bridges are the headline (real connective
+        # tissue); single-doc bridges fold into a quiet tail disclosure. If there are NO
+        # multi-doc bridges (a sparse neighbourhood), promote the singles so the view isn't
+        # empty behind a disclosure.
+        primary = [b for b in bridges if b["doc_count"] >= 2]
+        tail = [b for b in bridges if b["doc_count"] < 2]
+        if not primary:
+            primary, tail = tail, []
 
         return templates.TemplateResponse(
             request,
             "graph.html",
             {
                 "document": doc,
-                "graph_data": {"nodes": nodes, "edges": edges},
-                "neighbor_count": len(nodes) - 1,
+                "group": group,
+                "related": related,
+                "bridges_primary": primary,
+                "bridges_tail": tail,
+                "bridge_count": len(bridges),
+                "neighbor_count": len(related),
                 "graph_available": graph_available,
             },
         )

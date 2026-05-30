@@ -1221,19 +1221,11 @@ async def test_document_edit_form_includes_hidden_expected_sha(
     assert ref.content_sha256 in r.text
 
 
-@pytest.mark.asyncio
-async def test_graph_renders_with_inline_data(
-    settings: MemexSettings,
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """We don't need a real RyuGraph install — patch `GraphStore.open`
-    to return an in-memory fake whose `.related_documents()` returns a fixed
-    ranked list. The graph page should embed that data (nodes + entity-labelled
-    edges) in its `<script id="graph-data">` tag for Cytoscape to pick up."""
-    from memex.index.graph_store import RelatedDocument
-
-    ref = await ingest_markdown_passthrough("# Center\n\nThe centerpiece.\n", source_stem="center")
+def _fake_graph_store():
+    """A fake GraphStore for the /graph view tests: a fixed two-doc neighbourhood bridged by
+    a shared 'methodology' entity (+ 'reflexivity' on one doc). Provides BOTH lenses the route
+    calls — `related_documents` (document lens) and `related_bridges` (concept lens)."""
+    from memex.index.graph_store import BridgeDoc, DocumentBridge, RelatedDocument
 
     class _FakeStore:
         @classmethod
@@ -1256,25 +1248,104 @@ async def test_graph_renders_with_inline_data(
                 ),
             ]
 
+        async def related_bridges(
+            self, doc_id, *, limit_bridges=24, max_docs_per_bridge=50, max_via=5
+        ):
+            return [
+                DocumentBridge(
+                    entity="methodology",
+                    kind="concept",
+                    doc_count=2,
+                    strength=4.0,
+                    docs=[
+                        BridgeDoc(
+                            doc_id="abc12345-neighbor-a",
+                            title="Neighbor A",
+                            score=3.9,
+                            via_entities=["reflexivity"],
+                        ),
+                        BridgeDoc(
+                            doc_id="def67890-neighbor-b",
+                            title="Neighbor B",
+                            score=1.2,
+                            via_entities=[],
+                        ),
+                    ],
+                ),
+                DocumentBridge(
+                    entity="reflexivity",
+                    kind="concept",
+                    doc_count=1,
+                    strength=2.5,
+                    docs=[
+                        BridgeDoc(
+                            doc_id="abc12345-neighbor-a",
+                            title="Neighbor A",
+                            score=3.9,
+                            via_entities=["methodology"],
+                        )
+                    ],
+                ),
+            ]
+
         async def close(self):
             return None
 
+    return _FakeStore
+
+
+@pytest.mark.asyncio
+async def test_graph_renders_bridges_view(
+    settings: MemexSettings,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The redesigned /graph view is server-rendered (NO Cytoscape) — the concept lens groups
+    related docs under their bridging ENTITY, each entity a `/entity?name=` traversal link and
+    each doc a `/documents/` link. The single-doc bridge ('reflexivity') folds into the tail."""
+    ref = await ingest_markdown_passthrough("# Center\n\nThe centerpiece.\n", source_stem="center")
     monkeypatch.setattr(
-        "memex.webui.app.GraphStore.open",
-        staticmethod(_FakeStore.open),
+        "memex.webui.app.GraphStore.open", staticmethod(_fake_graph_store().open)
     )
 
     r = client.get(f"/graph/{ref.doc_id}")
     assert r.status_code == 200
     assert ref.doc_id in r.text
-    assert "abc12345-neighbor-a" in r.text
-    assert "Neighbor A" in r.text
-    assert "def67890-neighbor-b" in r.text
-    assert "reflexivity" in r.text  # a connecting entity → edge label (the "why")
-    assert 'id="graph-data"' in r.text
-    # cytoscape is VENDORED (air-gap rule) — referenced locally, never from a CDN.
-    assert "/static/cytoscape.min.js" in r.text
-    assert "unpkg.com" not in r.text and "cdn" not in r.text.lower()
+    # the bridging entity heading + its reached docs
+    assert "methodology" in r.text
+    assert "Neighbor A" in r.text and "abc12345-neighbor-a" in r.text
+    assert "Neighbor B" in r.text and "def67890-neighbor-b" in r.text
+    assert "bridges 2" in r.text  # the doc_count badge on the multi-doc bridge
+    # entities are TRAVERSAL links into the entity-centric view (the "why")
+    assert "/entity?name=methodology" in r.text
+    # the single-doc bridge folds into the tail
+    assert "single-doc bridge" in r.text
+    # the Cytoscape hairball is GONE — no canvas, no inline graph-data, no vendored lib
+    assert 'id="graph-data"' not in r.text
+    assert "cytoscape" not in r.text.lower()
+    # the lens toggle is present, concept active by default
+    assert "?group=document" in r.text and "?group=concept" in r.text
+
+
+@pytest.mark.asyncio
+async def test_graph_document_lens_renders_ranked_list(
+    settings: MemexSettings,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`?group=document` renders the flat strength-ranked neighbour list (the alternate lens),
+    each row a doc link + its connecting entities."""
+    ref = await ingest_markdown_passthrough("# Center\n\nThe centerpiece.\n", source_stem="center2")
+    monkeypatch.setattr(
+        "memex.webui.app.GraphStore.open", staticmethod(_fake_graph_store().open)
+    )
+
+    r = client.get(f"/graph/{ref.doc_id}?group=document")
+    assert r.status_code == 200
+    assert "Neighbor A" in r.text and "Neighbor B" in r.text
+    assert "/documents/abc12345-neighbor-a" in r.text
+    assert "/entity?name=reflexivity" in r.text  # connecting entity as a traversal link
+    assert "cytoscape" not in r.text.lower()
 
 
 @pytest.mark.asyncio

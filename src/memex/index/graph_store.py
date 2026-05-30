@@ -26,7 +26,7 @@ from pydantic import BaseModel
 
 from memex.core.config import get_settings
 from memex.core.errors import ConfigurationError
-from memex.core.types import RelatedDocument
+from memex.core.types import BridgeDoc, DocumentBridge, RelatedDocument
 from memex.index.initialism import (
     derive_initialism,
     initialism_matches,
@@ -341,6 +341,93 @@ def _rank_related_documents(
     return out[:limit]
 
 
+def _rank_bridges(
+    rows: list[tuple[str, str, str, str, int]],
+    n_docs: int,
+    *,
+    limit_bridges: int,
+    max_docs_per_bridge: int,
+    max_via: int,
+) -> list[DocumentBridge]:
+    """PURE entity-grouped inversion of `_rank_related_documents`'s rows (separated for unit
+    testing) — the scoring core of `GraphStore.related_bridges` and the /graph "Bridges" view.
+
+    Consumes the SAME `(neighbour_doc_id, neighbour_title, shared_entity, entity_kind,
+    entity_df)` rows, applies the SAME `ln(n_docs/df) × kind_weight` contribution and the SAME
+    generic-df exclusion — but groups per ENTITY instead of per doc. Each bridge's `strength` is
+    `mean_contribution × ln(1 + doc_count)`: the per-edge SPECIFICITY (mean IDF×kind_weight)
+    times a LOGARITHMICALLY-damped fan-out. Specificity dominates — fan-out enters sub-linearly
+    so a near-generic entity shared by many docs (e.g. 'IP' in 28/47 docs, just under the
+    generic cutoff) does NOT swamp a genuinely specific concept shared by a few; a linear ×
+    fan-out would make breadth win and surface exactly the generic networking terms the view
+    should bury. `doc_count` is still the literal "bridges N" (and orders nothing on its own).
+    Within a bridge the reached docs carry their OVERALL relatedness score (identical to the doc
+    lens, computed in the same first pass) and their OTHER connecting entities as `via_entities`.
+    Bridges sorted by strength desc (entity name as the stable tiebreaker); docs within a bridge
+    by overall score."""
+    if n_docs <= 1:
+        return []
+    df_cap = _RELATED_GENERIC_ENTITY_DF_FRACTION * n_docs
+    # First pass — per-doc overall aggregate (score + ranked entities), IDENTICAL math to
+    # `_rank_related_documents`, so a doc's score + via-ordering match the doc lens exactly.
+    doc_agg: dict[str, dict[str, Any]] = {}
+    # Per-entity aggregate, keyed by lowercased NAME (same-name-different-kind merges into one
+    # bridge — they read as one concept; the displayed kind is the strongest-contributing link's).
+    ent_agg: dict[str, dict[str, Any]] = {}
+    for did, title, entity, kind, df in rows:
+        if df <= 0 or df > df_cap:  # generic/noise entity → skip (same gate as the doc lens)
+            continue
+        weight = _ENTITY_KIND_WEIGHT.get(kind, _DEFAULT_KIND_WEIGHT)
+        contribution = math.log(n_docs / df) * weight
+        if contribution <= 0:
+            continue
+        drec = doc_agg.setdefault(did, {"title": title or did, "score": 0.0, "ents": []})
+        drec["score"] = float(drec["score"]) + contribution
+        cast(list[tuple[float, str]], drec["ents"]).append((contribution, entity))
+        key = entity.lower()
+        erec = ent_agg.setdefault(
+            key, {"name": entity, "kind": kind, "best": 0.0, "strength": 0.0, "docs": {}}
+        )
+        erec["strength"] = float(erec["strength"]) + contribution
+        if contribution > float(erec["best"]):  # display name/kind from the strongest link
+            erec["best"], erec["name"], erec["kind"] = contribution, entity, kind
+        cast(dict[str, float], erec["docs"])[did] = contribution
+    bridges: list[DocumentBridge] = []
+    for erec in ent_agg.values():
+        ename = str(erec["name"])
+        ename_lower = ename.lower()
+        doc_ids = cast(dict[str, float], erec["docs"])
+        # strength = mean per-edge specificity × log-damped fan-out (see the docstring): the
+        # raw accumulator is Σ contribution, so raw/doc_count is the mean per-edge IDF×weight.
+        dc = len(doc_ids)
+        strength = (float(erec["strength"]) / dc) * math.log1p(dc) if dc else 0.0
+        ordered = sorted(doc_ids, key=lambda did: (-float(doc_agg[did]["score"]), did))
+        bridge_docs: list[BridgeDoc] = []
+        for did in ordered[:max_docs_per_bridge]:
+            drec = doc_agg[did]
+            ranked = [e for _c, e in sorted(cast(list[tuple[float, str]], drec["ents"]), reverse=True)]
+            via = [e for e in dict.fromkeys(ranked) if e.lower() != ename_lower][:max_via]
+            bridge_docs.append(
+                BridgeDoc(
+                    doc_id=did,
+                    title=str(drec["title"]),
+                    score=round(float(drec["score"]), 4),
+                    via_entities=via,
+                )
+            )
+        bridges.append(
+            DocumentBridge(
+                entity=ename,
+                kind=str(erec["kind"]),
+                doc_count=dc,
+                strength=round(strength, 4),
+                docs=bridge_docs,
+            )
+        )
+    bridges.sort(key=lambda b: (-b.strength, b.entity.lower(), b.entity))
+    return bridges[:limit_bridges]
+
+
 def _cooccurring_min_shared_docs() -> int:
     """The co-occurring neighbourhood FLOOR from settings, FAIL-OPEN to the default `2` when
     settings aren't initialised — a `GraphStore` opened outside bootstrap (tests, scripts)
@@ -577,27 +664,64 @@ class GraphStore:
         outranks one sharing five generic terms — the meaningful connection wins."""
 
         def _run() -> list[RelatedDocument]:
-            n_res = self._conn.execute("MATCH (d:Document) RETURN count(d) AS n;")
-            n_docs = int(n_res.get_next()[0]) if n_res.has_next() else 0
-            if n_docs <= 1:
-                return []
-            # Per (neighbour, shared-entity) row, with the entity's GLOBAL doc-frequency.
-            result = self._conn.execute(
-                "MATCH (d:Document {doc_id: $id})-[:MENTIONS]->(e:Entity)"
-                "<-[:MENTIONS]-(other:Document) "
-                "WHERE other.doc_id <> $id "
-                "WITH other, e "
-                "MATCH (e)<-[:MENTIONS]-(m:Document) "
-                "WITH other, e, count(DISTINCT m) AS df "
-                "RETURN other.doc_id AS doc_id, other.title AS title, "
-                "e.name AS entity, e.kind AS kind, df;",
-                {"id": doc_id},
-            )
-            rows: list[tuple[str, str, str, str, int]] = []
-            while result.has_next():
-                row = result.get_next()
-                rows.append((row[0], row[1], row[2], row[3] or "other", int(row[4])))
+            rows, n_docs = self._fetch_shared_entity_rows(doc_id)
             return _rank_related_documents(rows, n_docs, limit=limit, max_entities=max_entities)
+
+        return await asyncio.to_thread(_run)
+
+    def _fetch_shared_entity_rows(
+        self, doc_id: str
+    ) -> tuple[list[tuple[str, str, str, str, int]], int]:
+        """Sync fetch of the `(neighbour_doc_id, title, shared_entity, kind, df)` rows + the
+        corpus doc-count that feed BOTH `related_documents` (doc-grouped) and `related_bridges`
+        (entity-grouped). One MATCH per (neighbour, shared-entity) pair, each carrying the
+        entity's GLOBAL doc-frequency. Runs on the `to_thread` worker of whichever caller. An
+        empty / single-doc corpus returns `([], n_docs)` (both rankers no-op there)."""
+        n_res = self._conn.execute("MATCH (d:Document) RETURN count(d) AS n;")
+        n_docs = int(n_res.get_next()[0]) if n_res.has_next() else 0
+        if n_docs <= 1:
+            return [], n_docs
+        result = self._conn.execute(
+            "MATCH (d:Document {doc_id: $id})-[:MENTIONS]->(e:Entity)"
+            "<-[:MENTIONS]-(other:Document) "
+            "WHERE other.doc_id <> $id "
+            "WITH other, e "
+            "MATCH (e)<-[:MENTIONS]-(m:Document) "
+            "WITH other, e, count(DISTINCT m) AS df "
+            "RETURN other.doc_id AS doc_id, other.title AS title, "
+            "e.name AS entity, e.kind AS kind, df;",
+            {"id": doc_id},
+        )
+        rows: list[tuple[str, str, str, str, int]] = []
+        while result.has_next():
+            row = result.get_next()
+            rows.append((row[0], row[1], row[2], row[3] or "other", int(row[4])))
+        return rows, n_docs
+
+    async def related_bridges(
+        self,
+        doc_id: str,
+        *,
+        limit_bridges: int = 24,
+        max_docs_per_bridge: int = 50,
+        max_via: int = 5,
+    ) -> list[DocumentBridge]:
+        """The ENTITY-grouped lens on `doc_id`'s neighbourhood — powers the /graph "Bridges"
+        view. Where `related_documents` groups shared entities under each related DOC, this
+        inverts the SAME data (same Cypher fetch, same specificity scoring) to group related
+        docs under each shared ENTITY — the bridging concept. Bridges are ranked by `strength`
+        (Σ IDF×kind_weight over the links they form: a rare entity shared by many docs wins);
+        see the pure, unit-tested `_rank_bridges`."""
+
+        def _run() -> list[DocumentBridge]:
+            rows, n_docs = self._fetch_shared_entity_rows(doc_id)
+            return _rank_bridges(
+                rows,
+                n_docs,
+                limit_bridges=limit_bridges,
+                max_docs_per_bridge=max_docs_per_bridge,
+                max_via=max_via,
+            )
 
         return await asyncio.to_thread(_run)
 

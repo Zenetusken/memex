@@ -111,3 +111,196 @@
   font-family: ui-monospace, "JetBrains Mono", monospace;
   color: rgb(212 212 216);
 }
+
+/* ===========================================================================
+   "Bridges" view (2026-05-29 redesign) — the server-rendered, ranked replacement
+   for the Cytoscape hairball. A 1-hop neighbourhood is a STAR (no topology), so the
+   value is a specificity RANKING + the entities that explain WHY. The block ABOVE
+   (.graph-layout / .cy-canvas / .inspector-* / .graph-stats) is the RETIRED Cytoscape
+   view — unused by graph.html now, kept only so the still-vendored static/graph.js
+   classes it references stay covered by scripts/check-tailwind-coverage.py.
+   Reuses .related-* / .entity-kind from style.css; zinc + the one blue accent.
+   =========================================================================== */
+
+/* Intro + legend */
+.graph-intro {
+  color: rgb(161 161 170);                 /* zinc-400 */
+  font-size: 0.85rem;
+  margin: 0.25rem 0 1rem;
+  font-variant-numeric: tabular-nums;
+}
+.graph-intro .tabular { color: rgb(212 212 216); }   /* zinc-300 — the figures */
+.graph-intro-sep { margin: 0 0.5rem; color: rgb(63 63 70); }   /* zinc-700 divider */
+
+.graph-empty {
+  color: rgb(161 161 170);                 /* zinc-400 */
+  font-size: 0.9rem;
+  line-height: 1.55;
+  max-width: 42rem;
+  margin: 1.5rem 0;
+}
+
+.graph-legend {
+  color: rgb(161 161 170);                 /* zinc-400 */
+  font-size: 0.75rem;
+  line-height: 1.5;
+  margin: 1.75rem 0 0;
+  padding-top: 0.9rem;
+  border-top: 1px solid rgb(39 39 42);     /* zinc-800 */
+}
+.graph-legend-em { color: rgb(212 212 216); }   /* zinc-300 */
+
+/* Lens toggle (concept | document) */
+.lens-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 1.25rem;
+  font-size: 0.78rem;
+}
+.lens-toggle-label {
+  color: rgb(161 161 170);                 /* zinc-400 */
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.625rem;
+  margin-right: 0.25rem;
+}
+.lens-opt {
+  color: rgb(161 161 170);                 /* zinc-400 — inactive */
+  text-decoration: none;
+  padding: 0.2rem 0.7rem;
+  border: 1px solid rgb(39 39 42);         /* zinc-800 */
+  border-radius: 0.25rem;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.lens-opt:hover { color: rgb(212 212 216); border-color: rgb(63 63 70); }
+.lens-opt-active,
+.lens-opt-active:hover {
+  color: rgb(147 197 253);                 /* blue-300 */
+  border-color: rgb(37 99 235 / 0.5);      /* blue-600 tint */
+  background: rgb(37 99 235 / 0.1);
+}
+
+/* Bridges (concept lens) */
+.bridge-list { list-style: none; padding: 0; margin: 0; }
+.bridge { border-top: 1px solid rgb(39 39 42); }   /* zinc-800 divider */
+.bridge:first-child { border-top: none; }
+/* The summary IS the .bridge-head (flex). Don't set `display` on this generic
+   summary selector — at specificity (0,1,2) it would beat `.bridge-head` (0,1,0)
+   and clobber the flex layout (→ "bridges N" wraps). Marker-hiding + padding only. */
+.bridge > details > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 0.7rem 0;
+}
+.bridge > details > summary::-webkit-details-marker { display: none; }
+
+.bridge-head { display: flex; align-items: center; gap: 0.6rem; }
+.bridge-name {
+  font-size: 0.95rem;
+  font-weight: 500;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bridge-bar {
+  flex: 0 0 10rem;          /* a FIXED track → fills are directly comparable across rows */
+  margin-left: auto;        /* push the gauge + count to the right edge */
+  height: 6px;
+  background: rgb(39 39 42);               /* zinc-800 track */
+  border-radius: 3px;
+  overflow: hidden;
+}
+.bridge-bar-fill {
+  display: block;
+  height: 100%;
+  background: rgb(37 99 235 / 0.55);       /* blue-600, quieted — data, not an action */
+  border-radius: 3px;
+}
+.bridge-count {
+  flex: 0 0 auto;
+  color: rgb(161 161 170);                 /* zinc-400 */
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.bridge-docs { list-style: none; padding: 0 0 0.6rem; margin: 0; }
+.bridge-doc {
+  position: relative;
+  padding: 0.28rem 0 0.28rem 1.4rem;
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+.bridge-doc::before {                       /* a quiet tree-tick connector */
+  content: '';
+  position: absolute;
+  left: 0.45rem;
+  top: 0.95rem;
+  width: 0.6rem;
+  height: 1px;
+  background: rgb(63 63 70);               /* zinc-700 decorative */
+}
+.bridge-more-row { padding-left: 1.4rem; }
+.bridge-more-row::before { display: none; }
+.bridge-more > summary {
+  display: block;
+  list-style: none;
+  cursor: pointer;
+  color: rgb(161 161 170);                 /* zinc-400 */
+  font-size: 0.82rem;
+}
+.bridge-more > summary::-webkit-details-marker { display: none; }
+.bridge-more > summary:hover { color: rgb(212 212 216); }
+
+/* Single-doc bridge tail */
+.bridge-tail { margin-top: 1rem; }
+.bridge-tail > summary {
+  display: block;
+  list-style: none;
+  cursor: pointer;
+  color: rgb(161 161 170);                 /* zinc-400 */
+  font-size: 0.8rem;
+  padding: 0.5rem 0;
+  border-top: 1px solid rgb(39 39 42);
+}
+.bridge-tail > summary::-webkit-details-marker { display: none; }
+.bridge-tail > summary:hover { color: rgb(212 212 216); }
+.bridge-tail-list { list-style: none; padding: 0.3rem 0 0; margin: 0; }
+.bridge-tail-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0;
+  font-size: 0.85rem;
+}
+.bridge-arrow { color: rgb(63 63 70); }     /* zinc-700 decorative */
+
+/* Document lens (ranked rail) */
+.rail-list { list-style: none; padding: 0; margin: 0; }
+.rail-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.8rem;
+  padding: 0.55rem 0;
+  border-top: 1px solid rgb(39 39 42);
+}
+.rail-row:first-child { border-top: none; }
+.rail-bar {
+  flex: 0 0 7rem;
+  align-self: center;
+  height: 6px;
+  background: rgb(39 39 42);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.rail-bar-fill {
+  display: block;
+  height: 100%;
+  background: rgb(37 99 235 / 0.55);
+  border-radius: 3px;
+}
+.rail-body { flex: 1 1 auto; min-width: 0; }
+.rail-title { font-size: 0.92rem; }

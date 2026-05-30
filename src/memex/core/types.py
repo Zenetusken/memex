@@ -140,3 +140,35 @@ class RelatedDocument(BaseModel):
     title: str
     score: float  # Σ IDF(entity) over the shared, non-generic entities — higher = stronger
     shared_entities: list[str]  # the connecting entities, most-specific first
+
+
+class BridgeDoc(BaseModel):
+    """One related document reached THROUGH a bridging entity — a row under a `DocumentBridge`.
+    Carries the doc's OVERALL relatedness `score` (identical to its `RelatedDocument.score`, so
+    the two graph lenses agree) and `via_entities`: the doc's OTHER connecting entities besides
+    the bridge's own (the "·via X, Y" secondary tags), most-specific first."""
+
+    doc_id: str
+    title: str
+    score: float
+    via_entities: list[str]
+
+
+class DocumentBridge(BaseModel):
+    """A shared ENTITY that bridges a seed document to one or more related documents — the
+    entity-grouped lens on the neighbourhood (the /graph "Bridges" view). Inverts
+    `RelatedDocument`'s doc-grouping: instead of "which docs are related" it answers "which
+    CONCEPTS connect this doc, and to what". Ranked by `strength` = mean per-edge IDF×kind_weight
+    × ln(1 + doc_count) — per-edge SPECIFICITY dominates, with fan-out entering sub-linearly so a
+    near-generic entity shared by many docs doesn't bury the specific ones. `doc_count` is the
+    literal "bridges N" (how many related docs share it).
+
+    Lives in `core/types` alongside `RelatedDocument` — produced by
+    `index/graph_store::related_bridges`, surfaced by the webui. Not on `FinalResponse` (a
+    pure discovery surface, never on the answer path)."""
+
+    entity: str
+    kind: str
+    doc_count: int  # how many related docs share this entity with the seed ("bridges N")
+    strength: float  # Σ IDF×kind_weight over its (doc, entity) links — the ranking key
+    docs: list[BridgeDoc]  # the reached docs, strongest-first (by each doc's overall score)

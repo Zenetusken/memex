@@ -1,9 +1,25 @@
 {% extends "base.html" %}
-{% block title %}graph · {{ document.ref.doc_id }} — Memex{% endblock %}
+{% block title %}connections · {{ document.ref.doc_id }} — Memex{% endblock %}
 {% block content %}
-{# Break out of the base.html max-w-4xl constraint for this view only. #}
-<style>main { max-width: 100% !important; }</style>
 <link rel="stylesheet" href="/static/graph.css">
+{#
+  The "Bridges" view (redesign of the old Cytoscape hairball). A 1-hop entity
+  neighbourhood is a STAR — no clusters, no paths between leaves — so a node-link
+  diagram encodes a topology that doesn't exist. The real signal is a specificity
+  RANKING + the entities that explain WHY two docs relate. So this is a server-rendered,
+  ranked, no-JS view (native <details> disclosures), in two lenses toggled by ?group=:
+    · concept  → related docs grouped UNDER the bridging entity (the default)
+    · document → the neighbours as a flat strength-ranked list
+#}
+
+{% macro doc_row(d) %}
+<li class="bridge-doc">
+  <a class="related-link" href="/documents/{{ d.doc_id }}">{{ d.title }}</a>
+  {%- if d.via_entities %}
+  <span class="related-via">·via{% for e in d.via_entities %} <a class="related-entity related-entity-link" href="/entity?name={{ e | urlencode }}" title="Explore {{ e }} across the vault">{{ e }}</a>{% endfor %}</span>
+  {%- endif %}
+</li>
+{% endmacro %}
 
 <nav class="text-sm text-zinc-400 mb-3">
   <a href="/documents" class="hover:text-zinc-300">Documents</a>
@@ -11,13 +27,13 @@
   <a href="/documents/{{ document.ref.doc_id }}"
      class="text-zinc-300 font-mono hover:text-zinc-100">{{ document.ref.doc_id }}</a>
   <span class="mx-2 text-zinc-700">/</span>
-  <span class="text-zinc-200">graph</span>
+  <span class="text-zinc-200">connections</span>
 </nav>
 
-<header class="flex items-end justify-between gap-6 mb-4">
+<header class="flex items-end justify-between gap-6 mb-2">
   <div class="min-w-0">
     <p class="text-[0.625rem] uppercase tracking-widest text-zinc-400 mb-1">
-      one-hop entity graph
+      one-hop connections
     </p>
     <h1 class="text-xl font-semibold truncate">
       {{ document.frontmatter.title or document.ref.doc_id }}
@@ -34,26 +50,106 @@
   </div>
 </header>
 
-<div class="graph-layout">
-  <div id="cy" class="cy-canvas" aria-label="document graph"></div>
-  <aside class="inspector-panel" aria-label="node inspector">
-    <div class="inspector-header">
-      <span>inspector</span>
-      <span class="tabular text-zinc-400">{{ neighbor_count }} neighbor{{ '' if neighbor_count == 1 else 's' }}</span>
-    </div>
-    <div id="inspector-body" class="inspector-body">
-      <p class="text-xs text-zinc-400 italic">select a node to inspect.</p>
-    </div>
-  </aside>
+{% if not graph_available %}
+<p class="graph-empty">
+  The entity graph isn’t available (ryugraph isn’t installed), so this document’s
+  connections can’t be computed. The document itself still
+  <a class="related-link" href="/documents/{{ document.ref.doc_id }}">opens normally</a>.
+</p>
+{% elif neighbor_count == 0 %}
+<p class="graph-empty">
+  No related documents found. Nothing else in the vault shares a specific entity with this
+  document — it may be the only one on its topic, or it hasn’t been enriched yet.
+</p>
+{% else %}
+
+<p class="graph-intro">
+  <span class="tabular">{{ neighbor_count }}</span> related document{{ '' if neighbor_count == 1 else 's' }}
+  <span class="graph-intro-sep">·</span>
+  <span class="tabular">{{ bridge_count }}</span> bridging concept{{ '' if bridge_count == 1 else 's' }}
+</p>
+
+<div class="lens-toggle" role="group" aria-label="group related documents by">
+  <span class="lens-toggle-label">group by</span>
+  <a class="lens-opt {{ 'lens-opt-active' if group == 'concept' else '' }}"
+     href="/graph/{{ document.ref.doc_id }}?group=concept"
+     {% if group == 'concept' %}aria-current="true"{% endif %}>concept</a>
+  <a class="lens-opt {{ 'lens-opt-active' if group == 'document' else '' }}"
+     href="/graph/{{ document.ref.doc_id }}?group=document"
+     {% if group == 'document' %}aria-current="true"{% endif %}>document</a>
 </div>
 
-<div class="graph-stats">
-  <div><span>vault</span><span class="font-mono text-zinc-400">{{ document.ref.doc_id }}</span></div>
-  <div><span>neighbors</span><span class="text-zinc-400">{{ neighbor_count }}</span></div>
-  <div class="ml-auto text-zinc-400">scroll to zoom · drag to pan</div>
-</div>
+{% if group == 'document' %}
+{# Document lens — neighbours ranked by shared-entity specificity, each with a strength
+   bar + the connecting entities (the "why"). The lossless rendering of a ranking. #}
+<ul class="rail-list">
+  {% for d in related %}
+  <li class="rail-row">
+    <span class="rail-bar" aria-hidden="true"><span class="rail-bar-fill" style="width: {{ d.bar_pct }}%"></span></span>
+    <div class="rail-body">
+      <a class="related-link rail-title" href="/documents/{{ d.doc_id }}">{{ d.title }}</a>
+      {%- if d.shared_entities %}
+      <span class="related-via">via{% for e in d.shared_entities[:5] %} <a class="related-entity related-entity-link" href="/entity?name={{ e | urlencode }}" title="Explore {{ e }} across the vault">{{ e }}</a>{% endfor %}</span>
+      {%- endif %}
+    </div>
+  </li>
+  {% endfor %}
+</ul>
 
-<script id="graph-data" type="application/json">{{ graph_data | tojson }}</script>
-<script src="/static/cytoscape.min.js" defer></script>
-<script src="/static/graph.js" defer></script>
+{% else %}
+{# Concept lens (default) — related docs grouped UNDER the bridging entity. The bar +
+   "bridges N" carry the honest signal; the top two bridges open by default, the rest are
+   collapsed disclosures, and single-doc bridges fold into the tail. All server-rendered. #}
+<ul class="bridge-list">
+  {% for b in bridges_primary %}
+  <li class="bridge">
+    <details {% if loop.index <= 2 %}open{% endif %}>
+      <summary class="bridge-head">
+        <span class="entity-kind">{{ b.kind }}</span>
+        <a class="bridge-name related-entity-link" href="/entity?name={{ b.entity | urlencode }}"
+           title="Explore {{ b.entity }} across the vault">{{ b.entity }}</a>
+        <span class="bridge-bar" aria-hidden="true"><span class="bridge-bar-fill" style="width: {{ b.bar_pct }}%"></span></span>
+        <span class="bridge-count">bridges {{ b.doc_count }}</span>
+      </summary>
+      <ul class="bridge-docs">
+        {% for d in b.docs[:3] %}{{ doc_row(d) }}{% endfor %}
+        {% if b.docs|length > 3 %}
+        <li class="bridge-doc bridge-more-row">
+          <details class="bridge-more">
+            <summary>+{{ b.docs|length - 3 }} more docs through {{ b.entity }}</summary>
+            <ul class="bridge-docs">
+              {% for d in b.docs[3:] %}{{ doc_row(d) }}{% endfor %}
+            </ul>
+          </details>
+        </li>
+        {% endif %}
+      </ul>
+    </details>
+  </li>
+  {% endfor %}
+</ul>
+
+{% if bridges_tail %}
+<details class="bridge-tail">
+  <summary>{{ bridges_tail|length }} single-doc bridge{{ '' if bridges_tail|length == 1 else 's' }}</summary>
+  <ul class="bridge-tail-list">
+    {% for b in bridges_tail %}
+    <li class="bridge-tail-item">
+      <span class="entity-kind">{{ b.kind }}</span>
+      <a class="bridge-name related-entity-link" href="/entity?name={{ b.entity | urlencode }}">{{ b.entity }}</a>
+      <span class="bridge-arrow" aria-hidden="true">→</span>
+      {% for d in b.docs[:1] %}<a class="related-link" href="/documents/{{ d.doc_id }}">{{ d.title }}</a>{% endfor %}
+    </li>
+    {% endfor %}
+  </ul>
+</details>
+{% endif %}
+
+{% endif %}{# group #}
+
+<p class="graph-legend">
+  Bar = relatedness strength (Σ&nbsp;IDF specificity). Each entity links to its
+  <span class="graph-legend-em">entity view</span>; each title opens the document.
+</p>
+{% endif %}{# graph_available / empty #}
 {% endblock %}
