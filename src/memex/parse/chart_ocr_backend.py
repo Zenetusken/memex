@@ -190,7 +190,15 @@ def _render_figure_to_image(
             context={"underlying": str(e)},
         ) from e
 
-    doc = pdfium.PdfDocument(str(pdf_path))
+    try:
+        doc = pdfium.PdfDocument(str(pdf_path))
+    except Exception as e:
+        if type(e).__module__.startswith("pypdfium2"):
+            raise PDFFigureRenderError(
+                "failed to open PDF for figure rasterisation",
+                context={"page": page_no, "error_type": type(e).__name__},
+            ) from e
+        raise
     try:
         idx = page_no - 1
         if not 0 <= idx < len(doc):
@@ -235,6 +243,19 @@ def _render_figure_to_image(
         # freed memory. `.copy()` forces eager allocation + memcpy
         # BEFORE the doc closes so the returned crop owns its bytes.
         return full.crop((px_x0, px_y0, px_x1, px_y1)).copy()
+    except Exception as e:
+        # A pypdfium2 render/crop boundary error (PdfiumError) → the contract-typed
+        # PDFFigureRenderError so chart_ocr_extract's per-figure loop records THIS
+        # figure's failure and continues, instead of aborting the whole batch. An
+        # explicit PDFFigureRenderError above re-raises unchanged (its module is
+        # memex.core.errors, not pypdfium2). CancelledError etc. are BaseException,
+        # so `except Exception` leaves them alone.
+        if type(e).__module__.startswith("pypdfium2"):
+            raise PDFFigureRenderError(
+                "pypdfium2 figure render failed",
+                context={"page": page_no, "bbox": bbox, "error_type": type(e).__name__},
+            ) from e
+        raise
     finally:
         doc.close()
 
@@ -747,14 +768,15 @@ def _split_label_number_cells(cells: list[str]) -> list[tuple[str, str]] | None:
         `**On Time 22**` → `("On Time", "22")`
         `**Late 8**` → `("Late", "8")`
 
-    Post-audit (2026-05-23) hardening:
-    - Date-only cells (`March 2026`) no longer split (the regex requires
-      the label-half to contain a non-digit ending — `March 2026` →
-      label=`March 2026 ` (with trailing space) which the rstrip
-      normalizes, but the value-half then has to be a short number; the
-      `{0,7}` cap rejects long fragments).
+    Post-audit (2026-05-23) hardening — the value-half is bounded to at most
+    3 leading integer digits (`\\d{1,3}`) before an optional `[.,]\\d{1,3}`
+    fraction or `%` (see the comment block above):
+    - Date-only cells (`March 2026`) no longer split — `2026` is 4 digits,
+      exceeding the `\\d{1,3}` integer-digit bound for the value-half.
     - Currency-prefixed cells (`$ 193,737`) fall through to the table
-      fallback because the value-half exceeds 8 chars.
+      fallback for the same reason — `193` then `,737` is `\\d{1,3}` followed
+      by a `,\\d{1,3}` group, but the leading `$ ` / longer runs don't match
+      the value pattern, so the cell isn't a clean label/number split.
     """
     splits: list[tuple[str, str]] = []
     for c in cells:

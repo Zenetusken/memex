@@ -131,6 +131,15 @@ def test_footnote_and_whitespace_cleanup_values_verbatim() -> None:
     assert lines[1] == "Item=Total, Value=$30"  # [2] gone, trailing * gone
 
 
+def test_standalone_accounting_negative_value_survives() -> None:
+    """A parenthesized number that IS the whole cell is an accounting-NEGATIVE value,
+    not a footnote — keep it verbatim. A trailing `(1)` after a word still strips."""
+    md = "| Item | Value |\n|---|---|\n| Net change | (45) |\n| Revenue(1) | $(56) |\n"
+    lines = _rows_block(linearize_gfm_tables(md)).split("\n")
+    assert lines[0] == "Item=Net change, Value=(45)"  # standalone (45) kept verbatim
+    assert lines[1] == "Item=Revenue, Value=$(56)"  # word footnote (1) stripped; $(56) kept
+
+
 # ======================================================================
 # Header-sanity gate
 # ======================================================================

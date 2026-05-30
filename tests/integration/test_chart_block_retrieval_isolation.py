@@ -179,3 +179,47 @@ async def test_chart_block_does_not_outrank_prose_for_unrelated_query(
     )
 
     await store.close()
+
+
+@pytest.mark.asyncio
+async def test_chart_block_survives_into_non_bm25_reads(tmp_path: Path) -> None:
+    """The other half of the isolation: the NON-search read primitives
+    (`chunks_for_document` — the summarizer load path; `chunks_by_ids` — the entity
+    attested-passage path) reconstruct from `chunks_meta.full_text` (UNSTRIPPED), so a
+    chart-extracted figure SURVIVES into summaries / entity views — even though the BM25
+    `text` column is stripped (the strip must not leak chart data OUT of summaries)."""
+    vault_path = tmp_path / "vault"
+    vault_path.mkdir(parents=True)
+
+    chunk = _chunk(
+        "c1",
+        "doc-1",
+        (
+            "## Revenue by year\n\n"
+            "<!-- image -->\n\n"
+            "[chart-extracted]\n"
+            "2014 | 8253\n"
+            "2022 | 2126\n"
+            "[/chart-extracted]\n"
+        ),
+    )
+    store = await FTSStore.open(vault_path)
+    await store.upsert([chunk])
+
+    # chunks_for_document (summarizer) keeps the chart block + its numbers.
+    for_doc = await store.chunks_for_document("doc-1")
+    assert len(for_doc) == 1
+    assert "[chart-extracted]" in for_doc[0].text and "8253" in for_doc[0].text
+
+    # chunks_by_ids (entity attested passages) too.
+    by_id = await store.chunks_by_ids(["c1"])
+    assert len(by_id) == 1
+    assert "[chart-extracted]" in by_id[0].text and "2126" in by_id[0].text
+
+    # ...but the BM25 column stays stripped (the isolation above is preserved).
+    row = store._db.execute(
+        "SELECT text FROM chunks_fts WHERE chunk_id = ?", ("c1",)
+    ).fetchone()
+    assert row is not None and "8253" not in row[0]
+
+    await store.close()

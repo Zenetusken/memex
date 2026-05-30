@@ -147,6 +147,15 @@ def test_extract_equations_display_inline_and_fence() -> None:
     assert not any("PATH" in e for e in eqs)  # fenced shell $VAR excluded
 
 
+def test_extract_equations_ignores_currency_prose() -> None:
+    """Two same-line `$amount`s are currency prose, not an inline equation —
+    `from $100 to $200` must not extract `100 to` as LaTeX. Real math survives."""
+    eqs = extract_markdown_equations("The price rose from $100 to $200 last year.")
+    assert eqs == []
+    # a real inline equation still extracts (the filter only drops numeric-only interiors)
+    assert "y = x" in {normalize_equation(e) for e in extract_markdown_equations("the law $y = x$ holds")}
+
+
 def test_structural_f1_equations() -> None:
     ref = [r"E = mc^2", r"\dfrac{a}{b}"]
     assert structural_f1_equations(ref, ref) == 1.0

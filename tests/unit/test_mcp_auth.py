@@ -9,7 +9,7 @@ from typing import cast
 import pytest
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
@@ -122,6 +122,31 @@ def test_middleware_rejects_wrong_scheme(app: TestClient) -> None:
 def test_middleware_constructor_rejects_empty_token() -> None:
     with pytest.raises(ValueError, match="non-empty"):
         BearerAuthMiddleware(app=None, expected_token="")
+
+
+@pytest.mark.asyncio
+async def test_middleware_non_ascii_token_is_clean_401() -> None:
+    """A NON-ASCII bearer token must yield a 401, NOT a 500. `str` hmac.compare_digest
+    raises TypeError on a non-ASCII string, so the middleware compares on UTF-8 bytes.
+    Driven via a raw ASGI scope — an httpx TestClient rejects the non-ASCII header value
+    client-side, so it can't reach this path."""
+    mw = BearerAuthMiddleware(app=None, expected_token="s3cret-test-token")
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/probe",
+        "headers": [(b"authorization", "Bearer café".encode())],  # é → non-ASCII token
+        "client": ("127.0.0.1", 1234),
+        "query_string": b"",
+    }
+
+    async def _call_next(_req: Request) -> Response:  # pragma: no cover - rejected first
+        raise AssertionError("must reject before the handler")
+
+    resp = await mw.dispatch(Request(scope), _call_next)
+    assert resp.status_code == 401
+    assert resp.headers["WWW-Authenticate"].startswith("Bearer")
+    assert b"invalid_token" in bytes(resp.body)
 
 
 def test_middleware_never_logs_the_token(

@@ -1498,6 +1498,14 @@ async def verify(state: AnswerState) -> AnswerStateUpdate:
             phantom_ungrounded=phantom_u,
             draft_claim_count=n,
         )
+    # A claim index the verifier put in BOTH lists must not ship as grounded —
+    # `compose` keys solely on `verification.grounded`, so without this an index
+    # the verifier ALSO flagged ungrounded would still be emitted. Treat ungrounded
+    # as authoritative (consistent with the missing-index "treat-as-ungrounded" stance).
+    contested = set(valid_grounded) & set(valid_ungrounded)
+    if contested:
+        log.info("verify.contested_indices_demoted", contested=sorted(contested))
+        valid_grounded = [i for i in valid_grounded if i not in contested]
 
     verification = VerificationResult(
         grounded=valid_grounded,

@@ -396,6 +396,11 @@ def _verify_superlative(
     if returned is None:
         return None
     extremum = max(vals) if desc else min(vals)
+    # A degenerate huge-digit cell coerces to inf; `abs(inf - inf)` is nan, which is
+    # not `> tol`, so the gate would WRONGLY pass. Mirror `_classify_and_build`'s
+    # non-finite guard and refuse to frame on a non-finite value.
+    if not (math.isfinite(returned) and math.isfinite(extremum)):
+        return None
     # The `±1.0` floor mirrors the aggregate gate's tolerance. It's dead slack
     # here, not load-bearing: `_load_tables` builds the sqlite `__num` column via
     # the SAME `coerce_number`, so sqlite's `ORDER BY <col>__num` and this

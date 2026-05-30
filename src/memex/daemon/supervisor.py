@@ -179,14 +179,14 @@ async def _reachable(settings: MemexSettings) -> bool:
     misconfiguration ("connection refused on every poll") from a slow
     warm-up ("got HTTPError on first probe, then ok").
     """
-    try:
-        from openai import AsyncOpenAI
+    from openai import AsyncOpenAI
 
-        client = AsyncOpenAI(
-            base_url=settings.inference.base_url,
-            api_key=settings.inference.api_key,
-            timeout=2.0,
-        )
+    client = AsyncOpenAI(
+        base_url=settings.inference.base_url,
+        api_key=settings.inference.api_key,
+        timeout=2.0,
+    )
+    try:
         await client.models.list()
         return True
     except asyncio.CancelledError:
@@ -198,6 +198,11 @@ async def _reachable(settings: MemexSettings) -> bool:
             error=str(e)[:200],
         )
         return False
+    finally:
+        # Close the per-probe httpx pool — _reachable is polled once/second for up to
+        # daemon_startup_timeout_s (default 120) during start(), so leaking the client
+        # would accumulate ~120 connection pools per startup.
+        await client.close()
 
 
 async def start(settings: MemexSettings) -> DaemonStatus:

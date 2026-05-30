@@ -480,8 +480,8 @@ def chunk_document(
 
     `page_char_counts` is optional `[(page_no, char_count), ...]` from
     `ParseStage.pages` — when provided AND any page has a non-zero
-    char_count, each chunk's `char_start` is binary-searched into the
-    page intervals and `Chunk.page` is populated (drives the webui's
+    char_count, each chunk's `char_start` is located by a linear scan over
+    the page intervals and `Chunk.page` is populated (drives the webui's
     click-source→jump-to-PDF-page UX). When omitted or all-zero (legacy
     manifests), `Chunk.page` stays `None` and the webui falls back to
     section-only anchors. HARD-gate-neutral (a derived navigation

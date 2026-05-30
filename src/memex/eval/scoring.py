@@ -357,6 +357,11 @@ _INLINE_EQ_RES = (
     re.compile(r"(?<!\$)\$(?!\$)([^$\n]+?)\$(?!\$)"),
     re.compile(r"\\\((.+?)\\\)", re.DOTALL),
 )
+# A `$…$` whose interior is purely numeric (+ an optional trailing word) is
+# currency PROSE, not math — `from $100 to $200` matches with interior "100 to ".
+# Real inline math ("y = x", "E = mc^2", "\alpha") starts with a letter/backslash
+# and is NOT a full match here, so it survives the filter.
+_CURRENCYISH_RE = re.compile(r"[\d.,\s]+(?:[A-Za-z]+\s*)?")
 _FRAC_RE = re.compile(r"\\[dt]frac\b")
 # Spacing macros + `\left`/`\right` — pure rendering, dropped before compare.
 _EQ_SPACING_RE = re.compile(r"\\[,;:!> ]|\\quad\b|\\qquad\b|\\left\b|\\right\b")
@@ -384,8 +389,14 @@ def extract_markdown_equations(markdown: str) -> list[str]:
     inline_src = body
     for rx in _DISPLAY_EQ_RES:
         inline_src = rx.sub(" ", inline_src)
-    for rx in _INLINE_EQ_RES:
-        found.extend(m.group(1).strip() for m in rx.finditer(inline_src))
+    single_dollar, paren_inline = _INLINE_EQ_RES
+    # `$…$` is ambiguous with currency prose — drop a purely-numeric interior
+    # (see `_CURRENCYISH_RE`); the unambiguous `\(…\)` form is taken as-is.
+    for m in single_dollar.finditer(inline_src):
+        interior = m.group(1).strip()
+        if interior and not _CURRENCYISH_RE.fullmatch(interior):
+            found.append(interior)
+    found.extend(m.group(1).strip() for m in paren_inline.finditer(inline_src))
     return [e for e in found if e]
 
 

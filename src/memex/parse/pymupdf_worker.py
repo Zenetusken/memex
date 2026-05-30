@@ -579,16 +579,26 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
                 aspect = 1.0
                 image_count = 0
 
-            pages.append(
-                {
-                    "page": page_no,
-                    "markdown": page_md,
-                    "char_count": len(page_md),
-                    "image_count": image_count,
-                    "aspect_ratio": _coerce_finite(aspect),
-                }
-            )
-            markdown_parts.append(page_md)
+            # Record + join in LOCKSTEP: skip an empty page from BOTH (the join's
+            # `if p` filter already drops empty parts, so an empty page contributes
+            # neither text NOR a "\n\n" delimiter to `joined`). Keeping a char_count=0
+            # record while the join skipped its delimiter drifts the chunker's
+            # page→offset mapping +2 chars per empty page. This keeps `joined`
+            # byte-identical (no content-hash change / forced re-parse). The PyMuPDF
+            # path does no per-page VLM escalation, so an empty page is genuinely
+            # blank — safe to drop (unlike the Docling path, where an empty-markdown
+            # page may be a diagram awaiting escalation).
+            if page_md:
+                pages.append(
+                    {
+                        "page": page_no,
+                        "markdown": page_md,
+                        "char_count": len(page_md),
+                        "image_count": image_count,
+                        "aspect_ratio": _coerce_finite(aspect),
+                    }
+                )
+                markdown_parts.append(page_md)
 
         if not pages:
             # Defensive — pymupdf4llm should always emit at least one

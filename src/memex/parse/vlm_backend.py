@@ -379,23 +379,40 @@ async def _vllm_transcribe(
 
     b64 = await asyncio.to_thread(_png_b64, image)
     client = AsyncOpenAI(base_url=base_url, api_key="EMPTY")
-    resp = await client.chat.completions.create(
-        model=model_id,
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/png;base64,{b64}"},
-                    },
-                    {"type": "text", "text": prompt},
-                ],
-            }
-        ],
-        max_tokens=max_new_tokens,
-        temperature=0.0,
-    )
+    try:
+        resp = await client.chat.completions.create(
+            model=model_id,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{b64}"},
+                        },
+                        {"type": "text", "text": prompt},
+                    ],
+                }
+            ],
+            max_tokens=max_new_tokens,
+            temperature=0.0,
+        )
+    except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as e:
+        # Convert a transient SDK/transport error (openai/httpx APIConnectionError,
+        # ReadTimeout, 5xx) into VLMUnavailable so convert_pages' per-page loop records
+        # THIS page's failure and continues, instead of aborting the whole batch (its
+        # catch handles only VLMUnavailable/PDFRenderError). Non-SDK errors re-raise
+        # (the narrow-except / SDK-module-check rule in src/memex/CLAUDE.md).
+        if type(e).__module__.startswith(("openai", "httpx")) or isinstance(e, TimeoutError):
+            raise VLMUnavailable(
+                "VLM vLLM transcription call failed",
+                context={"error_type": type(e).__name__, "detail": str(e)[:200]},
+            ) from e
+        raise
+    finally:
+        await client.close()
     content = resp.choices[0].message.content or ""
     return _strip_image_links(content)
 

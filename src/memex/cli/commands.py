@@ -151,15 +151,13 @@ async def _ingest_path_chain(
                 if ingest_only:
                     results.append(r)
                     continue
-                # `ingest_directory` has already done the file-level work;
-                # we just need parse + (optional) index for each accepted doc.
-                # Markdown sources that came in via `ingest_directory` were
-                # processed as bytes — when `--skip-parse` is set we still
-                # need to honour it.
-                if skip_parse and r.is_markdown:
-                    # Honour --skip-parse for directory items too.
-                    results.append(r)
-                    continue
+                # `ingest_directory` has already done the file-level work
+                # (copied `source.md` + wrote the manifest) but NOT the canonical
+                # `{doc_id}.md`. Always run `parse_document`: for a markdown source
+                # it dispatches to the passthrough (which materializes `{doc_id}.md`
+                # WITHOUT a real parse — that IS the skip-parse behaviour), so the
+                # doc becomes visible to list/search/index. Matches the single-file
+                # branch, which also calls `parse_document` for skip-parse markdown.
                 await parse_document(r.doc_id, force_docling=force_docling)
                 if do_index:
                     await index_document(r.doc_id)
@@ -1058,8 +1056,9 @@ async def _doctor_report() -> dict[str, object]:
         actual = hash_bytes(ref.markdown_path.read_bytes())
         if manifest.content_sha256 != actual:
             issues.append(f"{ref.doc_id}: content_sha256 drifted (user edit?)")
-            stale_index += 1
-        if manifest.index is None:
+        # Count a doc as stale-index at most ONCE even if it has BOTH a drifted
+        # content hash AND a missing index stage (the two used to double-count).
+        if manifest.content_sha256 != actual or manifest.index is None:
             stale_index += 1
 
     # Daemon probe.

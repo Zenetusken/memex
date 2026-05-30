@@ -815,8 +815,9 @@ def create_app() -> FastAPI:
                         # just gives a Letter-shaped placeholder for the unknown ratio.
                         logger.warning("document.preview_size_unreadable", doc_id=doc_id)
         # Related documents ("explore connections") — entity-specificity-ranked graph
-        # discovery. Optional: a missing/unavailable graph fails OPEN to no section
-        # (never 500s the doc view), mirroring the /graph route.
+        # discovery. Optional: an uninstalled ryugraph (ImportError) fails OPEN to no
+        # section, mirroring the /graph route. (A runtime graph error still surfaces —
+        # only the optional-dependency case is caught, per the narrow-except rule.)
         related: list[dict[str, Any]] = []
         citations: dict[str, list[dict[str, Any]]] = {"cites": [], "cited_by": []}
         try:

@@ -67,7 +67,13 @@ CREATE TABLE IF NOT EXISTS chunks_meta (
     page INTEGER,
     char_start INTEGER NOT NULL,
     char_end INTEGER NOT NULL,
-    heading_path TEXT NOT NULL
+    heading_path TEXT NOT NULL,
+    -- The UNSTRIPPED chunk body. The FTS5 `text` column is stripped for BM25
+    -- (chart-extracted blocks + superseded GFM tables removed); the non-search
+    -- read primitives (`chunks_for_document`, `chunks_by_ids`) reconstruct the
+    -- chunk from here so summaries / entity passages keep chart-OCR figures.
+    -- NULL on legacy rows (pre-migration) → callers COALESCE to the stripped FTS text.
+    full_text TEXT
 );
 
 CREATE INDEX IF NOT EXISTS chunks_meta_doc ON chunks_meta(document_id);
@@ -106,6 +112,16 @@ class FTSStore:
             db = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
             apply_sqlite_pragmas(db)  # WAL + cache + mmap (ADR-0003 derived state)
             db.executescript(_SCHEMA)
+            # Migrate a chunks_meta created before `full_text` existed: CREATE IF NOT
+            # EXISTS won't add the column to a pre-existing table, so ALTER it. Guarded
+            # (a fresh table already has the column from _SCHEMA → "duplicate column"
+            # which we swallow; any other error re-raises). Legacy rows stay NULL until
+            # `reindex --force` repopulates them — the read primitives COALESCE meanwhile.
+            try:
+                db.execute("ALTER TABLE chunks_meta ADD COLUMN full_text TEXT")
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e).lower():
+                    raise
             return db
 
         db = await asyncio.to_thread(_connect)
@@ -169,8 +185,8 @@ class FTSStore:
             )
             self._db.executemany(
                 "INSERT INTO chunks_meta (chunk_id, document_id, document_title, "
-                "page, char_start, char_end, heading_path) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "page, char_start, char_end, heading_path, full_text) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     (
                         c.chunk_id,
@@ -180,6 +196,7 @@ class FTSStore:
                         c.char_start,
                         c.char_end,
                         " > ".join(c.heading_path),
+                        c.text,  # UNSTRIPPED — non-search reads reconstruct from here
                     )
                     for c in deduped
                 ],
@@ -285,8 +302,10 @@ class FTSStore:
         The whole-document primitive for summarization (ADR-0008): unlike
         `search`, there is NO query — it returns the FULL ordered set so a
         map-reduce summarizer can walk the document section by section
-        (grouping by `heading_path`). Joins `chunks_fts` (text) with
-        `chunks_meta` (offsets + heading_path), like `search` but unfiltered.
+        (grouping by `heading_path`). Joins `chunks_fts` with `chunks_meta`
+        (offsets + heading_path), like `search` but unfiltered. Text comes from
+        `chunks_meta.full_text` (UNSTRIPPED) so a chart-extracted figure survives into
+        the summary — NOT the BM25-stripped FTS `text` (legacy NULL → COALESCE fallback).
         """
 
         def _read() -> list[Chunk]:
@@ -295,11 +314,13 @@ class FTSStore:
             # `document_id` column, which is UNINDEXED, so filtering there forces a
             # full virtual-table scan + a temp-B-tree sort. Same rows, same order;
             # an index seek instead of an O(all-chunks-in-vault) scan (the
-            # summarizer's per-doc load path). Text still comes from FTS by chunk_id.
+            # summarizer's per-doc load path). Text comes from chunks_meta.full_text
+            # (UNSTRIPPED) so chart-OCR figures survive; COALESCE to the FTS text for
+            # legacy rows written before the full_text column existed.
             rows = self._db.execute(
                 """
                 SELECT
-                  f.chunk_id, m.document_id, m.document_title, f.text,
+                  m.chunk_id, m.document_id, m.document_title, COALESCE(m.full_text, f.text),
                   m.page, m.char_start, m.char_end, m.heading_path
                 FROM chunks_meta m
                 JOIN chunks_fts f ON f.chunk_id = m.chunk_id
@@ -334,10 +355,12 @@ class FTSStore:
 
         def _read() -> list[Chunk]:
             placeholders = ",".join("?" for _ in chunk_ids)
+            # Text from chunks_meta.full_text (UNSTRIPPED) so an entity's attested
+            # passage keeps its chart-OCR figure; COALESCE to the FTS text for legacy rows.
             rows = self._db.execute(
                 f"""
                 SELECT
-                  f.chunk_id, m.document_id, m.document_title, f.text,
+                  m.chunk_id, m.document_id, m.document_title, COALESCE(m.full_text, f.text),
                   m.page, m.char_start, m.char_end, m.heading_path
                 FROM chunks_meta m
                 JOIN chunks_fts f ON f.chunk_id = m.chunk_id

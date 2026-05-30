@@ -38,6 +38,13 @@ def test_derive_hyphen_and_slash_tokenised() -> None:
     assert derive_initialism("Input/Output Control") == "IOC"  # slash splits
 
 
+def test_derive_fr_elision_apostrophe_splits_connector() -> None:
+    """A FR elision (`d'`/`l'`) must split off the connector so it's skipped —
+    "Liste d'Accès" → "LA" (Liste, Accès), NOT "LD" (Liste, d'accès kept whole)."""
+    assert derive_initialism("Liste d'Accès") == "LA"
+    assert derive_initialism("Liste d’Accès") == "LA"  # curly apostrophe too
+
+
 def test_derive_too_long_is_none() -> None:
     # 8 significant words → over the _MAX_INITIALISM_LEN (7) cap → not an acronym expansion.
     assert derive_initialism("one two three four five six seven eight") is None

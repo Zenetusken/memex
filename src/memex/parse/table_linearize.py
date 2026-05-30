@@ -61,7 +61,14 @@ _HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*$", re.MULTILINE)
 # double-dagger / asterisk run. Conservative — only trailing markers, so an
 # in-cell `$1,234 (note 3)` value is NOT mangled (the value is kept verbatim;
 # only a pure trailing `(1)` / `[2]` / `*` / `†` is dropped).
-_FOOTNOTE_RE = re.compile(r"(?:\s*(?:\((?:\d{1,3})\)|\[(?:\d{1,3})\]|[*†‡]+))+\s*$")
+#
+# A parenthesized/bracketed number must follow a word/value char (the `(?<=...)`
+# lookbehind) to count as a footnote — so a STANDALONE accounting-negative cell
+# (`(45)`, `$(56)` = negative values) survives verbatim, while `Revenue(1)` still
+# strips. The standalone `*`/`†`/`‡` rule keeps no lookbehind.
+_FOOTNOTE_RE = re.compile(
+    r"(?:\s*(?:(?<=[\w\)\]%])\((?:\d{1,3})\)|(?<=[\w\)\]%])\[(?:\d{1,3})\]|[*†‡]+))+\s*$"
+)
 _WHITESPACE_RE = re.compile(r"\s+")
 
 

@@ -34,9 +34,11 @@ _INITIALISM_SKIP: frozenset[str] = frozenset(
     }
 )
 
-# Tokenise on whitespace, hyphen family, and slash so
-# "Address-Resolution-Protocol" derives the same initialism as the spaced form.
-_WORD_SPLIT = re.compile(r"[\s/–—-]+")
+# Tokenise on whitespace, hyphen family, slash, AND the apostrophe family so
+# "Address-Resolution-Protocol" derives the same initialism as the spaced form, and
+# a FR elision ("Liste d'Accès") splits the connector off ("d'" → skipped) → "LA",
+# not "LD" (without the apostrophe split the tokenizer kept "d'accès" whole).
+_WORD_SPLIT = re.compile(r"[\s/–—'’-]+")
 
 _MIN_INITIALISM_LEN = 2  # a 1-letter "acronym" is meaningless + collision-prone
 _MAX_INITIALISM_LEN = 7  # matches the corpus's ^[A-Z0-9.+-]{2,7}$ acronym-shape family

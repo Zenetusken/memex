@@ -94,7 +94,10 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
         scheme, _, token = header.partition(" ")
         if scheme.lower() != "bearer" or not token:
             return self._unauthorized(request, reason="missing_or_malformed")
-        if not hmac.compare_digest(token, self._expected):
+        # Compare on the UTF-8 bytes: str compare_digest raises TypeError on a
+        # non-ASCII token (attacker-controlled) → a 500 instead of a clean 401.
+        # Bytes compare stays constant-time and is byte-identical for ASCII tokens.
+        if not hmac.compare_digest(token.encode("utf-8"), self._expected.encode("utf-8")):
             return self._unauthorized(request, reason="invalid_token")
         logger.debug(
             "mcp.auth.ok",

@@ -34,6 +34,7 @@ import re
 from dataclasses import dataclass
 
 from markupsafe import Markup, escape
+from pydantic import ValidationError
 
 from memex.core.text import (
     chart_extracted_spans,
@@ -179,7 +180,12 @@ def _anchor_for_wikilink(inner: str) -> str:
     occurrence of that heading text) — duplicate headings can't be
     disambiguated by text alone, mirroring the dedup'd anchor IDs.
     """
-    target = parse_wikilink(inner)
+    try:
+        target = parse_wikilink(inner)
+    except ValidationError:
+        # A malformed inner (empty doc_id — `[[#section]]`, `[[ ]]`) can't form a
+        # link; emit it as an inert escaped literal rather than 500-ing the body.
+        return str(escape(f"[[{inner}]]"))
     if target.section:
         slug = slugify_heading(target.section)
         href = f"/documents/{target.doc_id}#{slug}"
@@ -227,7 +233,11 @@ def render_wikilink(wikilink: str, titles: dict[str, str] | None = None) -> Mark
     match = _WIKILINK_RE.search(wikilink)
     if match is None:
         return Markup(str(escape(wikilink)))  # noqa: S704 — escaped above
-    target = parse_wikilink(match.group(1))
+    try:
+        target = parse_wikilink(match.group(1))
+    except ValidationError:
+        # Empty doc_id (`[[#section]]`, `[[ ]]`) — fall back to the escaped literal.
+        return Markup(str(escape(wikilink)))  # noqa: S704 — escaped above
     doc_label = (titles or {}).get(target.doc_id, target.doc_id)
     if target.section:
         # Clean inline-markdown out of the section for DISPLAY + slug (a parsed

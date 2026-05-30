@@ -316,14 +316,17 @@ async def list_documents(vault_path: Path) -> AsyncIterator[DocumentRef]:
     root = _docs_root(vault_path)
     if not root.exists():
         return
+
+    def _read_and_hash(p: Path) -> tuple[str, str]:
+        text = p.read_text(encoding="utf-8")
+        return p.stem, hash_bytes(text.encode("utf-8"))
+
     for md in sorted(root.glob("*.md")):
-        text = md.read_text(encoding="utf-8")
-        yield _ref_for(
-            vault_path,
-            md.stem,
-            hash_bytes(text.encode("utf-8")),
-            None,
-        )
+        # Read + hash the full body off the event loop — list_documents is called
+        # on the webui's request path and would otherwise block concurrent async
+        # work while hashing every doc (per the async/sync rule in CLAUDE.md).
+        stem, sha = await asyncio.to_thread(_read_and_hash, md)
+        yield _ref_for(vault_path, stem, sha, None)
 
 
 async def create_document(
@@ -368,4 +371,7 @@ async def delete_document(vault_path: Path, doc_id: str) -> None:
         # the open fd. A future write_document on this doc_id will
         # recreate the file at the same path.
         cleanup_lock_file(vault_path, doc_id)
-    _DOC_LOCKS.pop(doc_id, None)
+    # NB: deliberately do NOT pop `_DOC_LOCKS[doc_id]` here. Popping outside the
+    # critical section let a concurrent writer that called `_lock_for(doc_id)` after
+    # the pop acquire a DIFFERENT Lock object and race this delete. A retained stale
+    # Lock is harmless (one bounded entry per distinct doc_id ever written).

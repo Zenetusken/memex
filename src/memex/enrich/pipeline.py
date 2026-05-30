@@ -328,9 +328,13 @@ async def enrich_document(doc_id: str) -> EnrichResult:
                 # unions chunk_ids first-seen-first) so discovery can surface the exact passage.
                 rep_chunk = ent.chunk_ids[0] if ent.chunk_ids else None
                 await graph.link_mentions(doc_id, eid, ent.confidence, chunk_id=rep_chunk)
+            # Ensure each DISTINCT target document node exists before linking —
+            # upsert once per target (not once per citation), so a doc cited N
+            # times doesn't re-MERGE the same node + emit N upsert log lines.
+            targets = {cit.target_doc_id: cit.target_title for cit in resolved}
+            for tid, ttitle in targets.items():
+                await graph.upsert_document(tid, ttitle)
             for cit in resolved:
-                # Ensure the target document node exists before linking.
-                await graph.upsert_document(cit.target_doc_id, cit.target_title)
                 await graph.link_cites(
                     from_doc_id=doc_id,
                     to_doc_id=cit.target_doc_id,

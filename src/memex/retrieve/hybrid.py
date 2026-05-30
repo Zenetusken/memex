@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import AsyncExitStack
 from typing import Any
 
 import structlog
@@ -65,16 +66,18 @@ async def hybrid_search(query: str, k: int = 50) -> list[Chunk]:
     log = logger.bind(query_len=len(query), k=k)
     log.info("hybrid.start")
 
-    vstore = await VectorStore.open(settings.vault_path)
-    fstore = await FTSStore.open(settings.vault_path)
-    try:
+    # Each store is registered for close the instant it opens, so a SECOND open
+    # failing (e.g. FTSStore.open after VectorStore.open succeeded) can't leak the
+    # first; callbacks run LIFO → fstore then vstore (the original order).
+    async with AsyncExitStack() as stack:
+        vstore = await VectorStore.open(settings.vault_path)
+        stack.push_async_callback(vstore.close)
+        fstore = await FTSStore.open(settings.vault_path)
+        stack.push_async_callback(fstore.close)
         embedding = await _embed_query(query)
         dense_task = asyncio.create_task(vstore.search(embedding, k=k))
         bm25_task = asyncio.create_task(fstore.search(query, k=k))
         dense, bm25 = await asyncio.gather(dense_task, bm25_task)
-    finally:
-        await fstore.close()
-        await vstore.close()
 
     fused = reciprocal_rank_fusion([dense, bm25])[:k]
     log.info("hybrid.done", dense=len(dense), bm25=len(bm25), fused=len(fused))
@@ -100,16 +103,15 @@ async def hybrid_search_in_docs(
     log = logger.bind(query_len=len(query), doc_ids=len(doc_ids), k=k)
     log.info("hybrid_in_docs.start")
 
-    vstore = await VectorStore.open(settings.vault_path)
-    fstore = await FTSStore.open(settings.vault_path)
-    try:
+    async with AsyncExitStack() as stack:
+        vstore = await VectorStore.open(settings.vault_path)
+        stack.push_async_callback(vstore.close)
+        fstore = await FTSStore.open(settings.vault_path)
+        stack.push_async_callback(fstore.close)
         embedding = await _embed_query(query)
         dense_task = asyncio.create_task(vstore.search_in_docs(embedding, doc_ids=doc_ids, k=k))
         bm25_task = asyncio.create_task(fstore.search_in_docs(query, doc_ids=doc_ids, k=k))
         dense, bm25 = await asyncio.gather(dense_task, bm25_task)
-    finally:
-        await fstore.close()
-        await vstore.close()
 
     fused = reciprocal_rank_fusion([dense, bm25])[:k]
     log.info(

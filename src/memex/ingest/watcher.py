@@ -187,10 +187,19 @@ async def run_watcher(
 
     # Per-path debounce: latest-event timestamp for the path.
     last_seen: dict[Path, float] = {}
+    # Paths whose drain has passed the debounce + pop and is now in its
+    # reaction (confirm/publish/on_edit). Guards against a SECOND concurrent
+    # drain spawning for the same doc while the first is mid-reaction.
+    processing: set[Path] = set()
     # Strong refs to in-flight drain tasks so a) the GC doesn't collect
     # them (a CPython anti-pattern), and b) we can await + drain them
     # on shutdown rather than silently cancelling user-edit handling.
     drain_tasks: set[asyncio.Task[None]] = set()
+
+    def _spawn_drain(path: Path) -> None:
+        task = asyncio.create_task(_drain_one(path))
+        drain_tasks.add(task)
+        task.add_done_callback(drain_tasks.discard)
 
     async def _drain_one(path: Path) -> None:
         # Wait the debounce window from the last seen time; if more events
@@ -205,25 +214,41 @@ async def run_watcher(
                 break
             await asyncio.sleep(wait)
         last_seen.pop(path, None)
-        notice = await _confirm_user_edit(vault_path, path)
-        if notice is None:
-            log.debug("watcher.no_change", path=str(path))
-            return
-        log.info("watcher.edit_confirmed", doc_id=notice.doc_id)
-
-        # Bus publish is best-effort + exception-isolated (see
-        # `publish_edit_notice`). User-edit handling proceeds even when
-        # the bus is misconfigured or throwing.
-        await publish_edit_notice(notice)
-
+        # Mark in-flight so a same-path event arriving during the (possibly slow)
+        # reaction below doesn't spawn a second concurrent drain. Such an event is
+        # recorded in `last_seen` by the dispatch loop but NOT spawned; the finally
+        # re-spawns a drain for it so the edit is neither lost nor double-handled.
+        processing.add(path)
         try:
-            await on_edit(notice)
-        except Exception as e:
-            log.warning(
-                "watcher.handler_failed",
-                doc_id=notice.doc_id,
-                error=str(e),
-            )
+            notice = await _confirm_user_edit(vault_path, path)
+            if notice is None:
+                log.debug("watcher.no_change", path=str(path))
+                return
+            log.info("watcher.edit_confirmed", doc_id=notice.doc_id)
+
+            # Bus publish is best-effort + exception-isolated (see
+            # `publish_edit_notice`). User-edit handling proceeds even when
+            # the bus is misconfigured or throwing.
+            await publish_edit_notice(notice)
+
+            try:
+                await on_edit(notice)
+            except Exception as e:
+                log.warning(
+                    "watcher.handler_failed",
+                    doc_id=notice.doc_id,
+                    error=str(e),
+                )
+        finally:
+            processing.discard(path)
+            # A new event for this path that arrived DURING the reaction was held
+            # back (the `processing` guard); spawn a fresh drain for it now — both
+            # so the edit isn't lost and so the path can't wedge (an orphaned
+            # `last_seen` entry would otherwise make every future event look
+            # already-pending and never re-drain). The block is synchronous (no
+            # await), so it can't race the dispatch loop into a double spawn.
+            if path in last_seen:
+                _spawn_drain(path)
 
     try:
         while not stop_event.is_set():
@@ -235,16 +260,18 @@ async def run_watcher(
             )
             for t in pending:
                 t.cancel()
+            # asyncio.wait(FIRST_COMPLETED) can report BOTH tasks done in the same
+            # turn; handle a dequeued path FIRST (else it's silently dropped) and
+            # only then honour the stop signal.
+            if get_task in done and not get_task.cancelled():
+                path = get_task.result()
+                now = time.monotonic()
+                already_pending = path in last_seen
+                last_seen[path] = now
+                if not already_pending and path not in processing:
+                    _spawn_drain(path)
             if stop_task in done:
                 break
-            path = get_task.result()
-            now = time.monotonic()
-            already_pending = path in last_seen
-            last_seen[path] = now
-            if not already_pending:
-                task = asyncio.create_task(_drain_one(path))
-                drain_tasks.add(task)
-                task.add_done_callback(drain_tasks.discard)
     finally:
         # Drain pending debounce tasks so a clean shutdown doesn't silently
         # drop a user edit that was mid-debounce. Bound the wait — a stuck

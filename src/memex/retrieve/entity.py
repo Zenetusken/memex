@@ -91,15 +91,16 @@ async def entity_overview(
     )
     fts = await FTSStore.open(vault_path)
     try:
-        if attested:
-            passages = (await fts.chunks_by_ids(attested))[:passages_k]
-            scoped = True
-        elif scope_doc_ids:
+        # Decide on the FETCHED passages, not just on `attested` being non-empty:
+        # a re-indexed-but-not-re-enriched doc keeps STALE chunk_ids on MENTIONS, so
+        # chunks_by_ids can miss every id → fall through to the scoped name-search
+        # rather than return empty (scoped) passages.
+        passages = (await fts.chunks_by_ids(attested))[:passages_k] if attested else []
+        if not passages and scope_doc_ids:
             passages = await fts.search_in_docs(name, doc_ids=scope_doc_ids, k=passages_k)
-            scoped = True
-        else:
+        elif not passages:  # no scope docs (unknown name / no graph) → whole-corpus
             passages = await fts.search(name, k=passages_k)
-            scoped = False
+        scoped = bool(scope_doc_ids)
     finally:
         await fts.close()
 

@@ -36,7 +36,7 @@ from pydantic import BaseModel
 
 from memex.core.breakers import CircuitBreaker, CircuitBreakerOpen
 from memex.core.config import get_settings
-from memex.core.errors import ParseConfidenceTooLow, VaultIntegrityError
+from memex.core.errors import ConfigurationError, ParseConfidenceTooLow, VaultIntegrityError
 from memex.core.manifest import (
     PageDecision,
     ParseStage,
@@ -772,9 +772,10 @@ async def _vllm_restart(scripts_dir: Path) -> None:
 
     script = scripts_dir / "serve-vllm.sh"
     if not script.exists():
-        raise RuntimeError(
+        raise ConfigurationError(
             f"vLLM restart fallback failed: {script} not found. "
-            "Set MEMEX_SCRIPTS_DIR or restart manually."
+            "Set MEMEX_SCRIPTS_DIR or restart manually.",
+            context={"script": str(script)},
         )
     proc = await asyncio.create_subprocess_exec(
         "nohup",
@@ -1078,9 +1079,18 @@ async def _parse_with_docling(
                     await get_registry().unload("chart_ocr")
                 except Exception as ex:
                     log.warning("chart_ocr.unload_failed", error=str(ex))
+            pre_stitch = conversion
             conversion = _stitch_chart_extractions(conversion, extractions)
-            chart_ocr_count = sum(
-                1 for e in extractions if isinstance(e, ChartOCROutput) and e.markdown.strip()
+            # `_stitch_chart_extractions` returns the SAME object unchanged when it
+            # aborts on a placeholder/extraction count mismatch (and a `model_copy`
+            # otherwise) — so an identity check tells us whether anything was actually
+            # stitched. Don't log a non-zero `stitched` on an abort (0 blocks inserted).
+            chart_ocr_count = (
+                0
+                if conversion is pre_stitch
+                else sum(
+                    1 for e in extractions if isinstance(e, ChartOCROutput) and e.markdown.strip()
+                )
             )
             log.info(
                 "chart_ocr.done",

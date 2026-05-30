@@ -123,7 +123,10 @@ def dedupe(entities: list[Entity]) -> list[Entity]:
     for e in entities:
         k = _key(e.name, e.kind)
         if k not in merged:
-            merged[k] = e.model_copy()
+            # Rebuild chunk_ids: a shallow model_copy() shares the SAME list object
+            # as the source entity, which the merge branch below then mutates in
+            # place (existing.chunk_ids.append) — corrupting the caller's input.
+            merged[k] = e.model_copy(update={"chunk_ids": list(e.chunk_ids)})
             continue
         existing = merged[k]
         existing.confidence = max(existing.confidence, e.confidence)

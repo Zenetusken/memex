@@ -524,6 +524,50 @@ async def test_verify_missing_index_treated_as_ungrounded(
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("patch_retrieve", "patch_prompt")
+async def test_verify_contested_index_is_not_shipped_as_grounded(fake_llm: FakeLLM) -> None:
+    """A claim index the verifier put in BOTH `grounded` and `ungrounded` must NOT ship
+    as grounded — ungrounded is authoritative (the HARD gate: a verifier-flagged claim
+    can't leak into the answer because `compose` keys only on `grounded`). The contested
+    claim is dropped; the clean one ships."""
+    fake_llm.respond(
+        "assess_sufficiency",
+        SufficiencyAssessment,
+        SufficiencyAssessment(sufficient=True, reason="Two on-point chunks"),
+    )
+    fake_llm.respond(
+        "answer",
+        DraftAnswer,
+        DraftAnswer(
+            summary="Two claims.",
+            claims=[
+                CitedClaim(claim="Claim A", source_chunk_id="c1", confidence="high"),
+                CitedClaim(claim="Claim B", source_chunk_id="c2", confidence="high"),
+            ],
+        ),
+    )
+    # Claim 1 is CONTESTED — the verifier listed it in BOTH grounded and ungrounded.
+    fake_llm.respond(
+        "verify_grounding",
+        VerificationResult,
+        VerificationResult(
+            grounded=[0, 1],
+            ungrounded=[1],
+            ungrounded_reasons=["Claim B is not actually supported by its chunk."],
+        ),
+    )
+
+    response = await answer_query("What does the source say?")
+
+    assert response.answered is True
+    # Claim B (contested → demoted to ungrounded) is dropped; only Claim A ships.
+    assert [c.claim for c in response.claims] == ["Claim A"]
+    assert "Claim B" not in [c.claim for c in response.claims], (
+        "A verifier-contested claim was shipped as grounded"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_retrieve", "patch_prompt")
 async def test_partial_grounded_ships_grounded_subset(fake_llm: FakeLLM) -> None:
     """#262 — the compound-question fix. A draft with one grounded claim (the
     answerable half) + one ungrounded claim (the half the corpus can't support)

@@ -11,7 +11,7 @@ supervisor is intentionally minimal:
   startup timeout fires.
 - `stop()` — reads the PID file, SIGTERMs the process group, waits up
   to 10 seconds, SIGKILLs on timeout, cleans up the PID file.
-- `status()` — reports `{pid, alive, reachable, base_url, log_path}`.
+- `status()` — reports `{pid, alive, reachable, base_url, pid_file, log_file, error}`.
 """
 
 from memex.daemon.supervisor import (

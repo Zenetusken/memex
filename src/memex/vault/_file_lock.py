@@ -93,18 +93,31 @@ async def doc_file_lock(vault_path: Path, doc_id: str) -> AsyncGenerator[None]:
 
     loop = asyncio.get_running_loop()
     future = loop.run_in_executor(None, _acquire_blocking, path)
-    while True:
-        done, _ = await asyncio.wait({future}, timeout=0.1)
-        if future in done:
-            fd = future.result()
-            break
-        if not contention_logged:
-            logger.info(
-                "vault.lock.contended",
-                doc_id=doc_id,
-                waited_ms=int((time.monotonic() - start) * 1000),
-            )
-            contention_logged = True
+    try:
+        while True:
+            done, _ = await asyncio.wait({future}, timeout=0.1)
+            if future in done:
+                fd = future.result()
+                break
+            if not contention_logged:
+                logger.info(
+                    "vault.lock.contended",
+                    doc_id=doc_id,
+                    waited_ms=int((time.monotonic() - start) * 1000),
+                )
+                contention_logged = True
+    except BaseException:
+        # Cancelled (or errored) while WAITING to acquire. The executor future is
+        # abandoned, but the worker thread can't be interrupted mid-flock — if it
+        # eventually acquires, that fd would leak AND hold the cross-process lock
+        # forever. We can't await it here (we're unwinding), so release it via a
+        # done-callback once the thread returns the fd.
+        def _release_when_done(f: asyncio.Future[int]) -> None:
+            if not f.cancelled() and f.exception() is None:
+                _release(f.result())
+
+        future.add_done_callback(_release_when_done)
+        raise
 
     waited_ms = int((time.monotonic() - start) * 1000)
     if waited_ms >= 100:

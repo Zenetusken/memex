@@ -1,6 +1,6 @@
 # pyright: reportConstantRedefinition=false
 # `_BUS` is an uppercase module-level singleton intentionally rebound
-# by `set_bus()` for test isolation and `reset_bus()` for teardown.
+# by `set_bus()` for test isolation and `set_bus(None)` for teardown.
 
 """In-process event bus — see GUIDELINES.md Part II and IMPLEMENTATION-PLAN.md §2.1.
 
@@ -22,7 +22,7 @@ from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Self
+from typing import Any, Self
 
 import structlog
 
@@ -177,14 +177,21 @@ class EventBus:
         """Yield persisted events in the time window. Requires persistence."""
         if self._db is None:
             return
+        db = self._db
         until = until or datetime.now(UTC)
-        cursor = self._db.execute(
-            "SELECT correlation_id, stage, event_type, timestamp, payload, error, event_id "
-            "FROM events WHERE timestamp >= ? AND timestamp <= ? "
-            "ORDER BY timestamp",
-            (since.isoformat(), until.isoformat()),
-        )
-        for row in cursor:
+
+        # Run the (blocking) scan + cursor drain on a worker thread, matching
+        # publish()'s deliberate to_thread offload — neither should touch the loop.
+        def _fetch() -> list[Any]:
+            return db.execute(
+                "SELECT correlation_id, stage, event_type, timestamp, payload, error, event_id "
+                "FROM events WHERE timestamp >= ? AND timestamp <= ? "
+                "ORDER BY timestamp",
+                (since.isoformat(), until.isoformat()),
+            ).fetchall()
+
+        rows = await asyncio.to_thread(_fetch)
+        for row in rows:
             yield MemexEvent(
                 event_id=row[6],
                 correlation_id=row[0],
@@ -199,12 +206,14 @@ class EventBus:
         """Delete events older than `retention_days`. Returns rows deleted."""
         if self._db is None:
             return 0
+        db = self._db
         cutoff = datetime.now(UTC) - timedelta(days=retention_days)
-        cursor = self._db.execute(
-            "DELETE FROM events WHERE timestamp < ?",
-            (cutoff.isoformat(),),
-        )
-        return cursor.rowcount
+
+        def _delete() -> int:
+            cur = db.execute("DELETE FROM events WHERE timestamp < ?", (cutoff.isoformat(),))
+            return cur.rowcount
+
+        return await asyncio.to_thread(_delete)
 
 
 # Lazily constructed module-level singleton. The CLI / daemon entrypoint

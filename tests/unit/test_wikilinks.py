@@ -160,6 +160,14 @@ def test_extract_wikilinks_ignores_malformed_empty() -> None:
     assert [t.doc_id for t in targets] == ["doc-a", "doc-b"]
 
 
+def test_extract_wikilinks_skips_whitespace_and_section_only() -> None:
+    """A wikilink with an empty doc_id — whitespace-only `[[ ]]` or section-only
+    `[[#Section]]` — is skipped (not a ValidationError, not a half-built target)."""
+    body = "ok [[doc-a]] blank [[ ]] sec-only [[#Heading]] also-ok [[doc-b#S]]"
+    targets = extract_wikilinks(body)
+    assert [t.doc_id for t in targets] == ["doc-a", "doc-b"]
+
+
 def test_extract_wikilinks_empty_body_returns_empty() -> None:
     assert extract_wikilinks("") == []
     assert extract_wikilinks("no wikilinks here") == []

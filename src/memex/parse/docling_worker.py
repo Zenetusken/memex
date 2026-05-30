@@ -412,10 +412,13 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
         # image_fraction signal below is the primary trigger. Kept as a
         # forward-compat hook for a Docling that surfaces per-page scores.
         confidence = float(getattr(p, "confidence", 1.0))
-        # Docling sometimes reports NaN for empty pages. The parent's
-        # `json.loads` rejects literal NaN, so coerce to 0.0 here.
+        # Docling sometimes reports NaN for empty pages. The parent's `json.loads`
+        # rejects literal NaN, so coerce — to 1.0 ("un-scoreable", matching the
+        # getattr default above), NOT 0.0: coercing to 0.0 would make an empty page
+        # trip the `confidence < threshold` escalation arm backwards. Only the
+        # image_fraction/diagram arms should escalate an un-scoreable page.
         if math.isnan(confidence) or math.isinf(confidence):
-            confidence = 0.0
+            confidence = 1.0
         pages.append({"page": page_no, "markdown": page_md, "confidence": confidence})
     if not pages:
         pages.append({"page": 1, "markdown": markdown, "confidence": 1.0})

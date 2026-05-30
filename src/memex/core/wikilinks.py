@@ -123,9 +123,10 @@ def extract_wikilinks(body: str) -> list[WikilinkTarget]:
     """Find all wikilinks in `body`, returning their parsed targets
     in document order (by char_start of each match).
 
-    Malformed wikilinks where the inner text is empty (`[[]]`) are
-    skipped silently — the regex `[^\\[\\]]+?` requires at least one
-    non-bracket char inside.
+    Malformed wikilinks with an empty doc_id — `[[]]` (caught by the regex,
+    which requires a non-bracket char), but also `[[ ]]` (whitespace-only) and
+    `[[#Section]]` (section-only, no doc) — are skipped silently rather than
+    raising `parse_wikilink`'s `ValidationError`.
 
     Does NOT distinguish between wikilinks in prose vs. code blocks
     vs. tables. Callers that need to ignore wikilinks inside
@@ -133,7 +134,13 @@ def extract_wikilinks(body: str) -> list[WikilinkTarget]:
     use case (citation-enriched markdown), wikilinks appear in
     prose; code blocks rarely contain literal `[[...]]` syntax.
     """
-    return [parse_wikilink(m.group(1)) for m in _WIKILINK_RE.finditer(body)]
+    out: list[WikilinkTarget] = []
+    for m in _WIKILINK_RE.finditer(body):
+        inner = m.group(1)
+        if not inner.split(_SECTION_SEP, 1)[0].strip():
+            continue  # empty/whitespace-only/section-only doc_id → not a real link
+        out.append(parse_wikilink(inner))
+    return out
 
 
 def resolve_wikilink_section(
