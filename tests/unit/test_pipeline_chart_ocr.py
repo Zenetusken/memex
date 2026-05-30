@@ -203,7 +203,10 @@ def test_collapse_toc_leaders_strips_pagination_artifacts() -> None:
     fenced code untouched."""
     from memex.parse.pipeline import _collapse_toc_leaders
 
-    assert _collapse_toc_leaders("|**1**|**Introduction ............ 1**|") == "|**1**|**Introduction**|"
+    assert (
+        _collapse_toc_leaders("|**1**|**Introduction ............ 1**|")
+        == "|**1**|**Introduction**|"
+    )
     assert _collapse_toc_leaders("Figure 1: Access ......... 5") == "Figure 1: Access"
     assert _collapse_toc_leaders("plain prose, no leaders") == "plain prose, no leaders"
     fenced = "```\nx = a ...... b\n```"
@@ -221,12 +224,7 @@ def test_normalize_section_number_depth_builds_a_tree() -> None:
     heading text (as both workers emit) is detected and preserved verbatim."""
     from memex.parse.pipeline import normalize_heading_levels
 
-    md = (
-        "## **1 Introduction**\n\n"
-        "## **1.1 History**\n\n"
-        "## **1.1.1 Origins**\n\n"
-        "## **2 Tenets**\n"
-    )
+    md = "## **1 Introduction**\n\n## **1.1 History**\n\n## **1.1.1 Origins**\n\n## **2 Tenets**\n"
     out = normalize_heading_levels(md).split("\n")
     assert out[0] == "## **1 Introduction**"  # N → H2
     assert out[2] == "### **1.1 History**"  # N.N → H3 (text kept incl. bold)
@@ -308,3 +306,95 @@ def test_normalize_no_headings_is_noop() -> None:
 
     body = "Just prose.\n\nMore prose, no headings at all.\n"
     assert normalize_heading_levels(body) == body
+
+
+# ----- audit-10 W11: demote_layout_tables (the SOURCE markdown transform) -----
+
+
+def test_demote_layout_tables_10k_risk_oversight_bullets_in_cells() -> None:
+    """The egregious 10-K case: an INFOGRAPHIC rendered as a 1-column GFM table
+    with bullets INSIDE its cells. The transform re-renders it as plain bullets,
+    preserves the bold (`**Board of Directors**`), does not double an existing
+    `- ` bullet, and leaves NO pipe behind."""
+    from memex.parse.pipeline import demote_layout_tables
+
+    block = (
+        "| RISK OVERSIGHT AT NVIDIA |\n"
+        "| --- |\n"
+        "| **Board of Directors** |\n"
+        "| Oversees management of major risks, including: |\n"
+        "| - Business model, including AI |\n"
+        "| - Operational, including supply chain and sourcing |\n"
+    )
+    out = demote_layout_tables(block)
+    assert "|" not in out  # the spurious table structure is gone
+    assert out == (
+        "- RISK OVERSIGHT AT NVIDIA\n"
+        "- **Board of Directors**\n"  # bold balanced, not `**Board of Directors`
+        "- Oversees management of major risks, including:\n"
+        "- Business model, including AI\n"  # existing `- ` not doubled to `- - `
+        "- Operational, including supply chain and sourcing\n"
+    )
+    assert "- - " not in out
+
+
+def test_demote_layout_tables_leaves_real_two_column_table_untouched() -> None:
+    """NEGATIVE case: a genuine 2-column data table is returned BYTE-IDENTICAL —
+    the transform only rewrites layout graphics, never real tables (so the
+    Table-RAG fabrication boundary + KV linearization are unaffected for them)."""
+    from memex.parse.pipeline import demote_layout_tables
+
+    table = (
+        "| API | Application Programming Interface |\n"
+        "|---|---|\n"
+        "| BYOD | Bring Your Own Device |\n"
+        "| CDM | Continuous Diagnostics and Mitigation |\n"
+    )
+    assert demote_layout_tables(table) == table
+
+
+def test_demote_layout_tables_keeps_under_filled_two_column_table() -> None:
+    """NEGATIVE case (the load-bearing FP guard): a 2-col table Docling
+    under-filled (`| IPsec Protocol | Choices |` over `| AH | |`) is a REAL
+    table, not a list — left verbatim."""
+    from memex.parse.pipeline import demote_layout_tables
+
+    table = "| IPsec Protocol | Choices |\n|---|---|\n| AH | |\n| ESP | |\n"
+    assert demote_layout_tables(table) == table
+
+
+def test_demote_layout_tables_preserves_surrounding_prose_and_is_idempotent() -> None:
+    """The block is replaced in place; prose before/after is untouched; a re-run
+    is a no-op (the bullet output carries no pipe-rows)."""
+    from memex.parse.pipeline import demote_layout_tables
+
+    body = "Intro prose.\n\n| References |\n|---|\n| S1 Deep Dive |\n| S2 CUTLASS |\n\nTrailing.\n"
+    out = demote_layout_tables(body)
+    assert out == "Intro prose.\n\n- References\n- S1 Deep Dive\n- S2 CUTLASS\n\nTrailing.\n"
+    assert demote_layout_tables(out) == out  # idempotent
+
+
+def test_demote_layout_tables_no_table_is_noop() -> None:
+    from memex.parse.pipeline import demote_layout_tables
+
+    body = "# Title\n\nJust prose, no tables.\n"
+    assert demote_layout_tables(body) == body
+
+
+def test_finalize_body_demotes_layout_table_and_keeps_data_table() -> None:
+    """End-to-end wiring (W11): `_finalize_body` runs the demotion — a layout
+    'table' becomes bullets while a real adjacent data table is preserved. Also
+    confirms the heading normalizer still runs on the result."""
+    from memex.parse.pipeline import _finalize_body
+
+    body = (
+        "# Doc\n\n## Sources\n\n"
+        "| References |\n|---|\n| S62162 Deep Dive |\n\n"  # W11 layout list → bullets
+        "## Glossary\n\n"
+        "| API | Application Programming Interface |\n|---|---|\n| BYOD | Bring Your Own Device |\n"
+    )
+    out = _finalize_body(body)
+    assert "| References |" not in out  # demoted
+    assert "- References\n- S62162 Deep Dive" in out
+    assert "| API | Application Programming Interface |" in out  # real table preserved
+    assert "[table-rows]" not in out  # canonical .md stays content-only (W1)

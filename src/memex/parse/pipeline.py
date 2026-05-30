@@ -44,6 +44,12 @@ from memex.core.manifest import (
     read_manifest,
     update_manifest,
 )
+from memex.core.table_linearize import (
+    GFM_TABLE_RE,
+    is_layout_table,
+    parse_gfm_table,
+    table_cell_lines,
+)
 from memex.parse.chart_ocr_backend import (
     ChartOCROutput,
     ChartOCRUnavailable,
@@ -981,6 +987,79 @@ def _collapse_toc_leaders(markdown: str) -> str:
     return "\n".join(out)
 
 
+# ----- Layout-table demotion (audit-10 step 5, W11) -----
+#
+# Both engines recover a TABLE from bbox/line geometry, which mis-fires on layout
+# graphics: a single-column list (a metric list, a references list, a symptom
+# list), an INFOGRAPHIC whose bullets each land in their own 1-cell row, or a
+# bullet list mis-grouped under multi-column headers all serialize as GFM tables.
+# Left in the `.md` they read as garbled "tables" (raw view) and — worse — the
+# index-time linearizer would emit NONSENSE KV (`References=S62162 …`,
+# `RISK OVERSIGHT AT NVIDIA=- Business model …`) that pollutes retrieval. The
+# `is_layout_table` predicate (shared with the linearizer + table-store SKIP
+# paths) decides "not a 2-D data table"; here, at the SOURCE, we re-render the
+# flagged block as plain markdown bullets so the content survives but the
+# spurious table structure is gone. Engine-agnostic (runs in `_finalize_body` on
+# both worker outputs), deterministic, idempotent (the bullet output has no
+# pipe-rows, so a re-run finds no GFM table to touch). Only LAYOUT blocks are
+# rewritten — a real data table (incl. one Docling under-filled) is left verbatim.
+# A leading markdown bullet marker on a cell (`- Business model …`) — stripped so
+# the re-render doesn't emit a doubled `- - …`. Only a list-bullet marker, never a
+# leading `*emphasis*` (the `*` must be followed by whitespace to be a marker).
+_BULLET_PREFIX_RE: Final[re.Pattern[str]] = re.compile(r"^(?:[-+]|\*(?=\s)|•)\s+")
+
+
+def _layout_table_to_bullets(block: str) -> str:
+    """Render a flagged layout block as deterministic markdown bullets.
+
+    Emits one `- {cell}` line per NON-EMPTY cell of *block*, in document order
+    (header cells first, then each data-row cell) via `table_cell_lines` — which
+    keeps the cell text RAW (whitespace-collapsed only), so inline markdown like
+    `**Board of Directors**` stays bold-balanced (the KV-side footnote strip would
+    break it). A cell that is ALREADY a markdown bullet (`- Business model …`) has
+    its existing marker normalized so there's no `- - …` doubling. The block
+    always renders to >=1 bullet (a layout table reaching here had >=1 non-empty
+    cell). The trailing newline is the caller's concern.
+    """
+    return "\n".join(f"- {_BULLET_PREFIX_RE.sub('', cell)}" for cell in table_cell_lines(block))
+
+
+def demote_layout_tables(markdown: str) -> str:
+    """Re-render layout-graphic GFM tables (audit-10 W11) as markdown bullets.
+
+    For each GFM table block, parse it (`parse_gfm_table` — the shared core) and,
+    if `is_layout_table` flags it as a layout graphic / infographic / list rather
+    than a 2-D data table, replace the raw block with `_layout_table_to_bullets`.
+    A block that doesn't parse, or that is a real data table (incl. an under-
+    filled one), is left BYTE-IDENTICAL. Engine-agnostic, deterministic, and
+    idempotent (the bullet output carries no pipe-rows). Pure-sync; no-op when the
+    body has no GFM table.
+
+    Fence-unaware by design, mirroring the index-time `linearize_gfm_tables` that
+    re-derives KV from this same body — so the SET of blocks treated as tables is
+    identical across the parse-finalize and the index stages, and a block this
+    pass demotes is exactly the block the linearizer would otherwise mis-KV.
+    """
+    out: list[str] = []
+    cursor = 0
+    for m in GFM_TABLE_RE.finditer(markdown):
+        parsed = parse_gfm_table(m.group(0))
+        if parsed is None or not is_layout_table(*parsed):
+            continue  # leave real tables (and non-parsing blocks) verbatim
+        out.append(markdown[cursor : m.start()])
+        out.append(_layout_table_to_bullets(m.group(0)))
+        cursor = m.end()
+        # `GFM_TABLE_RE` consumes the trailing newline of the final data row when
+        # one is present (EOF-no-newline is the only exception); the bullet
+        # rendering above drops it, so re-add a single newline to keep the bullet
+        # block separated from whatever follows — except at EOF, where the table
+        # ended without one.
+        if markdown[m.end() - 1 : m.end()] == "\n":
+            out.append("\n")
+    out.append(markdown[cursor:])
+    return "".join(out)
+
+
 # ----- Heading-hierarchy normalizer (audit-10 step 3, W2/W15) -----
 #
 # Both engines recover a heading's level from FONT SIZE (PyMuPDF span size, Docling bbox
@@ -1090,12 +1169,17 @@ def _finalize_body(markdown: str) -> str:
     and no re-embed is needed. See `docs/audits/10-raw-md-output-audit.md` (W1).
 
     The engine-agnostic content scrubbers live here (audit-10 step 2+): collapse TOC dot-leader
-    pagination artifacts, then normalize the heading hierarchy (section-number depth + masthead
-    promotion + monotonic-nesting guard). The result is the bytes written to disk, so EVERY
-    consumer of the parsed body (the vault `body=`, the `_bootstrap_ref` content hash, and the
-    `markdown_bytes` manifest/log count) is threaded from this one value.
+    pagination artifacts, re-render layout-graphic GFM tables (infographics / single-column
+    lists Docling/PyMuPDF mis-detect as tables, W11) as bullets, then normalize the heading
+    hierarchy (section-number depth + masthead promotion + monotonic-nesting guard). The result
+    is the bytes written to disk, so EVERY consumer of the parsed body (the vault `body=`, the
+    `_bootstrap_ref` content hash, and the `markdown_bytes` manifest/log count) is threaded
+    from this one value. The layout-table demotion runs BEFORE the heading normalizer (it only
+    rewrites GFM blocks, never touches `#`-headings) and at the SOURCE here it also clears the
+    block from the index-time `linearize_gfm_tables` / `extract_tables` scan — so no nonsense
+    `[table-rows]` KV nor `tables.sqlite` row is derived for it.
     """
-    return normalize_heading_levels(_collapse_toc_leaders(markdown))
+    return normalize_heading_levels(demote_layout_tables(_collapse_toc_leaders(markdown)))
 
 
 async def _parse_with_docling(

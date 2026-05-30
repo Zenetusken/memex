@@ -39,10 +39,13 @@ from memex.core.text import looks_like_value
 __all__ = [
     "GFM_TABLE_RE",
     "header_all_value_like",
+    "header_has_lost_columns",
     "header_has_prose_cell",
+    "is_layout_table",
     "linearize_gfm_tables",
     "nearest_heading_text",
     "parse_gfm_table",
+    "table_cell_lines",
 ]
 
 # A GFM delimiter row: pipes / dashes / colons / whitespace with >=1 dash.
@@ -162,6 +165,43 @@ def _header_has_prose_cell(header: list[str]) -> bool:
     return False
 
 
+def _header_has_lost_columns(header: list[str]) -> bool:
+    """Header-sanity gate (W12, flattened merged-header defense): True iff the
+    header has ≥2 EMPTY cells — the tell of a Docling-flattened merged-cell
+    header whose real per-column labels collapsed into the first DATA row.
+
+    Docling flattens a multi-row (merged-cell) header into ONE GFM header row:
+    the group labels span columns, leaving the interior columns EMPTY, while the
+    real per-column sub-labels collapse INTO the first data row. The live 10-K
+    "components of pay" table is the prototype — its flattened header is
+    ``['', 'Fixed Compensation', '', 'At-Risk', 'Compensation', '']`` (group
+    labels over interior gaps), with the real sub-labels (``Base Salary``,
+    ``Variable Cash``, …) consumed as data row 0. Linearizing it treats those
+    real labels as DATA and keys the money by the garbage group header — a value
+    mapped to a WRONG column, the hallucination class the header-sanity gates
+    exist to avoid. So skip it: the raw GFM stays in the ``.md`` for fidelity
+    and no mis-keyed KV row enters retrieval. This merged-header flatten ALWAYS
+    leaves ≥2 gaps (a group label spans ≥2 columns), so ≥2 empties is the signal.
+
+    What this does NOT skip (load-bearing):
+      - a SINGLE empty col-0 corner (``['', '2024', '2025']``) → the classic
+        row-label table; `_is_row_label_column` keys it right.
+      - a SINGLE INTERIOR empty (``['Model', 'Params', '', 'LR', …]``, the gte
+        hyperparameter table) → a REAL table that lost ONE column's label. The
+        linearizer keys that one column POSITIONALLY (`_linearize_row._hdr`
+        emits ``col{j+1}`` for an empty header cell — NEVER a wrong adjacent
+        label), so its values surface fabrication-safely while the labelled
+        columns key correctly. Skipping it would needlessly drop a real table's
+        KV; the ≥2-empties threshold keeps it.
+      - a fully-named header (``['Name', 'Fees ($)', 'Total ($)']``) → 0 empty
+        cells (the 10-K director-compensation gold table).
+    Pure-sync.
+    """
+    if not header:
+        return False
+    return sum(1 for cell in header if not cell.strip()) >= 2
+
+
 # Public wrappers over the header-sanity gate so other modules (e.g.
 # `index/table_store.py`) can apply the SAME skip predicate without importing
 # the private `_header_*` symbols across a module boundary (forbidden by
@@ -182,6 +222,90 @@ def header_has_prose_cell(header: list[str]) -> bool:
     sentence/heading is the tell of a mis-bounded table → skip it.
     """
     return _header_has_prose_cell(header)
+
+
+def header_has_lost_columns(header: list[str]) -> bool:
+    """Public alias for the flattened-merged-header (W12) header-sanity gate.
+
+    See `_header_has_lost_columns`: a header with a non-leading empty cell (or
+    ≥2 empties) is a Docling-flattened merged-cell header whose interior columns
+    lost their labels → linearizing it mis-keys a value to a wrong/positional
+    label → skip the table. Used by `index/table_store.py` so the store and the
+    linearizer skip the same tables.
+    """
+    return _header_has_lost_columns(header)
+
+
+# Minimum STRUCTURAL column count for a block to be a real DATA table. A genuine
+# tabular relation is at least 2-dimensional: >=2 column labels AND >=1 data row
+# that actually splits into >=2 cells. A block that fails EITHER is a layout
+# graphic / infographic / single-column list that Docling (or PyMuPDF) mis-emitted
+# as a GFM table (audit-10 W11). The two failure shapes seen in the vault:
+#   - a 1-column "table" — a metric LIST (`| Revenue |`), a references list
+#     (`| References |`), a symptom list (`| Symptom Description |`), or an
+#     INFOGRAPHIC whose bullets each render as a 1-cell row
+#     (`| RISK OVERSIGHT AT NVIDIA |` → `| - Business model … |` rows);
+#   - a multi-column HEADER over rows that are each a SINGLE cell — a bullet
+#     list mis-grouped under column labels (`| AC | CC | NCGC |` over
+#     `| - Financial statement integrity |` rows).
+# Linearizing/storing either emits NONSENSE KV (`References=S62162 …`,
+# `RISK OVERSIGHT AT NVIDIA=- Business model …`) and pollutes the raw `.md`.
+_MIN_DATA_TABLE_COLS = 2
+
+
+def is_layout_table(header: list[str], data_rows: list[list[str]]) -> bool:
+    """True iff a parsed GFM block is a LAYOUT graphic / list, NOT a data table.
+
+    Operates on the SAME (header, data_rows) `parse_gfm_table` returns, so the
+    cell-split width is structural (the number of pipe-delimited fields per row),
+    NOT trailing-empty-trimmed: a real 2-column table Docling UNDER-FILLED
+    (`| IPsec Protocol | Choices |` over `| AH | |` rows — width 2, empty 2nd
+    cell) keeps its empty cell and stays a data table, while a bullet list
+    (`| AC | CC | NCGC |` over `| - … |` rows — width 1) is correctly flagged.
+
+    The 2-D-relation test keys off the DATA rows' structural width, NOT the
+    header's. This is load-bearing: a real 2-column table whose HEADER row
+    under-split to a single cell (`| Metric |` over `| --- | --- |` + `| Revenue
+    | 100 |`) still has 2-cell DATA rows and MUST stay a data table — flagging it
+    on `len(header) < 2` would flatten it to bullets and destroy the row→value
+    relation (a latent over-removal bug; 0 such blocks in the current vault, but
+    a re-parse could produce one). Conversely a bullet list under a multi-column
+    header (`| AC | CC | NCGC |` over `| - … |`) has 1-cell data rows and IS a
+    layout block — so the data width, not the (wider) header, is authoritative.
+    `header` is accepted to match the `parse_gfm_table` tuple the callers unpack.
+
+    A block is a layout table iff it has no data row OR no data row splits into
+    >= 2 cells — either way there is no 2-D relation to query, only a single
+    column of text. Pure-sync; the caller (the parse finalize) decides what to do
+    (re-render as bullets); the index-time linearizer + table store reuse it to
+    SKIP such blocks so the two stay coherent with the cleaned `.md`.
+    """
+    if not data_rows:
+        return True
+    return max(len(row) for row in data_rows) < _MIN_DATA_TABLE_COLS
+
+
+def table_cell_lines(block: str) -> list[str]:
+    """Every NON-EMPTY cell of a GFM table block as RAW text, in document order.
+
+    The header row's cells first, then each data row's cells, top-to-bottom /
+    left-to-right. Each cell is only WHITESPACE-collapsed (multi-space → single,
+    trimmed) — it is NOT footnote-stripped the way `parse_gfm_table` cleans cells,
+    so inline markdown survives verbatim: ``**Board of Directors**`` stays
+    bold-balanced (the footnote rule in `_clean_cell` would strip the trailing
+    ``**`` as a dagger/asterisk marker — desirable for KV retrieval, WRONG for a
+    content re-render). The delimiter row is skipped. Used by the parse-time W11
+    demotion to re-render a layout table's content as faithful bullets. Pure-sync.
+    """
+    out: list[str] = []
+    for line in block.split("\n"):
+        if not line.strip() or _is_delimiter_row(line):
+            continue
+        for cell in _split_pipe_row(line):
+            collapsed = _WHITESPACE_RE.sub(" ", cell).strip()
+            if collapsed:
+                out.append(collapsed)
+    return out
 
 
 def parse_gfm_table(block: str) -> tuple[list[str], list[list[str]]] | None:
@@ -216,6 +340,36 @@ def parse_gfm_table(block: str) -> tuple[list[str], list[list[str]]] | None:
     if not data_rows:
         return None
     return header, data_rows
+
+
+def _trim_furniture_columns(
+    header: list[str], data_rows: list[list[str]]
+) -> tuple[list[str], list[list[str]]]:
+    """Drop trailing HEADER-only "furniture" columns before linearization (W12).
+
+    An OCR/layout artifact (a stray ruling line, a cropped marginal glyph) can
+    add a trailing column to the HEADER row that NO data row ever fills — the
+    live ``which-chart`` table's ``['City', '2000', …, '2010', 'P']`` header has
+    a 13th ``'P'`` column over 12-cell data rows. Linearizing it as-is appends a
+    dangling ``P=`` (empty value) to every row — benign noise, but noise. This
+    trims any RIGHTMOST header column whose index is beyond EVERY data row's
+    width, so the ``P=`` key disappears.
+
+    Conservative by construction — it can only DROP a column the data never
+    reaches, so no value is ever re-keyed or lost (a furniture column has no
+    value to begin with). It does NOT touch a column a single ragged data row
+    DOES fill (that stays — the ragged positional fallback still surfaces it),
+    nor an interior empty (only contiguous trailing furniture). Pure-sync.
+    """
+    if not header or not data_rows:
+        return header, data_rows
+    max_data_width = max((len(row) for row in data_rows), default=0)
+    # Only trim header columns to the RIGHT of every data cell. Stop at the
+    # first non-empty header cell within data width to keep it contiguous.
+    trimmed = list(header)
+    while len(trimmed) > max_data_width and len(trimmed) > _MIN_DATA_TABLE_COLS:
+        trimmed.pop()
+    return trimmed, data_rows
 
 
 def _linearize_row(
@@ -291,9 +445,21 @@ def _linearize_table(markdown: str, match: re.Match[str]) -> str | None:
         return None
     header, data_rows = parsed
 
-    if _header_all_value_like(header) or _header_has_prose_cell(header):
+    if (
+        _header_all_value_like(header)
+        or _header_has_prose_cell(header)
+        or _header_has_lost_columns(header)
+    ):
+        return None
+    # A layout graphic / infographic / single-column list mis-detected as a GFM
+    # table (audit-10 W11): no 2-D relation to linearize → skip. The parse-time
+    # finalize re-renders these as bullets, so a re-parsed `.md` has none left;
+    # this guard keeps a not-yet-re-parsed (still-polluted) `.md` coherent — its
+    # re-derived index has no nonsense `[table-rows]` KV for the layout block.
+    if is_layout_table(header, data_rows):
         return None
 
+    header, data_rows = _trim_furniture_columns(header, data_rows)
     row_label_column = _is_row_label_column(header, data_rows)
     prefix = _nearest_heading_prefix(markdown, match.start())
 

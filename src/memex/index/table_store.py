@@ -13,9 +13,10 @@ writes, per-doc `upsert_document`/`delete_document`. Path alongside
 `search.sqlite` under `{vault}/.memex/tables.sqlite`.
 
 Only tables that pass the SAME header-sanity gate as Phase-1 linearization
-(`header_all_value_like` OR `header_has_prose_cell` → skip) enter the store, so
-the mis-bounded segment table is absent and no wrong SQL can run over it
-(coherent with Phase 1).
+(`header_all_value_like` OR `header_has_prose_cell` OR `header_has_lost_columns`
+→ skip) enter the store, so the mis-bounded segment table AND the flattened
+merged-cell comp table (audit-10 W12) are absent and no wrong SQL can run over
+them (coherent with Phase 1).
 """
 
 from __future__ import annotations
@@ -32,7 +33,9 @@ from memex.core.sqlite_tuning import apply_sqlite_pragmas
 from memex.core.table_linearize import (
     GFM_TABLE_RE,
     header_all_value_like,
+    header_has_lost_columns,
     header_has_prose_cell,
+    is_layout_table,
     nearest_heading_text,
     parse_gfm_table,
 )
@@ -69,7 +72,22 @@ def extract_tables(doc_id: str, body: str) -> list[StoredTable]:
         if parsed is None:
             continue
         header, rows = parsed
-        if header_all_value_like(header) or header_has_prose_cell(header):
+        if (
+            header_all_value_like(header)
+            or header_has_prose_cell(header)
+            or header_has_lost_columns(header)
+        ):
+            # A flattened merged-cell header (audit-10 W12) has interior columns
+            # that lost their labels to a Docling flatten — a SQL table built
+            # over it would carry empty/duplicate column names AND mis-attribute
+            # a cell to the wrong column, so skip it (coherent with the Phase-1
+            # linearizer skip; the raw GFM stays in the `.md`).
+            continue
+        # A layout graphic / infographic / single-column list mis-detected as a
+        # GFM table (audit-10 W11) has no 2-D relation to query — skip it so no
+        # nonsense table enters tables.sqlite (coherent with the Phase-1
+        # linearizer skip + the cleaned `.md` the finalize re-renders to bullets).
+        if is_layout_table(header, rows):
             continue
         # An empty header would build `CREATE TABLE "t" ()` downstream
         # (sqlite OperationalError). Not reachable via the GFM parser's

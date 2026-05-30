@@ -668,3 +668,105 @@ def test_nearest_heading_text() -> None:
     table_start = body.index("| Metric")
     assert nearest_heading_text(body, table_start) == "Revenue"
     assert nearest_heading_text("| Metric | 2024 |\n", 0) == ""
+
+
+# ----- audit-10 W11: is_layout_table predicate + table_cell_lines (shared core) -----
+
+
+def test_is_layout_table_flags_single_column() -> None:
+    """A 1-column 'table' is a list/figure, not a 2-D relation — flag it.
+    Covers the metric-list (`Revenue`), references-list, symptom-list classes."""
+    from memex.core.table_linearize import is_layout_table
+
+    parsed = parse_gfm_table(
+        "| References |\n|---|\n| S62162 Deep Dive into Math Libraries |\n| S61198 CUTLASS |\n"
+    )
+    assert parsed is not None
+    assert is_layout_table(*parsed)
+
+
+def test_is_layout_table_flags_multicol_header_over_single_cell_rows() -> None:
+    """The 10-K `| AC | CC | NCGC |` infographic: a multi-column HEADER over rows
+    that are each a single `| - bullet |` cell is a bullet list, not a table."""
+    from memex.core.table_linearize import is_layout_table
+
+    parsed = parse_gfm_table(
+        "| AC | CC | NCGC |\n| --- | --- | --- |\n"
+        "| - Financial statement integrity |\n| - Disclosure controls |\n"
+    )
+    assert parsed is not None
+    header, rows = parsed
+    assert header == ["AC", "CC", "NCGC"]  # header is genuinely 3-col
+    assert max(len(r) for r in rows) == 1  # but every data row is one cell
+    assert is_layout_table(header, rows)
+
+
+def test_is_layout_table_keeps_real_two_column_table() -> None:
+    """A real 2-col data table (acronym glossary) is NOT a layout table."""
+    from memex.core.table_linearize import is_layout_table
+
+    parsed = parse_gfm_table(
+        "| API | Application Programming Interface |\n|---|---|\n| BYOD | Bring Your Own Device |\n"
+    )
+    assert parsed is not None
+    assert not is_layout_table(*parsed)
+
+
+def test_is_layout_table_keeps_under_filled_two_column_table() -> None:
+    """Load-bearing false-positive guard: a real 2-col table Docling UNDER-FILLED
+    (`| IPsec Protocol | Choices |` over `| AH | |` rows) keeps width 2 — the
+    empty 2nd cell is preserved by the structural split, so it stays a data
+    table and is NOT mistaken for a single-column list."""
+    from memex.core.table_linearize import is_layout_table
+
+    parsed = parse_gfm_table("| IPsec Protocol | Choices |\n|---|---|\n| AH | |\n| ESP | |\n")
+    assert parsed is not None
+    header, rows = parsed
+    assert max(len(r) for r in rows) == 2  # structural width 2 despite empty cells
+    assert not is_layout_table(header, rows)
+
+
+def test_is_layout_table_keeps_header_under_split_two_column_table() -> None:
+    """Load-bearing false-positive guard: a real 2-col table whose HEADER row
+    under-split to a SINGLE cell (`| Metric |`) but whose DATA rows are 2-col
+    (`| Revenue | 100 |`) MUST stay a data table — the data width, not the
+    header width, is the 2-D signal. Flagging on `len(header) < 2` would flatten
+    it to bullets and destroy the row→value relation."""
+    from memex.core.table_linearize import is_layout_table
+
+    parsed = parse_gfm_table("| Metric |\n| --- | --- |\n| Revenue | 100 |\n| Cost | 40 |\n")
+    assert parsed is not None
+    header, rows = parsed
+    assert len(header) == 1  # header genuinely under-split to one cell
+    assert max(len(r) for r in rows) == 2  # but the DATA carries the 2-D relation
+    assert not is_layout_table(header, rows)  # kept as a real table, NOT demoted
+
+
+def test_table_cell_lines_preserves_raw_markdown() -> None:
+    """`table_cell_lines` keeps cell text RAW (no footnote/asterisk strip) so a
+    bold cell stays bold-balanced — the KV-side `_clean_cell` would strip the
+    trailing `**` as a footnote marker, which is wrong for a content re-render."""
+    from memex.core.table_linearize import table_cell_lines
+
+    block = (
+        "| RISK OVERSIGHT AT NVIDIA |\n| --- |\n| **Board of Directors** |\n"
+        "| - Business model, including AI |\n"
+    )
+    cells = table_cell_lines(block)
+    assert cells == [
+        "RISK OVERSIGHT AT NVIDIA",
+        "**Board of Directors**",  # bold intact — NOT mangled to `**Board of Directors`
+        "- Business model, including AI",
+    ]
+    # Contrast: parse_gfm_table's cleaned form DOES strip the trailing `**`.
+    parsed = parse_gfm_table(block)
+    assert parsed is not None
+    assert parsed[1][0] == ["**Board of Directors"]  # documents the footnote-strip
+
+
+def test_linearizer_skips_layout_tables() -> None:
+    """A layout table emits NO `[table-rows]` KV (W11 skip wired into the
+    index-time linearizer) — so a not-yet-re-parsed polluted `.md` re-derives
+    to an index with no nonsense KV for the block."""
+    refs = "## Sources\n\n| References |\n|---|\n| S62162 Deep Dive |\n| S61198 CUTLASS |\n"
+    assert "[table-rows]" not in linearize_gfm_tables(refs)
