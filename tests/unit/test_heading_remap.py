@@ -203,7 +203,7 @@ def test_strips_multiline_running_header_band() -> None:
     """A TWO-line running header (e.g. NIST's "NIST SP 800-207" / "ZERO TRUST ARCHITECTURE")
     is caught by the band, not just the single first line."""
     pages = [f"NIST SP 800-207\n\nZERO TRUST ARCHITECTURE\n\nUnique body {i}." for i in range(10)]
-    out, stripped = strip_repeating_page_furniture(pages)
+    out, _ = strip_repeating_page_furniture(pages)
     assert all("NIST SP 800-207" not in p and "ZERO TRUST ARCHITECTURE" not in p for p in out)
     assert all(f"Unique body {i}." in out[i] for i in range(10))  # body kept
 
@@ -236,3 +236,15 @@ def test_rare_repeat_below_threshold_kept() -> None:
     pages = ["Shared top\n\nbody"] * 2 + [f"Unique {i}\n\nbody {i}" for i in range(8)]
     out, stripped = strip_repeating_page_furniture(pages)
     assert stripped == 0 and out == pages
+
+
+def test_strips_roman_numeral_page_numbers() -> None:
+    """Front-matter roman page numbers (UNIQUE per page → only the roman rule, not repeat-
+    frequency, catches them); word false-friends are never stripped."""
+    pages = [f"{r}\n\nKeywords body {i}." for i, r in enumerate(["iv", "v", "vi", "vii"])]
+    out, n = strip_repeating_page_furniture(pages)
+    assert n == 4 and all(p.split("\n")[0].startswith("Keywords") for p in out)
+    # roman-looking WORDS (unique, non-repeating) must NOT be stripped by the roman rule
+    keep = [f"{w}\n\nbody {i}." for i, w in enumerate(["mix", "lid", "civil", "mild"])]
+    out2, n2 = strip_repeating_page_furniture(keep)
+    assert n2 == 0 and out2 == keep

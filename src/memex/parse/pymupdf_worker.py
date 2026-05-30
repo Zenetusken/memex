@@ -300,9 +300,13 @@ def _remap_heading_levels(page_md: str, page: Any, size_to_level: dict[int, int]
 
 
 # A bare page-number / "Page N (of M)" line in the boundary band is furniture even though
-# each page's number differs (so it can't be caught by repeat-frequency). Roman numerals are
-# deliberately NOT matched here — `mix`/`did`/`lid` are all-[ivxlcdm] false-friends.
+# each page's number differs (so it can't be caught by repeat-frequency).
 _PAGE_NUMBER_RE = re.compile(r"^(?:\d{1,4}|[Pp]age\s+\d{1,4}(?:\s+of\s+\d{1,4})?)$")
+# Lowercase roman page numbers 1–39 (the front-matter `iv`/`vi`/`vii`/`x` case). A STRICT roman
+# grammar (`(?=[ivx])` forces a non-empty roman start; tens-then-units must consume to `$`) so it
+# rejects the all-[ivxlcdm] English false-friends — `mix`/`did`/`lid`/`civil`/`mild` all fail the
+# tens/units body. (Roman ≥40 in front matter is vanishingly rare; not matched, deliberately.)
+_ROMAN_PAGENO_RE = re.compile(r"^(?=[ivx])(?:x{0,3})(?:ix|iv|v?i{0,3})$", re.IGNORECASE)
 # A markdown-structural boundary line is NEVER furniture (heading / table / code / list / quote).
 _FURNITURE_STRUCTURAL_PREFIXES = ("#", "|", "```", "- ", "* ", "> ", "[", "<!--")
 _MAX_FURNITURE_LEN = 90
@@ -365,7 +369,10 @@ def strip_repeating_page_furniture(
         drop: set[int] = set()
         for idx in _page_band_indices(md):
             txt = lines[idx].strip()
-            if txt in repeating or (_is_furniture_candidate(txt) and _PAGE_NUMBER_RE.match(txt)):
+            is_pageno = _is_furniture_candidate(txt) and bool(
+                _PAGE_NUMBER_RE.match(txt) or _ROMAN_PAGENO_RE.match(txt)
+            )
+            if txt in repeating or is_pageno:
                 drop.add(idx)
         if drop:
             stripped += len(drop)

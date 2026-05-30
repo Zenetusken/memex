@@ -156,4 +156,13 @@ lets us choose **per-arm** what dense vs. BM25 each consume (the future fix for 
   running header + page numbers → 0, confirmed in the webui raw view; vault restored pristine.
   - **Deferred:** docling-deck running-header furniture (decks rarely have them) + a multi-line-aware band
     for docling, if a deck case appears.
+- ✅ **Step 2c — roman page numbers + TOC dot-leaders** (2026-05-30, follow-up to user-reported residual
+  artifacts). `pymupdf_worker`: a STRICT roman-numeral pattern (`(?=[ivx])` + tens/units to `$`) adds
+  standalone front-matter roman page numbers (`iv`/`v`/`vi`/`vii`/`x`) to the furniture strip while
+  rejecting the all-[ivxlcdm] English false-friends (`mix`/`did`/`lid`/`civil`/`mild`). `_finalize_body`
+  (the now-active engine-agnostic finalize scrubber) collapses dot-leader pagination artifacts
+  (`Introduction ......... 1` → `Introduction`), incl. inside GFM table cells, fence-aware. **Validation:**
+  1075 tests (+3) + ruff/pyright clean; a live NIST re-parse took dot-leaders 106→0, the TOC table to a
+  clean `|**1**|**Introduction**|`, roman page numbers → 0; an adversarial collapse audit across all 47
+  docs removed only pure pagination spans (0 content-loss); webui-confirmed; vault restored pristine.
 - ⏭ Next: step 3 (heading-hierarchy normalizer: section-number depth + monotonic nesting + masthead→H1).

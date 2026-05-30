@@ -196,3 +196,15 @@ def test_stitch_preserves_placeholder_token() -> None:
     assert "[chart-extracted]" in stitched.markdown
     # Placeholder comes before the chart-extracted block.
     assert stitched.markdown.index("<!-- image -->") < stitched.markdown.index("[chart-extracted]")
+
+
+def test_collapse_toc_leaders_strips_pagination_artifacts() -> None:
+    """audit-10 step 2c: dot-leader + trailing page number removed in prose AND table cells;
+    fenced code untouched."""
+    from memex.parse.pipeline import _collapse_toc_leaders
+
+    assert _collapse_toc_leaders("|**1**|**Introduction ............ 1**|") == "|**1**|**Introduction**|"
+    assert _collapse_toc_leaders("Figure 1: Access ......... 5") == "Figure 1: Access"
+    assert _collapse_toc_leaders("plain prose, no leaders") == "plain prose, no leaders"
+    fenced = "```\nx = a ...... b\n```"
+    assert _collapse_toc_leaders(fenced) == fenced  # literal dots in code untouched

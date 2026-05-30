@@ -958,6 +958,29 @@ def _stitch_chart_extractions(
     return conversion.model_copy(update={"markdown": new_markdown})
 
 
+# A dot-leader run (≥4 dots) + the page number that trails it — the TOC / List-of-Figures /
+# List-of-Tables pagination artifact (`Introduction ......... 1`), including inside GFM table
+# cells. The leading `[ \t]*` eats the space before the dots so `Introduction ... 1` → `Introduction`.
+_TOC_LEADER_RE: Final[re.Pattern[str]] = re.compile(r"[ \t]*\.{4,}[ \t]*\d*")
+_FENCE_LINE_RE: Final[re.Pattern[str]] = re.compile(r"^\s*(?:```|~~~)")
+
+
+def _collapse_toc_leaders(markdown: str) -> str:
+    """Strip dot-leader + trailing-page-number pagination artifacts (audit-10 step 2c). Skips
+    fenced code (a literal `....` there is content). Pure-sync; no-op when no leader is present."""
+    if "...." not in markdown:  # fast path — the overwhelming majority of docs
+        return markdown
+    out: list[str] = []
+    in_fence = False
+    for line in markdown.split("\n"):
+        if _FENCE_LINE_RE.match(line):
+            in_fence = not in_fence
+            out.append(line)
+        else:
+            out.append(line if in_fence else _TOC_LEADER_RE.sub("", line))
+    return "\n".join(out)
+
+
 def _finalize_body(markdown: str) -> str:
     """Engine-agnostic post-parse finalize of the body that is WRITTEN TO THE VAULT.
 
@@ -970,12 +993,12 @@ def _finalize_body(markdown: str) -> str:
     reproduces the exact pre-split input the chunker used to see, so chunk_ids are stable
     and no re-embed is needed. See `docs/audits/10-raw-md-output-audit.md` (W1).
 
-    This is currently a pass-through (the home for the future content-only finalize
-    scrubber — audit-10 step 2). The result is the bytes written to disk, so EVERY consumer
-    of the parsed body (the vault `body=`, the `_bootstrap_ref` content hash, and the
+    The engine-agnostic content scrubber lives here (audit-10 step 2+): it currently collapses
+    TOC dot-leader pagination artifacts. The result is the bytes written to disk, so EVERY
+    consumer of the parsed body (the vault `body=`, the `_bootstrap_ref` content hash, and the
     `markdown_bytes` manifest/log count) is threaded from this one value.
     """
-    return markdown
+    return _collapse_toc_leaders(markdown)
 
 
 async def _parse_with_docling(
