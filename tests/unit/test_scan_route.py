@@ -79,3 +79,24 @@ def test_strip_fence_md_variant_and_applied_in_assembly() -> None:
     # And the assembly applies it: a fence-wrapped page → unwrapped part.
     _, parts = _assemble_scan_pages({1: _out(1, "```markdown\n# P\n\nalpha\n```")}, 1)
     assert parts == ["# P\n\nalpha"]
+
+
+def test_strip_fence_noop_when_close_missing() -> None:
+    # The conservative branch the W5 vault sweep found in 3 real docs (e.g. cr350-semaine-5):
+    # a ```markdown opener whose closing fence was lost (EOF). With no matching close we CANNOT
+    # know the boundary → return the input unchanged rather than risk swallowing real content.
+    md = "```markdown\n# Intro\n\nbody with no closing fence"
+    assert _strip_markdown_fence_wrapper(md) == md
+
+
+def test_strip_fence_unwraps_title_slide_with_decorative_narration() -> None:
+    # The canonical vault W5 case (21bc279d-ensa-module-10@7): a ```markdown wrapper around a
+    # real title heading AND a W6 decorative-narration line. Unwrapping recovers the heading as
+    # a heading; the decorative line is left for the (separate) W6 prompt fix to suppress.
+    md = (
+        "```markdown\n# Module 10: Network Management\n\n"
+        '*Image Description: A man in a suit ... reads "OBEY" ... solid orange color.*\n```'
+    )
+    out = _strip_markdown_fence_wrapper(md)
+    assert out.startswith("# Module 10: Network Management")
+    assert not out.startswith("```") and not out.endswith("```")

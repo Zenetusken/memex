@@ -1600,6 +1600,20 @@ async def _route_and_escalate(
             result = results.get(page_no)
             original = page_index[page_no]
             if isinstance(result, DoclingPageOutput):
+                # W5 (audit-10 step 4): the VLM, asked to transcribe a page, often wraps its
+                # WHOLE answer in a ```markdown / ```md fence — which traps the page's headings,
+                # tables and prose as a code block (degrades chunking + grounding). Unwrap it at
+                # the SOURCE store point — the SAME `_strip_markdown_fence_wrapper` the scan path
+                # already applies (`_assemble_scan_pages`), here mirrored for the escalation path
+                # (the gap that was W5). Doing it here (not at the join below) keeps the page
+                # OBJECT clean too, so the `char_count` recompute below counts the unwrapped
+                # length, not the ~13-char wrapper. Cache-NEUTRAL: the VLM cache still stores the
+                # raw (wrapped) draft, so existing cached pages replay and get unwrapped on read —
+                # a plain re-parse retires the trapped wrappers with no cache bust. Idempotent +
+                # a no-op on a non-wrapped page, so it can never drop real content.
+                result = result.model_copy(
+                    update={"markdown": _strip_markdown_fence_wrapper(result.markdown)}
+                )
                 escalated_pages[page_no] = result
                 via_diagram = page_no in diagram_arm_pages and not (
                     original.confidence < threshold

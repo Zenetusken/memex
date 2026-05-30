@@ -73,6 +73,50 @@ async def test_escalation_wraps_pause_and_unloads_vlm(monkeypatch) -> None:
     assert unloaded == ["vlm"]  # VLM unloaded before vLLM restarts
 
 
+async def test_escalation_unwraps_markdown_fence_wrapper(monkeypatch) -> None:
+    """W5 (audit-10 step 4): a VLM page transcribed inside a whole-page ```markdown fence
+    is UNWRAPPED at the escalation store point — so the heading indexes as a heading (not a
+    code block) AND the page object's char_count reflects the unwrapped length."""
+
+    @contextlib.asynccontextmanager
+    async def fake_pause() -> AsyncGenerator[None]:
+        yield
+
+    wrapped = "```markdown\n# Module 10: Network Management\n\nEnterprise body text.\n```"
+
+    async def fake_vlm(*, source_pdf: Path, page_numbers: list[int], **_kw: object):
+        return {2: DoclingPageOutput(page=2, markdown=wrapped, confidence=0.95)}
+
+    class _FakeRegistry:
+        async def unload(self, name: str) -> None: ...
+
+    monkeypatch.setattr(P, "pause_vllm_for_gpu", fake_pause)
+    monkeypatch.setattr(P, "vlm_convert_pages", fake_vlm)
+    monkeypatch.setattr("memex.models.registry.get_registry", lambda: _FakeRegistry())
+
+    decisions, conv = await P._route_and_escalate(
+        _conversion(),
+        source=Path("deck.pdf"),
+        threshold=0.65,
+        image_area_threshold=0.5,
+        disable_vlm=False,
+        log=structlog.get_logger("test"),
+    )
+
+    # The fence is gone from the document-level markdown; the heading survives bare.
+    assert "```markdown" not in conv.markdown
+    assert "# Module 10: Network Management" in conv.markdown
+    assert "Enterprise body text." in conv.markdown
+    # The page OBJECT is unwrapped too → char_count (recomputed below the stitch) is the
+    # unwrapped length, not the ~13-char-heavier wrapped draft.
+    page2 = next(p for p in conv.pages if p.page == 2)
+    assert page2.markdown.startswith("# Module 10")
+    assert "```" not in page2.markdown
+    by_page = {d.page: d for d in decisions}
+    assert by_page[2].engine == "vlm"
+    assert by_page[2].char_count == len(page2.markdown)
+
+
 async def test_disable_vlm_skips_escalation_pause_and_unload(monkeypatch) -> None:
     entered: list[bool] = []
 
