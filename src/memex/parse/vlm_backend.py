@@ -60,6 +60,25 @@ _PROMPT = (
 # safety net below is the validated combination. The model still
 # occasionally punts a hard spatial diagram; the strip removes the
 # resulting broken `![...]()` so it never reaches the vault.
+#
+# W6 (audit-10 step 4): a SECOND, calm-register rewrite was tried 2026-05-30 to
+# suppress decorative-image / visual-styling / editorial narration (the
+# "*Image Description: a man in a suit ... OBEY ... orange background*" vault
+# noise) WITHOUT the forceful absolutes — it added a "skip purely decorative
+# pictures" clause led by a "Transcribe every heading, title, label, and line"
+# preservation guard. It was IMPLEMENTED + empirically validated on a
+# cr350-network-diagrams re-parse (fresh VLM, prompt_sha8 cache-miss): the
+# over-suppression risk did NOT materialise (single-tier connectivity, EAPOL,
+# every instructional token PRESERVED or richer) and the HARD gates held
+# (refusal_cf=1.0, 0 hallucinations, N=3). BUT it failed the ship bar with a
+# CONSISTENT −1 ANS on cr350-diagrams (diag-02: answer PRESENT but the
+# preservation guard makes the model transcribe MORE multi-tier detail, which
+# crowds the single-tier answer in retrieval → a benign borderline false-
+# refuse). Suppress-decoration vs preserve-content vs don't-induce-retrieval-
+# crowding-verbosity is a real tension that needs a focused session + broad
+# multi-corpus validation, so W6 is DEFERRED (the prompt above is the
+# unchanged, validated baseline). Full evidence + the refinement direction:
+# docs/audits/10-raw-md-output-audit.md + docs/ROADMAP.md (audit-10 W6).
 
 # The VLM transcribes a rendered PAGE image, so any markdown image link it
 # emits points at a file that does not exist — pure noise, and a broken

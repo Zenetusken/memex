@@ -60,3 +60,19 @@ def test_strip_image_links_keeps_plain_links() -> None:
     # A normal (non-image) markdown link has no leading '!' — must survive.
     md = "See [the spec](https://example.com) for details."
     assert _strip_image_links(md) == md
+
+
+def test_vlm_prompt_keeps_load_bearing_clauses() -> None:
+    """Pin the VLM prompt's load-bearing, validated clauses so a future edit can't silently
+    drop them — the 2026-05-25 forceful rewrite AND the 2026-05-30 W6 decorative-suppression
+    attempt were both reverted (the latter for a −1 ANS on cr350-diagrams; see the NB comment in
+    vlm_backend.py + audit-10 W6). This is the validated baseline prompt."""
+    from memex.parse.vlm_backend import _PROMPT
+
+    # The validated diagram clause + its inline-flow example + the image-placeholder guard.
+    assert "Router -> Firewall -> Private Network" in _PROMPT
+    assert "do NOT emit an image placeholder like ![...]" in _PROMPT
+    assert "Code blocks (```fenced)" in _PROMPT
+    assert "Output ONLY Markdown for the page contents" in _PROMPT
+    # Calm register — the forceful absolutes that got reverted must NOT reappear.
+    assert "MUST" not in _PROMPT and "NEVER" not in _PROMPT
