@@ -95,6 +95,14 @@ _PICTURE_TEXT_BOUNDARY_RE = re.compile(
 )
 # Strip runs of 3+ consecutive blank lines that the marker-strips leave behind.
 _BLANK_LINE_RUN_RE = re.compile(r"\n{3,}")
+# audit-10 W9: the honest content-loss visibility placeholder a picture-omitted marker is CONVERTED
+# to (was deleted). Blank-line padded on BOTH sides so it is a STANDALONE paragraph regardless of
+# pymupdf4llm's spacing — a figure-dense page can emit adjacent markers, and the bare form would glue
+# two placeholders onto one line (`<!-- image --><!-- image -->`) or onto a following prose line,
+# which breaks the per-line `<!-- image -->` recognition downstream (the W13 dedup's `_dedup_is_excluded`,
+# the chunker's image-block handling). The `_BLANK_LINE_RUN_RE` collapse below then makes each its own
+# paragraph. The bare `<!-- image -->` matches the Docling D2/D3 convention + `_IMAGE_PLACEHOLDER_RE`.
+_IMAGE_PLACEHOLDER_SUB = "\n\n<!-- image -->\n\n"
 
 
 def _looks_like_table_row(line: str) -> bool:
@@ -143,8 +151,15 @@ def _strip_pymupdf_markers(text: str) -> str:
 
     Two patterns:
       - `**==> picture [W x H] intentionally omitted <==**` lines —
-        pure extraction metadata describing a region PyMuPDF didn't
-        render. No retrieval signal; deleted outright.
+        pymupdf4llm's marker for a FIGURE it detected but did not render
+        (a born-digital vector drawing / image). It used to be deleted
+        outright, which SILENTLY DROPPED the figure AND left the manifest
+        reporting 0 figures (audit-10 W9, crit: a paper that says "see
+        Figure 2" with no figure). It is now CONVERTED to a `<!-- image -->`
+        visibility placeholder (the Docling D2/D3 convention) so the gap is
+        honest in the raw view + countable for the manifest; the figures are
+        modest on the pymupdf path (gte 12, NIST 14 — figure-dense decks
+        route to Docling, never here), so no per-page cap is needed.
       - `**----- Start/End of picture text -----**` boundary markers —
         replaced with compact `[chart-text]` / `[/chart-text]` tags.
         The verbose form bloats chunks (~5 KB on the canonical CUDA
@@ -158,7 +173,7 @@ def _strip_pymupdf_markers(text: str) -> str:
     """
     if "**==>" not in text and "Start of picture text" not in text:
         return text
-    text = _PICTURE_OMITTED_RE.sub("", text)
+    text = _PICTURE_OMITTED_RE.sub(_IMAGE_PLACEHOLDER_SUB, text)
     text = _PICTURE_TEXT_BOUNDARY_RE.sub(_compact_picture_text_marker, text)
     text = _BLANK_LINE_RUN_RE.sub("\n\n", text)
     return text
@@ -733,7 +748,14 @@ def _convert_to_payload(source: Path) -> dict[str, Any]:
             "pages": pages,
             "pymupdf_version": pymupdf_version,
             "signals": signals,
-            "figure_count": 0,
+            # audit-10 W9: the honest figure count = the `<!-- image -->` placeholders in the WRITTEN
+            # body (each is one converted picture-omitted marker; `<!--` is furniture-exempt so the
+            # furniture strip never drops one → body count == converted count). Was hardcoded 0 (a
+            # lie). table_count + equation_count stay 0 — DEFERRED (a documented W9 follow-up in
+            # ROADMAP): an honest table_count must be counted AFTER `_finalize_body`'s layout-table
+            # demotion (a pipeline-level concern, not the worker's), and born-digital equations need
+            # OCR-LaTeX (a heavy separate model); near-absent on these docs (gte 1 ref, NIST 0).
+            "figure_count": joined.count("<!-- image -->"),
             "table_count": 0,
             "equation_count": 0,
         }

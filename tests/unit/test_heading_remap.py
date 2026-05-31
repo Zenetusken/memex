@@ -12,11 +12,52 @@ from typing import Any
 
 from memex.parse.pymupdf_worker import (
     _heading_size_to_level,
+    _is_furniture_candidate,
     _looks_like_prose_heading,
     _normalise_breaks,
     _remap_heading_levels,
+    _strip_pymupdf_markers,
     strip_repeating_page_furniture,
 )
+
+# ======================================================================
+# audit-10 step 6c (W9): picture-omitted marker -> <!-- image --> placeholder
+# ======================================================================
+
+
+def test_picture_omitted_converts_to_standalone_placeholder() -> None:
+    # The born-digital figure gap: pymupdf4llm emits the marker for a vector drawing it didn't
+    # render; it is now CONVERTED to a visibility placeholder (was deleted, silently dropping the
+    # figure + lying figure_count=0). Standalone + blank-padded; surrounding prose preserved.
+    raw = "# Section 5\n\n**==> picture [612 x 792] intentionally omitted <==**\n\nSee Figure 2.\n"
+    out = _strip_pymupdf_markers(raw)
+    assert "<!-- image -->" in out
+    assert "==> picture" not in out  # the verbose marker is gone
+    assert "\n\n<!-- image -->\n\n" in f"\n{out}\n"  # standalone paragraph
+    assert "# Section 5" in out and "See Figure 2." in out  # content untouched
+
+
+def test_adjacent_markers_not_glued() -> None:
+    # A figure-dense page can emit adjacent markers — they must stay separate placeholders
+    # (a glued `<!-- image --><!-- image -->` would break per-line image-block recognition).
+    raw = (
+        "**==> picture [1 x 1] intentionally omitted <==**\n"
+        "**==> picture [2 x 2] intentionally omitted <==**\n"
+    )
+    out = _strip_pymupdf_markers(raw)
+    assert out.count("<!-- image -->") == 2
+    assert "<!-- image --><!-- image -->" not in out
+
+
+def test_no_picture_marker_is_noop() -> None:
+    md = "# Title\n\nJust prose, no figures.\n"
+    assert _strip_pymupdf_markers(md) == md  # fast-path no-op
+
+
+def test_image_placeholder_is_furniture_exempt() -> None:
+    # The count = body `<!-- image -->` count is only robust if the furniture strip never drops a
+    # placeholder — `<!--` is a structural prefix, so it is never a furniture candidate.
+    assert _is_furniture_candidate("<!-- image -->") is False
 
 
 class _FakePage:
