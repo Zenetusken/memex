@@ -133,7 +133,9 @@ def test_synthetic_chunk_total_text_bounded_with_long_sql() -> None:
     # Evidence survived (rows are present even though SQL is huge).
     assert "Compute & Networking" in chunk.text
     assert "Graphics" in chunk.text
-    assert "Aggregate result = 133302" in chunk.text
+    # The aggregate self-describes by its column header (2026-05-31) so the answer
+    # node connects the scalar to the queried quantity.
+    assert "SUM of Revenue = 133302" in chunk.text
 
 
 # ======================================================================
@@ -676,3 +678,75 @@ def test_relevant_tables_scopes_to_near_chunks_and_caps() -> None:
     # _span_gap: overlap → 0; disjoint → positive gap.
     assert _span_gap(0, 100, 50, 150) == 0
     assert _span_gap(0, 100, 300, 400) == 200
+
+
+def test_query_matched_tables_surfaces_by_section_header() -> None:
+    """`_query_matched_tables` offers a table whose section/header lexically
+    matches the query, regardless of where its chunk reranked — the recall path
+    that fixed ar-14 (a 'director fees' query whose Director Compensation table
+    chunk never reranked into the candidate pool)."""
+    from memex.agents.answering import _TABLE_QUERY_MATCH_MIN, _query_matched_tables
+    from memex.core.types import StoredTable
+
+    def _t(tid: str, section: str, header: list[str]) -> StoredTable:
+        return StoredTable(
+            doc_id="d", table_id=tid, section=section, header=header, rows=[["1"]],
+            char_start=0, char_end=10,
+        )
+
+    director_comp = _t(
+        "dc", "Director Compensation", ["Name", "Fees Earned or Paid in Cash ($)", "Total ($)"]
+    )
+    exec_comp = _t(
+        "ec", "Summary Compensation", ["Name", "Salary ($)", "Bonus ($)", "Stock Awards ($)"]
+    )
+    unrelated = _t("ux", "Lease Maturities", ["Year", "Operating Leases ($)"])
+    tables = [exec_comp, director_comp, unrelated]
+
+    q = "What was the total amount of fees earned or paid in cash to all of NVIDIA's directors?"
+    matched = _query_matched_tables(tables, q)
+    ids = [t.table_id for t in matched]
+    assert ids[0] == "dc", "the header-matching Director Compensation table ranks first"
+    assert "ux" not in ids, "an unrelated table (< min overlap) is not offered"
+
+    # A query that matches nothing → empty (no spurious offering).
+    assert _query_matched_tables(tables, "Who is the CEO?") == []
+    # Below-threshold overlap (a single shared term) is not enough.
+    assert _TABLE_QUERY_MATCH_MIN == 2
+
+
+def test_select_tables_unions_proximity_and_query_match() -> None:
+    """`_select_tables` = proximity ∪ query-match, query-matched first, deduped,
+    capped — so the right table is offered whether retrieval reranked its chunk
+    (proximity) or only its name matches (query-relevance)."""
+    from memex.agents.answering import _TABLE_CANDIDATE_CAP, _select_tables
+    from memex.core.types import StoredTable
+
+    # A query-matching table FAR from any reranked chunk (proximity would miss it).
+    director_comp = StoredTable(
+        doc_id="d", table_id="dc", section="Director Compensation",
+        header=["Name", "Fees Earned or Paid in Cash ($)"], rows=[["x", "1"]],
+        char_start=150_000, char_end=150_500,
+    )
+    # A proximity table near the reranked chunk but NOT query-matching.
+    near_table = StoredTable(
+        doc_id="d", table_id="nt", section="Balance Sheet", header=["Assets", "Liabilities"],
+        rows=[["1", "2"]], char_start=5000, char_end=5100,
+    )
+    chunk = Chunk(
+        chunk_id="d#abcdef0123", document_id="d", document_title="", text="...",
+        char_start=5000, char_end=5100,
+    )
+    q = "total fees earned or paid in cash to directors"
+    sel = _select_tables([near_table, director_comp], [chunk], q, "d")
+    ids = [t.table_id for t in sel]
+    assert "dc" in ids, "the query-matched table is offered even though no chunk is near it"
+    assert "nt" in ids, "the proximity table is still offered"
+    assert ids[0] == "dc", "query-matched first"
+    assert len(ids) == len(set(ids)), "no duplicates"
+    assert len(sel) <= _TABLE_CANDIDATE_CAP
+
+    # When proximity already covers the matched table, dedup keeps one copy.
+    near_dc = director_comp.model_copy(update={"char_start": 5000, "char_end": 5100})
+    sel2 = _select_tables([near_dc], [chunk], q, "d")
+    assert [t.table_id for t in sel2] == ["dc"], "proximity ∪ query-match dedups to one"

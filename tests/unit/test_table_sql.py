@@ -623,3 +623,31 @@ def test_verify_superlative_non_numeric_order_col_returns_none() -> None:
         table_sql._verify_superlative(t, loaded, "name", "asc", None, ["Burgess", "342,559"])
         is None
     )
+
+
+def test_describe_aggregate_labels_by_header() -> None:
+    """`describe_aggregate` maps the SQL's aggregated column back to its original
+    header so the synthetic chunk self-describes the scalar (the fix that makes
+    the answer node recognize the aggregate AS the queried quantity, ar-14)."""
+    from memex.agents.table_sql import describe_aggregate
+    from memex.core.types import TableQueryResult
+
+    def _agg(sql: str, header: list[str], kind: str = "aggregate") -> TableQueryResult:
+        return TableQueryResult(
+            kind=kind, aggregate_value=956250.0, sql=sql, header=header,
+            contributing_rows=[["x", "85,000"]], doc_id="d", target_table_id="t",
+            section="Director Compensation", heading_path=["Director Compensation"],
+            char_start=0, char_end=10, document_title="10-K",
+        )
+
+    r = _agg(
+        "SELECT SUM(fees_earned_or_paid_in_cash__num) FROM c_x",
+        ["**Name", "**Fees Earned or Paid in Cash ($)", "**Total ($)"],
+    )
+    assert describe_aggregate(r) == "SUM of Fees Earned or Paid in Cash ($)"
+    # COUNT(*) → a sensible label, not a column.
+    assert describe_aggregate(_agg("SELECT COUNT(*) FROM c_x", ["**Name", "**Fee"])).startswith("COUNT")
+    # A rows-kind result has no aggregate label.
+    assert describe_aggregate(_agg("SELECT * FROM c_x", ["A"], kind="rows")) is None
+    # An unmappable column → None (caller falls back to the generic framing).
+    assert describe_aggregate(_agg("SELECT SUM(unknown_col__num) FROM c_x", ["**Name"])) is None

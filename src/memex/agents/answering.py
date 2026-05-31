@@ -63,8 +63,9 @@ from memex.agents.artifact_scope import (
     detect_artifact_reference,
     resolve_scope,
 )
-from memex.agents.table_sql import coerce_number
+from memex.agents.table_sql import coerce_number, describe_aggregate
 from memex.core.errors import AnswerStateInvariantError
+from memex.core.text import STOPWORDS, atomise
 from memex.core.types import Chunk, RelatedDocument, StoredTable, TableQueryResult
 from memex.core.wikilinks import format_wikilink
 from memex.models.client import complete_structured
@@ -907,15 +908,17 @@ def _build_synthetic_chunk(result: TableQueryResult) -> Chunk:
     header = result.header
     lines: list[str] = []
     if result.kind == "aggregate":
-        op_col = result.sql
         # Lead with the validated aggregate framing, then the basis rows. The
         # value lives in THIS framing line, so the aggregate path is unaffected
         # by row-dropping — even if every basis row overflows, the answer (the
-        # scalar) survives.
+        # scalar) survives. The framing SELF-DESCRIBES the aggregate (`SUM of
+        # Fees Earned or Paid in Cash ($) = 956250`) so the answer node connects
+        # the scalar to the queried quantity — a bare "Aggregate result = X"
+        # reads as un-labelled and the literal-presence rule refuses it.
         agg_val = result.aggregate_value
         val_str = f"{agg_val:g}" if agg_val is not None else "n/a"
-        lines.append(f"Aggregate result = {val_str} over {len(result.contributing_rows)} rows:")
-        _ = op_col
+        label = describe_aggregate(result) or "Aggregate result"
+        lines.append(f"{label} = {val_str} over {len(result.contributing_rows)} rows:")
         for cells in result.contributing_rows:
             candidate = "\n".join([*lines, _render_kv_row(header, cells)])
             # Stop adding rows once we'd exceed the evidence budget (leaving
@@ -1036,6 +1039,68 @@ def _relevant_tables(
     return [t for gap, _, t in scored if gap <= _TABLE_PROXIMITY_MARGIN][:_TABLE_CANDIDATE_CAP]
 
 
+# Decouple Table-RAG recall from chunk-proximity. `_relevant_tables` only offers
+# the SQL generator tables whose char-span sits near a RERANKED chunk — so a
+# clearly-named table whose prose chunk didn't rerank into the pool is never
+# queried (the 10-K's "Director Compensation" fees table for a "total director
+# fees" query: its chunk ranks below the exec-comp sections, leaving the table
+# ~60k chars from any reranked chunk, so the SQL-gen LLM gets the wrong tables
+# and returns empty SQL → the query false-refuses despite a perfectly clean,
+# summable Fees column). The query-relevance path below ALSO offers a table
+# whose section heading + header columns lexically match the query. Lexical
+# (the shared `core/text` atomise + STOPWORDS), no LLM, no embedding. Additive
+# to recall: the §4 recompute / row-verbatim injection gate in `query_doc_tables`
+# stays the safety boundary, so an extra (even off-topic) candidate table can
+# only let the model find the right one — it can never ship an unverified value.
+_TABLE_QUERY_MATCH_MIN = 2  # significant query terms a table's section+header must share
+
+
+def _significant_terms(text: str) -> set[str]:
+    """Lowercased, stopword-filtered atomic tokens of a phrase (single-char
+    tokens like the `s` of `NVIDIA's` dropped) — the same `core/text` tokenizer
+    artifact_scope/FTS use, so terms match the same way."""
+    return {a for raw in text.split() for a in atomise(raw) if len(a) > 1 and a not in STOPWORDS}
+
+
+def _query_matched_tables(tables: list[StoredTable], query: str) -> list[StoredTable]:
+    """Tables whose section heading + header columns share at least
+    `_TABLE_QUERY_MATCH_MIN` significant terms with the query, ranked by overlap
+    (desc, ties by document order), capped. The query-relevance recall path that
+    doesn't depend on the table's prose chunk reranking."""
+    q_terms = _significant_terms(query)
+    if not q_terms:
+        return []
+    scored: list[tuple[int, int, StoredTable]] = []
+    for i, t in enumerate(tables):
+        sig_terms = _significant_terms(t.section + " " + " ".join(t.header))
+        overlap = len(q_terms & sig_terms)
+        if overlap >= _TABLE_QUERY_MATCH_MIN:
+            scored.append((overlap, i, t))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    return [t for _, _, t in scored][:_TABLE_CANDIDATE_CAP]
+
+
+def _select_tables(
+    tables: list[StoredTable], reranked: list[Chunk], query: str, doc_id: str
+) -> list[StoredTable]:
+    """The tables of *doc_id* to offer the SQL generator: those near a reranked
+    chunk (spatial proximity, `_relevant_tables`) UNION those whose section/header
+    matches the query (`_query_matched_tables`) — query-matched first (more
+    on-topic for a table question), deduped by `table_id`, capped at
+    `_TABLE_CANDIDATE_CAP`. When proximity already finds the right table the two
+    overlap and dedup to the same set (no change); the query-match path only adds
+    recall when retrieval didn't rerank the table's chunk."""
+    matched = _query_matched_tables(tables, query)
+    proximity = _relevant_tables(tables, reranked, doc_id)
+    out: list[StoredTable] = []
+    seen: set[str] = set()
+    for t in [*matched, *proximity]:
+        if t.table_id not in seen:
+            seen.add(t.table_id)
+            out.append(t)
+    return out[:_TABLE_CANDIDATE_CAP]
+
+
 async def query_tables(state: AnswerState) -> AnswerStateUpdate:
     """Text-to-SQL over a relevant document's structured tables (Phase 2).
 
@@ -1083,10 +1148,12 @@ async def query_tables(state: AnswerState) -> AnswerStateUpdate:
                 if c.document_id not in seen_docs:
                     seen_docs.append(c.document_id)
 
-            # Pick the first reranked doc that has stored tables NEAR the
-            # retrieved chunks (proximity-scoped — passing all of a 74-table doc
-            # overflows the SQL-gen prompt). A doc with tables only far from the
-            # retrieved region is skipped, as is one with no stored tables.
+            # Pick the first reranked doc whose stored tables are relevant to the
+            # query — either NEAR the retrieved chunks (proximity) OR matching the
+            # query's section/header terms (query-relevance). Both paths are capped
+            # so passing all of a 74-table doc can't overflow the SQL-gen prompt. A
+            # doc with tables neither near the retrieved region nor query-matching
+            # is skipped, as is one with no stored tables.
             target_tables: list[StoredTable] = []
             target_title = ""
             any_doc_has_tables = False
@@ -1095,7 +1162,7 @@ async def query_tables(state: AnswerState) -> AnswerStateUpdate:
                 if not tables:
                     continue
                 any_doc_has_tables = True
-                near = _relevant_tables(tables, state.reranked, doc_id)
+                near = _select_tables(tables, state.reranked, state.query, doc_id)
                 if near:
                     target_tables = near
                     target_title = next(

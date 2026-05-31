@@ -330,6 +330,32 @@ def _strip_quotes(ident: str) -> str:
     return ident.strip().strip('"').strip("'")
 
 
+def describe_aggregate(result: TableQueryResult) -> str | None:
+    """A human-readable label for an aggregate result — e.g. `SUM of Fees Earned
+    or Paid in Cash ($)` — by parsing the SQL's function + column and mapping the
+    sanitized column back to its ORIGINAL header. Used to frame the synthetic
+    chunk so the answer node recognizes the scalar AS the queried quantity (a
+    bare "Aggregate result = 956250" reads as un-labelled and the literal-presence
+    rule refuses it). None when the SQL isn't a recognizable scalar aggregate or
+    the column can't be mapped → the caller falls back to the generic framing."""
+    if result.kind != "aggregate":
+        return None
+    m = _AGG_RE.match(result.sql)
+    if not m:
+        return None
+    fn = m.group("fn").upper()
+    col = _strip_quotes(m.group("col"))
+    if col == "*":
+        return f"{fn} over {result.header[0].strip('*').strip()}" if result.header else None
+    # The numeric companion column is `<sanitized>__num`; the aggregate runs on it.
+    base = col[:-5] if col.lower().endswith("__num") else col
+    for h in result.header:
+        if _sanitize_identifier(h, fallback="c") == base.lower():
+            label = h.strip().strip("*").strip()
+            return f"{fn} of {label}" if label else None
+    return None
+
+
 # A single-row superlative SELECT: `SELECT ... FROM tbl [WHERE ...] ORDER BY col
 # [ASC|DESC] LIMIT 1`. Captures the order column, direction (default ASC), and
 # the optional WHERE body. Scoped to `LIMIT 1` — the "which X has the most/least
