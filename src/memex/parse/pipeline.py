@@ -971,6 +971,56 @@ _TOC_LEADER_RE: Final[re.Pattern[str]] = re.compile(r"[ \t]*\.{4,}[ \t]*\d*")
 _FENCE_LINE_RE: Final[re.Pattern[str]] = re.compile(r"^\s*(?:```|~~~)")
 
 
+# ----- Markdown-fence un-wrap (audit-10 step 6b, W14) -----
+#
+# The parsers (and the per-page VLM, beyond W5's whole-page wrapper) sometimes wrap a markdown
+# REGION — headings + prose — in a ```markdown / ```md fenced code block MID-document, trapping its
+# headings/prose as inert code (the chunker + the fence-aware finalize passes treat a fenced region
+# as code, so the headings are invisible and grounding degrades — the W5 failure mode, here mid-doc).
+# A ```markdown / ```md language tag is by construction a "this is markdown" signal — measured prose,
+# code-ratio 0 across all 73 such vault blocks — so un-fencing them is FALSE-POSITIVE-FREE. We
+# ABSTAIN on any such block that contains a NESTED fence line (a real ```text/```python the VLM
+# embedded): un-fencing it would splice an UNBALANCED inner fence into the body. The riskier
+# BARE-tagged heading-block un-fence — which must disentangle a heading mis-fenced WITH real CLI/code
+# — is DEFERRED (an FP analysis rated it 8/10 real-code-corruption risk; tracked in docs/ROADMAP.md),
+# as is the pull-quote→blockquote sub-rule. Engine-agnostic, deterministic, idempotent.
+_FENCE_MD_OPEN_RE: Final[re.Pattern[str]] = re.compile(r"^[ \t]*(?:```|~~~)(?:markdown|md)[ \t]*$", re.IGNORECASE)
+_FENCE_BARE_CLOSE_RE: Final[re.Pattern[str]] = re.compile(r"^[ \t]*(?:```|~~~)[ \t]*$")
+
+
+def unfence_markdown_blocks(markdown: str) -> str:
+    """Un-fence a mid-document ```markdown / ```md block whose content is plain markdown (W14).
+
+    Drops the opening ```markdown / closing ``` lines and splices the inner lines back VERBATIM at
+    the same position, so the trapped headings + prose become top-level (and visible to the
+    downstream chunker + fence-aware finalize passes). ABSTAINS — leaves the block fenced — when it
+    has no matching bare close, OR contains a NESTED fence line (un-fencing would expose an
+    unbalanced inner ```text/```python the VLM embedded). Only an explicitly markdown/md-LABELLED
+    fence is touched; a real-code fence (any other / no language tag) is never considered. Pure-sync;
+    fast-path no-op when no markdown fence is present; idempotent (the un-fenced content has no outer
+    fence left to match)."""
+    if "`" not in markdown and "~" not in markdown:
+        return markdown
+    lines = markdown.split("\n")
+    out: list[str] = []
+    i, n = 0, len(lines)
+    while i < n:
+        if _FENCE_MD_OPEN_RE.match(lines[i]):
+            j = i + 1
+            nested = False
+            while j < n and not _FENCE_BARE_CLOSE_RE.match(lines[j]):
+                if _FENCE_LINE_RE.match(lines[j]):  # an inner ```/~~~ line → nested code, abstain
+                    nested = True
+                j += 1
+            if j < n and not nested:  # clean markdown block with a bare close → un-fence
+                out.extend(lines[i + 1 : j])
+                i = j + 1
+                continue
+        out.append(lines[i])
+        i += 1
+    return "\n".join(out)
+
+
 def _collapse_toc_leaders(markdown: str) -> str:
     """Strip dot-leader + trailing-page-number pagination artifacts (audit-10 step 2c). Skips
     fenced code (a literal `....` there is content). Pure-sync; no-op when no leader is present."""
@@ -1319,7 +1369,9 @@ def _finalize_body(markdown: str) -> str:
     `[table-rows]` KV nor `tables.sqlite` row is derived for it.
     """
     return normalize_heading_levels(
-        collapse_consecutive_duplicates(demote_layout_tables(_collapse_toc_leaders(markdown)))
+        collapse_consecutive_duplicates(
+            demote_layout_tables(unfence_markdown_blocks(_collapse_toc_leaders(markdown)))
+        )
     )
 
 
