@@ -1060,6 +1060,145 @@ def demote_layout_tables(markdown: str) -> str:
     return "".join(out)
 
 
+# ----- Consecutive duplicate collapse (audit-10 step 6a, W13) -----
+#
+# A slide deck with N animation steps is transcribed as N near-identical slides, and a figure at
+# a page seam can be transcribed twice — both produce CONSECUTIVE duplicate blocks (a slide title
+# re-emitted, a bullet / diagram-transcription repeated back-to-back). RAW EQUALITY + STRICT
+# ADJACENCY (window 1) is the ONLY false-positive-free setting: a ratio / token-overlap threshold
+# collapses PARALLEL DATA that shares a template (different IPs, footnote numbers, "5 GHz -1" vs
+# "-2", precision-table rows) — verified unsafe at every value tested. So we drop only a block
+# whose normalized text is EXACTLY equal to the immediately-preceding KEPT block. Scattered
+# legitimate repeats (the 10-K's "vote required" ×3 per proposal, the ×21 running header) are NOT
+# consecutive → untouched (the 10-K collapses 0). Excluded blocks — the load-bearing
+# `<!-- image -->` marker (D2 / audit #3), bare PictureClassifier labels (W3 residue), and
+# box-drawing diagram connectors — are KEPT but skipped for adjacency, so two identical slide
+# titles separated only by image+Logo noise are still adjacent. Headings compare
+# level-insensitively (keep the SHALLOWER). Engine-agnostic, deterministic, idempotent.
+# (The riskier near-duplicate SECTION collapse — animation supersets/reorders via token-overlap —
+# is DEFERRED: the FP sweep showed every ratio threshold reintroduces parallel-data content loss;
+# tracked in docs/ROADMAP.md as a W13 follow-up.)
+_DEDUP_FURNITURE_RE: Final[re.Pattern[str]] = re.compile(
+    r"^(?:Logo|Line chart|Bar chart|Pie chart|Icon|Music|Screenshot from computer"
+    r"|Engineering drawing|Flow ?chart|Picture|Photograph|Table|Image)$",
+    re.IGNORECASE,
+)
+_DEDUP_BOXART_CHARS: Final[frozenset[str]] = frozenset("│─┌┐└┘├┤┬┴┼╴╵╶╷▼▲◄►←→↑↓")
+_DEDUP_WS_RE: Final[re.Pattern[str]] = re.compile(r"\s+")
+
+
+def _dedup_is_boxart(text: str) -> bool:
+    """A box-drawing / arrow diagram block (a connector run) — a DIAGRAM unit, never a dup target
+    (the guidelines flowchart's identical `│   │` connector rows each link a different node pair)."""
+    chars = [c for c in text if not c.isspace()]
+    if not chars:
+        return False
+    box = sum(1 for c in chars if c in _DEDUP_BOXART_CHARS)
+    return box >= 2 and box / len(chars) >= 0.3
+
+
+def _dedup_is_excluded(block_lines: list[str]) -> bool:
+    """A block kept verbatim but NOT counted toward adjacency and never collapsed: a block whose
+    every non-blank line is the image placeholder marker or a bare PictureClassifier label, or a
+    box-art connector block."""
+    if _dedup_is_boxart("\n".join(block_lines)):
+        return True
+    nonblank = [ln.strip() for ln in block_lines if ln.strip()]
+    return bool(nonblank) and all(
+        _IMAGE_PLACEHOLDER_RE.fullmatch(ln) or _DEDUP_FURNITURE_RE.match(ln) for ln in nonblank
+    )
+
+
+def _dedup_key(block_lines: list[str]) -> tuple[str, int]:
+    """The raw-equality comparison key + heading level (0 = not a heading) for a block.
+
+    A single-line ATX heading is keyed LEVEL-INSENSITIVELY (strip the `#`-run, drop backslash
+    escapes like `single\\_program.cu`, whitespace-collapse, casefold) so a same-title-different-
+    level animation seam collapses; its level is returned so the caller keeps the shallower. Any
+    other block is keyed by a plain whitespace-collapse of its full text (no casefold — exact for
+    prose / code), so only a byte-faithful re-emission matches."""
+    if len(block_lines) == 1:
+        m = _HEADING_RE.match(block_lines[0])
+        if m:
+            key = _DEDUP_WS_RE.sub(" ", m.group(2).replace("\\", "")).strip().casefold()
+            return key, len(m.group(1))
+    return _DEDUP_WS_RE.sub(" ", "\n".join(block_lines)).strip(), 0
+
+
+def _dedup_segment(lines: list[str]) -> list[tuple[int, int]]:
+    """Segment the body into block line-ranges `[start, end)` (blank lines are separators, not in
+    any block). A fenced ```/~~~ region is ONE block (inner blanks inert); a heading line is its
+    own block; everything else is a maximal run of non-blank, non-heading, non-fence lines."""
+    blocks: list[tuple[int, int]] = []
+    i, n = 0, len(lines)
+    while i < n:
+        if not lines[i].strip():
+            i += 1
+            continue
+        if _FENCE_LINE_RE.match(lines[i]):
+            start = i
+            i += 1
+            while i < n and not _FENCE_LINE_RE.match(lines[i]):
+                i += 1
+            if i < n:
+                i += 1  # include the closing fence line
+            blocks.append((start, i))
+        elif _HEADING_RE.match(lines[i]):
+            blocks.append((i, i + 1))
+            i += 1
+        else:
+            start = i
+            while (
+                i < n
+                and lines[i].strip()
+                and not _HEADING_RE.match(lines[i])
+                and not _FENCE_LINE_RE.match(lines[i])
+            ):
+                i += 1
+            blocks.append((start, i))
+    return blocks
+
+
+def collapse_consecutive_duplicates(markdown: str) -> str:
+    """Drop a block that is an EXACT (whitespace-normalized) re-emission of the immediately
+    preceding KEPT block — animation slide-build + figure/page-seam double-transcription (W13).
+
+    Excluded blocks (image markers, PictureClassifier labels, box-art) are kept but don't count
+    toward adjacency. A run of >2 identical blocks collapses to one. Two adjacent same-text
+    headings at different levels keep the shallower. Pure, deterministic, idempotent (the kept
+    survivor is not itself a dup, so a re-run drops nothing). No-op when there is nothing to
+    collapse."""
+    lines = markdown.split("\n")
+    blocks = _dedup_segment(lines)
+    drop: set[int] = set()
+    prev: tuple[int, str, int] | None = None  # (block_index, key, heading_level)
+    for bi, (s, e) in enumerate(blocks):
+        block_lines = lines[s:e]
+        if _dedup_is_excluded(block_lines):
+            continue  # kept verbatim; does not advance adjacency
+        key, level = _dedup_key(block_lines)
+        if prev is not None and key == prev[1]:
+            # A consecutive exact duplicate → drop it; keep `prev`. If both are headings and this
+            # one is SHALLOWER, rewrite the survivor's heading line to the shallower level first.
+            if level and prev[2] and level < prev[2]:
+                lines[blocks[prev[0]][0]] = block_lines[0]
+                prev = (prev[0], key, level)
+            drop.add(bi)
+        else:
+            prev = (bi, key, level)
+    if not drop:
+        return markdown
+    keep = [True] * len(lines)
+    for bi in drop:
+        s, e = blocks[bi]
+        for k in range(s, e):
+            keep[k] = False
+        j = s - 1  # also remove ONE immediately-preceding blank separator
+        if j >= 0 and not lines[j].strip():
+            keep[j] = False
+    return "\n".join(ln for k, ln in enumerate(lines) if keep[k])
+
+
 # ----- Heading-hierarchy normalizer (audit-10 step 3, W2/W15) -----
 #
 # Both engines recover a heading's level from FONT SIZE (PyMuPDF span size, Docling bbox
@@ -1179,7 +1318,9 @@ def _finalize_body(markdown: str) -> str:
     block from the index-time `linearize_gfm_tables` / `extract_tables` scan — so no nonsense
     `[table-rows]` KV nor `tables.sqlite` row is derived for it.
     """
-    return normalize_heading_levels(demote_layout_tables(_collapse_toc_leaders(markdown)))
+    return normalize_heading_levels(
+        collapse_consecutive_duplicates(demote_layout_tables(_collapse_toc_leaders(markdown)))
+    )
 
 
 async def _parse_with_docling(
