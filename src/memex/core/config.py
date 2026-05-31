@@ -597,6 +597,13 @@ class AgentsSettings(BaseModel):
     artifact_scope_enabled: bool = True
     partial_grounded_answers: bool = True
     graph_expansion_enabled: bool = False
+    # The deterministic numeric-grounding backstop (2026-05-31): a post-verify
+    # gate that demotes a grounded claim whose principal LARGE figure is absent
+    # from its cited TABLE chunk (a computed aggregate the LLM verifier
+    # rubber-stamps via the "literal table-row reading" loophole). Fixes the
+    # verify_grounding aggregate-numeric FALSE-POSITIVE that regressed the 10-K
+    # (annual-report-16). Demotion-only ⇒ HARD-gate-safe; default on, fail-open.
+    numeric_grounding_backstop_enabled: bool = True
     report_pack_chars: int = 4_000
     report_coalesce_target: int = Field(default=2, ge=1)
     cooccurring_min_shared_docs: int = Field(default=2, ge=1)

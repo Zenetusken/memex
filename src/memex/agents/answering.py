@@ -44,6 +44,8 @@ Usage:
 
 from __future__ import annotations
 
+import math
+import re
 import threading
 from collections.abc import Callable
 from typing import Annotated, Literal, TypedDict
@@ -61,6 +63,7 @@ from memex.agents.artifact_scope import (
     detect_artifact_reference,
     resolve_scope,
 )
+from memex.agents.table_sql import coerce_number
 from memex.core.errors import AnswerStateInvariantError
 from memex.core.types import Chunk, RelatedDocument, StoredTable, TableQueryResult
 from memex.core.wikilinks import format_wikilink
@@ -520,6 +523,13 @@ class AnswerState(BaseModel):
     # the compound-question over-refusal. Set from `agents.partial_grounded_answers`
     # in `answer_query` (fail-open True). A zero-grounded verdict always refuses.
     allow_partial_grounded: bool = True
+
+    # The deterministic numeric-grounding backstop (2026-05-31). When True, the
+    # verify node demotes a grounded claim whose principal LARGE figure is absent
+    # from its cited TABLE chunk (a computed aggregate the LLM verifier accepts
+    # via the literal-table-row loophole). Set from
+    # `agents.numeric_grounding_backstop_enabled` in `answer_query` (fail-open).
+    numeric_grounding_backstop: bool = True
 
     nodes_traversed: int = 0
     max_nodes_traversed: int = 20
@@ -1345,6 +1355,107 @@ async def answer(state: AnswerState) -> AnswerStateUpdate:
     }
 
 
+# --- Numeric-grounding backstop (2026-05-31) --------------------------------
+# A deterministic post-verify gate (in `verify`) that demotes a grounded claim
+# whose PRINCIPAL large figure is absent from its cited TABLE chunk — the
+# verbatim-cell half of the Table-RAG fabrication boundary (agents/table_sql.py)
+# ported onto the free-text verify path. It closes the verify_grounding
+# aggregate-numeric FALSE-POSITIVE: the LLM verifier rubber-stamps a SUMMED table
+# total via the "literal reading of a table row / structural adjacency" rule
+# (the live `$159,748,343` 10-K fabrication; the recorded `$16,042M` vs `16384`).
+# It is engineered to NOT false-drop legitimate numeric answers:
+#   * fires ONLY on a claim citing a chunk that CONTAINS a markdown table (the
+#     cross-cell-aggregate site) — prose-cited rounded headlines ("$216 billion")
+#     are exempt;
+#   * EXEMPTS the synthetic Table-RAG `#sql0001` chunk (its aggregate is already
+#     independently recompute-gated, and `%g` framing renders a >=1e6 value
+#     unreadable so a verbatim re-check would wrongly drop it);
+#   * scopes to a LARGE figure (|value| >= 1e4) so years (2026), small counts,
+#     percentages, and `x`-suffixed values never enter scope;
+#   * matches a cell under a thousands/millions/billions DENOMINATION shift (a
+#     power of 1000) so "$22.5 billion" grounds in a "22,500" $-millions cell and
+#     "$16,042 million" in a "16,042" cell — but DELIBERATELY NOT an arbitrary
+#     x10/x100 shift (that would launder a mis-scaled fabrication).
+# Demotion-only ⇒ HARD-gate-safe by construction (can only refuse, never admit).
+# Kill-switch: AgentsSettings.numeric_grounding_backstop_enabled (default True).
+
+# A number-like token: optional currency, optional accounting parens / sign,
+# digits with thousands separators, optional decimal, optional %/scale suffix.
+# Greedy enough to keep "$159,748,343", "$22.5 billion", "(1,234)", "215,938"
+# whole. coerce_number does the real parsing; this just isolates candidates.
+_NUMBER_TOKEN_RE = re.compile(
+    # A scale WORD may sit after a space ("$22.5 billion"); a scale LETTER must
+    # attach directly ("2.5B") — and both end on a word boundary so the "t" of a
+    # following word ("$50,000 to …") is never mistaken for a trillion suffix.
+    r"[$€£]?\(?[+-]?\d[\d,]*(?:\.\d+)?\)?(?:\s*(?:thousand|million|billion|trillion)\b|[KMBT]\b)?",
+    re.IGNORECASE,
+)
+# A GFM table separator row (`|---|---|`, optional leading/trailing pipe +
+# alignment colons) — the structural signature that a chunk carries a table.
+_TABLE_SEPARATOR_RE = re.compile(r"(?m)^[ \t]*\|?[ \t]*:?-{1,}:?[ \t]*(?:\|[ \t]*:?-{1,}:?[ \t]*)+\|?[ \t]*$")
+# The index-time `[table-rows]` linearization marker (W1, linearize_gfm_tables)
+# — a second, parse-engine-independent table signature.
+_TABLE_ROWS_MARKER = "[table-rows]"
+# Below this magnitude a figure is out of scope (years, small counts/ordinals);
+# the fabrication shape this gate targets is a large financial aggregate.
+_NUMERIC_BACKSTOP_MIN_MAGNITUDE = 1e4
+# Only a thousands/millions/billions denomination bridges a claim figure to a
+# cell — NOT an arbitrary x10/x100 (which would be a mis-scaled fabrication).
+_NUMERIC_DENOMINATION_FACTORS = (1.0, 1e3, 1e-3, 1e6, 1e-6, 1e9, 1e-9)
+
+
+def _chunk_has_markdown_table(chunk_text: str) -> bool:
+    """True iff the chunk carries a GFM table (a `|---|` separator row) or its
+    index-time `[table-rows]` linearization — the only site where a cross-cell
+    aggregate is fabricated. A prose-only chunk returns False (exempt)."""
+    return _TABLE_ROWS_MARKER in chunk_text or _TABLE_SEPARATOR_RE.search(chunk_text) is not None
+
+
+def _chunk_numbers(chunk_text: str) -> list[float]:
+    """Every number-like token in the FULL chunk text parsed via `coerce_number`
+    (covers GFM cells, the `[table-rows]` KV linearization, and prose figures)."""
+    out: list[float] = []
+    for tok in _NUMBER_TOKEN_RE.findall(chunk_text):
+        value = coerce_number(tok)
+        if value is not None:
+            out.append(value)
+    return out
+
+
+def _claim_scoped_figures(claim_text: str) -> list[float]:
+    """Every LARGE figure the claim asserts (|`coerce_number`| >= 1e4). Years,
+    small counts, and `x`/%-only values are out of scope (the LLM verdict stands
+    untouched). A claim with NO such figure returns `[]` → the gate skips it.
+
+    The gate demotes only when EVERY one of these is unsupported — so a claim
+    stating a rounded headline AND an exact figure (e.g. "~800M … 788M") is kept
+    on the strength of the verbatim 788M, never false-dropped on the rounded one."""
+    out: list[float] = []
+    for tok in _NUMBER_TOKEN_RE.findall(claim_text):
+        value = coerce_number(tok)
+        if value is None or abs(value) < _NUMERIC_BACKSTOP_MIN_MAGNITUDE:
+            continue
+        out.append(value)
+    return out
+
+
+def _figure_supported_by_chunk(figure: float, chunk_numbers: list[float]) -> bool:
+    """True iff `figure` equals some chunk number, allowing only a
+    thousands/millions/billions denomination shift (a power of 1000), under the
+    Table-RAG aggregate-gate tolerance `|a - b| <= max(1, 1e-6 * |b|)`. A
+    computed aggregate (no single cell at any clean unit scale) returns False."""
+    if not math.isfinite(figure):
+        return False
+    for cell in chunk_numbers:
+        if not math.isfinite(cell):
+            continue
+        for factor in _NUMERIC_DENOMINATION_FACTORS:
+            target = cell * factor
+            if abs(figure - target) <= max(1.0, 1e-6 * abs(target)):
+                return True
+    return False
+
+
 async def verify(state: AnswerState) -> AnswerStateUpdate:
     """Independent grounding check.
 
@@ -1506,6 +1617,47 @@ async def verify(state: AnswerState) -> AnswerStateUpdate:
     if contested:
         log.info("verify.contested_indices_demoted", contested=sorted(contested))
         valid_grounded = [i for i in valid_grounded if i not in contested]
+
+    # Numeric-grounding backstop (2026-05-31): a 4th deterministic demotion,
+    # mirroring the phantom/missing/contested filters above. Demote a claim the
+    # LLM marked grounded when it asserts a PRINCIPAL large figure that is absent
+    # from its cited TABLE chunk under a clean unit-denomination shift — i.e. a
+    # computed aggregate the verifier accepted via the literal-table-row
+    # loophole. See `_figure_supported_by_chunk` et al. above. Demotion-only ⇒
+    # HARD-gate-safe; the existing route_after_verify/compose/refuse handle a
+    # zero-grounded result (→ refuse). Fail-open kill-switch on AnswerState.
+    if state.numeric_grounding_backstop:
+        numeric_demoted: list[int] = []
+        for i in valid_grounded:
+            claim = state.draft.claims[i]
+            # The Table-RAG synthetic aggregate is recompute-gated upstream AND
+            # its %g framing renders a >=1e6 value unreadable to coerce_number,
+            # so a verbatim re-check would wrongly drop it — exempt by id.
+            if claim.source_chunk_id.endswith("#sql0001"):
+                continue
+            chunk = chunk_by_id.get(claim.source_chunk_id)
+            if chunk is None or not _chunk_has_markdown_table(chunk.text):
+                continue  # prose-only / dangling: not a cross-cell-aggregate site
+            figures = _claim_scoped_figures(claim.claim)
+            if not figures:
+                continue  # no large figure → out of scope
+            chunk_numbers = _chunk_numbers(chunk.text)
+            # Demote only if EVERY asserted large figure is unsupported — a single
+            # verbatim figure (even alongside a rounded one) keeps the claim.
+            if not any(_figure_supported_by_chunk(f, chunk_numbers) for f in figures):
+                numeric_demoted.append(i)
+        if numeric_demoted:
+            log.info("verify.numeric_aggregate_demoted", demoted=numeric_demoted)
+            demote = set(numeric_demoted)
+            valid_grounded = [i for i in valid_grounded if i not in demote]
+            already_ungrounded = set(valid_ungrounded)
+            for i in numeric_demoted:
+                if i not in already_ungrounded:
+                    valid_ungrounded.append(i)
+                    valid_reasons.append(
+                        "Claim asserts a large numeric value not present in the cited "
+                        "table; a computed aggregate is not a literal cell reading."
+                    )
 
     verification = VerificationResult(
         grounded=valid_grounded,
@@ -1982,6 +2134,13 @@ async def answer_query(
     except (ConfigurationError, MemexError):
         allow_partial_grounded = True
 
+    # The numeric-grounding backstop is a settings policy toggle (default on),
+    # read fail-open so a non-bootstrapped fixture keeps the default behaviour.
+    try:
+        numeric_grounding_backstop = get_settings().agents.numeric_grounding_backstop_enabled
+    except (ConfigurationError, MemexError):
+        numeric_grounding_backstop = True
+
     # Graph expansion is the param ANDed with the settings kill-switch (default on),
     # read fail-open — so `MEMEX_AGENTS__GRAPH_EXPANSION_ENABLED=false` disables it
     # globally (for the earns-its-keep A/B) while an explicit param=False still wins.
@@ -2000,6 +2159,7 @@ async def answer_query(
         graph_expansion_budget=graph_expansion_budget,
         chunks_per_neighbor=chunks_per_neighbor,
         allow_partial_grounded=allow_partial_grounded,
+        numeric_grounding_backstop=numeric_grounding_backstop,
         scope_doc_ids=scope_doc_ids or [],
         # A caller-supplied correlation_id (e.g. the webui's progress key) drives
         # both the structlog/Langfuse binding and FinalResponse.correlation_id, so

@@ -30,6 +30,7 @@ from memex.agents.answering import (
     refuse,
     reset_compiled_graph,
     resolve_artifact_scope,
+    verify,
 )
 
 # ----- Fixtures: fake retrieve + fake model + reset graph cache -----
@@ -1528,3 +1529,224 @@ async def test_explicit_scope_empty_pool_refuses_cleanly(
     assert in_docs_calls == [["does-not-exist"]]
     assert rerank_saw == [[]]  # the empty scoped pool reached rerank, not the full corpus
     assert response.artifact_scope_doc_ids == ["does-not-exist"]
+
+
+# ----- Numeric-grounding backstop (2026-05-31) -----------------------------
+# The verify node's 4th demotion filter closes the aggregate-numeric
+# FALSE-POSITIVE: the LLM verifier rubber-stamps a SUMMED table total via the
+# literal-table-row loophole (the live $159,748,343 10-K fabrication). These
+# pin the wiring; the pure matchers are in tests/unit/test_numeric_grounding.py.
+
+# An exec-comp TABLE chunk (GFM + [table-rows]); the fabricated $159,748,343 is
+# a SUM of these PSU cells and equals no single cell at any unit scale.
+_EXEC_TABLE_TEXT = (
+    "| Name | SY PSU ($) | MY PSU ($) |\n|---|---|---|\n"
+    "| Huang | 19,166,424 | 18,034,343 |\n"
+    "| Kress | 6,099,993 | 7,350,483 |\n\n"
+    "[table-rows]\n[Comp] Name=Huang, SY PSU=19,166,424, MY PSU=18,034,343\n"
+)
+
+
+def _vchunk(chunk_id: str, text: str) -> Chunk:
+    return Chunk(
+        chunk_id=chunk_id, document_id="d1", document_title="10-K", text=text, page=1, score=0.9
+    )
+
+
+async def _run_verify(
+    fake_llm: FakeLLM,
+    *,
+    claim: str,
+    chunk: Chunk,
+    backstop: bool = True,
+) -> VerificationResult:
+    """Drive the verify node directly: the LLM marks the single claim grounded;
+    the deterministic backstop then decides keep-vs-demote."""
+    fake_llm.respond(
+        "verify_grounding",
+        VerificationResult,
+        VerificationResult(grounded=[0], ungrounded=[], ungrounded_reasons=[]),
+    )
+    state = AnswerState(
+        query="q",
+        draft=DraftAnswer(
+            summary="s",
+            claims=[CitedClaim(claim=claim, source_chunk_id=chunk.chunk_id, confidence="high")],
+        ),
+        reranked=[chunk],
+        numeric_grounding_backstop=backstop,
+    )
+    out = await verify(state)
+    result = out["verification"]
+    assert isinstance(result, VerificationResult)
+    return result
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_prompt")
+async def test_numeric_backstop_demotes_fabricated_table_aggregate(fake_llm: FakeLLM) -> None:
+    """The kill target: a fabricated SUM cited to a table chunk → demoted."""
+    v = await _run_verify(
+        fake_llm,
+        claim="The total value of stock options granted to directors in fiscal 2026 is $159,748,343.",
+        chunk=_vchunk("t1", _EXEC_TABLE_TEXT),
+    )
+    assert v.grounded == []
+    assert 0 in v.ungrounded
+    assert v.ungrounded_reasons  # a demotion reason is recorded
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_prompt")
+async def test_numeric_backstop_keeps_verbatim_cell(fake_llm: FakeLLM) -> None:
+    """A verbatim cell read ($321,309 present in the table) stays grounded."""
+    text = (
+        "| Director | Fees | Stock | Total |\n|---|---|---|---|\n"
+        "| Ochoa | 42,500 | 278,809 | 321,309 |\n"
+        "[table-rows]\n[Comp] Director=Ochoa, Total=321,309\n"
+    )
+    v = await _run_verify(
+        fake_llm,
+        claim="The lowest director total compensation was $321,309 (Ellen Ochoa).",
+        chunk=_vchunk("t2", text),
+    )
+    assert v.grounded == [0]
+    assert v.ungrounded == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_prompt")
+async def test_numeric_backstop_keeps_millions_denomination(fake_llm: FakeLLM) -> None:
+    """A '$16,042 million' claim grounds in a '16,042' $-millions cell."""
+    text = "| Segment | Year |\n|---|---|\n| Gaming | 16,042 |\n[table-rows]\n[Seg] Gaming=16,042\n"
+    v = await _run_verify(
+        fake_llm,
+        claim="Gaming revenue was $16,042 million in fiscal 2026.",
+        chunk=_vchunk("t3", text),
+    )
+    assert v.grounded == [0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_prompt")
+async def test_numeric_backstop_exempts_sql_synthetic_chunk(fake_llm: FakeLLM) -> None:
+    """A legit recompute-gated aggregate cites the synthetic #sql0001 chunk and
+    is EXEMPT — even though its >=1e6 value renders as unreadable %g exponential
+    so a verbatim re-check would wrongly drop it (the suffix is the durable guard)."""
+    text = "Aggregate result = 1.59748e+08 over 10 rows:\n[Comp] Name=Huang, Total=19,166,424\n"
+    v = await _run_verify(
+        fake_llm,
+        claim="The total fees paid to directors was $159,748,343.",
+        chunk=_vchunk("d1#sql0001", text),
+    )
+    assert v.grounded == [0]
+    assert v.ungrounded == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_prompt")
+async def test_numeric_backstop_exempts_prose_chunk(fake_llm: FakeLLM) -> None:
+    """A rounded headline ('$216 billion') cited to a PROSE chunk (no table) is
+    exempt — table-presence narrowing protects scale-reformatted prose answers."""
+    text = "Revenue grew 65 percent to $216 billion in fiscal 2026, a record year."
+    v = await _run_verify(
+        fake_llm,
+        claim="NVIDIA's total revenue in fiscal 2026 was $216 billion.",
+        chunk=_vchunk("p1", text),
+    )
+    assert v.grounded == [0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_prompt")
+async def test_numeric_backstop_ignores_small_count_claim(fake_llm: FakeLLM) -> None:
+    """A derived small count (< 1e4, no large figure) cited to a table is out of
+    scope — the LLM verdict stands (no false-drop on enumerated counts)."""
+    text = "| Tenet | Name |\n|---|---|\n| 1 | Data sources |\n[table-rows]\n[Z] Tenet=1\n"
+    v = await _run_verify(
+        fake_llm,
+        claim="Zero trust defines 7 core tenets.",
+        chunk=_vchunk("t4", text),
+    )
+    assert v.grounded == [0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_prompt")
+async def test_numeric_backstop_kill_switch_off_keeps_fabrication(fake_llm: FakeLLM) -> None:
+    """With the backstop disabled (AnswerState flag False) the pre-fix behaviour
+    is restored: the fabricated aggregate stays grounded."""
+    v = await _run_verify(
+        fake_llm,
+        claim="The total value of stock options granted to directors in fiscal 2026 is $159,748,343.",
+        chunk=_vchunk("t1", _EXEC_TABLE_TEXT),
+        backstop=False,
+    )
+    assert v.grounded == [0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_prompt")
+async def test_numeric_backstop_fabrication_refuses_end_to_end(
+    monkeypatch: pytest.MonkeyPatch, fake_llm: FakeLLM
+) -> None:
+    """End-to-end: a fabricated table aggregate is the ONLY claim → demoted →
+    zero grounded → answer_query REFUSES (the ar-16 HARD-gate restoration)."""
+    table_chunk = _vchunk("t1", _EXEC_TABLE_TEXT)
+
+    async def _hybrid(query: str, k: int = 50) -> list[Chunk]:
+        return [table_chunk]
+
+    async def _rerank(query: str, candidates: list[Chunk], top_k: int = 10) -> list[Chunk]:
+        return list(candidates[:top_k])
+
+    monkeypatch.setattr("memex.agents.answering.hybrid_search", _hybrid)
+    monkeypatch.setattr("memex.agents.answering.cross_encoder_rerank", _rerank)
+    monkeypatch.setattr(
+        "memex.agents.answering.render_prompt", lambda name, **_kw: f"[fake {name} prompt]"
+    )
+
+    fake_llm.respond(
+        "assess_sufficiency",
+        SufficiencyAssessment,
+        SufficiencyAssessment(sufficient=True, reason="A comp table is present"),
+    )
+    fake_llm.respond(
+        "answer",
+        DraftAnswer,
+        DraftAnswer(
+            summary="The total value of stock options granted to directors is $159,748,343.",
+            claims=[
+                CitedClaim(
+                    claim="The total value of stock options granted to directors in fiscal 2026 is $159,748,343.",
+                    source_chunk_id="t1",
+                    confidence="high",
+                ),
+            ],
+        ),
+    )
+    fake_llm.respond(
+        "verify_grounding",
+        VerificationResult,
+        VerificationResult(grounded=[0], ungrounded=[], ungrounded_reasons=[]),
+    )
+
+    response = await answer_query("What was the total value of stock options granted to directors?")
+
+    assert response.answered is False, "fabricated aggregate must be demoted → refused"
+    assert response.claims == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_prompt")
+async def test_numeric_backstop_keeps_rounded_plus_exact_figure(fake_llm: FakeLLM) -> None:
+    """A claim asserting a rounded headline AND an exact table figure (the gte-05
+    shape: ~800M alongside the verbatim 788M) is KEPT — the gate demotes only
+    when EVERY scoped figure is unsupported, so the verbatim 788M saves it."""
+    text = "| Source | Pairs |\n|---|---|\n| Total | 788M |\n[table-rows]\n[T] Total=788M\n"
+    v = await _run_verify(
+        fake_llm,
+        claim="We used ~800M text pairs for pre-training (Table 1 totals 788M).",
+        chunk=_vchunk("t5", text),
+    )
+    assert v.grounded == [0]
