@@ -2137,8 +2137,16 @@ async def _parse_with_pymupdf(vault_path: Path, doc_id: str, source: Path) -> _P
         parser_version=_PARSER_VERSION,
         pymupdf_version=conversion.pymupdf_version,
         pages=pages,
+        # figure_count is the worker's <!-- image --> placeholder count (W9); it equals the
+        # final_body count because `_finalize_body` never removes a placeholder (`<!-- image -->`
+        # is dedup-excluded + untouched by the other scrubbers). table_count was hardcoded 0 on
+        # this path (a lie — the doc has GFM tables); count them HONESTLY in the WRITTEN body,
+        # AFTER `_finalize_body`'s W11 layout-table demotion, so a demoted infographic is not
+        # counted (the pymupdf path runs no chart-OCR, so final_body has no [chart-extracted]
+        # tables to conflate). equation_count stays 0 — born-digital equations need OCR-LaTeX
+        # (deferred, ROADMAP); near-absent on the born-digital docs this path handles.
         figure_count=conversion.figure_count,
-        table_count=conversion.table_count,
+        table_count=len(GFM_TABLE_RE.findall(final_body)),
         equation_count=conversion.equation_count,
         duration_ms=duration_ms,
     )
