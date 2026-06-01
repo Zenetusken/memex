@@ -1,7 +1,7 @@
 {
-  "_description": "Hand-labelled answer-quality eval corpus for the GTE paper (Li et al., 'Towards General Text Embeddings with Multi-stage Contrastive Learning', arXiv 2308.03281). New category for the P0 multi-category extension: a SCIENTIFIC PAPER (2-column NLP/ML, equations, citation-dense prose, benchmark tables) \u2014 the equation/multi-column/table retrieval profile no existing corpus exercises. Thematically apt: GTE is the embedder Memex A/B-tested (see ROADMAP P2.5).",
+  "_description": "Hand-labelled answer-quality eval corpus for the GTE paper (Li et al., 'Towards General Text Embeddings with Multi-stage Contrastive Learning', arXiv 2308.03281). New category for the P0 multi-category extension: a SCIENTIFIC PAPER (2-column NLP/ML, equations, citation-dense prose, benchmark tables) — the equation/multi-column/table retrieval profile no existing corpus exercises. Thematically apt: GTE is the embedder Memex A/B-tested (see ROADMAP P2.5).",
   "_doc_id": "d646b885-gte-2308-03281",
-  "_query_count": 18,
+  "_query_count": 21,
   "_mix": {
     "ans": 12,
     "ref": 6,
@@ -11,7 +11,7 @@
   "_labelling_rule": "ANS queries: `_anchor_phrase` is a distinctive verbatim substring (mostly prose; table facts via the `[table-rows]` linearization) from the chunk holding the answer; `scripts/extend_corpus.py resolve` populates `relevant_chunk_ids` via FTS. REF queries: `should_refuse=true`, `relevant_chunk_ids=[]`. Refusals split into in-corpus-unanswerable (topic present, specific value absent) and out-of-corpus (absent from the entire vault).",
   "_created": "2026-05-25",
   "_purpose": "Extend the eval matrix to the scientific-paper category so the queued P2.x A/Bs (reranker, VLM, chunker-size) get a 2-column / equation / benchmark-table signal. HARD GATES: refusal_rate_on_counterfactuals == 1.0, zero hallucinations.",
-  "_source_note": "arXiv 2308.03281 (Aug 2023), license CC BY-NC-ND 4.0 (Creative Commons; attribution: Li, Zhang, Zhang, Long, Xie, Zhang \u2014 Alibaba Group). Used as LOCAL eval material only (non-commercial research; no derivative redistributed) \u2014 the PDF is not committed to the repo; only this query set ships (anchor phrases are <15-word excerpts).",
+  "_source_note": "arXiv 2308.03281 (Aug 2023), license CC BY-NC-ND 4.0 (Creative Commons; attribution: Li, Zhang, Zhang, Long, Xie, Zhang — Alibaba Group). Used as LOCAL eval material only (non-commercial research; no derivative redistributed) — the PDF is not committed to the repo; only this query set ships (anchor phrases are <15-word excerpts).",
   "_baseline_2026_05_25": {
     "stack": "Qwen3-8B-AWQ orchestrator + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3 (cross_encoder, bf16), top_k=5",
     "doc_id": "d646b885-gte-2308-03281",
@@ -23,7 +23,10 @@
     "hallucinations": 0,
     "mean_citation_precision": 0.889,
     "mean_citation_precision_answered_only": 0.8,
-    "false_refusals": ["scientific-gte-04", "scientific-gte-05"],
+    "false_refusals": [
+      "scientific-gte-04",
+      "scientific-gte-05"
+    ],
     "notes": "HARD GATES hold — refusal_cf=1.0 (incl. cross-paper traps: C-MTEB belongs to BGE/C-Pack, GSM8K is a generative benchmark, text-embedding-3 postdates the paper), 0 hallucinations. 2 false-refusals (τ=0.01, ~800M pairs) are retrieval misses on §3.4 chunks. cite_prec_answered_only=0.80 AFTER a multi-chunk relabel per the eval-data README (raised from 0.60: 110M/A100 facts repeat across abstract/intro/Table 3); the 2 residual cp=0.0 (gte-03 InfoNCE objective, gte-10 MTEB 56/7 counts) are irreducible sibling-chunk artifacts where the concept spans several §3.4/§4.3 chunks — grounded correct answers, not fabrication. 10/12 ANS leaves headroom for the P2.1 reranker A/B; the 2-column scientific-paper retrieval profile is new to the matrix."
   },
   "queries": [
@@ -71,7 +74,7 @@
       "qid": "scientific-gte-04",
       "question": "What temperature value does GTE fix in its contrastive loss?",
       "_anchor_phrase": "is fixed to 0.01 in this work",
-      "_expected_answer": "The temperature \u03c4 is fixed to 0.01.",
+      "_expected_answer": "The temperature τ is fixed to 0.01.",
       "_answer_type": "single_fact",
       "_note": "Section 3.4. Distinctive numeric.",
       "should_refuse": false,
@@ -119,9 +122,9 @@
       "qid": "scientific-gte-08",
       "question": "How does GTE sample data batches across sources of different sizes during pre-training?",
       "_anchor_phrase": "multinomial distribution to sample data batches",
-      "_expected_answer": "With a multinomial distribution over sources weighted by size (\u03b1 = 0.5), and all instances in a batch drawn from the same task.",
+      "_expected_answer": "With a multinomial distribution over sources weighted by size (α = 0.5), and all instances in a batch drawn from the same task.",
       "_answer_type": "single_fact",
-      "_note": "Section 3.4 Data Sampling. Expected answer includes \u03b1=0.5.",
+      "_note": "Section 3.4 Data Sampling. Expected answer includes α=0.5.",
       "should_refuse": false,
       "relevant_chunk_ids": [
         "d646b885-gte-2308-03281#84cbeb0271"
@@ -182,7 +185,7 @@
       "qid": "scientific-gte-13",
       "question": "What was the total monetary cost (in dollars) of training the GTE models?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE \u2014 the paper reports GPU types/counts and step counts but no monetary training cost.",
+      "_expected_answer": "REFUSE — the paper reports GPU types/counts and step counts but no monetary training cost.",
       "_answer_type": "counterfactual",
       "_note": "In-corpus-unanswerable: compute is described, no $ figure. HARD GATE.",
       "should_refuse": true,
@@ -192,7 +195,7 @@
       "qid": "scientific-gte-14",
       "question": "How many wall-clock days did it take to train GTE-large?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE \u2014 the paper gives 50,000 pre-training steps and GPU counts but no wall-clock training duration in days.",
+      "_expected_answer": "REFUSE — the paper gives 50,000 pre-training steps and GPU counts but no wall-clock training duration in days.",
       "_answer_type": "counterfactual",
       "_note": "In-corpus-unanswerable: steps/GPUs given, no wall-clock time. HARD GATE.",
       "should_refuse": true,
@@ -202,7 +205,7 @@
       "qid": "scientific-gte-15",
       "question": "What is GTE's inference latency in milliseconds per query?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE \u2014 the paper uses parameter count as a proxy for inference speed but reports no millisecond latency.",
+      "_expected_answer": "REFUSE — the paper uses parameter count as a proxy for inference speed but reports no millisecond latency.",
       "_answer_type": "counterfactual",
       "_note": "In-corpus-unanswerable: speed discussed via params, no ms figure. HARD GATE.",
       "should_refuse": true,
@@ -212,7 +215,7 @@
       "qid": "scientific-gte-16",
       "question": "What embedding dimension does OpenAI's text-embedding-3-large model use?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE \u2014 text-embedding-3-large is a later OpenAI model not discussed in this 2023 paper (which only notes outperforming OpenAI's then-current API).",
+      "_expected_answer": "REFUSE — text-embedding-3-large is a later OpenAI model not discussed in this 2023 paper (which only notes outperforming OpenAI's then-current API).",
       "_answer_type": "counterfactual",
       "_note": "Out-of-corpus: a newer external model not in the paper or vault. HARD GATE.",
       "should_refuse": true,
@@ -222,7 +225,7 @@
       "qid": "scientific-gte-17",
       "question": "What accuracy does GTE achieve on the GSM8K math-reasoning benchmark?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE \u2014 GTE is a text-embedding model; GSM8K (math reasoning for generative LLMs) is not evaluated in the paper.",
+      "_expected_answer": "REFUSE — GTE is a text-embedding model; GSM8K (math reasoning for generative LLMs) is not evaluated in the paper.",
       "_answer_type": "counterfactual",
       "_note": "Out-of-corpus: wrong benchmark/model-type trap. HARD GATE.",
       "should_refuse": true,
@@ -232,12 +235,43 @@
       "qid": "scientific-gte-18",
       "question": "What score does GTE report on the Chinese C-MTEB benchmark?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE \u2014 this English GTE paper evaluates on English MTEB/BEIR; C-MTEB belongs to the separate C-Pack/BGE work, which is not in the vault.",
+      "_expected_answer": "REFUSE — this English GTE paper evaluates on English MTEB/BEIR; C-MTEB belongs to the separate C-Pack/BGE work, which is not in the vault.",
       "_answer_type": "counterfactual",
       "_note": "Out-of-corpus: cross-paper confabulation trap (C-MTEB is the BGE/C-Pack paper). HARD GATE.",
       "should_refuse": true,
       "relevant_chunk_ids": []
+    },
+    {
+      "qid": "scientific-gte-19",
+      "question": "What was the combined total number of training GPUs reported across all GTE model variants?",
+      "_anchor_phrase": "GTEsmall 2 GPUs, GTEbase 4 GPUs, GTElarge 8 GPUs",
+      "_expected_answer": "14 GPUs (2 + 4 + 8), summed from the Training Details table.",
+      "_answer_type": "aggregate",
+      "_note": "Table-RAG SUM on a NON-10-K doc (GTE Training Details table) — SELECT SUM(gpus__num) = 14 (2+4+8), recompute-gated; cites the synthetic #sql chunk (citation_precision N/A). Added 2026-05-31 to gate the SQL-aggregate path with >1 doc (generality audit). NB phrasing avoids enumerating the variants — naming them ('small, base, large') makes the SQL-gen add a spurious WHERE model IN (...) whose literals miss the formatting-mangled cells -> no_result -> false-refuse (a general SQL-gen brittleness, not the aggregate path; observed + documented).",
+      "should_refuse": false,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "scientific-gte-20",
+      "question": "On which MTEB benchmark dataset did the GTE-large model achieve its highest retrieval score?",
+      "_anchor_phrase": "GTElarge column maximum is Quora 84.8",
+      "_expected_answer": "Quora (nDCG@10 of 84.8) — the maximum of the GTElarge column in the Massive Text Embedding Benchmark table.",
+      "_answer_type": "superlative",
+      "_note": "Table-RAG row-superlative (ORDER BY gtelarge DESC LIMIT 1) on a NON-10-K doc — the _verify_superlative + caption-named synthetic-chunk path (the ar-15 mechanism). Borderline-prone like ar-15 (the 8B's which-row inference); cites the synthetic #sql chunk (citation_precision N/A). Added 2026-05-31 (generality audit).",
+      "should_refuse": false,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "scientific-gte-21",
+      "question": "What was GTE-large's accuracy on the GLUE benchmark?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE — the GTE paper evaluates on MTEB/BEIR (zero-shot classification, retrieval), never the GLUE benchmark; 'GLUE' does not appear in the paper.",
+      "_answer_type": "counterfactual",
+      "_note": "In-corpus-unanswerable absent-column counterfactual on a NON-10-K doc's table path (the ar-16 analogue) — GLUE is genuinely absent (verified count=0). HARD GATE: must refuse. Added 2026-05-31 to gate the SQL refusal path with >1 document (generality audit).",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
     }
   ],
-  "_resolved_at": "2026-05-25T17:26:35Z"
+  "_resolved_at": "2026-05-25T17:26:35Z",
+  "_table_sql_validation_note": "scientific-gte-19/20/21 added 2026-05-31 (generality audit): aggregate SUM (GPUs=14), row-superlative (GTElarge best MTEB dataset=Quora), absent-column counterfactual (GLUE -> refuse) — gating the Table-RAG SQL aggregate/superlative/refusal paths with a SECOND document beyond the 10-K. 19/20 cite synthetic SQL-result chunks (citation_precision N/A)."
 }

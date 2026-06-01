@@ -162,19 +162,21 @@ async def test_aggregate_recompute_disagree_real_no_patch_returns_none() -> None
 
     Drives a genuine numeric disagreement through the whole live path
     (`_load_tables` → sqlite SELECT → `_AGG_RE` → real `_recompute_aggregate`
-    → the `abs() > tol` tolerance check):
+    → the `abs() > tol` tolerance check). The text columns are `COLLATE NOCASE`,
+    so a pure CASE mismatch now AGREES (the value-linking recall fix); the
+    surviving divergence the independent oracle still catches is WHITESPACE —
+    the recompute's `_row_matches` strips both sides, sqlite's NOCASE `=` does
+    not:
 
-      - The table has a case-collision in the filter column: `Graphics` (100)
-        and `graphics` (999), plus an unrelated `Other` (1).
-      - The LLM emits `SUM(revenue__num) WHERE segment = 'graphics'`.
-      - sqlite's `=` on TEXT is case-SENSITIVE → matches only the lowercase
-        row → SUM = 999.
-      - the independent recompute's `_row_matches` lowercases both sides →
-        matches BOTH `Graphics` and `graphics` → 100 + 999 = 1099.
-      - 999 vs 1099 exceeds `max(1, 1e-6*|1099|)` → the gate refuses → None.
+      - filter column: `Graphics` (100), ` graphics ` (999, padded), `Other` (1).
+      - the LLM emits `SUM(revenue__num) WHERE segment = 'graphics'`.
+      - sqlite NOCASE `=` matches `Graphics` (case-insensitive) but NOT the
+        padded ` graphics ` (no strip) → SUM = 100.
+      - the independent recompute strips+lowercases → matches BOTH → 100+999=1099.
+      - 100 vs 1099 exceeds `max(1, 1e-6*|1099|)` → the gate refuses → None.
 
-    This exercises the real recompute + real tolerance with two genuinely
-    different non-trivial numbers, not a stub."""
+    This proves the INDEPENDENT row-selection oracle (not 'sqlite agrees with
+    sqlite') still gates a real divergence even after NOCASE."""
     t = StoredTable(
         doc_id="doc-2",
         table_id="def7654321",
@@ -182,7 +184,7 @@ async def test_aggregate_recompute_disagree_real_no_patch_returns_none() -> None
         header=["Segment", "Revenue"],
         rows=[
             ["Graphics", "100"],
-            ["graphics", "999"],
+            [" graphics ", "999"],
             ["Other", "1"],
         ],
         char_start=0,
@@ -219,8 +221,8 @@ async def test_aggregate_recompute_disagree_real_no_patch_returns_none() -> None
     finally:
         db.close()
     assert recompute is not None
-    assert sqlite_val == pytest.approx(999)
-    assert recompute == pytest.approx(1099)  # case-insensitive → both rows
+    assert sqlite_val == pytest.approx(100)  # NOCASE matches 'Graphics' only (padded row excluded)
+    assert recompute == pytest.approx(1099)  # strip+lower → both 'Graphics' and ' graphics '
     assert abs(sqlite_val - recompute) > max(1.0, 1e-6 * abs(recompute))
 
     # End-to-end: the live gate must refuse injection (→ None).
@@ -651,3 +653,209 @@ def test_describe_aggregate_labels_by_header() -> None:
     assert describe_aggregate(_agg("SELECT * FROM c_x", ["A"], kind="rows")) is None
     # An unmappable column → None (caller falls back to the generic framing).
     assert describe_aggregate(_agg("SELECT SUM(unknown_col__num) FROM c_x", ["**Name"])) is None
+
+
+# ======================================================================
+# WHERE-form robustness + safety matrix (2026-05-31)
+# Pinned from the adversarial table-sql-robustness workflow. The independent
+# Python WHERE oracle (`_parse_where_predicate`) was widened to all the prompt's
+# forms; every ADVERSARY / complex-aggregate row MUST stay REFUSED so the no-
+# fabrication HARD gate is held by construction, not by the LLM behaving.
+# ======================================================================
+
+_MATRIX_HEADER = ["Region", "Cost"]
+# Cost: US=10+20=30, EU=30, JP=40 → total 100
+_MATRIX_ROWS = [["US", "10"], ["US", "20"], ["EU", "30"], ["JP", "40"]]
+
+
+async def _probe_one(sql: str, header: list[str], rows: list[list[str]]) -> object | None:
+    """Run one LLM-emitted SQL through the live gate; return the TableQueryResult
+    (or None = refuse). Deterministic — the SQL is monkeypatched in."""
+    st = StoredTable(
+        doc_id="d", table_id="t1", section="S", header=header, rows=rows, char_start=0, char_end=1
+    )
+    name = table_sql._compute_schemas([st])[0].sql_name
+
+    async def _fake(*, prompt: object, schema: type, **_kw: object) -> tuple[object, int]:
+        return (GeneratedSQL(sql=sql.replace("__T__", name), target_table_id=name), 1)
+
+    mp = pytest.MonkeyPatch()
+    try:
+        mp.setattr("memex.agents.table_sql.complete_structured", _fake)
+        return await query_doc_tables("q", [st])
+    finally:
+        mp.undo()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("sql", "expected"),
+    [
+        ("SELECT SUM(cost__num) FROM __T__ WHERE region = 'US'", 30.0),
+        ("SELECT SUM(cost__num) FROM __T__ WHERE region != 'US'", 70.0),
+        ("SELECT SUM(cost__num) FROM __T__ WHERE cost__num > 10", 90.0),
+        ("SELECT SUM(cost__num) FROM __T__ WHERE region IN ('US','EU')", 60.0),
+        ("SELECT SUM(cost__num) FROM __T__ WHERE region NOT IN ('US')", 70.0),
+        ("SELECT SUM(cost__num) FROM __T__ WHERE cost__num BETWEEN 20 AND 40", 90.0),
+        ("SELECT SUM(cost__num) FROM __T__ WHERE region LIKE '%U%'", 60.0),  # US, EU
+        ("SELECT SUM(cost__num) FROM __T__ WHERE region IS NOT NULL", 100.0),
+        ("SELECT SUM(cost__num) FROM __T__ WHERE region = 'US' AND cost__num > 10", 20.0),
+        ("SELECT SUM(cost__num) FROM __T__ WHERE region = 'US' OR cost__num = 40", 70.0),
+        # NOCASE value-linking: a case-normalized literal still matches.
+        ("SELECT SUM(cost__num) FROM __T__ WHERE region = 'us'", 30.0),
+    ],
+)
+async def test_where_forms_ship_correct_value(sql: str, expected: float) -> None:
+    """Every WHERE form the prompt permits — incl. NOT IN / BETWEEN / LIKE /
+    IS NOT NULL / AND / OR and a case-normalized literal — verifies and ships its
+    CORRECT aggregate via the independent Python oracle."""
+    result = await _probe_one(sql, _MATRIX_HEADER, _MATRIX_ROWS)
+    assert result is not None, f"false-refuse: {sql}"
+    assert result.kind == "aggregate"
+    assert result.aggregate_value == pytest.approx(expected)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "sql",
+    [
+        # ADVERSARY — over-the-wrong-rows / non-reproducible / expression WHEREs.
+        "SELECT SUM(cost__num) FROM __T__ WHERE rowid <= 2",
+        "SELECT SUM(cost__num) FROM __T__ WHERE (abs(random()) % 2) = 0",
+        "SELECT SUM(cost__num) FROM __T__ WHERE cost__num > (SELECT AVG(cost__num) FROM __T__)",
+        "SELECT SUM(cost__num) FROM __T__ WHERE cost__num % 20 = 0",
+        "SELECT SUM(amt__num) FROM __T__ WHERE cat GLOB 'x*'",
+        # Complex / unverifiable aggregates — conservative refuse.
+        "SELECT COUNT(DISTINCT region) FROM __T__",
+        "SELECT SUM(DISTINCT cost__num) FROM __T__",
+        "SELECT SUM(cost__num), AVG(cost__num) FROM __T__",
+        "SELECT SUM(cost__num)-AVG(cost__num) FROM __T__",
+        "SELECT region, SUM(cost__num) FROM __T__ GROUP BY region",
+        "SELECT CAST(SUM(cost__num) AS INTEGER) FROM __T__",
+        "SELECT TOTAL(cost__num) FROM __T__",
+        # A1 SAFETY — aggregate over a raw TEXT column (coercion-misread surface).
+        "SELECT SUM(cost) FROM __T__",
+        "SELECT AVG(region) FROM __T__",
+    ],
+)
+async def test_dangerous_or_complex_forms_refuse(sql: str) -> None:
+    """The no-fabrication HARD gate: every adversary WHERE (rowid / random /
+    subquery / expression / GLOB), every unverifiable aggregate (DISTINCT /
+    multi-scalar / arithmetic / GROUP BY / CAST / TOTAL), and every raw-text-
+    column aggregate (A1) MUST refuse — independent of LLM behaviour."""
+    result = await _probe_one(sql, _MATRIX_HEADER, _MATRIX_ROWS)
+    assert result is None, f"MUST refuse but shipped: {sql}"
+
+
+@pytest.mark.asyncio
+async def test_a2_text_column_superlative_not_framed() -> None:
+    """A2 SAFETY: ORDER BY a raw TEXT column sorts LEXICALLY ('9' > '10'); the
+    extremum tolerance would otherwise frame the WRONG row as 'highest'. The gate
+    withholds the superlative framing (requires the `__num` companion)."""
+    result = await _probe_one(
+        "SELECT * FROM __T__ ORDER BY gpus DESC LIMIT 1",
+        ["Model", "GPUs"],
+        [["A", "2"], ["B", "10"], ["C", "9"]],
+    )
+    # Ships rows (verbatim, safe) but with NO verified-extremum framing.
+    assert result is not None
+    assert result.kind == "rows"
+    assert result.superlative is None
+
+
+@pytest.mark.asyncio
+async def test_a2_numeric_companion_superlative_is_framed() -> None:
+    """The correct `ORDER BY gpus__num` sorts numerically → the extremum (B=10)
+    is the real max → the superlative framing IS applied."""
+    result = await _probe_one(
+        "SELECT * FROM __T__ ORDER BY gpus__num DESC LIMIT 1",
+        ["Model", "GPUs"],
+        [["A", "2"], ["B", "10"], ["C", "9"]],
+    )
+    assert result is not None
+    assert result.kind == "rows"
+    assert result.superlative == ("GPUs", "highest")
+    assert result.rows is not None and result.rows[0][0] == "B"
+
+
+# ======================================================================
+# Coercion-soundness guard (2026-05-31)
+# `coerce_number` is lenient (strips ALL commas → '1,2,3'=123) and the sqlite
+# __num column shares it, so the recompute-agreement check is blind to a misread.
+# The aggregate/superlative gate refuses a contributing cell that coerces but is
+# NOT canonical. Closes the malformed / mixed-separator wrong-value ship.
+# ======================================================================
+
+
+@pytest.mark.parametrize(
+    ("cell", "canonical"),
+    [
+        # Canonical US-convention numbers — MUST pass (no false-refuse).
+        ("100", True),
+        ("1,234", True),
+        ("1,000,000", True),
+        ("$1,234.56", True),
+        ("$22.5 billion", True),
+        ("30M", True),
+        ("2.5B", True),
+        ("€500", True),
+        ("(1,234)", True),
+        ("71.1%", True),
+        ("-50", True),
+        ("$-5", True),
+        ("342,559", True),
+        # Malformed / mixed-separator — coerces leniently but NON-canonical.
+        ("1,2,3", False),  # commas not in thousands positions → coerce='123' (wrong)
+        ("12,34", False),
+        ("1,23", False),
+        ("1.234,56", False),  # European mixed separators
+    ],
+)
+def test_is_canonical_number_cell(cell: str, canonical: bool) -> None:
+    from memex.core.text import is_canonical_number_cell
+
+    assert table_sql.is_canonical_number_cell(cell) is canonical
+    # Sanity: every NON-canonical case here still coerces (the lenient misread the
+    # guard exists to catch); every canonical case coerces too.
+    assert is_canonical_number_cell(cell) is canonical
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("rows", "sql", "expected"),
+    [
+        # Legit columns ship the correct aggregate.
+        ([["a", "10"], ["b", "20"], ["c", "30"]], "SELECT SUM(val__num) FROM __T__", 60.0),
+        ([["a", "1,234"], ["b", "766"]], "SELECT SUM(val__num) FROM __T__", 2000.0),
+        ([["a", "$22.5 billion"]], "SELECT SUM(val__num) FROM __T__", 2.25e10),
+        # A contributing cell that COERCES but is NON-canonical → refuse (None).
+        ([["a", "10"], ["b", "1,2,3"]], "SELECT SUM(val__num) FROM __T__", None),
+        ([["a", "10"], ["b", "1.234,56"]], "SELECT SUM(val__num) FROM __T__", None),
+        ([["a", "10"], ["b", "12,34"]], "SELECT MAX(val__num) FROM __T__", None),
+    ],
+)
+async def test_aggregate_coercion_soundness(
+    rows: list[list[str]], sql: str, expected: float | None
+) -> None:
+    """A malformed / mixed-separator contributing cell makes the aggregate refuse
+    (the recompute-agreement check is blind to the shared-parser misread); legit
+    US-convention columns still ship the correct value."""
+    st = StoredTable(
+        doc_id="d", table_id="t1", section="S", header=["Item", "Val"], rows=rows, char_start=0, char_end=1
+    )
+    name = table_sql._compute_schemas([st])[0].sql_name
+
+    async def _fake(*, prompt: object, schema: type, **_kw: object) -> tuple[object, int]:
+        return (GeneratedSQL(sql=sql.replace("__T__", name), target_table_id=name), 1)
+
+    mp = pytest.MonkeyPatch()
+    try:
+        mp.setattr("memex.agents.table_sql.complete_structured", _fake)
+        result = await query_doc_tables("q", [st])
+    finally:
+        mp.undo()
+    if expected is None:
+        assert result is None
+    else:
+        assert result is not None
+        assert result.aggregate_value == pytest.approx(expected)

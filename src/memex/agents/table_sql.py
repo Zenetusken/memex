@@ -31,9 +31,11 @@ import asyncio
 import math
 import re
 import sqlite3
+from collections.abc import Callable
 
 import structlog
 
+from memex.core.text import coerce_number, is_canonical_number_cell
 from memex.core.types import GeneratedSQL, StoredTable, TableQueryResult
 from memex.models.client import complete_structured
 from memex.prompts import render_prompt
@@ -43,6 +45,10 @@ logger = structlog.get_logger(__name__)
 # Execution caps — module constants (MEMEX_* env only if a cap ever needs
 # tuning, per the spec; none does today).
 _ROW_CAP = 1000  # max rows fetched from a result
+# Rows shown to the SQL-gen LLM per table for VALUE-LINKING — enough that a small
+# table's full value set is visible (so it copies WHERE literals exactly / sees a
+# filter is needless), bounded so a wide table doesn't blow the prompt budget.
+_SAMPLE_ROW_CAP = 8
 _STEP_CAP = 100_000  # sqlite VM instruction budget (no wall-clock dependency)
 
 # Statements forbidden in the read-only guard. The SQL must be a single
@@ -66,101 +72,9 @@ _FORBIDDEN_KEYWORDS = (
 # Aggregate functions we can independently recompute.
 _AGG_FUNCS = ("sum", "count", "avg", "min", "max")
 
-# Scale-word suffixes → multiplier (Phase-2 number grammar, spec §2).
-_SCALE_WORDS: dict[str, float] = {
-    "thousand": 1e3,
-    "million": 1e6,
-    "billion": 1e9,
-    "trillion": 1e12,
-}
-_SCALE_LETTERS: dict[str, float] = {
-    "k": 1e3,
-    "m": 1e6,
-    "b": 1e9,
-    "t": 1e12,
-}
-
-_NUMERIC_BODY_RE = re.compile(r"^-?\d+(?:\.\d+)?$")
-
-
-def coerce_number(cell: str) -> float | None:
-    """Parse a table cell's text to a float per the Phase-2 number grammar, or
-    None when the cell does not read as a single number.
-
-    The single documented grammar (spec §2), applied in order:
-      - strip a leading currency symbol (`$`/`€`/`£`);
-      - accounting negatives: a fully-parenthesised body `(1,234)` → `-1234`;
-      - a trailing `%` is KEPT as the percent value (`45%` → `45.0`);
-      - a trailing scale word (`thousand|million|billion|trillion`) or letter
-        (`K|M|B|T`) multiplies by 1e3/1e6/1e9/1e12;
-      - thousands separators (`,`) are removed;
-      - the remaining body must be a plain (optionally signed/decimal) number,
-        else None.
-    Pure-sync. Verbatim-text in, float-or-None out — the load-bearing 10-K
-    shapes (`$22.5 billion`, `(1,234)`, `45%`, `1,000,000`) are unit-tested.
-    """
-    s = cell.strip()
-    if not s:
-        return None
-
-    negative = False
-    # Accounting negative: a fully-parenthesised body.
-    if s.startswith("(") and s.endswith(")"):
-        negative = True
-        s = s[1:-1].strip()
-
-    # Leading currency symbol.
-    if s and s[0] in ("$", "€", "£"):
-        s = s[1:].strip()
-        # A leading sign may sit inside the currency symbol: `$-5`.
-        if s.startswith("-"):
-            negative = not negative
-            s = s[1:].strip()
-
-    if not s:
-        return None
-
-    # Leading sign on the bare body.
-    if s.startswith("-"):
-        negative = not negative
-        s = s[1:].strip()
-    elif s.startswith("+"):
-        s = s[1:].strip()
-
-    percent = False
-    if s.endswith("%"):
-        percent = True
-        s = s[:-1].strip()
-
-    scale = 1.0
-    lowered = s.lower()
-    matched_scale = False
-    for word, mult in _SCALE_WORDS.items():
-        if lowered.endswith(word):
-            scale = mult
-            s = s[: -len(word)].strip()
-            matched_scale = True
-            break
-    if not matched_scale and len(s) >= 2 and s[-1].lower() in _SCALE_LETTERS:
-        # Only treat a trailing letter as a scale suffix when a digit
-        # precedes it (`2.5B`) — not a bare token like "B".
-        if s[-2].isdigit():
-            scale = _SCALE_LETTERS[s[-1].lower()]
-            s = s[:-1].strip()
-
-    # Remove thousands separators.
-    s = s.replace(",", "")
-
-    if not _NUMERIC_BODY_RE.match(s):
-        return None
-
-    value = float(s) * scale
-    if negative:
-        value = -value
-    # `percent` is informational — the value is already the percent number
-    # (`45%` → 45.0), kept verbatim per the grammar.
-    _ = percent
-    return value
+# `coerce_number` moved to `core/text.py` 2026-05-31 (a pure core utility shared
+# with the index-time table machinery) and is re-exported above for the existing
+# `from memex.agents.table_sql import coerce_number` callers.
 
 
 _SANITIZE_RE = re.compile(r"[^0-9a-zA-Z]+")
@@ -258,7 +172,14 @@ def _load_tables(db: sqlite3.Connection, schemas: list[_LoadedTable]) -> dict[st
         columns = schema.columns
         numeric_cols = schema.numeric_cols
 
-        col_defs = [f'"{c}" TEXT' for c in columns]
+        # COLLATE NOCASE aligns sqlite's text `=`/`IN`/`LIKE` with the
+        # independent recompute's case-insensitive matching (`_row_matches`
+        # lower-cases both sides). Without it, a case-normalized literal the LLM
+        # routinely writes (`'gte small'` vs stored `'GTE Small'`) matches 0 rows
+        # in sqlite while the recompute matches → the two arms DISAGREE and the
+        # gate false-refuses (the dominant value-linking recall bug). NOCASE makes
+        # both arms select the SAME rows → agree → ship the correct value.
+        col_defs = [f'"{c}" TEXT COLLATE NOCASE' for c in columns]
         col_defs += [f'"{columns[ci]}__num" REAL' for ci in numeric_cols]
         db.execute(f'CREATE TABLE "{sql_name}" ({", ".join(col_defs)})')
 
@@ -324,6 +245,34 @@ _WHERE_RE = re.compile(
     r"^\s*(?P<col>[\w\".]+)\s*(?P<op>=|==|!=|<>|<=|>=|<|>)\s*(?P<lit>.+?)\s*$",
     flags=re.IGNORECASE,
 )
+
+# A `col IN (lit, lit, ...)` membership predicate — the OTHER simple WHERE the
+# prompt permits. Literals may be quoted text or numbers.
+_IN_RE = re.compile(
+    r"^\s*(?P<col>[\w\".]+)\s+in\s*\(\s*(?P<lits>.+?)\s*\)\s*$",
+    flags=re.IGNORECASE,
+)
+_NOTIN_RE = re.compile(
+    r"^\s*(?P<col>[\w\".]+)\s+not\s+in\s*\(\s*(?P<lits>.+?)\s*\)\s*$",
+    flags=re.IGNORECASE,
+)
+_BETWEEN_RE = re.compile(
+    r"^\s*(?P<col>[\w\".]+)\s+between\s+(?P<lo>.+?)\s+and\s+(?P<hi>.+?)\s*$",
+    flags=re.IGNORECASE,
+)
+_ISNULL_RE = re.compile(
+    r"^\s*(?P<col>[\w\".]+)\s+is\s+(?P<negate>not\s+)?null\s*$",
+    flags=re.IGNORECASE,
+)
+_LIKE_RE = re.compile(
+    r"^\s*(?P<col>[\w\".]+)\s+like\s+(?P<pat>.+?)\s*$",
+    flags=re.IGNORECASE,
+)
+# G3 SAFETY: a WHERE the independent oracle must NEVER trust — non-deterministic
+# (random), positional (rowid), raw pattern (glob), or a correlated subquery.
+# These don't match any safe atom below either, but reject them EXPLICITLY (the
+# safety review's over-the-wrong-rows / non-reproducible-scalar attacks).
+_DANGEROUS_WHERE_RE = re.compile(r"\b(?:random|rowid|glob)\b|\(\s*select\b", flags=re.IGNORECASE)
 
 
 def _strip_quotes(ident: str) -> str:
@@ -391,29 +340,37 @@ def _verify_superlative(
     """
     desc = direction.lower() == "desc"
     col_name = _strip_quotes(order_col).split(".")[-1].lower()
+    # SAFETY: the ORDER BY must target the NUMERIC companion `<col>__num` so
+    # sqlite sorts NUMERICALLY. Ordering a raw text column sorts LEXICALLY
+    # (`'9' > '10'`), and the extremum tolerance below then swallows abs(9-10)=1
+    # and frames the WRONG row as the extremum. The prompt already mandates
+    # `<col>__num` for ORDER BY; require it. (Adversary-pinned in test_table_sql.)
+    if not col_name.endswith("__num"):
+        return None
     cidx = _column_index(loaded, col_name)
     if cidx is None or cidx not in loaded.numeric_cols:
         return None  # only numeric ordering is framed (text ordering is risky)
 
-    where_filter: tuple[int, str, str] | None = None
+    match_row: Callable[[list[str]], bool] | None = None
     if where is not None:
-        wm = _WHERE_RE.match(where)
-        if wm is None:
+        match_row = _parse_where_predicate(where, loaded)
+        if match_row is None:
             return None
-        wcol = _strip_quotes(wm.group("col")).split(".")[-1].lower()
-        widx = _column_index(loaded, wcol)
-        if widx is None:
-            return None
-        where_filter = (widx, wm.group("op"), _strip_quotes(wm.group("lit")))
 
     vals: list[float] = []
     for row in stored.rows:
-        if where_filter is not None and not _row_matches(row, where_filter):
+        if match_row is not None and not match_row(row):
             continue
         if cidx < len(row) and row[cidx].strip():
             n = coerce_number(row[cidx])
-            if n is not None:
-                vals.append(n)
+            if n is None:
+                continue
+            # Coercion-soundness (mirror the aggregate gate): a cell that coerces
+            # but is NOT canonical is a lenient misread the __num-vs-coerce check
+            # is blind to — don't frame an extremum over a mis-ordered column.
+            if not is_canonical_number_cell(row[cidx]):
+                return None
+            vals.append(n)
     if not vals:
         return None
     if cidx >= len(returned_cells):
@@ -478,22 +435,28 @@ def _recompute_aggregate(
         return None
     col_name = _strip_quotes(column_sql).split(".")[-1].lower()
 
-    # Resolve the WHERE predicate to a (col_index, op, literal) filter.
-    where_filter: tuple[int, str, str] | None = None
+    # SAFETY: SUM/AVG/MIN/MAX must target the NUMERIC companion `<col>__num`
+    # (which the prompt mandates), never a raw text column. sqlite's lenient
+    # prefix-coercion of a text column (`SUM('350000.75 deferred')` → 350000.75)
+    # can diverge from `coerce_number` (→ 350000) by LESS than the agreement
+    # tolerance floor and SHIP a fabricated value. COUNT is exempt (it counts
+    # non-empty cells, no coercion). Forcing `__num` makes sqlite aggregate the
+    # SAME parsed numbers `coerce_number` re-derives, so a text-column misread
+    # can't masquerade as float noise. (Adversary-pinned in test_table_sql.)
+    if op in ("sum", "avg", "min", "max") and not col_name.endswith("__num"):
+        return None
+
+    # Resolve the WHERE predicate to a row predicate over the original cells.
+    match_row: Callable[[list[str]], bool] | None = None
     if where is not None:
-        wm = _WHERE_RE.match(where)
-        if wm is None:
+        match_row = _parse_where_predicate(where, loaded)
+        if match_row is None:
             return None
-        wcol = _strip_quotes(wm.group("col")).split(".")[-1].lower()
-        widx = _column_index(loaded, wcol)
-        if widx is None:
-            return None
-        where_filter = (widx, wm.group("op"), _strip_quotes(wm.group("lit")))
 
     # Select the matching rows (after the WHERE filter).
     selected: list[list[str]] = []
     for row in stored.rows:
-        if where_filter is not None and not _row_matches(row, where_filter):
+        if match_row is not None and not match_row(row):
             continue
         selected.append(row)
 
@@ -509,8 +472,22 @@ def _recompute_aggregate(
     cidx = _column_index(loaded, col_name)
     if cidx is None:
         return None
-    nums = [coerce_number(r[cidx]) for r in selected if cidx < len(r) and r[cidx].strip()]
-    clean = [n for n in nums if n is not None]
+    # Coercion-soundness: SUM/AVG/MIN/MAX over a column with a cell that COERCES
+    # but is NOT a canonical US-convention number (malformed grouping `1,2,3`→123,
+    # mixed European separators) — `coerce_number` is lenient AND the sqlite
+    # `__num` column shares it, so the recompute-agreement check is blind to the
+    # misread. Refuse the aggregate (HARD-gate-safe conservative drop). See
+    # `is_canonical_number_cell`; residual locale/unit ambiguity is documented.
+    clean: list[float] = []
+    for r in selected:
+        if cidx >= len(r) or not r[cidx].strip():
+            continue
+        v = coerce_number(r[cidx])
+        if v is None:
+            continue  # a non-numeric cell (N/A / footnote) is skipped, not refused
+        if not is_canonical_number_cell(r[cidx]):
+            return None  # a lenient misread → refuse rather than ship a wrong value
+        clean.append(v)
     if not clean:
         return None
     if op == "sum":
@@ -569,6 +546,215 @@ def _row_matches(row: list[str], where_filter: tuple[int, str, str]) -> bool:
     return False
 
 
+def _split_sql_list(body: str) -> list[str]:
+    """Split a SQL value list on TOP-LEVEL commas, respecting single/double
+    quotes so a quoted literal containing a comma (`'1,234'`) stays intact."""
+    out: list[str] = []
+    cur: list[str] = []
+    quote: str | None = None
+    for ch in body:
+        if quote is not None:
+            cur.append(ch)
+            if ch == quote:
+                quote = None
+        elif ch in ("'", '"'):
+            quote = ch
+            cur.append(ch)
+        elif ch == ",":
+            out.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    if cur:
+        out.append("".join(cur))
+    return [s for s in (p.strip() for p in out) if s]
+
+
+def _split_top_level(expr: str, keyword: str) -> list[str]:
+    """Split `expr` on a top-level (depth-0, unquoted) ` <keyword> ` (AND / OR),
+    case-insensitive, respecting parens + single/double quotes. A keyword inside
+    parens or a quoted literal is NOT a split point."""
+    target = " " + keyword.lower() + " "
+    low = expr.lower()
+    parts: list[str] = []
+    depth = 0
+    quote: str | None = None
+    start = 0
+    i = 0
+    n = len(expr)
+    while i < n:
+        ch = expr[i]
+        if quote is not None:
+            if ch == quote:
+                quote = None
+            i += 1
+        elif ch in ("'", '"'):
+            quote = ch
+            i += 1
+        elif ch == "(":
+            depth += 1
+            i += 1
+        elif ch == ")":
+            depth -= 1
+            i += 1
+        elif depth == 0 and low.startswith(target, i):
+            parts.append(expr[start:i])
+            start = i + len(target)
+            i = start
+        else:
+            i += 1
+    parts.append(expr[start:])
+    return [p.strip() for p in parts]
+
+
+def _like_to_regex(pattern: str) -> re.Pattern[str]:
+    """Compile a SQL LIKE pattern (`%` = any run, `_` = any char) to a case-
+    insensitive anchored regex over the cell text (NOCASE-consistent)."""
+    out = ["^"]
+    for ch in pattern:
+        if ch == "%":
+            out.append(".*")
+        elif ch == "_":
+            out.append(".")
+        else:
+            out.append(re.escape(ch))
+    out.append("$")
+    return re.compile("".join(out), flags=re.IGNORECASE | re.DOTALL)
+
+
+def _column_predicate(
+    col_sql: str,
+    loaded: _LoadedTable,
+    build: Callable[[int], Callable[[list[str]], bool]],
+) -> Callable[[list[str]], bool] | None:
+    """Resolve a WHERE column to its header index and hand it to `build`, or None
+    when the column isn't a real header column (rowid / unknown → refuse)."""
+    widx = _column_index(loaded, _strip_quotes(col_sql).split(".")[-1].lower())
+    if widx is None:
+        return None
+    return build(widx)
+
+
+def _parse_atom(expr: str, loaded: _LoadedTable) -> Callable[[list[str]], bool] | None:
+    """Parse ONE simple predicate (no AND/OR) into an independent row predicate
+    over the original cell text, or None when unrecomputable here."""
+    expr = expr.strip()
+    while expr.startswith("(") and expr.endswith(")"):
+        expr = expr[1:-1].strip()
+
+    m = _ISNULL_RE.match(expr)
+    if m is not None:
+        not_null = m.group("negate") is not None  # `IS NOT NULL` → cell non-empty
+        return _column_predicate(
+            m.group("col"),
+            loaded,
+            lambda idx: (lambda row: (idx < len(row) and bool(row[idx].strip())) == not_null),
+        )
+    m = _NOTIN_RE.match(expr)
+    if m is not None:
+        lits = [_strip_quotes(x) for x in _split_sql_list(m.group("lits"))]
+        if not lits:
+            return None
+        return _column_predicate(
+            m.group("col"),
+            loaded,
+            lambda idx: (lambda row: not any(_row_matches(row, (idx, "=", lit)) for lit in lits)),
+        )
+    m = _IN_RE.match(expr)
+    if m is not None:
+        lits = [_strip_quotes(x) for x in _split_sql_list(m.group("lits"))]
+        if not lits:
+            return None
+        return _column_predicate(
+            m.group("col"),
+            loaded,
+            lambda idx: (lambda row: any(_row_matches(row, (idx, "=", lit)) for lit in lits)),
+        )
+    m = _LIKE_RE.match(expr)
+    if m is not None:
+        rx = _like_to_regex(_strip_quotes(m.group("pat")))
+        return _column_predicate(
+            m.group("col"),
+            loaded,
+            lambda idx: (lambda row: idx < len(row) and rx.match(row[idx].strip()) is not None),
+        )
+    m = _WHERE_RE.match(expr)
+    if m is not None:
+        op = m.group("op")
+        lit = _strip_quotes(m.group("lit"))
+        return _column_predicate(
+            m.group("col"),
+            loaded,
+            lambda idx: (lambda row: _row_matches(row, (idx, op, lit))),
+        )
+    return None
+
+
+def _parse_where_predicate(
+    where: str, loaded: _LoadedTable
+) -> Callable[[list[str]], bool] | None:
+    """Parse a WHERE body into an INDEPENDENT Python row predicate over the
+    ORIGINAL cell text, or None when it isn't safely recomputable here (→ the
+    caller refuses, the conservative default).
+
+    This is the load-bearing SAFETY oracle. The aggregate gate re-selects the
+    contributing rows in PURE PYTHON (here), NOT via sqlite, so the agreement
+    check `sqlite_value == python_value` compares TWO INDEPENDENT row selections
+    — not 'sqlite agrees with sqlite'. Therefore every form added here is safe by
+    construction: a parse that diverges from sqlite's WHERE makes the two sums
+    DISAGREE → the gate REFUSES; it can NEVER ship a wrong subset. The worst case
+    of any bug here is a false-refuse (recall), never a fabrication — which is why
+    the oracle (not a SQLite-decomposition) is the right place to widen WHERE
+    coverage (a SQLite-owned WHERE would degenerate the check to a tautology and
+    admit rowid/random/subquery partial-sums — see ADR/CLAUDE notes).
+
+    Supported (all the prompt permits): `col <op> value`, `col [NOT] IN (...)`,
+    `col BETWEEN lo AND hi`, `col IS [NOT] NULL`, `col LIKE pat`, and a SINGLE
+    level of AND / OR over those (SQL precedence: OR splits first, then AND). A
+    `<col>__num` reference maps to its text column (coerce_number'd) so numeric
+    filters work. Anything else — subqueries, rowid, random(), functions, mixed
+    nesting, compound BETWEEN — does not match and returns None → REFUSE."""
+    expr = where.strip()
+    if _DANGEROUS_WHERE_RE.search(expr):
+        return None
+
+    # BETWEEN carries its own AND, which would defeat the AND-split below, so
+    # handle a STANDALONE BETWEEN first (a BETWEEN composed under AND/OR won't
+    # match the anchored regex → falls through → safely refuses).
+    bm = _BETWEEN_RE.match(expr)
+    if bm is not None:
+        lo = coerce_number(_strip_quotes(bm.group("lo")))
+        hi = coerce_number(_strip_quotes(bm.group("hi")))
+        if lo is None or hi is None:
+            return None
+        lo_f, hi_f = lo, hi
+        return _column_predicate(
+            bm.group("col"),
+            loaded,
+            lambda idx: (
+                lambda row: idx < len(row)
+                and (cn := coerce_number(row[idx])) is not None
+                and lo_f <= cn <= hi_f
+            ),
+        )
+
+    ors = _split_top_level(expr, "or")
+    if len(ors) > 1:
+        or_preds = [_parse_where_predicate(o, loaded) for o in ors]
+        if any(p is None for p in or_preds):
+            return None
+        return lambda row: any(p(row) for p in or_preds if p is not None)
+
+    ands = _split_top_level(expr, "and")
+    if len(ands) > 1:
+        and_preds = [_parse_atom(a, loaded) for a in ands]
+        if any(p is None for p in and_preds):
+            return None
+        return lambda row: all(p(row) for p in and_preds if p is not None)
+
+    return _parse_atom(expr, loaded)
+
+
 def _execute_select(db: sqlite3.Connection, sql: str) -> list[tuple[object, ...]] | None:
     """Execute a guarded SELECT under a VM-instruction step cap, returning up
     to `_ROW_CAP` rows, or None on any sqlite error.
@@ -622,7 +808,7 @@ async def query_doc_tables(question: str, tables: list[StoredTable]) -> TableQue
                 }
                 for ci in range(len(s.columns))
             ],
-            "sample_rows": [list(r) for r in s.stored.rows[:2]],
+            "sample_rows": [list(r) for r in s.stored.rows[:_SAMPLE_ROW_CAP]],
         }
         for s in schemas
     ]
@@ -798,15 +984,15 @@ def _classify_and_build(
 def _contributing_rows(
     stored: StoredTable, loaded: _LoadedTable, where: str | None
 ) -> list[list[str]]:
-    """The source rows an aggregate is built from (post-WHERE), verbatim."""
+    """The source rows an aggregate is built from (post-WHERE), verbatim — the
+    SAME independent predicate the recompute used, so the synthetic chunk's
+    evidence rows match the verified scalar (not a stale all-rows fallback that
+    would mislabel which rows a NOT IN / BETWEEN / AND aggregate drew from)."""
     if where is None:
         return [list(r) for r in stored.rows]
-    wm = _WHERE_RE.match(where)
-    if wm is None:
+    match_row = _parse_where_predicate(where, loaded)
+    if match_row is None:
+        # Unreachable once the recompute has agreed (it used the same parse), but
+        # fail safe to the full rows rather than an empty/misleading basis.
         return [list(r) for r in stored.rows]
-    wcol = _strip_quotes(wm.group("col")).split(".")[-1].lower()
-    widx = _column_index(loaded, wcol)
-    if widx is None:
-        return [list(r) for r in stored.rows]
-    where_filter = (widx, wm.group("op"), _strip_quotes(wm.group("lit")))
-    return [list(r) for r in stored.rows if _row_matches(r, where_filter)]
+    return [list(r) for r in stored.rows if match_row(r)]
