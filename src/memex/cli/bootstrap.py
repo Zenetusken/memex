@@ -82,6 +82,12 @@ _VRAM_GB: dict[tuple[str, str | None], float] = {
     ("orchestrator", "Q8_0"): 8.5,
     ("orchestrator", "AWQ"): 5.0,
     ("orchestrator", "GPTQ"): 5.0,
+    # Qwen3.5-4B compressed-tensors W4A16: ~6.3 GB weights+overhead on a
+    # 4070 — NOT half the 8B-AWQ. The dense W4A16 saving is offset because
+    # the vision tower / Gated-DeltaNet linear-attn / sparse-MoE router /
+    # MTP head stay fp16 (vLLM #37080). Unification buys a simpler lifecycle
+    # + a reasoning-capable base, NOT VRAM — do not budget freed VRAM.
+    ("orchestrator", "compressed_tensors"): 6.3,
     ("embedder", None): 0.6,
     # bge-reranker-v2-m3 in BF16: ~2 GB resident (568 M params × 2 B
     # plus the cross-encoder head). Qwen3-Reranker-0.6B in BF16:
@@ -107,6 +113,10 @@ _VRAM_GB: dict[tuple[str, str | None], float] = {
 # KV cache + processor + activations headroom. Empirical from the GUIDELINES
 # Part III VRAM table.
 _OVERHEAD_GB = 2.5
+# Conservative fallback for an orchestrator quant tier not in `_VRAM_GB`
+# (a future Literal addition without a matching table entry) — over-estimate
+# so the fit warning errs toward caution rather than crashing.
+_DEFAULT_ORCHESTRATOR_GB = 6.5
 
 
 def _estimated_vram_gb(settings: MemexSettings) -> float:
@@ -125,7 +135,14 @@ def _estimated_vram_gb(settings: MemexSettings) -> float:
         settings.models.embedder_device,
         settings.models.reranker_device,
     )
-    estimated = _VRAM_GB[("orchestrator", settings.models.orchestrator_quantization)] + _OVERHEAD_GB
+    # `.get` (not a bare subscript) so a future orchestrator quant tier added
+    # to the config Literal degrades to a conservative estimate + the
+    # vram.budget.tight warning, never a KeyError that bricks daemon startup.
+    orch_gb = _VRAM_GB.get(
+        ("orchestrator", settings.models.orchestrator_quantization),
+        _DEFAULT_ORCHESTRATOR_GB,
+    )
+    estimated = orch_gb + _OVERHEAD_GB
     if emb_device == "cuda":
         estimated += _VRAM_GB[("embedder", None)]
     if rr_device == "cuda":

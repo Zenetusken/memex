@@ -1065,10 +1065,17 @@ async def _doctor_report() -> dict[str, object]:
     try:
         client = get_client()
         models = await client.models.list()
+        served = [m.id for m in getattr(models, "data", [])]
+        # Surface a model-id desync: the client sends settings.models.orchestrator,
+        # so if the daemon is serving a DIFFERENT model every /ask 404s silently.
+        # `orchestrator_match=False` is the loud signal that the serve-env bridge
+        # (daemon/supervisor.orchestrator_serve_env) didn't take.
         daemon = {
             "reachable": True,
             "base_url": settings.inference.base_url,
-            "models": [m.id for m in getattr(models, "data", [])],
+            "models": served,
+            "orchestrator_expected": settings.models.orchestrator,
+            "orchestrator_match": settings.models.orchestrator in served,
         }
     except Exception as e:
         daemon = {
