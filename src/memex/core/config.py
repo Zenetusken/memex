@@ -604,6 +604,13 @@ class AgentsSettings(BaseModel):
     # verify_grounding aggregate-numeric FALSE-POSITIVE that regressed the 10-K
     # (annual-report-16). Demotion-only ⇒ HARD-gate-safe; default on, fail-open.
     numeric_grounding_backstop_enabled: bool = True
+    # Index-time column UNDER-SPLIT recovery (2026-05-31): split a Docling-MERGED
+    # table column (a >=2-bold-group header over K>=2 clean number-runs, e.g. the
+    # 10-K "Stock Awards ($) Total ($)" / "278,809 342,559") back into K columns
+    # in extract_tables so Table-RAG can query the Total column (ar-15) and the
+    # synthetic chunk renders ungarbled rows (ar-14). Validated 0-false-split on
+    # the 47-doc vault; fail-open default True (a flip reverts on `reindex --force`).
+    table_column_split_enabled: bool = True
     report_pack_chars: int = 4_000
     report_coalesce_target: int = Field(default=2, ge=1)
     cooccurring_min_shared_docs: int = Field(default=2, ge=1)

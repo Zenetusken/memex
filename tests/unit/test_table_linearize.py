@@ -770,3 +770,136 @@ def test_linearizer_skips_layout_tables() -> None:
     to an index with no nonsense KV for the block."""
     refs = "## Sources\n\n| References |\n|---|\n| S62162 Deep Dive |\n| S61198 CUTLASS |\n"
     assert "[table-rows]" not in linearize_gfm_tables(refs)
+
+
+# ----- Column UNDER-SPLIT recovery (2026-05-31) -----------------------------
+
+
+def test_split_merged_columns_director_comp() -> None:
+    """The ar-14/ar-15 target: a >=2-bold-group header over 2-number cells splits
+    3->4, with the Total column now a clean numeric column."""
+    from memex.core.table_linearize import split_merged_columns
+
+    header = ["**Name", "**Fees Earned or Paid in Cash ($)", "**Stock Awards ($) (1)** **Total ($)"]
+    rows = [["Robert K. Burgess (2)", "63,750", "278,809 342,559"],
+            ["Ellen Ochoa (3)", "42,500", "278,809 321,309"]]
+    nh, nr = split_merged_columns(header, rows)
+    assert len(nh) == 4
+    assert nh[2:] == ["Stock Awards ($) (1)", "Total ($)"]
+    assert nr[1] == ["Ellen Ochoa (3)", "42,500", "278,809", "321,309"]
+    # idempotent
+    assert split_merged_columns(nh, nr) == (nh, nr)
+
+
+def test_value_runs_currency_aware() -> None:
+    """A lone currency token binds to the next: `$ 1,813 $ 1,337` = TWO runs."""
+    from memex.core.table_linearize import value_runs
+
+    assert value_runs("$ 1,813 $ 1,337") == ["$ 1,813", "$ 1,337"]
+    assert value_runs("278,809 342,559") == ["278,809", "342,559"]
+    assert value_runs("$193,479") == ["$193,479"]
+
+
+def test_bold_groups() -> None:
+    from memex.core.table_linearize import bold_groups
+
+    assert bold_groups("**Stock Awards ($) (1)** **Total ($)") == ["Stock Awards ($) (1)", "Total ($)"]
+    assert bold_groups("**Jan 25, 2026** **Jan 26, 2025** _(In millions)_") == ["Jan 25, 2026", "Jan 26, 2025"]
+    assert bold_groups("**Year Ended") == ["Year Ended"]  # single group → not a candidate
+    # A non-bold header yields ONE fallback group, so the >=2-group gate excludes it.
+    assert bold_groups("Activity Type") == ["Activity Type"]
+
+
+def test_split_merged_columns_year_pair_currency() -> None:
+    """A two-year financial merge with $-prefixed cells splits cleanly."""
+    from memex.core.table_linearize import split_merged_columns
+
+    header = ["**Item", "**Jan 25, 2026** **Jan 26, 2025** _(In millions)_"]
+    rows = [["Cash", "$ 1,813 $ 1,337"], ["Receivables", "$ 5,436 $ 6,256"]]
+    nh, nr = split_merged_columns(header, rows)
+    assert len(nh) == 3
+    assert nr[0] == ["Cash", "$ 1,813", "$ 1,337"]
+
+
+# --- the false-positive set: these must be LEFT UNTOUCHED ---
+
+
+def test_no_split_non_bold_header_list() -> None:
+    """A key-length LIST in one cell (3 coercible runs) is NOT split because its
+    header is not >=2-bold — the gate that excludes lists/dates/ranges."""
+    from memex.core.table_linearize import split_merged_columns
+
+    header = ["Algorithm", "Key Length"]
+    rows = [["RSA", "512, 1024, 2048"], ["AES", "128, 192, 256"]]
+    assert split_merged_columns(header, rows) == (header, rows)
+
+
+def test_no_split_date_with_month() -> None:
+    """A date cell with an alpha month is non-coercible → not a clean merge."""
+    from memex.core.table_linearize import split_merged_columns
+
+    header = ["**Event A** **Event B", "Other"]
+    rows = [["January 25, 2026", "x"], ["February 26, 2025", "y"]]
+    assert split_merged_columns(header, rows) == (header, rows)
+
+
+def test_no_split_ip_range() -> None:
+    """An IP range / address-pool cell (range connector + dotted octets) stays whole."""
+    from memex.core.table_linearize import split_merged_columns
+
+    header = ["**Pool A** **Pool B", "Use"]
+    rows = [["10.0.0.0 10.255.255.255", "private"], ["192.168.0.0 192.168.255.255", "lan"]]
+    assert split_merged_columns(header, rows) == (header, rows)
+
+
+def test_no_split_range_connector() -> None:
+    from memex.core.table_linearize import _clean_merge_width
+
+    assert _clean_merge_width("150 - 600") is None
+    assert _clean_merge_width("512 to 2048") is None
+
+
+def test_no_split_footnote_interior_run() -> None:
+    """A footnote marker BETWEEN two figures makes the cell ragged (not clean)."""
+    from memex.core.table_linearize import _clean_merge_width, _split_cell
+
+    assert _clean_merge_width("1,113,555 (3) 141,311,217") is None
+    # in a fired K=2 column, a ragged cell keeps its whole text in column-1
+    assert _split_cell("1,113,555 (3) 141,311,217", 2) == ["1,113,555 (3) 141,311,217", ""]
+
+
+def test_split_cell_empty_and_dash() -> None:
+    from memex.core.table_linearize import _split_cell
+
+    assert _split_cell("", 2) == ["", ""]
+    assert _split_cell("—", 2) == ["", ""]
+
+
+def test_no_split_majority_below_threshold() -> None:
+    """If fewer than 80% of cells are clean-merge at K, the column is left alone."""
+    from memex.core.table_linearize import split_merged_columns
+
+    header = ["**A** **B", "x"]
+    # only 1 of 3 cells is a clean 2-run merge → below 80% → no split
+    rows = [["100 200", "a"], ["single", "b"], ["another single", "c"]]
+    assert split_merged_columns(header, rows) == (header, rows)
+
+
+def test_nearest_table_caption() -> None:
+    """A bold caption immediately above a table is its section (more specific
+    than the distant heading — disambiguates near-twin compensation tables)."""
+    from memex.core.table_linearize import nearest_table_caption
+
+    body = (
+        "## **Other Compensation/Benefits**\n\n"
+        "Directors do not receive dividends on deferred RSUs.\n\n"
+        "**Director Compensation for Fiscal 2026**\n\n"
+        "|**Name**|**Total**|\n|---|---|\n|Ochoa|321,309|\n"
+    )
+    pos = body.find("|**Name**")
+    assert nearest_table_caption(body, pos) == "Director Compensation for Fiscal 2026"
+    # No caption when the preceding non-blank line is prose or a heading.
+    prose = "Some explanatory prose about the table.\n\n|**A**|**B**|\n|---|---|\n|1|2|\n"
+    assert nearest_table_caption(prose, prose.find("|**A**")) == ""
+    heading = "## **Section Heading**\n\n|**A**|**B**|\n|---|---|\n|1|2|\n"
+    assert nearest_table_caption(heading, heading.find("|**A**")) == ""

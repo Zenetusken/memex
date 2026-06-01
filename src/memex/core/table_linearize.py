@@ -33,8 +33,9 @@ This module is pure-sync (string transforms only) and `core/`-only in deps.
 from __future__ import annotations
 
 import re
+from collections import Counter
 
-from memex.core.text import looks_like_value
+from memex.core.text import coerce_number, looks_like_value
 
 __all__ = [
     "GFM_TABLE_RE",
@@ -44,7 +45,9 @@ __all__ = [
     "is_layout_table",
     "linearize_gfm_tables",
     "nearest_heading_text",
+    "nearest_table_caption",
     "parse_gfm_table",
+    "split_merged_columns",
     "table_cell_lines",
 ]
 
@@ -342,6 +345,156 @@ def parse_gfm_table(block: str) -> tuple[list[str], list[list[str]]] | None:
     return header, data_rows
 
 
+# ----- Column UNDER-SPLIT recovery (2026-05-31) ------------------------------
+# Docling sometimes MERGES two real columns into one: a header cell carrying two
+# bold-label groups (`**Stock Awards ($) (1)** **Total ($)**`) over data cells
+# carrying two number-runs (`278,809 342,559`). The merged column is not a clean
+# numeric column, so Table-RAG can't run a MIN over it (ar-15) and the synthetic
+# chunk renders garbled rows (ar-14). `split_merged_columns` rewrites such a
+# column back into K columns when the StoredTable is built (the SQL-store path
+# ONLY — the `[table-rows]` linearizer + raw GFM keep the original; see the
+# function's NB).
+# DOUBLY-GATED — the header must carry >=2 bold-label groups AND a strong
+# majority of cells must split into the SAME K>=2 clean number-runs — so it fires
+# on genuine financial merges only (validated to split ONLY the 10-K's ~8 merged
+# columns, ZERO false positives across the 47-doc vault; a value-run-only signal
+# would wrongly split dates / IP ranges / binaries / key-length lists, all of
+# which have non-bold or single-bold headers). FABRICATION-SAFE: a ragged or
+# ambiguous cell keeps its whole text in the first new column, never mis-slicing.
+
+_BOLD_BOUNDARY_RE = re.compile(r"\*\*\s*\*\*")  # the interior close→open bold boundary
+_ITALIC_UNITS_RE = re.compile(r"\s*_\(.*?\)_\s*$")  # trailing `_(In millions)_` unit note
+_FOOTNOTE_RUN_RE = re.compile(r"^\(\d{1,3}\)$")  # a run that is purely a `(3)` marker
+_RANGE_CONNECTOR_RE = re.compile(r"\d\s*(?:[-–—]|\bto\b)\s*\d", re.IGNORECASE)  # `150 - 600`, `1 to 5`
+_DASH_ONLY_RE = re.compile(r"^[-–—‐]+$")
+_CURRENCY_TOKENS = ("$", "€", "£")
+_SPLIT_MAJORITY = 0.8  # >= this fraction of non-empty cells must be clean-merge at width K
+
+
+def bold_groups(header_cell: str) -> list[str]:
+    """Split a header cell into its bold-label groups (`**A** **B**` → [A, B]),
+    stripping asterisks, whitespace, and a trailing italic-unit annotation. The
+    labels are COSMETIC (column names); the values are what resolve a query."""
+    out: list[str] = []
+    for part in _BOLD_BOUNDARY_RE.split(header_cell):
+        label = _ITALIC_UNITS_RE.sub("", part.strip()).strip().strip("*").strip("_").strip()
+        if label:
+            out.append(label)
+    return out
+
+
+def value_runs(cell: str) -> list[str]:
+    """Whitespace-separated runs of a cell, currency-aware: a lone `$`/`€`/`£`
+    token binds to the following token so `$ 1,813 $ 1,337` reads as TWO runs,
+    not four (which is what collapses the `$ 193,479` word-wrap-header trap)."""
+    toks = cell.split()
+    runs: list[str] = []
+    i = 0
+    while i < len(toks):
+        if toks[i] in _CURRENCY_TOKENS and i + 1 < len(toks):
+            runs.append(toks[i] + " " + toks[i + 1])
+            i += 2
+        else:
+            runs.append(toks[i])
+            i += 1
+    return runs
+
+
+def _is_dash_only(cell: str) -> bool:
+    return bool(_DASH_ONLY_RE.match(cell.strip()))
+
+
+def _clean_merge_width(cell: str) -> int | None:
+    """The number of value-runs a cell cleanly splits into (>=2), or None when it
+    is NOT a clean merge: a digit range, <2 runs, any footnote-marker run, or any
+    run that does not parse as a number (`coerce_number` — kills alpha tokens like
+    a month name, an IP octet group, a binary string)."""
+    if _RANGE_CONNECTOR_RE.search(cell):
+        return None
+    runs = value_runs(cell)
+    if len(runs) < 2:
+        return None
+    if any(_FOOTNOTE_RUN_RE.match(r.strip()) for r in runs):
+        return None
+    if all(coerce_number(r) is not None for r in runs):
+        return len(runs)
+    return None
+
+
+def _undersplit_width(header: list[str], rows: list[list[str]], ci: int) -> int:
+    """The merge-width K (>=2) to split column `ci` into, or 0 to leave it. GATED
+    on the header carrying >=2 bold-label groups (the discriminator that excludes
+    dates/ranges/lists whose headers are non-bold), then requiring >= _SPLIT_MAJORITY
+    of the non-empty, non-dash cells to be clean-merge cells of the SAME modal
+    width K>=2."""
+    if ci >= len(header) or len(bold_groups(header[ci])) < 2:
+        return 0
+    cells = [(row[ci] if ci < len(row) else "") for row in rows]
+    considered = [c for c in cells if c.strip() and not _is_dash_only(c)]
+    if len(considered) < 2:
+        return 0
+    widths = [_clean_merge_width(c) for c in considered]
+    clean = [w for w in widths if w is not None]
+    if not clean:
+        return 0
+    k = Counter(clean).most_common(1)[0][0]
+    if k < 2:
+        return 0
+    if sum(1 for w in widths if w == k) / len(considered) < _SPLIT_MAJORITY:
+        return 0
+    return k
+
+
+def _split_cell(cell: str, k: int) -> list[str]:
+    """Split one cell into K sub-cells. A clean-merge cell of width K splits into
+    its runs; an empty/dash cell → K empties; anything ELSE (ragged: wrong run
+    count, a footnote run, markup) keeps its whole text in the FIRST sub-cell and
+    the rest empty — never mis-slicing a number."""
+    if not cell.strip() or _is_dash_only(cell):
+        return [""] * k
+    if _clean_merge_width(cell) == k:
+        return value_runs(cell)
+    return [cell] + [""] * (k - 1)
+
+
+def split_merged_columns(
+    header: list[str], rows: list[list[str]]
+) -> tuple[list[str], list[list[str]]]:
+    """Recover Docling-MERGED columns: a header column with >=2 bold-label groups
+    whose cells carry K>=2 clean number-runs is split into K columns (header by
+    bold-groups, cells by their runs), preserving the row/header length invariant
+    (each grows by K-1 at the split point). Returns the rewritten (header, rows);
+    a no-op when nothing fires. Idempotent (a split column's header has no bold
+    boundary, so a re-run finds nothing). Pure-sync.
+
+    NB: applied by `index/table_store.extract_tables` ONLY (the Table-RAG SQL
+    store). The `[table-rows]` linearizer and the raw-GFM chunk text KEEP the
+    original merged structure by design — the split exists to give the SQL query
+    path clean columns to aggregate / order over (ar-14 SUM, ar-15 MIN); the BM25
+    `[table-rows]` channel still indexes a merged cell's numbers, and the answer
+    LLM grounds on the verbatim GFM either way, so neither needs the rewrite. So
+    the SQL and retrieval views of a merged-column table differ intentionally."""
+    if not header:
+        return header, rows
+    new_header = list(header)
+    new_rows = [list(r) for r in rows]
+    ci = 0
+    while ci < len(new_header):
+        k = _undersplit_width(new_header, new_rows, ci)
+        if k >= 2:
+            labels = bold_groups(new_header[ci])
+            if len(labels) != k:
+                labels = [f"col{ci + j}" for j in range(k)]  # fabrication-safe positional fallback
+            new_header = new_header[:ci] + labels + new_header[ci + 1 :]
+            for ri, row in enumerate(new_rows):
+                cell = row[ci] if ci < len(row) else ""
+                new_rows[ri] = row[:ci] + _split_cell(cell, k) + row[ci + 1 :]
+            ci += k
+        else:
+            ci += 1
+    return new_header, new_rows
+
+
 def _trim_furniture_columns(
     header: list[str], data_rows: list[list[str]]
 ) -> tuple[list[str], list[list[str]]]:
@@ -431,6 +584,33 @@ def nearest_heading_text(body: str, pos: int) -> str:
     for m in _HEADING_RE.finditer(body[:pos]):
         nearest = m.group(2).strip()
     return nearest
+
+
+# A line that is ENTIRELY a bold caption (`**Director Compensation for Fiscal
+# 2026**`) — a financial filing's table TITLE sits as a bold line, NOT an ATX
+# heading, immediately above the table. More specific than the distant section
+# heading, so it disambiguates near-duplicate tables (director vs executive
+# "Compensation" tables) for table-selection.
+_BOLD_CAPTION_RE = re.compile(r"^\s*\*\*(.+?)\*\*\s*$")
+_CAPTION_MAX_GAP_LINES = 3  # blank lines tolerated between a caption and its table
+
+
+def nearest_table_caption(body: str, pos: int) -> str:
+    """The bold-caption line immediately preceding the table at *pos* (its title,
+    e.g. `**Director Compensation for Fiscal 2026**`), or ``""`` when the nearest
+    non-blank preceding line is prose or an ATX heading rather than a standalone
+    bold caption. Used as a MORE-SPECIFIC section label than the distant heading."""
+    lines = body[:pos].split("\n")
+    blanks = 0
+    for line in reversed(lines):
+        if not line.strip():
+            blanks += 1
+            if blanks > _CAPTION_MAX_GAP_LINES:
+                return ""
+            continue
+        caption = _BOLD_CAPTION_RE.match(line)
+        return caption.group(1).strip() if caption else ""
+    return ""
 
 
 def _linearize_table(markdown: str, match: re.Match[str]) -> str | None:

@@ -292,7 +292,12 @@ async def index_document(doc_id: str, *, force: bool = False) -> IndexResult:
         # it always reflects the current body. The agent's `query_tables`
         # node reads these at answer time. On a body with no tables this is
         # a cheap DELETE (clears any stale rows from a prior version).
-        await tstore.upsert_document(doc_id, extract_tables(doc_id, doc.body))
+        await tstore.upsert_document(
+            doc_id,
+            extract_tables(
+                doc_id, doc.body, split_merged=settings.agents.table_column_split_enabled
+            ),
+        )
 
         # Register the document node in the graph; enrich adds the
         # MENTIONS / CITES edges when it runs. We do this on every

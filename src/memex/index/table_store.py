@@ -37,7 +37,9 @@ from memex.core.table_linearize import (
     header_has_prose_cell,
     is_layout_table,
     nearest_heading_text,
+    nearest_table_caption,
     parse_gfm_table,
+    split_merged_columns,
 )
 from memex.core.types import StoredTable
 
@@ -55,13 +57,18 @@ CREATE INDEX IF NOT EXISTS doc_tables_doc ON doc_tables(doc_id);
 """
 
 
-def extract_tables(doc_id: str, body: str) -> list[StoredTable]:
+def extract_tables(doc_id: str, body: str, *, split_merged: bool = True) -> list[StoredTable]:
     """Extract every well-formed GFM table from *body* as a `StoredTable`.
 
     Scans `body` with the Phase-1 `_GFM_TABLE_RE` (so `match.start()/end()`
     give `char_start`/`char_end`), parses each block via `parse_gfm_table`, and
     applies the SAME header-sanity gate as the linearizer (skip an all-value-like
-    OR prose-like header). The `table_id` is `sha1(doc_id + char_start +
+    OR prose-like header). When `split_merged` (the `table_column_split_enabled`
+    setting, fail-open True), a kept table's Docling-MERGED columns are recovered
+    via `split_merged_columns` BEFORE the `table_id` + StoredTable are built, so
+    Table-RAG sees the un-merged columns (the `table_id` is then derived from the
+    SPLIT first row — its chunk_id churns once on `reindex --force`, expected for
+    regenerable derived state). The `table_id` is `sha1(doc_id + char_start +
     first-data-row-text)` truncated to 10 hex chars — content-and-position-derived
     so it's unique per table (two tables sharing a first row don't collide) and a
     re-extraction of an unchanged body keeps each id. Pure-sync (string transforms only).
@@ -95,6 +102,12 @@ def extract_tables(doc_id: str, body: str) -> list[StoredTable]:
         # never enters the store.
         if not header:
             continue
+        # Recover Docling-MERGED columns on a KEPT table (after the skip gates so
+        # a layout/lost-columns table isn't split): a >=2-bold-group header over
+        # K>=2 clean number-runs becomes K columns, so a query can target the
+        # un-merged column. No-op on a clean table; validated 0-false-split.
+        if split_merged:
+            header, rows = split_merged_columns(header, rows)
         # Position-qualify the id with char_start: two tables that share a
         # first row (common in financial filings — repeated "$ in millions"
         # header rows) must not collide on the (doc_id, table_id) primary
@@ -115,7 +128,12 @@ def extract_tables(doc_id: str, body: str) -> list[StoredTable]:
             StoredTable(
                 doc_id=doc_id,
                 table_id=table_id,
-                section=nearest_heading_text(body, m.start()),
+                # Prefer the table's own bold CAPTION (its title, e.g. "Director
+                # Compensation for Fiscal 2026") over the distant section heading
+                # — more specific, so table-selection can disambiguate near-twin
+                # tables (director vs executive "Compensation"). Falls back to the
+                # nearest ATX heading when there's no caption.
+                section=nearest_table_caption(body, m.start()) or nearest_heading_text(body, m.start()),
                 header=header,
                 rows=rows,
                 char_start=m.start(),
