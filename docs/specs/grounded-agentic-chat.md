@@ -1,6 +1,6 @@
 # Grounded Multi-Turn Agentic Chat — and the Ungrounded Expert Surface (fenced)
 
-- **Status**: Design — the primary build target is **Surface A** (grounded multi-turn chat). The architecture that enables both surfaces is **shipped** (ADR-0015, 2026-06-01); neither surface is built yet.
+- **Status**: **Surface A v1 SHIPPED 2026-06-01 (`9a6b46e`)** — grounded multi-turn chat on **CLI (`memex chat`) + WebUI (`/chat`)** (NOT MCP — reserved for the upstream flagship-fallback layer). The compaction digest + the `eval-chat` recall runner shipped; the real `chat-multiturn` gold corpus is a live-vault follow-up. **Surface B** (the ungrounded expert mode) remains design-only (ADR-0013 Proposed).
 - **Date**: 2026-06-01
 - **Primary surface (the spine): Surface A — a grounded, multi-turn, conversational version of `/ask`** that keeps the no-hallucination HARD gate intact on every turn. Reasoning is confined to a control-layer query-rewrite; every *answer* turn stays guided-JSON + verified.
 - **Secondary surface (fenced, §10–§11): Surface B — the ungrounded ADR-0013 "expert/analysis" mode** that *inverts* the grounding contract (model knowledge, not your vault), plus the reason-then-ground bridge that connects A↔B. Recorded here because the two surfaces share the chat chrome, the conversation store, and the long-poll plumbing — but they must **never blur**.
