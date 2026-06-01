@@ -1,6 +1,6 @@
 # ADR-0015: Qwen3.5-4B as the Unified Orchestrator (+ VLM) Model
 
-- **Status**: Accepted (orchestrator role; VLM-role unification sequenced as a follow-on)
+- **Status**: Accepted — orchestrator role UNIFIED on the 4B; **VLM-role unification ATTEMPTED + REVERTED 2026-06-01** (the dedicated `Qwen3-VL-8B` is retained as the doc-VLM — **partial unification is the terminal state**). See §"VLM-role unification: attempted, reverted" below.
 - **Date**: 2026-06-01
 - **Deciders**: Memex core team
 - **Tags**: models, vllm, orchestrator, vlm, reasoning, co-residence, vram
@@ -95,6 +95,38 @@ not half: the vision tower / linear-attn / MoE-router / MTP head stay fp16).
   embeddings / FTS5 / RyuGraph / `tables.sqlite` are orchestrator-agnostic. Rollback
   is inference-only: revert `models.orchestrator` (+ quant) to `Qwen/Qwen3-8B-AWQ`
   and `memex daemon restart`; verify `GET /v1/models` + a counterfactual smoke.
+
+## VLM-role unification: attempted, reverted (2026-06-01)
+
+The follow-on — point `models.vlm` at the same 4B so one checkpoint serves both
+roles — was **built, validated, and REVERTED**. The 4B is a hybrid-reasoning
+model, so a FREE-FORM (non-guided-JSON) transcription leaks CoT; the fix
+(`models.vlm_disable_thinking` → `extra_body={"chat_template_kwargs":
+{"enable_thinking": False}}` in `parse/vlm_backend._vllm_transcribe`, + a
+defensive `_strip_think_block`) worked cleanly (a smoke + all 17 re-parsed docs
+showed **zero CoT leak**). But the focused re-baseline (the 5 VLM corpora, N=3,
+on the 4B-VL-re-transcribed vault) **failed the gate**:
+
+- ✅ `cr350-diagrams` 3/3 PASS (ANS=11, exact match); `ccna-multidoc` 3/3 PASS (ANS 7→8).
+- ❌ **`cr350-multidoc` 3/3 FAIL** — `cr350-xref-15` (a true false-premise counterfactual:
+  the Cyber Kill Chain has 7 phases, "what is the 8th?") **hallucinates an 8th phase**.
+  The transcribed content is *correct* (7 phases, verified vs the 8B-VL backup) — the
+  4B-VL **re-chunking** reliably tips this adversarial near-miss bait where the 8B-VL
+  chunking refused it 3/3.
+- ◐ `slide-decks` ANS 14→11 (−3) and `handwritten` ANS 5→3 (−2) — false-refuses
+  (HARD-gate-safe, but real answerability loss on chart/scan-heavy pages).
+
+**Root cause**: the dedicated **`Qwen3-VL-8B`** (a larger, vision-specialised model)
+is simply stronger at demanding diagram/scan transcription than the 4B's unified
+vision; and a 4B-VL re-transcription **re-chunks** the doc, which on its own can tip
+a borderline counterfactual. **Decision: KEEP the 8B-VL as the doc-VLM** — the
+gate-determined fallback the orchestrator-swap plan explicitly allowed. The
+revert was clean (`git checkout` of the uncommitted code/config/eval-anchors +
+restore the 17 docs' `.md`/manifests/`vlm_cache` from a pre-attempt backup +
+`reindex --force`); the orchestrator unification is unaffected. The
+`vlm_disable_thinking` mechanism is **not** retained (reverted) — a future hybrid
+doc-VLM would re-add it. **Do not retry the 4B as the doc-VLM without a stronger
+result**; revisit only if a 4B-class model's vision measurably matches the 8B-VL.
 
 ## Revisit When
 
