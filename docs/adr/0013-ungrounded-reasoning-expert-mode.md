@@ -69,5 +69,6 @@ Underweights a contract inversion of the project's load-bearing invariant. Recor
 
 ## References
 
+- **Spec:** [`grounded-agentic-chat.md`](../specs/grounded-agentic-chat.md) — the implementation design; this ADR's ungrounded expert mode is its **Surface B** (fenced), sibling to the grounded multi-turn chat (Surface A) that is the primary build.
 - [ADR-0008](0008-document-summarization.md) — the grounded summarizer (the contract this inverts) + the swap-in seam it reuses; [ADR-0007](0007-co-residence-resource-modes.md) — co-residence modes; [ADR-0001](0001-vllm-as-sole-inference-engine.md) — vLLM serve
 - [[reasoning-expert-mode-scope-2026-05-29]], [[cisco-security-llm-scope-2026-05-29]] — the Foundation-Sec-8B-Reasoning candidate + its 12 GB self-quantize prerequisite
