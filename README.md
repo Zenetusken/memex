@@ -184,6 +184,8 @@ uv run memex ask "Has anyone discussed CUDA-graph capture overhead?"
 
 Output is JSON on a pipe, rich tables in a terminal. Every `claim` carries a `source_chunk_id`; the agent **refuses** when chunks don't ground the answer (returns `answered: false` + `refusal_reason`).
 
+Numeric/aggregate/superlative questions over tables ("total fees paid to all directors", "which segment had the highest revenue") run a structured **text-to-SQL** pass over a per-vault table store (`tables.sqlite`, built at index time) instead of LLM arithmetic over a truncated markdown slice. The no-hallucination gate holds by construction: row-returning SQL injects only verbatim cells, and a computed aggregate ships **only** when an independent Python recompute over the original cells agrees — otherwise it falls back to normal retrieval (which refuses if it can't ground). See [`docs/specs/table-sql.md`](docs/specs/table-sql.md) and [ADR-0014](docs/adr/0014-text-to-sql-robustness-safety.md).
+
 ### Summarize a whole document
 
 ```sh
@@ -435,6 +437,7 @@ The only thing that talks to the network is the *initial model download* (one-ti
 └── .memex/
     ├── embeddings.lance/               ← vector index (LanceDB)
     ├── search.sqlite                   ← keyword index (SQLite FTS5)
+    ├── tables.sqlite                   ← structured table store for text-to-SQL (Table-RAG)
     ├── graph.ryu                       ← entity + citation graph (RyuGraph)
     ├── events.sqlite                   ← in-process audit bus (30-day prune)
     ├── manifests/{doc_id}.json         ← per-doc audit trail (sha, parse versions)
@@ -450,7 +453,7 @@ The only thing that talks to the network is the *initial model download* (one-ti
 ## 🧪 Run the tests
 
 ```sh
-uv run pytest                  # ~1030 tests, ~14 seconds, no GPU needed
+uv run pytest                  # ~1245 tests, ~18 seconds, no GPU needed
 uv run pytest tests/unit       # just the pure-function tests
 uv run pytest tests/integration  # full ingest→parse→index→ask flow with faked I/O
 ```
@@ -467,7 +470,7 @@ Integration tests fake the heavy I/O (vLLM, Docling, PyMuPDF worker, LanceDB, se
 | 🔧 The how (engineering rules + stack) | [`docs/GUIDELINES.md`](docs/GUIDELINES.md) |
 | 🗺️ What's done & what's queued | [`docs/ROADMAP.md`](docs/ROADMAP.md) |
 | 🏗️ The architecture blueprint | [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) |
-| 📐 Why we picked what we picked | [`docs/adr/`](docs/adr/) (ADRs 0001–0013) |
+| 📐 Why we picked what we picked | [`docs/adr/`](docs/adr/) (ADRs 0001–0014) |
 | 🚀 Network-facing MCP setup | [`docs/deploy/mcp-http.md`](docs/deploy/mcp-http.md) |
 | 🖥️ systemd deployment (Linux) | [`docs/deploy/systemd.md`](docs/deploy/systemd.md) |
 | 🍎 launchd deployment (macOS dev) | [`docs/deploy/launchd.md`](docs/deploy/launchd.md) |
