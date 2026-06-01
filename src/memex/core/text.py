@@ -347,3 +347,126 @@ def atomise(word: str) -> list[str]:
         if cleaned:
             out.append(cleaned)
     return out
+
+
+# ----- Number coercion (Table-RAG Phase-2 number grammar, spec §2) -----------
+# Lives in `core/` so BOTH the index-time table machinery (`core/table_linearize`,
+# `index/table_store`) and the agents (`agents/table_sql` re-exports it) share ONE
+# parser without inverting the import direction. Moved here from agents/table_sql
+# 2026-05-31 for the column-under-split detector, which is core/-only.
+_SCALE_WORDS: dict[str, float] = {"thousand": 1e3, "million": 1e6, "billion": 1e9, "trillion": 1e12}
+_SCALE_LETTERS: dict[str, float] = {"k": 1e3, "m": 1e6, "b": 1e9, "t": 1e12}
+_NUMERIC_BODY_RE = re.compile(r"^-?\d+(?:\.\d+)?$")
+
+
+def coerce_number(cell: str) -> float | None:
+    """Parse a table cell's text to a float per the Phase-2 number grammar, or
+    None when the cell does not read as a single number.
+
+    The single documented grammar (spec §2), applied in order:
+      - strip a leading currency symbol (`$`/`€`/`£`);
+      - accounting negatives: a fully-parenthesised body `(1,234)` → `-1234`;
+      - a trailing `%` is KEPT as the percent value (`45%` → `45.0`);
+      - a trailing scale word (`thousand|million|billion|trillion`) or letter
+        (`K|M|B|T`) multiplies by 1e3/1e6/1e9/1e12;
+      - thousands separators (`,`) are removed;
+      - the remaining body must be a plain (optionally signed/decimal) number,
+        else None.
+    Pure-sync. Verbatim-text in, float-or-None out — the load-bearing 10-K
+    shapes (`$22.5 billion`, `(1,234)`, `45%`, `1,000,000`) are unit-tested.
+    """
+    s = cell.strip()
+    if not s:
+        return None
+
+    negative = False
+    # Accounting negative: a fully-parenthesised body.
+    if s.startswith("(") and s.endswith(")"):
+        negative = True
+        s = s[1:-1].strip()
+
+    # Leading currency symbol.
+    if s and s[0] in ("$", "€", "£"):
+        s = s[1:].strip()
+        # A leading sign may sit inside the currency symbol: `$-5`.
+        if s.startswith("-"):
+            negative = not negative
+            s = s[1:].strip()
+
+    if not s:
+        return None
+
+    # Leading sign on the bare body.
+    if s.startswith("-"):
+        negative = not negative
+        s = s[1:].strip()
+    elif s.startswith("+"):
+        s = s[1:].strip()
+
+    percent = False
+    if s.endswith("%"):
+        percent = True
+        s = s[:-1].strip()
+
+    scale = 1.0
+    lowered = s.lower()
+    matched_scale = False
+    for word, mult in _SCALE_WORDS.items():
+        if lowered.endswith(word):
+            scale = mult
+            s = s[: -len(word)].strip()
+            matched_scale = True
+            break
+    if not matched_scale and len(s) >= 2 and s[-1].lower() in _SCALE_LETTERS:
+        # Only treat a trailing letter as a scale suffix when a digit
+        # precedes it (`2.5B`) — not a bare token like "B".
+        if s[-2].isdigit():
+            scale = _SCALE_LETTERS[s[-1].lower()]
+            s = s[:-1].strip()
+
+    # Remove thousands separators.
+    s = s.replace(",", "")
+
+    if not _NUMERIC_BODY_RE.match(s):
+        return None
+
+    value = float(s) * scale
+    if negative:
+        value = -value
+    # `percent` is informational — the value is already the percent number.
+    _ = percent
+    return value
+
+
+# A cell whose `coerce_number` reading is UNAMBIGUOUS: plain digits OR US-grouped
+# thousands (`\d{1,3}(,\d{3})*`) with at most one decimal, after stripping
+# currency / sign / parens / a trailing scale-word|letter | `%`.
+_CANONICAL_NUMERIC_CORE_RE = re.compile(r"^(?:\d{1,3}(?:,\d{3})*|\d+)(?:\.\d+)?$")
+_CANONICAL_SCALE_SUFFIX_RE = re.compile(
+    r"\s*(?:%|thousand|million|billion|trillion|[kmbt])\s*$", flags=re.IGNORECASE
+)
+
+
+def is_canonical_number_cell(cell: str) -> bool:
+    """True iff `cell` reads as an UNAMBIGUOUS US-convention number.
+
+    `coerce_number` is deliberately LENIENT — it strips ALL commas, so a malformed
+    `1,2,3` becomes `123` and a mixed-separator European `1.234,56` misreads.
+    Because the Table-RAG sqlite `__num` column is built by the SAME `coerce_number`
+    the aggregate recompute uses, the recompute-AGREEMENT check is structurally
+    BLIND to such a misread (both arms agree on the wrong number). The aggregate /
+    superlative gate calls this on each contributing cell and REFUSES when a cell
+    coerces but is NOT canonical — closing the malformed / mixed-separator wrong-
+    value ship. It does NOT resolve LOCALE ('1.000' European decimal-vs-thousands)
+    or UNIT ('5m' metres-vs-million) ambiguity — those need context the system
+    lacks and do not occur in the US-format corpora; documented as a residual.
+
+    Strips one balanced paren pair, leading currency/sign, and a trailing
+    scale/percent, then requires the core be plain digits OR properly 3-grouped
+    thousands with at most one decimal point. Pure-sync."""
+    s = cell.strip()
+    if s.startswith("(") and s.endswith(")"):
+        s = s[1:-1].strip()
+    s = re.sub(r"^[\s$€£+\-]*", "", s)  # leading currency + sign, either order
+    s = _CANONICAL_SCALE_SUFFIX_RE.sub("", s).strip()
+    return bool(s) and _CANONICAL_NUMERIC_CORE_RE.match(s) is not None
