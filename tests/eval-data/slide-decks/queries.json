@@ -311,10 +311,10 @@
     {
       "qid": "slide-decks-30",
       "question": "What programming language must I use to write CUDA kernels \u2014 only C++, or are other options supported?",
-      "relevant_chunk_ids": [],
-      "should_refuse": true,
-      "_counterfactual_mode": "empty-retrieval",
-      "_expected_answer": "(Refuse \u2014 although Python interfaces are mentioned for some libraries, the deck does not give a comprehensive answer to 'which languages can write CUDA kernels'.)"
+      "relevant_chunk_ids": ["2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#fe9722a3c6"],
+      "should_refuse": false,
+      "_expected_answer": "Other options are supported: besides C++/CUDA C, the deck (slide 'GPU Kernels in Python', NVIDIA Warp) states you can write CUDA kernels in 100% Python syntax with runtime JIT compilation.",
+      "_note": "RE-LABELED 2026-06-01 (was should_refuse=true / empty-retrieval). The deck DIRECTLY answers this: the Warp slide (p.39, chunk ...#fe9722a3c6) literally says 'Write CUDA kernels in 100% Python syntax'. The original label assumed the deck held only Python LIBRARY-interface content (the 'Python JIT Compilers: Numba/Warp/CuPy' line), but it also has the explicit Warp kernel-authoring slide \u2014 so a verbatim-grounded 'yes, Python via Warp' is a CORRECT answer, not a conflation/hallucination. Surfaced during the Qwen3.5-4B orchestrator re-baseline: the 4B answered it correctly (grounded on the Warp chunk); the 8B false-refused it."
     },
     {
       "qid": "slide-decks-31",
@@ -367,6 +367,6 @@
     "answered": 16,
     "refusal_rate_on_counterfactuals": 1.0,
     "hallucinations": 0,
-    "note": "CUDA-deck VLM re-process REVERTED to Docling+chart-OCR (no vault backup \u21d2 irreversible). The relevance gate (agents/answering.py::assess_relevance) restored refusal_cf=1.0 by refusing slide-decks-30 \u2014 a grounded-but-non-responsive conflation (library-abstraction content answering a kernel-language question). Measured over 2 runs (slide-decks-30 refused both; ANS=16). NB borderline counterfactuals are non-deterministic run-to-run (agent BF16/AWQ greedy); refusal_cf=1.0 is a typical-run figure. No _anchor_phrase \u21d2 cite-prec not tracked."
+    "note": "CUDA-deck VLM re-process REVERTED to Docling+chart-OCR (no vault backup \u21d2 irreversible). The relevance gate (agents/answering.py::assess_relevance) was once credited with refusing slide-decks-30 as a grounded-but-non-responsive conflation \u2014 but slide-decks-30 was RE-LABELED 2026-06-01 to should_refuse=false: the deck DIRECTLY answers it (the Warp 'GPU Kernels in Python' slide), so refusing it was actually a false-refuse. See that entry's _note. NB borderline counterfactuals are non-deterministic run-to-run (agent BF16/AWQ greedy); refusal_cf=1.0 is a typical-run figure. No _anchor_phrase \u21d2 cite-prec not tracked."
   }
 }

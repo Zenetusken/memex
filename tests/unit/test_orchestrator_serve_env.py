@@ -26,12 +26,34 @@ def _settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, **env: str):  # t
     return MemexSettings()  # type: ignore[call-arg]
 
 
-def test_default_8b_awq_serve_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """The default (Qwen3-8B-AWQ) maps to the proven awq_marlin + fp8_e5m2 serve —
-    byte-identical to the pre-bridge serve-vllm.sh defaults (the regression guard)."""
+def test_default_orchestrator_is_the_4b(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Post-ADR-0015 the committed default IS the unified Qwen3.5-4B → it omits
+    the quant flag (compressed-tensors auto-detect) and uses auto KV."""
     from memex.daemon.supervisor import orchestrator_serve_env
 
     env = orchestrator_serve_env(_settings(monkeypatch, tmp_path))
+    assert env["MEMEX_VLLM_MODEL"] == "cyankiwi/Qwen3.5-4B-AWQ-4bit"
+    assert env["MEMEX_VLLM_QUANTIZATION"] == ""
+    assert env["MEMEX_VLLM_KV_CACHE_DTYPE"] == "auto"
+
+
+def test_8b_awq_kill_switch_serve_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The 8B kill-switch path maps to the proven awq_marlin + fp8_e5m2 serve —
+    byte-identical to the pre-swap serve-vllm.sh defaults (the rollback regression guard)."""
+    from memex.daemon.supervisor import orchestrator_serve_env
+
+    env = orchestrator_serve_env(
+        _settings(
+            monkeypatch,
+            tmp_path,
+            MEMEX_MODELS__ORCHESTRATOR="Qwen/Qwen3-8B-AWQ",
+            MEMEX_MODELS__ORCHESTRATOR_QUANTIZATION="AWQ",
+        )
+    )
     assert env["MEMEX_VLLM_MODEL"] == "Qwen/Qwen3-8B-AWQ"
     assert env["MEMEX_VLLM_QUANTIZATION"] == "awq_marlin"
     assert env["MEMEX_VLLM_KV_CACHE_DTYPE"] == "fp8_e5m2"

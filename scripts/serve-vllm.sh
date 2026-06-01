@@ -48,8 +48,21 @@ PORT="${MEMEX_VLLM_PORT:-8000}"
 # (e.g. MEMEX_VLLM_QUANTIZATION='') means "no --quantization flag"
 # for unquantized models like Qwen3-0.6B.
 QUANTIZATION="${MEMEX_VLLM_QUANTIZATION-awq_marlin}"
-MAX_MODEL_LEN="${MEMEX_VLLM_MAX_MODEL_LEN:-6144}"
-GPU_FRACTION="${MEMEX_VLLM_GPU_FRACTION:-0.72}"
+# Posture defaults are keyed to the orchestrator so the legacy 8B kill-switch
+# keeps its exact calibrated posture while the unified Qwen3.5-4B gets its
+# fit-tested one (ADR-0015): the 4B (compressed-tensors) is validated at
+# 0.62/8192 with auto KV; the 8B-AWQ keeps 0.72/6144 with fp8_e5m2 KV. Env
+# overrides and the co-residence mode (which sets these via `daemon restart`)
+# still win. NB the model id is supplied by `daemon/supervisor.orchestrator_serve_env`.
+if [[ "$MODEL" == *Qwen3.5* || "$MODEL" == *Qwen3_5* ]]; then
+  _DEFAULT_MAX_MODEL_LEN=8192
+  _DEFAULT_GPU_FRACTION=0.62
+else
+  _DEFAULT_MAX_MODEL_LEN=6144
+  _DEFAULT_GPU_FRACTION=0.72
+fi
+MAX_MODEL_LEN="${MEMEX_VLLM_MAX_MODEL_LEN:-$_DEFAULT_MAX_MODEL_LEN}"
+GPU_FRACTION="${MEMEX_VLLM_GPU_FRACTION:-$_DEFAULT_GPU_FRACTION}"
 # KV-cache dtype. Default `fp8_e5m2` halves KV memory and is fine for
 # AWQ-int4 checkpoints (the model weights and the KV cache use different
 # numerical formats). FP8-checkpoint models (e.g. IBM Granite 4.1 FP8)

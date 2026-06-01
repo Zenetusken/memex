@@ -94,18 +94,22 @@ class ModelSettings(BaseModel):
     rig; tighter rigs override via env vars (see `docs/deploy/
     hardware-tiers.md`)."""
 
-    orchestrator: str = "Qwen/Qwen3-8B-AWQ"
+    # The unified Qwen3.5-4B (ADR-0015): hybrid-reasoning VL model serving the
+    # grounded orchestrator role. Re-baseline 2026-06-01 held the HARD gate on
+    # all 12 answer-eval corpora at N=3. Kill-switch = revert this id (+ quant)
+    # to "Qwen/Qwen3-8B-AWQ"/"AWQ" and `memex daemon restart` (the swap touches
+    # zero derived state — chunk_ids/embeddings/FTS/graph are orchestrator-agnostic).
+    orchestrator: str = "cyankiwi/Qwen3.5-4B-AWQ-4bit"
     # vLLM's GGUF path is flagged experimental; AWQ/GPTQ are the production
-    # path on Ada (see ADR-0001 Revisit + ADR-0006). Default matches the
-    # `Qwen/Qwen3-8B-AWQ` model id above. `compressed_tensors` is the W4A16
-    # pack-quantized format of the unified Qwen3.5-4B candidate (the serve
-    # OMITS --quantization for it — vLLM auto-detects — and falls back to
-    # `auto` KV, since it is an fp8 checkpoint that rejects fp8_e5m2 KV;
-    # both handled by `daemon/supervisor.orchestrator_serve_env`). The
-    # Q*_K_M variants are kept for users running gguf-via-vLLM experimentally.
+    # path on Ada (see ADR-0001 Revisit + ADR-0006). `compressed_tensors` is the
+    # W4A16 pack-quantized format of the 4B above (the serve OMITS --quantization
+    # — vLLM auto-detects — and falls back to `auto` KV, since the 4B is an fp8
+    # checkpoint that rejects fp8_e5m2 KV; both handled by
+    # `daemon/supervisor.orchestrator_serve_env`). The Q*_K_M variants are kept
+    # for users running gguf-via-vLLM experimentally.
     orchestrator_quantization: Literal[
         "AWQ", "GPTQ", "compressed_tensors", "Q4_K_M", "Q5_K_M", "Q8_0"
-    ] = "AWQ"
+    ] = "compressed_tensors"
     # VLM default: Qwen3-VL-8B-AWQ, served via vLLM (`vlm_serving`). The
     # in-process transformers path CANNOT run this compressed-tensors
     # build on 12 GB — it decompresses int4→dense (~16 GB) and OOMs;

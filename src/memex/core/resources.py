@@ -64,7 +64,7 @@ class ResourceProfile(BaseModel):
     orchestrator_gpu_fraction: float | None
     orchestrator_max_model_len: int | None
     # How many reranked chunks the answering agent grounds against. This is the
-    # concrete way a mode LEVERAGES its orchestrator window: the fast 6,144 window
+    # concrete way a mode LEVERAGES its orchestrator window: the fast 8,192 window
     # holds ~5 truncated chunks, while full's 24,576 grounds against many more
     # (deeper retrieval → more evidence per answer, the refusal gate unchanged).
     # `MEMEX_RERANK_TOP_K`, when set, overrides this (operator escape hatch).
@@ -85,11 +85,16 @@ def _curated(mode: CoResidenceMode) -> ResourceProfile:
             ),
             embedder_device="cuda",
             reranker_device="cuda",
-            orchestrator_gpu_fraction=0.60,
-            orchestrator_max_model_len=6144,
+            # Calibrated for the unified Qwen3.5-4B orchestrator (compressed-tensors,
+            # auto KV — it rejects fp8_e5m2). The 4B's validated window is 8,192 (vs
+            # the 8B's 6,144 answer-prompt floor); at 0.62 util the daemon footprint
+            # is ~7.0 GB leaving ~4.3 GB for the GPU embedder+reranker (fit-tested,
+            # desktop-peak slack). The 8B kill-switch fallback runs fine at this posture.
+            orchestrator_gpu_fraction=0.62,
+            orchestrator_max_model_len=8192,
             retrieval_top_k=5,
             expected_latency="~14 s / answer",
-            context_window="6,144 tokens · top-5 chunks",
+            context_window="8,192 tokens · top-5 chunks",
         )
     if mode == "full":
         return ResourceProfile(
@@ -120,10 +125,10 @@ def _curated(mode: CoResidenceMode) -> ResourceProfile:
             embedder_device="cuda",
             reranker_device="cuda",
             orchestrator_gpu_fraction=0.72,
-            orchestrator_max_model_len=6144,
+            orchestrator_max_model_len=8192,
             retrieval_top_k=5,
             expected_latency="~14 s / answer",
-            context_window="6,144 tokens · top-5 chunks",
+            context_window="8,192 tokens · top-5 chunks",
         )
     raise ConfigurationError(
         f"unknown co-residence mode {mode!r}",

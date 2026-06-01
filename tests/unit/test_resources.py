@@ -20,8 +20,9 @@ from memex.core.resources import (
 def test_fast_mode_is_gpu_retrieval_low_util() -> None:
     p = resolve_profile("fast")
     assert (p.embedder_device, p.reranker_device) == ("cuda", "cuda")
-    assert p.orchestrator_gpu_fraction == 0.60
-    assert p.orchestrator_max_model_len == 6144
+    # Calibrated for the unified Qwen3.5-4B orchestrator (fit-tested at 0.62/8192).
+    assert p.orchestrator_gpu_fraction == 0.62
+    assert p.orchestrator_max_model_len == 8192
 
 
 def test_full_mode_offloads_reranker_for_a_large_window() -> None:
