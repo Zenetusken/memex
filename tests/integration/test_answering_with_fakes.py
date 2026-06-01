@@ -1823,3 +1823,32 @@ async def test_answer_non_overflow_error_propagates(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr("memex.agents.answering.complete_structured", err500)
     with pytest.raises(ModelCallError):
         await answer(AnswerState(query="q", reranked=chunks))
+
+
+@pytest.mark.asyncio
+async def test_answer_context_overflow_preserves_synthetic_sql_chunk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The synthetic Table-RAG `#sql0001` chunk is appended LAST to reranked but
+    carries the aggregate/superlative answer — the overflow drop must remove the
+    lowest-ranked REAL chunk and NEVER the synthetic (regressed ar-14/ar-15 under
+    overflow at top_k=5/6144)."""
+    reals = [_doc_chunk(f"{i:010x}", "d", "D", text="chunk " * 30) for i in range(4)]
+    synthetic = _doc_chunk("sql0001", "d", "D", text="SUM of Fees = 956250 over 12 rows")
+    chunks = [*reals, synthetic]  # synthetic appended last, as query_tables does
+    calls = {"n": 0}
+    synthetic_present: list[bool] = []
+
+    async def fake_call(*, prompt: object, schema: type, **_kw: object) -> tuple[object, int]:
+        calls["n"] += 1
+        rendered = prompt if isinstance(prompt, str) else " ".join(str(m) for m in prompt)
+        synthetic_present.append("956250" in rendered)
+        if calls["n"] <= 3:  # overflow until the lowest 3 reals are dropped
+            raise _OVERFLOW
+        return DraftAnswer(summary="ok", claims=[]), 5
+
+    monkeypatch.setattr("memex.agents.answering.complete_structured", fake_call)
+    result = await answer(AnswerState(query="q", reranked=chunks))
+    assert result["draft"].summary == "ok"
+    # The synthetic chunk survived EVERY attempt (never dropped).
+    assert all(synthetic_present), synthetic_present

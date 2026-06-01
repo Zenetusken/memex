@@ -1422,9 +1422,10 @@ async def answer(state: AnswerState) -> AnswerStateUpdate:
     # Generate the draft, DEGRADING on a context-length overflow instead of
     # crashing the run. vLLM raises a 400 when the rendered chunks + the 1800-tok
     # output reservation exceed the window (e.g. a few dense 10-K table chunks in
-    # the 6144 fast window — the eval-aborting case). Drop the LOWEST-ranked chunk
-    # and retry: verify rebuilds `chunk_by_id` from the FULL `state.reranked`, so
-    # grounding for the kept (top-ranked, most-citable) chunks is unaffected. If
+    # the 6144 fast window — the eval-aborting case). Drop the lowest-ranked REAL
+    # chunk and retry (NEVER the synthetic Table-RAG `#sql0001` chunk, which holds
+    # the aggregate/superlative answer): verify rebuilds `chunk_by_id` from the
+    # FULL `state.reranked`, so grounding for the kept chunks is unaffected. If
     # even the single top chunk overflows (pathological), refuse via an empty
     # draft (verify short-circuits → `route_after_verify` → refuse) — never crash.
     from memex.core.errors import ModelCallError
@@ -1455,7 +1456,23 @@ async def answer(state: AnswerState) -> AnswerStateUpdate:
         except ModelCallError as e:
             if not _is_context_overflow(e):
                 raise
-            if len(answer_chunks) <= 1:
+            # Drop the lowest-ranked REAL chunk — NEVER the synthetic Table-RAG
+            # `#sql0001` chunk. It's appended LAST (so a naive drop-the-last would
+            # discard it FIRST) but it carries the aggregate/superlative answer, so
+            # dropping it defeats the table query (regressed ar-14/ar-15 under
+            # overflow at top_k=5/6144). Find the lowest-ranked non-synthetic chunk.
+            drop_idx = next(
+                (
+                    i
+                    for i in range(len(answer_chunks) - 1, -1, -1)
+                    if not answer_chunks[i].chunk_id.endswith("#sql0001")
+                ),
+                None,
+            )
+            if drop_idx is None:
+                # Only the synthetic chunk remains and it STILL overflows
+                # (pathological — it's bounded < the smallest truncate budget):
+                # refuse via an empty draft rather than crash the run.
                 log.warning("context_overflow_refuse", chunks=len(answer_chunks))
                 draft = DraftAnswer(
                     summary="No answer could be generated within the model's context window.",
@@ -1463,7 +1480,7 @@ async def answer(state: AnswerState) -> AnswerStateUpdate:
                 )
                 tokens = 0
                 break
-            dropped = answer_chunks.pop()
+            dropped = answer_chunks.pop(drop_idx)
             log.info(
                 "context_overflow_retry",
                 remaining=len(answer_chunks),
