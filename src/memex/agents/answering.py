@@ -1376,6 +1376,15 @@ def repair_claim_chunk_ids(
     return repaired, stats
 
 
+def _is_context_overflow(error: Exception) -> bool:
+    """True iff a `ModelCallError` is a vLLM context-length 400 — the rendered
+    prompt plus the requested output exceeds the model's window (distinct from
+    other 400s / real I/O failures by the 'maximum context length' phrasing the
+    OpenAI-compatible server returns). The answer node degrades on this rather
+    than letting it abort the whole run."""
+    return "maximum context length" in str(error).lower()
+
+
 async def answer(state: AnswerState) -> AnswerStateUpdate:
     """Generate a draft answer with explicit citations.
 
@@ -1410,24 +1419,56 @@ async def answer(state: AnswerState) -> AnswerStateUpdate:
     # markdown-table emission from chart_ocr_backend._latex_tabular_
     # to_markdown + _split_label_number_cells keeps chart blocks
     # compact enough to live alongside prose within truncate(1800).
-    messages = render_messages(
-        "answer",
-        query=state.query,
-        chunks=state.reranked,
-        feedback=feedback,
-    )
-    draft, tokens = await complete_structured(
-        prompt=messages,
-        schema=DraftAnswer,
-        # Explicit (above the 1024 default): the summary cap is 600 + up to 8
-        # claims (~435 chars each) ≈ 4.1k chars ≈ ~1.1-1.6k tokens worst-case, so
-        # xgrammar needs room to CLOSE the JSON or the draft truncates invalid.
-        # 1800 clears that with margin and still fits the fast 6,144 window
-        # (input ~2.3k tokens + 1.8k output). The summary-cap bump (300→600)
-        # fixed the mid-word "policyEn" cut full mode's richer answers exposed.
-        max_tokens=1800,
-        prompt_tag="answer@v3",
-    )
+    # Generate the draft, DEGRADING on a context-length overflow instead of
+    # crashing the run. vLLM raises a 400 when the rendered chunks + the 1800-tok
+    # output reservation exceed the window (e.g. a few dense 10-K table chunks in
+    # the 6144 fast window — the eval-aborting case). Drop the LOWEST-ranked chunk
+    # and retry: verify rebuilds `chunk_by_id` from the FULL `state.reranked`, so
+    # grounding for the kept (top-ranked, most-citable) chunks is unaffected. If
+    # even the single top chunk overflows (pathological), refuse via an empty
+    # draft (verify short-circuits → `route_after_verify` → refuse) — never crash.
+    from memex.core.errors import ModelCallError
+
+    answer_chunks = list(state.reranked)
+    draft: DraftAnswer | None = None
+    tokens = 0
+    while draft is None:
+        messages = render_messages(
+            "answer",
+            query=state.query,
+            chunks=answer_chunks,
+            feedback=feedback,
+        )
+        try:
+            draft, tokens = await complete_structured(
+                prompt=messages,
+                schema=DraftAnswer,
+                # Explicit (above the 1024 default): the summary cap is 600 + up
+                # to 8 claims (~435 chars each) ≈ 4.1k chars ≈ ~1.1-1.6k tokens
+                # worst-case, so xgrammar needs room to CLOSE the JSON or the
+                # draft truncates invalid. 1800 clears that with margin and still
+                # fits the fast 6,144 window. The summary-cap bump (300→600) fixed
+                # the mid-word "policyEn" cut full mode's richer answers exposed.
+                max_tokens=1800,
+                prompt_tag="answer@v3",
+            )
+        except ModelCallError as e:
+            if not _is_context_overflow(e):
+                raise
+            if len(answer_chunks) <= 1:
+                log.warning("context_overflow_refuse", chunks=len(answer_chunks))
+                draft = DraftAnswer(
+                    summary="No answer could be generated within the model's context window.",
+                    claims=[],
+                )
+                tokens = 0
+                break
+            dropped = answer_chunks.pop()
+            log.info(
+                "context_overflow_retry",
+                remaining=len(answer_chunks),
+                dropped_chunk=dropped.chunk_id,
+            )
 
     # Repair corrupted citation ids before they reach verify/compose.
     # The answer LLM sometimes mangles the long `docid#hash` ids it's

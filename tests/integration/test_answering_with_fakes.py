@@ -24,6 +24,7 @@ from memex.agents.answering import (
     RelevanceAssessment,
     SufficiencyAssessment,
     VerificationResult,
+    answer,
     answer_query,
     compose,
     expand_graph,
@@ -32,6 +33,7 @@ from memex.agents.answering import (
     resolve_artifact_scope,
     verify,
 )
+from memex.core.errors import ModelCallError
 
 # ----- Fixtures: fake retrieve + fake model + reset graph cache -----
 
@@ -1750,3 +1752,74 @@ async def test_numeric_backstop_keeps_rounded_plus_exact_figure(fake_llm: FakeLL
         chunk=_vchunk("t5", text),
     )
     assert v.grounded == [0]
+
+
+# ======================================================================
+# Answer-node context-overflow degradation (2026-05-31)
+# A vLLM context-length 400 (rendered chunks + output reservation exceed the
+# window) must NOT abort the run: the answer node drops the lowest-ranked chunk
+# and retries (verify still grounds against the FULL reranked set), and refuses
+# via an empty draft if even the top chunk overflows.
+# ======================================================================
+
+_OVERFLOW = ModelCallError(
+    "vLLM call failed: Error code: 400 - This model's maximum context length is 6144 tokens."
+)
+
+
+def test_is_context_overflow_detector() -> None:
+    from memex.agents.answering import _is_context_overflow
+
+    assert _is_context_overflow(_OVERFLOW) is True
+    assert _is_context_overflow(ModelCallError("vLLM call failed: Error code: 500 - boom")) is False
+
+
+@pytest.mark.asyncio
+async def test_answer_context_overflow_retries_with_fewer_chunks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Overflow on the full chunk set → drop the lowest-ranked chunk + retry;
+    the draft is produced (not crashed) once it fits."""
+    chunks = [_doc_chunk(f"{i:010x}", "d", "D", text="chunk " * 30) for i in range(4)]
+    calls = {"n": 0}
+
+    async def fake_call(*, prompt: object, schema: type, **_kw: object) -> tuple[object, int]:
+        calls["n"] += 1
+        if calls["n"] <= 2:  # 4 chunks then 3 chunks overflow; 2 chunks fits
+            raise _OVERFLOW
+        return DraftAnswer(summary="ok", claims=[]), 5
+
+    monkeypatch.setattr("memex.agents.answering.complete_structured", fake_call)
+    result = await answer(AnswerState(query="q", reranked=chunks))
+    assert calls["n"] == 3  # 4 → 3 → 2 (fits)
+    assert result["draft"].summary == "ok"
+
+
+@pytest.mark.asyncio
+async def test_answer_context_overflow_single_chunk_refuses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If even the single top chunk overflows, refuse via an EMPTY draft (verify
+    short-circuits → refuse) rather than propagate the crash."""
+    chunks = [_doc_chunk(f"{i:010x}", "d", "D", text="chunk " * 30) for i in range(3)]
+
+    async def always_overflow(*, prompt: object, schema: type, **_kw: object) -> tuple[object, int]:
+        raise _OVERFLOW
+
+    monkeypatch.setattr("memex.agents.answering.complete_structured", always_overflow)
+    result = await answer(AnswerState(query="q", reranked=chunks))
+    assert result["draft"].claims == []  # empty draft → route_after_verify refuses
+
+
+@pytest.mark.asyncio
+async def test_answer_non_overflow_error_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A non-overflow ModelCallError is a real failure — it must NOT be masked
+    as a degradation."""
+    chunks = [_doc_chunk("aaaaaaaaaa", "d", "D", text="x")]
+
+    async def err500(*, prompt: object, schema: type, **_kw: object) -> tuple[object, int]:
+        raise ModelCallError("vLLM call failed: Error code: 500 - boom")
+
+    monkeypatch.setattr("memex.agents.answering.complete_structured", err500)
+    with pytest.raises(ModelCallError):
+        await answer(AnswerState(query="q", reranked=chunks))
