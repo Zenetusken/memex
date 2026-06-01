@@ -172,3 +172,18 @@ def test_chunk_numbers_extracts_gfm_and_linearized() -> None:
 def test_chunk_numbers_handles_currency_and_scale() -> None:
     nums = _chunk_numbers("Revenue was $22.5 billion and margin 71.1%.")
     assert 2.25e10 in nums
+
+
+def test_sum_expression_detection() -> None:
+    """A claim phrased as an arithmetic sum of large figures is a computed
+    aggregate (ar-16 evasion: "19,166,424 + 18,034,343 + …") — detected so the
+    backstop demotes it even though every summand is a verbatim cell."""
+    from memex.agents.answering import _claim_is_sum_expression
+
+    assert _claim_is_sum_expression("The total is 19,166,424 + 18,034,343 + 6,099,993.") is True
+    assert _claim_is_sum_expression("$1,234,567 + $2,345,678") is True
+    # NOT a sum expression:
+    assert _claim_is_sum_expression("Revenue was $216 billion.") is False
+    assert _claim_is_sum_expression("We used ~800M pairs (Table 1 totals 788M).") is False
+    assert _claim_is_sum_expression("Adopted in 2025 + 2026.") is False  # years, no separator
+    assert _claim_is_sum_expression("The fees total $956,250.") is False  # a stated total

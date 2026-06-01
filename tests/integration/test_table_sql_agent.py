@@ -168,8 +168,10 @@ def test_superlative_oversized_row_keeps_value_and_framing() -> None:
     chunk = _build_synthetic_chunk(result)
     # Whole text bounded.
     assert len(chunk.text) <= 900
-    # The framing is present (only emitted because the row is present).
-    assert "Row with the highest Revenue in this table:" in chunk.text
+    # The framing is present (only emitted because the row is present) and
+    # NAMES the source table by its caption (the ar-15 fix — an anonymous
+    # "this table" left the answer LLM unable to map the column to the query).
+    assert 'Row with the highest Revenue in the "Reportable Segments" table:' in chunk.text
     # The row's value survived (the real cell values, even if the wide Notes
     # cell is truncated).
     assert "Compute & Networking" in chunk.text
@@ -195,7 +197,10 @@ def test_superlative_normal_row_unaffected() -> None:
         superlative=("Total ($)", "lowest"),
     )
     chunk = _build_synthetic_chunk(result)
-    assert "Row with the lowest Total ($) in this table:" in chunk.text
+    # The caption-named framing (ar-15): "Total ($)" alone is anonymous; the
+    # "Director Compensation" table name is what lets the answer node map it to
+    # the question's "total compensation".
+    assert 'Row with the lowest Total ($) in the "Director Compensation" table:' in chunk.text
     assert "Ochoa" in chunk.text
     assert "321,309" in chunk.text
 
@@ -222,7 +227,8 @@ def test_plain_rows_oversized_first_row_kept_truncated() -> None:
     )
     chunk = _build_synthetic_chunk(result)
     assert len(chunk.text) <= 900
-    assert "Matching rows:" in chunk.text
+    # No section → the framing falls back to the anonymous "this table".
+    assert "Matching rows in this table:" in chunk.text
     # The leading value survived.
     assert chunk.text.count("Name=A") == 1
 

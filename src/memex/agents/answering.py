@@ -893,6 +893,12 @@ def _render_kv_row(header: list[str], cells: list[str]) -> str:
 # into the assess/answer/verify prompts (spec §3 / round-1 B1c).
 _SYNTHETIC_TEXT_MAX = 900
 
+# Max chars of the source-table caption injected into a row/superlative synthetic
+# chunk's framing line (ar-15 fix): a section is unbounded doc text, so cap it to
+# keep the framing from eating the mandatory answer row's budget. 120 > any real
+# table title.
+_SYNTHETIC_TABLE_NAME_MAX = 120
+
 
 def _build_synthetic_chunk(result: TableQueryResult) -> Chunk:
     """Build the single synthetic `Chunk` injected into `state.reranked` for a
@@ -935,6 +941,24 @@ def _build_synthetic_chunk(result: TableQueryResult) -> Chunk:
         # Always include at least the first contributing row, truncating its KV
         # text to fit the budget if it's pathologically wide, so the value is
         # never lost.
+        # Name the SOURCE table by its caption/section so the answer node can
+        # map a generic column header ("Total ($)") to the queried quantity
+        # ("total compensation"): without it the row reads as an anonymous
+        # "Total ($)" the No-substitute rule conservatively refuses (ar-15 —
+        # the "Director Compensation for Fiscal 2026" table's Total column IS
+        # total compensation, but the answer LLM can't confirm that from a
+        # bare column label). The caption is VERBATIM doc text carrying no
+        # numeric value ⇒ HARD-gate-safe (it adds context, never a figure).
+        # The aggregate framing already self-describes via `describe_aggregate`
+        # ("SUM of Fees Earned or Paid in Cash ($)"), so this is row-path only.
+        table_name = (result.section or (result.heading_path[-1] if result.heading_path else "") or "").strip().strip("*").strip()
+        # Bound the caption like every other LLM-facing string: a section is doc
+        # text of unbounded length, and the framing line's budget is reserved
+        # up-front (framing_cost below) — an unbounded caption would eat the
+        # mandatory answer row's char budget. 120 fits any real table title.
+        table_name = table_name[:_SYNTHETIC_TABLE_NAME_MAX]
+        table_phrase = f'the "{table_name}" table' if table_name else "this table"
+
         superlative_framing: str | None = None
         if result.superlative is not None:
             # Verified extremum framing — the returned row was independently
@@ -942,7 +966,7 @@ def _build_synthetic_chunk(result: TableQueryResult) -> Chunk:
             # the agent can attribute the superlative (the framing is grounded,
             # not an unchecked claim). Held back until we know the row fits.
             col_label, direction = result.superlative
-            superlative_framing = f"Row with the {direction} {col_label} in this table:"
+            superlative_framing = f"Row with the {direction} {col_label} in {table_phrase}:"
 
         # The framing line that WILL be prepended (superlative if verified, else
         # the neutral "Matching rows:"). Reserve room for it + its newline in
@@ -950,7 +974,7 @@ def _build_synthetic_chunk(result: TableQueryResult) -> Chunk:
         # exceed _SYNTHETIC_TEXT_MAX. The superlative framing is only used when
         # at least the first row survives (so an extremum claim always has a
         # value beneath it).
-        neutral_framing = "Matching rows:"
+        neutral_framing = f"Matching rows in {table_phrase}:"
         framing_for_budget = superlative_framing if superlative_framing else neutral_framing
         framing_cost = len(framing_for_budget) + 1  # + the joining newline
 
@@ -1469,6 +1493,13 @@ _NUMERIC_BACKSTOP_MIN_MAGNITUDE = 1e4
 # Only a thousands/millions/billions denomination bridges a claim figure to a
 # cell — NOT an arbitrary x10/x100 (which would be a mis-scaled fabrication).
 _NUMERIC_DENOMINATION_FACTORS = (1.0, 1e3, 1e-3, 1e6, 1e-6, 1e9, 1e-9)
+# A claim phrased as an arithmetic SUM EXPRESSION of large (thousands-separated)
+# figures — `19,166,424 + 18,034,343 + ...`. This is a computed aggregate whose
+# RESULT the doc never states, even though each summand is a verbatim cell — so
+# the "any figure supported" rule would wrongly keep it (the ar-16 evasion). The
+# first operand must carry a thousands separator so a bare "2025 + 2026" (years)
+# never matches.
+_SUM_EXPRESSION_RE = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?\s*\+\s*[$€£(]?\s*\d")
 
 
 def _chunk_has_markdown_table(chunk_text: str) -> bool:
@@ -1504,6 +1535,14 @@ def _claim_scoped_figures(claim_text: str) -> list[float]:
             continue
         out.append(value)
     return out
+
+
+def _claim_is_sum_expression(claim_text: str) -> bool:
+    """True if the claim presents an arithmetic SUM of large figures
+    (`19,166,424 + 18,034,343 + ...`) — a computed aggregate whose result the doc
+    never states, so it must be demoted even though each summand is a verbatim
+    cell (the "any figure supported" rule would otherwise keep it)."""
+    return _SUM_EXPRESSION_RE.search(claim_text) is not None
 
 
 def _figure_supported_by_chunk(figure: float, chunk_numbers: list[float]) -> bool:
@@ -1709,9 +1748,13 @@ async def verify(state: AnswerState) -> AnswerStateUpdate:
             if not figures:
                 continue  # no large figure → out of scope
             chunk_numbers = _chunk_numbers(chunk.text)
-            # Demote only if EVERY asserted large figure is unsupported — a single
-            # verbatim figure (even alongside a rounded one) keeps the claim.
-            if not any(_figure_supported_by_chunk(f, chunk_numbers) for f in figures):
+            # Demote when EVERY asserted large figure is unsupported (a single
+            # verbatim figure, even alongside a rounded one, keeps the claim) OR
+            # the claim is an arithmetic SUM EXPRESSION (`a + b + ...`) — a computed
+            # aggregate whose result the doc never states, even though each summand
+            # is a verbatim cell (the ar-16 "19,166,424 + 18,034,343 + …" evasion).
+            unsupported = not any(_figure_supported_by_chunk(f, chunk_numbers) for f in figures)
+            if unsupported or _claim_is_sum_expression(claim.claim):
                 numeric_demoted.append(i)
         if numeric_demoted:
             log.info("verify.numeric_aggregate_demoted", demoted=numeric_demoted)
