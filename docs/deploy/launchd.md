@@ -2,7 +2,7 @@
 
 Memex's production target is Linux + NVIDIA CUDA per ADR-0001; macOS is a development tier where the CUDA-only stack doesn't apply. This guide ships a `launchd` user-agent template for running the serve script as a background process on a Mac dev box — useful if you're iterating on the agent / web UI side without the GPU pipeline.
 
-If you actually need GPU inference on macOS, swap the model out of `MEMEX_VLLM_MODEL` for something Metal/MPS-friendly and drop `MEMEX_VLLM_QUANTIZATION` entirely — the default `Qwen/Qwen3-8B-AWQ` with the `awq_marlin` kernel is CUDA-only.
+If you actually need GPU inference on macOS, swap the model out of `MEMEX_VLLM_MODEL` for something Metal/MPS-friendly and drop `MEMEX_VLLM_QUANTIZATION` entirely — the default 12 GB-tier orchestrator `cyankiwi/Qwen3.5-4B-AWQ-4bit` (compressed-tensors, ADR-0015) and the `Qwen/Qwen3-8B-AWQ` kill-switch (`awq_marlin`) are both CUDA-only.
 
 ## Quickstart
 

@@ -20,11 +20,15 @@
 Memex targets a single consumer GPU (reference: RTX 4070, 12 GB). The answering
 stack co-resides on that one card:
 
-- the **orchestrator** (Qwen3-8B-AWQ) runs out-of-process in vLLM (ADR-0001),
-  reserving `gpu_memory_utilization × VRAM` upfront — that reservation holds
-  the model weights (~5.7 GB) AND the KV cache (everything left over). The KV
-  cache size, divided by `--max-model-len`, sets how much context a request can
-  hold and how many requests run concurrently.
+- the **orchestrator** (Qwen3-8B-AWQ at the time of writing; now Qwen3.5-4B-AWQ
+  by default per **ADR-0015**, 2026-06-01 — the "non-Qwen3-8B orchestrator"
+  revisit trigger below has fired, and `core/resources.py` was retuned for it:
+  `fast`/`gpu_only` now 0.62 util / 8192 window) runs out-of-process in vLLM
+  (ADR-0001), reserving `gpu_memory_utilization × VRAM` upfront — that
+  reservation holds the model weights (4B ~6.3 GB live; the old 8B was ~5.7 GB)
+  AND the KV cache (everything left over). The KV cache size, divided by
+  `--max-model-len`, sets how much context a request can hold and how many
+  requests run concurrently.
 - the **embedder** + **reranker** (retrieval) load in the answering process
   (webui / MCP / CLI) — bf16 on the GPU by default (ADR-0006), ~0.8 GB + ~2 GB.
 
@@ -233,7 +237,9 @@ auto-selection exists (an override / an explanation of what the manager chose).
 - The dynamic VRAM manager lands (the resolver becomes VRAM-aware) — fold its
   policy into §5 here.
 - A second card tier is calibrated, or a non-Qwen3-8B orchestrator changes the
-  weight/KV arithmetic.
+  weight/KV arithmetic. **(Fired 2026-06-01 — ADR-0015 swapped in Qwen3.5-4B;
+  the `fast`/`gpu_only` profiles in `core/resources.py` were retuned to
+  0.62 util / 8192 window. The `full` mode's 0.80/24,576 posture is unchanged.)**
 - The structured-summary capability ships (it may add a capability tier and/or a
   resource axis per "Expanding horizontally").
 

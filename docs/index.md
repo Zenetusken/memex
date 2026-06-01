@@ -49,6 +49,8 @@ The full set of ADRs lives under [`adr/`](adr/0001-vllm-as-sole-inference-engine
 - **[ADR-0011](adr/0011-entity-graph-from-expansion-to-discovery.md)** — The entity graph serves discovery (`related_documents` + entity-centric retrieval), not retrieval augmentation (`expand_graph` retired, default-off)
 - **[ADR-0012](adr/0012-otter-bert-ner-enrich-backend.md)** — A BERT span-NER (OTTER) extracts entities at enrich, not the LLM (discovery-graph-only; HARD-gate-neutral)
 - **[ADR-0013](adr/0013-ungrounded-reasoning-expert-mode.md)** — *(Proposed)* An ungrounded reasoning "expert" mode, separate from `/ask` (inverts the grounding contract)
+- **[ADR-0014](adr/0014-text-to-sql-robustness-safety.md)** — Text-to-SQL robustness + safety: keep the independent Python WHERE oracle, reject SQL-stack decomposition
+- **[ADR-0015](adr/0015-qwen35-4b-unified-orchestrator.md)** — Qwen3.5-4B as the unified orchestrator (a vLLM model swap; orchestrator role unified, doc-VLM-role unification attempted + reverted)
 
 ## Building this site locally
 

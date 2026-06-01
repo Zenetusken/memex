@@ -254,7 +254,7 @@ class PromptSpec(BaseModel):
     name: str
     version: str                     # semver-like, manually bumped
     role: Literal["system", "user"]
-    target_model: str                # e.g. "Qwen/Qwen3-8B-Instruct"
+    target_model: str                # e.g. "cyankiwi/Qwen3.5-4B-AWQ-4bit"
     input_schema: str                # dotted path to a pydantic class
     output_schema: str | None        # same, when applicable
     eval_suite: str | None           # name in tests/evals/

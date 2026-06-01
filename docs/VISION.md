@@ -118,7 +118,7 @@ Memex is opinionated about its stack because constraint at this level is what ma
 
 **Reasoning and agents**
 
-- **Qwen3-8B-Instruct** (Q4_K_M, ~5GB VRAM) as the orchestrator and answer model. Strong tool-use, structured-output reliability, multilingual.
+- **Qwen3.5-4B** (`cyankiwi/Qwen3.5-4B-AWQ-4bit`, compressed-tensors W4A16, ~6.3 GB live) as the orchestrator and answer model since 2026-06-01 (ADR-0015) — a unified vision-language, hybrid-reasoning model. Strong tool-use, structured-output reliability, multilingual, with an 8,192-token window. *(Was Qwen3-8B-AWQ, retained as the one-flip kill-switch. NB reasoning is suppressed on the strict-guided-JSON grounded path by construction — the orchestrator gains the stronger base + window, not chain-of-thought; the CoT lever's home is the proposed ungrounded expert surface, ADR-0013.)*
 - **LangGraph** for state-machine orchestration. Agent loops are explicit graphs with budgets, not free-form ReAct chains.
 
 **Retrieval**
@@ -143,7 +143,7 @@ Memex is opinionated about its stack because constraint at this level is what ma
 
 - An **MCP server** exposing the vault as queryable tools (search, retrieve, follow links, summarize, cite). Any MCP client speaks to Memex.
 
-VRAM budget on the reference RTX 4070 (12GB), with the agent and embedding models co-resident: orchestrator ~5GB, embedder ~600MB, reranker ~600MB, KV cache and overhead ~3GB. The VLM fallback (Qwen3-VL-8B-AWQ, ~7.4GB) runs only at *parse* time, in its own short-lived vLLM process on the GPU freed by pausing the orchestrator — never co-resident with answering. Inference is sequential by design — the agent is the bottleneck, not parallel decoding.
+VRAM budget on the reference RTX 4070 (12GB), with the agent and embedding models co-resident: orchestrator ~6.3GB (Qwen3.5-4B at 0.62 util, auto KV), embedder ~600MB, reranker ~600MB, KV cache and overhead. The VLM fallback (Qwen3-VL-8B-AWQ, ~7.4GB — a dedicated vision model, stronger than the 4B's unified vision on hard diagrams, so it is NOT unified) runs only at *parse* time, in its own short-lived vLLM process on the GPU freed by pausing the orchestrator — never co-resident with answering. Inference is sequential by design — the agent is the bottleneck, not parallel decoding.
 
 ---
 

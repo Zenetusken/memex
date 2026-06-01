@@ -308,7 +308,7 @@ Output:
 
 - `jiwer` for CER/WER
 - `ragas` for retrieval and faithfulness metrics (use selectively; we don't want a heavy dep for things we already have)
-- A **local judge model** for LLM-as-judge — same Qwen3-8B that runs the orchestrator, with a dedicated judge prompt
+- A **local judge model** for LLM-as-judge — the same model that runs the orchestrator (now Qwen3.5-4B, ADR-0015), with a dedicated judge prompt
 - In-house structural F1 implementation (small, no external dep)
 
 Using the same local model as both the system-under-test and the judge has obvious risks (the judge will be biased toward its own outputs). Mitigations:

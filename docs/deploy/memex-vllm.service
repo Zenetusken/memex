@@ -20,7 +20,7 @@
 # with systemd's restart loop, so use `systemctl --user stop` instead.
 
 [Unit]
-Description=Memex vLLM orchestrator (Qwen3-8B-AWQ via vllm serve)
+Description=Memex vLLM orchestrator (Qwen3.5-4B-AWQ default, ADR-0015; via vllm serve)
 Documentation=https://github.com/Zenetusken/memex/blob/main/docs/deploy/systemd.md
 After=network-online.target
 Wants=network-online.target

@@ -19,7 +19,7 @@ But a class of questions goes **beyond a vault lookup** — analytical, synthesi
 - **Do NOT weaken the grounded `/ask` contract** — the no-hallucination gate is non-negotiable on the gated path.
 - **Honesty of provenance** — an ungrounded answer must be unmistakably labelled "model knowledge, not your vault."
 - **Reuse, not a parallel stack** — the summarizer swap-in seam (the `inference_override` ContextVar + a serve-at-call-time vLLM lifecycle) already exists for a model swap.
-- **Local-first / 12 GB** — a reasoning model (e.g. Foundation-Sec-8B-Reasoning for the security flavour) must fit / self-quantize on the reference card (an inherited prerequisite).
+- **Local-first / 12 GB** — a reasoning model (e.g. Foundation-Sec-8B-Reasoning for the security flavour) must fit / self-quantize on the reference card (an inherited prerequisite). **Update (2026-06-01, ADR-0015):** the default orchestrator is now `cyankiwi/Qwen3.5-4B-AWQ-4bit`, a *hybrid-reasoning* model already resident and 12 GB-proven — a general-purpose reasoning candidate for this surface that needs no self-quantize (toggle its `enable_thinking` ON here, where there is no guided-JSON grammar suppressing the CoT). The domain-specialised Foundation-Sec variant remains the security-flavour option behind its own self-quantize prerequisite.
 
 ## Considered Options
 
@@ -64,7 +64,7 @@ Underweights a contract inversion of the project's load-bearing invariant. Recor
 ## Revisit When
 
 - Implementation lands → move Status to **Accepted**, record the realized contract boundary + the eval discipline, and add the VISION carve-out.
-- A reasoning model with a clean 12 GB-fitting build appears (unblocks the security variant).
+- A reasoning model with a clean 12 GB-fitting build appears (unblocks the security variant). **(Partially fired 2026-06-01 — the now-default Qwen3.5-4B is a 12 GB-fitting hybrid-reasoning model usable as the general-purpose expert model with `enable_thinking` ON; the security-specialised variant is still gated on a self-quantize. See ADR-0015.)**
 - The relaxed-grounding boundary proves too loose (a user mistakes expert output for grounded) → tighten the labelling / separation.
 
 ## References

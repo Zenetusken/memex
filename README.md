@@ -44,7 +44,7 @@ Memex helps you:
 
 Per ADR-0001 the project doesn't ship a CPU fallback. If `torch.cuda.is_available()` is False, startup fails fast with a clear message.
 
-Memex ships **two hardware-tier profiles**. The 12 GB tier uses Qwen3-8B-AWQ and is the default; the 8 GB tier uses Qwen3-4B-AWQ at a tighter vLLM memory fraction. See [`docs/deploy/hardware-tiers.md`](docs/deploy/hardware-tiers.md) for the env-var matrix + the eval-verified quality numbers behind each profile.
+The **default 12 GB-tier orchestrator is `cyankiwi/Qwen3.5-4B-AWQ-4bit`** — a unified vision-language, hybrid-reasoning model (compressed-tensors W4A16) adopted 2026-06-01 ([ADR-0015](docs/adr/0015-qwen35-4b-unified-orchestrator.md); the full re-baseline held every HARD gate). The legacy `Qwen3-8B-AWQ` remains the one-flip kill-switch (revert `models.orchestrator` + `memex daemon restart` — zero re-indexing). The parse-time diagram **doc-VLM stays `Qwen3-VL-8B`** (unifying it onto the 4B was attempted + reverted — it regressed). See [`docs/deploy/hardware-tiers.md`](docs/deploy/hardware-tiers.md) for the env-var matrix + the eval-verified quality numbers.
 
 ---
 
@@ -344,13 +344,13 @@ Every knob is set via environment variable or `~/.config/memex/config.toml`. Env
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `MEMEX_VLLM_MODEL` | `Qwen/Qwen3-8B-AWQ` | HuggingFace model ID for the orchestrator. 8 GB tier: `Qwen/Qwen3-4B-AWQ`. |
+| `MEMEX_VLLM_MODEL` | _(derived from `models.orchestrator`)_ | The daemon's `orchestrator_serve_env` bridge (ADR-0015) exports this from `models.orchestrator` (default `cyankiwi/Qwen3.5-4B-AWQ-4bit`), so you normally set `MEMEX_MODELS__ORCHESTRATOR`, not this directly. Kill-switch: `MEMEX_MODELS__ORCHESTRATOR=Qwen/Qwen3-8B-AWQ`. |
 | `MEMEX_VLLM_HOST` | `127.0.0.1` | Bind host. |
 | `MEMEX_VLLM_PORT` | `8000` | Bind port. |
-| `MEMEX_VLLM_QUANTIZATION` | `awq_marlin` | Quantization kernel. Set `""` for unquantized or FP8 models, `awq` for the legacy kernel. |
-| `MEMEX_VLLM_MAX_MODEL_LEN` | `6144` | Max sequence length. Sized to fit the production answer prompt at `top_k=5` with chunks truncated to 1800 chars; the +2048 over the earlier 4096 ceiling costs ~1 GB KV-cache reservation under fp8_e5m2. |
-| `MEMEX_VLLM_GPU_FRACTION` | `0.72` | 12 GB-rig floor with the 8B-AWQ orchestrator. **Drop to `0.68` when chart-OCR is enabled** (the default since 2026-05-23) — embedder + reranker + chart-OCR slot need the extra headroom. **8 GB tier: drop to `0.50`** to leave room for embedder + reranker alongside the smaller orchestrator. |
-| `MEMEX_VLLM_KV_CACHE_DTYPE` | `fp8_e5m2` | Halves KV-cache memory for AWQ-int4 checkpoints. **Set to `auto` for FP8-checkpoint models** (vLLM blocks fp8 KV cache + FP8 weights at startup). |
+| `MEMEX_VLLM_QUANTIZATION` | _(model-keyed; bridge-derived)_ | Quantization kernel. The default 4B is compressed-tensors → **empty** (`""`); the 8B kill-switch uses `awq_marlin`. `serve-vllm.sh` keys this off the model and the daemon bridge exports it from config (ADR-0015). Set `awq` for the legacy kernel. |
+| `MEMEX_VLLM_MAX_MODEL_LEN` | `8192` (4B) / `6144` (8B) | Max sequence length, model-keyed in `serve-vllm.sh`. The 4B default is 8192; the 8B kill-switch is 6144 (sized to fit the production answer prompt at `top_k=5`, chunks truncated to 1800 chars). |
+| `MEMEX_VLLM_GPU_FRACTION` | `0.62` (4B) / `0.72` (8B) | 12 GB-rig util, model-keyed. The 4B (auto KV) fits at `0.62`; the 8B kill-switch uses `0.72`. **Drop ~0.04 when chart-OCR is enabled** (default since 2026-05-23) — embedder + reranker + chart-OCR slot need headroom. **8 GB tier: `0.50`** for the smaller orchestrator. |
+| `MEMEX_VLLM_KV_CACHE_DTYPE` | `auto` (4B) / `fp8_e5m2` (8B) | Model-keyed. The 4B is an **fp8 checkpoint → `auto`** (vLLM blocks fp8 KV cache + fp8 weights at startup); the 8B AWQ-int4 kill-switch uses `fp8_e5m2` (halves KV-cache memory). |
 | `CUDA_VISIBLE_DEVICES` | `0` | GPU device index. |
 | `MEMEX_VLLM_EAGER` | _(unset)_ | Set to anything to disable CUDA-graph compilation (slower decode, faster startup). |
 
@@ -371,7 +371,7 @@ Every knob is set via environment variable or `~/.config/memex/config.toml`. Env
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `MEMEX_AGENTS__ENRICH_NER_BACKEND` | `llm` | Entity-extraction backend at enrich. `llm` = the orchestrator (Qwen3-8B) extracts entities; `otter` = the span NER `whoisjones/otter-bi-mmbert` (a BERT, runs CPU-side, lazy-loaded once). OTTER types entities far more cleanly (tool/method vs the LLM's generic concept-dump) and roughly doubles graph-discovery yield (+103% `related_documents` on the reference 47-doc vault). **Enrich-graph-only** — citation extraction and the answer path stay on the LLM, so the no-hallucination gate is untouched. Switching backends needs a re-`enrich` (or `reindex`) of existing docs. See [`docs/specs/ner-enrich.md`](docs/specs/ner-enrich.md) + [ADR-0012](docs/adr/0012-otter-bert-ner-enrich-backend.md). |
+| `MEMEX_AGENTS__ENRICH_NER_BACKEND` | `llm` | Entity-extraction backend at enrich. `llm` = the orchestrator (now Qwen3.5-4B, ADR-0015) extracts entities; `otter` = the span NER `whoisjones/otter-bi-mmbert` (a BERT, runs CPU-side, lazy-loaded once). OTTER types entities far more cleanly (tool/method vs the LLM's generic concept-dump) and roughly doubles graph-discovery yield (+103% `related_documents` on the reference 47-doc vault). **Enrich-graph-only** — citation extraction and the answer path stay on the LLM, so the no-hallucination gate is untouched. Switching backends needs a re-`enrich` (or `reindex`) of existing docs. See [`docs/specs/ner-enrich.md`](docs/specs/ner-enrich.md) + [ADR-0012](docs/adr/0012-otter-bert-ner-enrich-backend.md). |
 | `MEMEX_AGENTS__ENRICH_NER_MODEL` | `whoisjones/otter-bi-mmbert` | HF id for the OTTER NER (consulted only when `backend=otter`). |
 | `MEMEX_AGENTS__ENRICH_NER_THRESHOLD` | `0.05` | OTTER span-confidence floor — the master knob. The model card's 0.1 strangles recall; 0.05 is the A/B-validated sweet spot. |
 | `MEMEX_AGENTS__ENRICH_NER_LABELS` | `union` | OTTER label set: `generic` / `domain` / `union`. `union` (both) is the A/B winner — resolves corpus-dependence. |

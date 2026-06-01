@@ -2,6 +2,8 @@
 
 **Status:** shipped 2026-05-26 (P2.3). **Code:** `parse/vlm_backend.py` (`_serve_vlm_vllm`, `_reap_vlm_vllm`, `_convert_one_via_vllm`, `_vllm_transcribe`, the `convert_pages` backend branch), `core/config.py` (`VLMServeSettings`, `ModelSettings.vlm_serving`). **See also:** ADR-0006 §4 (the amendment that reverses "Route VLM through a second vLLM process"), `vlm-transcription-cache.md`, `office-pdf-conversion.md`.
 
+> **Update (2026-06-01, ADR-0015):** the grounded *orchestrator* swapped to the unified `cyankiwi/Qwen3.5-4B-AWQ-4bit`. Unifying THIS doc-VLM role onto the same 4B was **attempted + reverted** — the dedicated `Qwen3-VL-8B` is stronger at hard diagram/scan transcription (the 4B-VL regressed `cr350-multidoc`/`slide-decks`/`handwritten`), and a VLM re-parse re-chunks docs, which can tip a borderline counterfactual. So this lifecycle still serves **`models.vlm` = `cyankiwi/Qwen3-VL-8B-Instruct-AWQ-4bit`** (unchanged); the orchestrator and the doc-VLM are *different* models. See ADR-0015 §"VLM-role unification: attempted, reverted".
+
 ## Problem
 
 The VLM upgrade Qwen2.5-VL-7B → **Qwen3-VL-8B** fixes the state-machine / flow-diagram *flattening* the 7B model exhibited (it read a directed diagram's boxes top-to-bottom as a flat list, losing the transitions). But Qwen3-VL's only int4 community build is **compressed-tensors `pack-quantized`** (`cyankiwi/Qwen3-VL-8B-Instruct-AWQ-4bit`), and **transformers cannot run it in-process on a 12 GB card**:

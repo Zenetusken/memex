@@ -1,5 +1,7 @@
 # Hardware tiers
 
+> **⚠️ Updated 2026-06-01 ([ADR-0015](../adr/0015-qwen35-4b-unified-orchestrator.md)) — the 12 GB-tier DEFAULT orchestrator is now the unified `cyankiwi/Qwen3.5-4B-AWQ-4bit`** (a hybrid-reasoning VL model, compressed-tensors W4A16), NOT `Qwen3-8B-AWQ`. The daemon's `orchestrator_serve_env` bridge serves it from `models.orchestrator` with **no `--quantization` flag** (compressed-tensors auto-detect), **`--kv-cache-dtype auto`** (the 4B is an fp8 checkpoint that rejects `fp8_e5m2`), and **`0.62`/`8192`** (model-keyed in `serve-vllm.sh`). Live VRAM ~7.0 GB at 0.62 util (more headroom than the old 8B's ~0.5 GB). The full re-baseline held all HARD gates (12/12 corpora N=3). **The `Qwen/Qwen3-8B-AWQ` config in the "12 GB tier" section below is now the documented KILL-SWITCH / pre-swap baseline** (revert `models.orchestrator` + quant and `memex daemon restart` — zero derived-state migration); its eval numbers are the pre-swap 8B figures. The parse-time **doc-VLM stays `Qwen3-VL-8B`** (the 4B-VL unification was attempted + reverted — it regressed; see ADR-0015 §"VLM-role unification: attempted, reverted").
+
 Memex ships two **eval-verified** hardware-tier profiles. Pick the one that matches your GPU; the env-var matrix below activates each profile end-to-end.
 
 The tiers were validated empirically against the 30-query slide-decks evaluation corpus (`tests/eval-data/slide-decks/queries.json`). Both clear the project's **HARD GATES**:
@@ -11,18 +13,33 @@ The trade-off between tiers is **how often the model attempts an answer** (answe
 
 ---
 
-## 12 GB tier (default — Qwen3-8B-AWQ)
+## 12 GB tier — Qwen3.5-4B-AWQ (default since ADR-0015) + the Qwen3-8B-AWQ kill-switch
 
 **Recommended for**: RTX 4070, 4080, 3080-12GB, A4000, RTX 5070, any consumer GPU with 12-15 GB VRAM.
 
-### Activation
+> Since 2026-06-01 (ADR-0015) the **default** 12 GB-tier orchestrator is `cyankiwi/Qwen3.5-4B-AWQ-4bit` — served by the daemon's `orchestrator_serve_env` bridge from `models.orchestrator` (no `--quantization` flag, `--kv-cache-dtype auto`, `0.62`/`8192`, model-keyed in `serve-vllm.sh`). The `Qwen/Qwen3-8B-AWQ` config below is the documented **kill-switch / pre-swap baseline**; its eval + footprint numbers are the pre-swap 8B figures, retained for rollback reference.
+
+### Activation (default 4B)
 
 ```sh
-# Defaults — no env var override needed.
+# Defaults — no env var override needed; the daemon bridge sets the 4B from config.
 ./scripts/serve-vllm.sh
 ```
 
-Or equivalently, with explicit env vars:
+Standalone, with explicit env vars (the bridge sets these for you under the daemon):
+
+```sh
+MEMEX_VLLM_MODEL=cyankiwi/Qwen3.5-4B-AWQ-4bit \
+MEMEX_VLLM_QUANTIZATION= \
+MEMEX_VLLM_MAX_MODEL_LEN=8192 \
+MEMEX_VLLM_GPU_FRACTION=0.62 \
+MEMEX_VLLM_KV_CACHE_DTYPE=auto \
+  ./scripts/serve-vllm.sh
+```
+
+### Kill-switch (legacy Qwen3-8B-AWQ)
+
+Revert `models.orchestrator` to `Qwen/Qwen3-8B-AWQ` + `memex daemon restart` (zero re-indexing), or run serve-vllm.sh standalone with:
 
 ```sh
 MEMEX_VLLM_MODEL=Qwen/Qwen3-8B-AWQ \

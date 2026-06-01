@@ -48,18 +48,24 @@
     <key>PATH</key>
     <string>/Users/YOUR_USER/.local/bin:/usr/local/bin:/usr/bin:/bin</string>
 
+    <!-- Default 12 GB-tier orchestrator since ADR-0015. The compressed-tensors
+         4B takes an EMPTY quantization string + auto KV. Kill-switch:
+         Qwen/Qwen3-8B-AWQ + awq_marlin + fp8_e5m2 + 6144 + 0.72.
+         (Both are CUDA-only; on Apple Silicon swap for an MPS-friendly model.) -->
     <key>MEMEX_VLLM_MODEL</key>
-    <string>Qwen/Qwen3-8B-AWQ</string>
+    <string>cyankiwi/Qwen3.5-4B-AWQ-4bit</string>
     <key>MEMEX_VLLM_HOST</key>
     <string>127.0.0.1</string>
     <key>MEMEX_VLLM_PORT</key>
     <string>8000</string>
     <key>MEMEX_VLLM_QUANTIZATION</key>
-    <string>awq_marlin</string>
+    <string></string>
+    <key>MEMEX_VLLM_KV_CACHE_DTYPE</key>
+    <string>auto</string>
     <key>MEMEX_VLLM_MAX_MODEL_LEN</key>
-    <string>4096</string>
+    <string>8192</string>
     <key>MEMEX_VLLM_GPU_FRACTION</key>
-    <string>0.72</string>
+    <string>0.62</string>
     <key>CUDA_VISIBLE_DEVICES</key>
     <string>0</string>
   </dict>

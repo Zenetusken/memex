@@ -175,9 +175,9 @@ A single `MemexSettings` pydantic-settings model is the source of truth. Loaded 
 ```python
 # src/memex/core/config.py
 class ModelSettings(BaseModel):
-    orchestrator: str = "Qwen/Qwen3-8B-AWQ"
-    orchestrator_quantization: Literal["AWQ", "GPTQ", "Q4_K_M", "Q5_K_M", "Q8_0"] = "AWQ"
-    vlm: str = "cyankiwi/Qwen3-VL-8B-Instruct-AWQ-4bit"
+    orchestrator: str = "cyankiwi/Qwen3.5-4B-AWQ-4bit"   # ADR-0015; kill-switch: Qwen/Qwen3-8B-AWQ
+    orchestrator_quantization: Literal["AWQ", "GPTQ", "compressed_tensors", "Q4_K_M", "Q5_K_M", "Q8_0"] = "compressed_tensors"
+    vlm: str = "cyankiwi/Qwen3-VL-8B-Instruct-AWQ-4bit"   # doc-VLM stays the dedicated 8B-VL (4B-VL unification reverted)
     vlm_quantization: Literal["awq_int4", "bf16"] = "awq_int4"
     vlm_serving: Literal["transformers", "vllm"] = "vllm"  # Qwen3-VL → parse-time vLLM process
     embedder: str = "google/embeddinggemma-300m"
@@ -198,7 +198,7 @@ class MemexSettings(BaseSettings):
     model_config = SettingsConfigDict(toml_file="~/.config/memex/config.toml")
 ```
 
-For tight-VRAM rigs (8 GB tier), P4.2 ships a documented `Qwen3-4B-AWQ + gpu_memory_utilization=0.50` profile rather than a runtime auto-downgrade — see `docs/deploy/hardware-tiers.md`. Fail loudly at startup, never silently at runtime.
+Since 2026-06-01 (ADR-0015) the 12 GB-tier default orchestrator is itself the 4B-class `cyankiwi/Qwen3.5-4B-AWQ-4bit` (compressed-tensors, no `--quantization` flag, `--kv-cache-dtype auto`, 0.62 util / 8192 window). The legacy `Qwen/Qwen3-8B-AWQ` is retained as the documented one-flip kill-switch. Fail loudly at startup, never silently at runtime — and note the serve-env bridge (`daemon/supervisor.orchestrator_serve_env`) is what makes a config-only orchestrator swap actually reach vLLM (see ADR-0015 / `docs/deploy/hardware-tiers.md`).
 
 ---
 
@@ -206,11 +206,11 @@ For tight-VRAM rigs (8 GB tier), P4.2 ships a documented `Qwen3-4B-AWQ + gpu_mem
 
 ### The model stack and VRAM budget
 
-The reference target is an RTX 4070 (12GB VRAM) with 32GB system RAM. Every model choice is constrained by this. **bf16 across the stack on Ada** (ADR-0006); the orchestrator and VLM use AWQ-Int4 for weight compression but their activations stay bf16.
+The reference target is an RTX 4070 (12GB VRAM) with 32GB system RAM. Every model choice is constrained by this. **bf16 across the stack on Ada** (ADR-0006); the orchestrator and VLM use Int4 (AWQ / compressed-tensors) for weight compression but their activations stay bf16.
 
 | Model | Role | Quantization | VRAM (live) | Resident? |
 |---|---|---|---|---|
-| Qwen3-8B-AWQ | Orchestrator, answerer | AWQ-Int4 (out-of-process via vLLM) | ~5.5 GB | vLLM daemon |
+| Qwen3.5-4B-AWQ | Orchestrator, answerer (default since 2026-06-01, ADR-0015; unified VL + hybrid-reasoning, 8192 window) | compressed-tensors W4A16 (out-of-process via vLLM, auto KV) | ~6.3 GB | vLLM daemon |
 | EmbeddingGemma 300M | Embeddings | bf16 | ~0.6 GB | Always (registry) |
 | bge-reranker-v2-m3 | Reranking | bf16 | ~1.0 GB | Always (registry) |
 | Qwen3-VL-8B-AWQ | Page transcription fallback (diagrams) | AWQ-Int4 (compressed-tensors, vLLM Marlin) | ~7.4 GB | **Parse-time vLLM process** (`vlm_serving="vllm"`); `disable_vlm=True` by default on 12 GB |

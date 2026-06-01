@@ -10,7 +10,7 @@ Memex is a local-first, fully agentic document-understanding system. Runs entire
 | Engineering practices (full) | [`docs/GUIDELINES.md`](docs/GUIDELINES.md) |
 | Operational status | [`docs/ROADMAP.md`](docs/ROADMAP.md) |
 | Architectural blueprint | [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) |
-| ADRs (`0001`–`0014`) | [`docs/adr/`](docs/adr/) |
+| ADRs (`0001`–`0015`) | [`docs/adr/`](docs/adr/) |
 | Eval corpus design | [`docs/eval-corpus-plan.md`](docs/eval-corpus-plan.md) |
 | Python source | [`src/memex/`](src/memex/) — see [`src/memex/CLAUDE.md`](src/memex/CLAUDE.md) for backend rules |
 | Web UI | [`src/memex/webui/`](src/memex/webui/) — see [`src/memex/webui/CLAUDE.md`](src/memex/webui/CLAUDE.md) for frontend rules |
@@ -30,7 +30,7 @@ Memex is a local-first, fully agentic document-understanding system. Runs entire
 - **Async-first for I/O, sync for CPU.** Filesystem reads, model calls, database writes — `async`. Token parsing, formatting, string manipulation — `sync`. Don't mix without a reason.
 - **Configuration is centralized.** `MemexSettings` (`core/config.py`) is the single source. Loaded once at startup from `~/.config/memex/config.toml` + `MEMEX_*` env vars. Validated immediately.
 - **Logs use structlog with bound context.** `logger.bind(node="...").info("event", k=v)`. No `extra={...}`, no f-strings in event names (ADR-0004).
-- **vLLM is the sole inference engine for v1** (ADR-0001). No CPU fallback. The CUDA toolkit and dtype dispatch are settled in ADR-0006.
+- **vLLM is the sole inference engine for v1** (ADR-0001). No CPU fallback. The CUDA toolkit and dtype dispatch are settled in ADR-0006. The default 12 GB-tier orchestrator is `cyankiwi/Qwen3.5-4B-AWQ-4bit` (a vLLM *model* swap, ADR-0015; `Qwen/Qwen3-8B-AWQ` is the one-flip kill-switch). A config-only orchestrator swap only reaches vLLM through the `daemon/supervisor.orchestrator_serve_env` bridge — don't hardcode model ids in `serve-vllm.sh`.
 
 ## When in doubt
 

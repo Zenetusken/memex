@@ -86,14 +86,15 @@ Measured live, not estimated. Numbers are from the 2026-05-20 E2E + load + OCR a
 
 | Model | Used as | Resident VRAM |
 |---|---|---|
-| `Qwen/Qwen3-8B-AWQ` | Orchestrator (vLLM) — `awq_marlin` kernel | 5.7 GB weights + ~2 GB KV cache |
+| `cyankiwi/Qwen3.5-4B-AWQ-4bit` | Orchestrator (vLLM) — compressed-tensors, auto KV (default since 2026-06-01, ADR-0015) | ~6.3 GB weights + KV cache (57k tokens @ 0.62 util) |
+| `Qwen/Qwen3-8B-AWQ` | Orchestrator **kill-switch** (vLLM) — `awq_marlin` kernel | 5.7 GB weights + ~2 GB KV cache |
 | `google/embeddinggemma-300m` | Embedder (lazy load in process) | ~0.6 GB BF16 |
 | `BAAI/bge-reranker-v2-m3` | Reranker (lazy load in process) | ~2 GB BF16 |
-| `Qwen/Qwen2.5-VL-7B-Instruct-AWQ` | VLM, **disabled by default** | ~5 GB AWQ-Int4 (off the 12 GB budget) |
+| `cyankiwi/Qwen3-VL-8B-Instruct-AWQ-4bit` | Doc-VLM (parse-time vLLM process; P2.3, **NOT** unified onto the 4B) | ~7.4 GB (off the answer-time budget) |
 
 ### Tuned defaults
 
-- vLLM: `--gpu-memory-utilization 0.72 --max-model-len 6144 --kv-cache-dtype fp8_e5m2 --quantization awq_marlin --enable-prefix-caching --max-num-seqs 8` (the 4096→6144 + 0.62→0.72 bump shipped with the retrieval truncate-budget retune; `MEMEX_VLLM_GPU_FRACTION` → 0.68 when chart-OCR runs co-resident). On the 12 GB tier, `memex ingest`/`index`/`reindex` pause vLLM for the duration (the embedder can't run co-resident with vLLM's ~8.5 GB)
+- vLLM (default 4B, ADR-0015): `--gpu-memory-utilization 0.62 --max-model-len 8192 --kv-cache-dtype auto` (no `--quantization` flag — compressed-tensors auto-detect) `--enable-prefix-caching --max-num-seqs 8`. These are **model-keyed** in `serve-vllm.sh` and exported from config by `daemon/supervisor.orchestrator_serve_env`; the 8B kill-switch keeps its exact posture `0.72 / 6144 / fp8_e5m2 / awq_marlin`. (`MEMEX_VLLM_GPU_FRACTION` → 0.68 when chart-OCR runs co-resident.) On the 12 GB tier, `memex ingest`/`index`/`reindex` pause vLLM for the duration (the embedder can't run co-resident with vLLM's footprint)
 - Parse: `docling_timeout_s=1200`, `do_ocr=False` (`MEMEX_PARSE_DOCLING_OCR=1` to opt in for scanned docs)
 - Index: `embed_batch=32` (`MEMEX_INDEX_EMBED_BATCH=...` to push throughput on bigger rigs)
 - Observability: `langfuse_enabled=False` by default (local-first, opt-in tracing)

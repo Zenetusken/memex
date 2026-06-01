@@ -2,7 +2,7 @@
 
 Status: **SHIPPED + LIVE 2026-05-29** (config `enrich_ner_backend=otter` @ `enrich_ner_threshold=0.05` + `enrich_ner_labels=union`). Decision record: [ADR-0012](../adr/0012-otter-bert-ner-enrich-backend.md). A/B record: [`docs/audits/08-otter-ner-ab.md`](../audits/08-otter-ner-ab.md). Commits `0583600` (A/B harness) / `0891480` (backend) / `ba8042c` (`clear_mentions`) / `1b8aaa7` (roadmap note).
 
-The pluggable entity-extraction backend at enrich. `AgentsSettings.enrich_ner_backend` selects `"llm"` (the orchestrator Qwen3-8B, default — unchanged) or `"otter"` (a BERT span NER). Only the entity SOURCE changes; **citations always stay on the LLM**, and the surface is enrich-graph-only ⇒ HARD-gate-neutral.
+The pluggable entity-extraction backend at enrich. `AgentsSettings.enrich_ner_backend` selects `"llm"` (whatever model serves the orchestrator role — now Qwen3.5-4B, ADR-0015) or `"otter"` (a BERT span NER). Only the entity SOURCE changes; **citations always stay on the LLM**, and the surface is enrich-graph-only ⇒ HARD-gate-neutral.
 
 ## Problem
 
@@ -55,7 +55,7 @@ OTTER is **enrich-graph-only**. Citation extraction and the assess/answer/verify
 
 | Setting (`MEMEX_AGENTS__…`) | Default | Live | Purpose |
 |---|---|---|---|
-| `enrich_ner_backend` | `llm` | `otter` | `llm` (Qwen3-8B) or `otter` (the span NER) |
+| `enrich_ner_backend` | `llm` | `otter` | `llm` (the orchestrator, now Qwen3.5-4B) or `otter` (the span NER) |
 | `enrich_ner_model` | `whoisjones/otter-bi-mmbert` | — | HF id (only when `otter`) |
 | `enrich_ner_device` | `cpu` | — | `cpu` or `cuda` (viable in the CLI enrich pause-window) |
 | `enrich_ner_threshold` | `0.05` | `0.05` | span-confidence floor (the master knob) |
