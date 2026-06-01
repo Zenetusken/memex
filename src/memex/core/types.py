@@ -172,3 +172,46 @@ class DocumentBridge(BaseModel):
     doc_count: int  # how many related docs share this entity with the seed ("bridges N")
     strength: float  # Σ IDF×kind_weight over its (doc, entity) links — the ranking key
     docs: list[BridgeDoc]  # the reached docs, strongest-first (by each doc's overall score)
+
+
+class ConversationTurn(BaseModel):
+    """One turn of a grounded multi-turn chat (Surface A — `docs/specs/grounded-agentic-chat.md`).
+
+    Persisted in the conversation sqlite sidecar (`core/conversation_store.py`) and rehydrated by
+    the CLI/webui surfaces. Lives in `core/types` because it crosses `core/` ↔ `agents/` ↔ `webui/`.
+
+    `cited_chunk_ids` are chunk IDs ONLY (never chunk text) — the bounded prior-chunk carry re-fetches
+    them live from the FTS store, and they can never become grounding evidence. `response_json` is an
+    OPAQUE `FinalResponse.model_dump_json()` (core/ must not import `agents/FinalResponse`); the surface
+    parses it to re-render a resumed thread. `created_at` is ISO-8601 UTC.
+    """
+
+    turn_id: str
+    conversation_id: str
+    turn_index: int
+    user_text: str
+    standalone_query: str
+    is_followup: bool = False
+    answered: bool = False
+    answer_summary: str = ""
+    cited_chunk_ids: list[str] = Field(default_factory=list)
+    response_json: str | None = None
+    correlation_id: str | None = None
+    created_at: str = ""
+
+
+class Conversation(BaseModel):
+    """A grounded multi-turn chat thread (Surface A). Persisted in the conversation sqlite sidecar;
+    **USER DATA** — deliberately excluded from the `reindex_vault(force=True)` teardown (the
+    `scope_sets.json` precedent). `running_summary` is the compacted history of turns older than the
+    verbatim window (the digest); `scope_doc_ids` is the per-conversation scope pin (set on turn 1).
+    `turns` is the hydrated turn list (empty until loaded with turns)."""
+
+    conversation_id: str
+    title: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+    turn_count: int = 0
+    running_summary: str = ""
+    scope_doc_ids: list[str] = Field(default_factory=list)
+    turns: list[ConversationTurn] = []

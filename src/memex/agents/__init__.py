@@ -18,16 +18,19 @@ from memex.agents.answering import (
     answer_query,
     build_answering_graph,
 )
+from memex.agents.chat import ChatTurnResult, answer_turn
 from memex.agents.table_sql import coerce_number, query_doc_tables
 
 __all__ = [
     "AnswerState",
+    "ChatTurnResult",
     "CitedClaim",
     "DraftAnswer",
     "FinalResponse",
     "SufficiencyAssessment",
     "VerificationResult",
     "answer_query",
+    "answer_turn",
     "build_answering_graph",
     "coerce_number",
     "query_doc_tables",

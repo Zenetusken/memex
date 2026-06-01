@@ -49,14 +49,16 @@ from typing import Any
 import structlog
 import ulid
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from jinja2 import Environment, FileSystemLoader
 
 from memex.agents.answering import FinalResponse, answer_query
+from memex.agents.chat import answer_turn
 from memex.agents.document_summarizer import SummaryDetail, summarize_document
 from memex.core.config import get_settings
+from memex.core.conversation_store import ConversationStore
 from memex.core.errors import (
     MemexError,
     ScopeSetError,
@@ -970,6 +972,187 @@ def create_app() -> FastAPI:
                 "doc_titles": doc_titles,
             },
         )
+
+    # ----- Grounded multi-turn chat (Surface A, docs/specs/grounded-agentic-chat.md) -----
+
+    def _chat_assistant_ctx(response: FinalResponse) -> dict[str, object]:
+        """Minimal context to re-render a chat assistant bubble from a stored response:
+        the source view-model (cheap, no I/O); the related panel is skipped on
+        rehydration (the LIVE turn adds it via `_answer_context`)."""
+        chunk_refs, doc_titles = _source_view(response)
+        return {
+            "response": response,
+            "error": None,
+            "chunk_refs": chunk_refs,
+            "doc_titles": doc_titles,
+            "related": [],
+        }
+
+    async def _run_chat_turn(
+        cid: str, conversation_id: str, message: str, scope_doc_ids: list[str] | None
+    ) -> None:
+        """Background runner: answer one grounded chat turn (persisted by `answer_turn`),
+        streaming the answer-graph phases into the registry. Top of a fire-and-forget
+        task — never crash silently."""
+        from memex.core.errors import MemexError
+
+        try:
+            result = await answer_turn(
+                conversation_id,
+                message,
+                scope_doc_ids=scope_doc_ids,
+                correlation_id=cid,
+                on_node=lambda n: progress.set_phase(cid, phase_for(n)),
+            )
+            progress.finish(cid, response=result.response)
+        except MemexError as e:
+            logger.warning("chat.failed", error_type=type(e).__name__, error=str(e)[:200])
+            progress.finish(cid, error=f"Couldn't answer: {type(e).__name__}. {str(e)[:160]}")
+        except Exception as e:
+            logger.error("chat.crashed", error_type=type(e).__name__, error=str(e)[:200])
+            progress.finish(cid, error="An unexpected error occurred while answering.")
+
+    @app.get("/chat", response_class=HTMLResponse)
+    async def chat_home() -> RedirectResponse:
+        """Open a conversation: reuse the most recent EMPTY one (so repeated nav clicks
+        don't litter the store) or create a fresh one, then redirect to it."""
+        store = await ConversationStore.open(get_settings().vault_path)
+        try:
+            recent = await store.list_conversations(limit=20)
+            empty = next((c for c in recent if c.turn_count == 0), None)
+            convo = empty or await store.create_conversation()
+        finally:
+            await store.close()
+        return RedirectResponse(f"/chat/{convo.conversation_id}", status_code=303)
+
+    @app.get("/chat/{conversation_id}", response_class=HTMLResponse)
+    async def chat_view(request: Request, conversation_id: str) -> HTMLResponse:
+        """Render a conversation: each turn rehydrated (user message + grounded assistant
+        bubble), the composer, and a rail of recent conversations to resume."""
+        settings = get_settings()
+        store = await ConversationStore.open(settings.vault_path)
+        try:
+            convo = await store.load(conversation_id)
+            if convo is None:
+                raise HTTPException(status_code=404, detail="conversation not found")
+            recent = [c for c in await store.list_conversations(limit=20) if c.turn_count > 0]
+        finally:
+            await store.close()
+
+        turns: list[dict[str, object]] = []
+        for t in convo.turns:
+            assistant: dict[str, object] | None = None
+            if t.response_json:
+                try:
+                    resp = FinalResponse.model_validate_json(t.response_json)
+                    assistant = _chat_assistant_ctx(resp)
+                except ValueError:
+                    assistant = None
+            turns.append({"user_text": t.user_text, "assistant": assistant})
+
+        # The scope picker shows only on a fresh conversation (turn 0); later turns
+        # inherit the persisted per-conversation scope pin.
+        picker_ctx: dict[str, object] = {}
+        if convo.turn_count == 0:
+            picker_ctx = await _scope_picker_context(
+                settings.vault_path,
+                checked_ids=convo.scope_doc_ids,
+                flash=None,
+                picker_open=False,
+            )
+
+        return templates.TemplateResponse(
+            request,
+            "chat.html",
+            {
+                "conversation": convo,
+                "turns": turns,
+                "recent": recent,
+                "show_picker": convo.turn_count == 0,
+                **picker_ctx,
+            },
+        )
+
+    @app.post("/chat/{conversation_id}/turn", response_class=HTMLResponse)
+    async def chat_turn(
+        request: Request,
+        conversation_id: str,
+        message: str = Form(..., max_length=_QUESTION_MAX_BYTES),
+        scope_doc_ids: list[str] = Form([]),  # noqa: B008  # FastAPI Form default sentinel
+    ) -> HTMLResponse:
+        """Start a grounded chat turn in the background and return the user bubble + the
+        progress fragment (appended to #conversation-log; the progress self-replaces with
+        the assistant bubble on completion). A turn-0 scope selection is persisted as the
+        conversation's scope pin so later turns inherit it."""
+        message = message.strip()
+        if not message:
+            return HTMLResponse("", status_code=400)
+        scope = list(dict.fromkeys(s for s in scope_doc_ids if s.strip()))
+        if scope:
+            store = await ConversationStore.open(get_settings().vault_path)
+            try:
+                await store.set_scope(conversation_id, scope)
+            finally:
+                await store.close()
+        cid = str(ulid.ULID())
+        progress.new(cid, scope_doc_ids=scope, scope_source="selected" if scope else "named")
+        task = asyncio.create_task(_run_chat_turn(cid, conversation_id, message, scope or None))
+        progress.attach_task(cid, task)
+        return templates.TemplateResponse(
+            request,
+            "_chat_turn.html",
+            {
+                "user_text": message,
+                "poll_url": f"/chat/{conversation_id}/status?cid={cid}&v=0",
+                "phases": PHASES,
+                "active_index": 0,
+                "elapsed": 0,
+                "detail": "",
+            },
+        )
+
+    @app.get("/chat/{conversation_id}/status", response_class=HTMLResponse)
+    async def chat_status(
+        request: Request, conversation_id: str, cid: str = "", v: int = 0
+    ) -> HTMLResponse:
+        """Long-poll the in-flight chat turn (mirrors `summarize_status`): the progress
+        fragment until the answer graph finishes, then the grounded assistant bubble
+        (which replaces the progress in place). The turn is already persisted by
+        `answer_turn`, so a later resume re-renders it identically."""
+        entry = await progress.wait_for_change(cid, v)
+        if entry is None:
+            return templates.TemplateResponse(request, "_progress_expired.html", {})
+        if not entry.done:
+            return templates.TemplateResponse(
+                request,
+                "_progress.html",
+                {
+                    "poll_url": f"/chat/{conversation_id}/status?cid={cid}&v={entry.version}",
+                    "phases": PHASES,
+                    "active_index": entry.active_index(),
+                    "elapsed": entry.phase_elapsed_s(),
+                    "detail": "",
+                },
+            )
+        progress.evict(cid)
+        if entry.error is not None or entry.response is None:
+            return templates.TemplateResponse(
+                request,
+                "_chat_assistant.html",
+                {"response": None, "error": entry.error or "Answering produced no result."},
+            )
+        ctx = await _answer_context(get_settings().vault_path, entry.response, "named")
+        return templates.TemplateResponse(request, "_chat_assistant.html", ctx)
+
+    @app.post("/chat/{conversation_id}/delete", response_class=HTMLResponse)
+    async def chat_delete(conversation_id: str) -> RedirectResponse:
+        """Delete a conversation and return to the chat home."""
+        store = await ConversationStore.open(get_settings().vault_path)
+        try:
+            await store.delete_conversation(conversation_id)
+        finally:
+            await store.close()
+        return RedirectResponse("/chat", status_code=303)
 
     @app.get("/documents/{doc_id}/source")
     async def document_source(doc_id: str) -> FileResponse:

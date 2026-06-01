@@ -1,0 +1,25 @@
+{
+ "_description": "Grounded multi-turn chat query-rewrite eval (Surface A, docs/specs/grounded-agentic-chat.md §9.1). Each case is a conversation HISTORY + a FOLLOW-UP whose references the control-layer rewrite must resolve; the score is gold-chunk recall@k of hybrid_search on the REWRITTEN query (retrieval-isolated — no rerank/LLM in the inner metric).",
+ "_doc_note": "Source documents stay LOCAL (tests/eval-data/README.md); only this case set ships. `relevant_chunk_ids` are GOLD chunks from THIS vault — resolve them against your live index before running. The cases below are ILLUSTRATIVE placeholders (the chunk ids are NOT real) showing the format; replace with real gold ids (and add cases) for a meaningful baseline.",
+ "_metric": "mean_recall = mean over cases of gold_chunk_recall(hybrid_search(rewritten_query)[:k], relevant_chunk_ids, k). A case < 1.0 means the rewrite failed to surface a gold chunk for that follow-up — the A-1.5 follow-up-resolution gap (the trigger for prompt tuning, spec §9.1).",
+ "_run": "MEMEX_MODELS__RERANKER_DEVICE=cpu uv run memex eval-chat tests/eval-data/chat-multiturn/queries.json",
+ "_baseline": "(none yet — author real gold ids on the live vault, then record a mean_recall baseline here)",
+ "cases": [
+  {
+   "name": "stp-timers-followup",
+   "history": [
+    {"user_text": "What is STP?", "answer_summary": "Spanning Tree Protocol (STP) prevents Layer-2 loops by blocking redundant paths."}
+   ],
+   "follow_up": "what about its timers?",
+   "relevant_chunk_ids": ["REPLACE-with-a-real-STP-timers-chunk-id"],
+   "k": 50
+  },
+  {
+   "name": "self-contained-no-rewrite-needed",
+   "history": [],
+   "follow_up": "What does the NIST zero-trust document say about the policy enforcement point?",
+   "relevant_chunk_ids": ["REPLACE-with-a-real-PEP-chunk-id"],
+   "k": 50
+  }
+ ]
+}

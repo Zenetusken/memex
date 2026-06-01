@@ -27,6 +27,7 @@ from memex.eval.scoring import (
     ParseQualityScores,
     absent_assertion_violations,
     citation_precision,
+    gold_chunk_recall,
     mention_recall,
     score_parse_quality,
 )
@@ -481,4 +482,116 @@ async def run_parse_eval(corpus_dir: Path, *, vault_path: Path | None = None) ->
         mean_cer=report.mean_cer,
         errors=len(errors),
     )
+    return report
+
+
+# --- Grounded multi-turn chat eval (Surface A) -------------------------------
+#
+# The natural query-rewrite metric: does the follow-up's REWRITTEN query retrieve the
+# gold chunks a human would ground the answer in? Cheap + deterministic (rewrite +
+# `hybrid_search` + `gold_chunk_recall`, NO full answer loop in the inner metric), so a
+# single run isolates the rewrite quality from rerank/LLM non-determinism. This is what
+# measures the spec's A-1.5 "follow-up-resolution gap". (The rewrite call needs the live
+# orchestrator; gold chunk_ids are resolved against the LIVE vault, so the corpus stays
+# local per the eval-data rule — only the case set + baselines ship.)
+
+
+class ChatEvalCase(BaseModel):
+    """One multi-turn case: the prior turns (`history`), the `follow_up` to rewrite, and
+    the gold chunks the rewritten query SHOULD retrieve (`relevant_chunk_ids`, resolved
+    against the live vault)."""
+
+    name: str
+    history: list[dict[str, str]] = Field(default_factory=list[dict[str, str]])
+    follow_up: str
+    relevant_chunk_ids: list[str] = Field(default_factory=list[str])
+    k: int = 50
+
+
+class ChatEvalResult(BaseModel):
+    """Per-case verdict: the rewritten query, whether it was judged a follow-up, and the
+    gold-chunk recall@k of `hybrid_search` on it."""
+
+    name: str
+    standalone_query: str
+    is_followup: bool
+    recall: float
+    retrieved: int
+
+
+class ChatEvalReport(BaseModel):
+    """Aggregate chat-eval report. `mean_recall` is the retrieval-quality signal; a
+    per-case recall below 1.0 means the rewrite didn't surface a gold chunk for that
+    follow-up — the A-1.5 gap, the trigger for prompt tuning (spec §9.1)."""
+
+    run_id: str
+    started_at: datetime
+    finished_at: datetime
+    case_count: int
+    mean_recall: float
+    per_case: list[ChatEvalResult] = Field(default_factory=list[ChatEvalResult])
+
+
+def _load_chat_cases(query_set_path: Path) -> list[ChatEvalCase]:
+    payload = json.loads(query_set_path.read_text(encoding="utf-8"))
+    return [ChatEvalCase(**c) for c in payload["cases"]]
+
+
+async def run_chat_eval(query_set: Path) -> ChatEvalReport:
+    """Score the grounded-chat query-rewrite: for each case, rewrite the follow-up using
+    its history, run `hybrid_search` on the rewritten query, and measure gold-chunk
+    recall@k. The retrieval-isolated A-1.5 metric (no rerank/LLM in the inner loop)."""
+    import ulid
+
+    from memex.agents.chat import rewrite_query
+    from memex.core.types import Conversation, ConversationTurn
+    from memex.retrieve import hybrid_search
+
+    cases = _load_chat_cases(query_set)
+    started = datetime.now(UTC)
+    log = logger.bind(case_count=len(cases))
+    log.info("chat_eval.start")
+
+    results: list[ChatEvalResult] = []
+    for c in cases:
+        turns = [
+            ConversationTurn(
+                turn_id=f"t{i}",
+                conversation_id="eval",
+                turn_index=i,
+                user_text=h.get("user_text", ""),
+                standalone_query=h.get("user_text", ""),
+                answered=True,
+                answer_summary=h.get("answer_summary", ""),
+            )
+            for i, h in enumerate(c.history)
+        ]
+        convo = Conversation(conversation_id="eval", turn_count=len(turns), turns=turns)
+        rewritten = await rewrite_query(convo, c.follow_up)
+        retrieved = await hybrid_search(rewritten.standalone_query, k=c.k)
+        recall = gold_chunk_recall(
+            [ch.chunk_id for ch in retrieved], c.relevant_chunk_ids, c.k
+        )
+        results.append(
+            ChatEvalResult(
+                name=c.name,
+                standalone_query=rewritten.standalone_query,
+                is_followup=rewritten.is_followup,
+                recall=recall,
+                retrieved=len(retrieved),
+            )
+        )
+        log.info("chat_eval.case", name=c.name, recall=recall, is_followup=rewritten.is_followup)
+
+    finished = datetime.now(UTC)
+    recalls = [r.recall for r in results]
+    report = ChatEvalReport(
+        run_id=str(ulid.ULID()),
+        started_at=started,
+        finished_at=finished,
+        case_count=len(results),
+        mean_recall=(sum(recalls) / len(recalls)) if recalls else 0.0,
+        per_case=results,
+    )
+    log.info("chat_eval.done", case_count=report.case_count, mean_recall=report.mean_recall)
     return report

@@ -27,10 +27,12 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from memex.agents.answering import answer_query
+from memex.agents.answering import FinalResponse, answer_query
+from memex.agents.chat import answer_turn
 from memex.cli.bootstrap import bootstrap
+from memex.core.conversation_store import ConversationStore
 from memex.enrich.pipeline import enrich_document
-from memex.eval.runner import run_eval, run_parse_eval, run_summary_eval
+from memex.eval.runner import run_chat_eval, run_eval, run_parse_eval, run_summary_eval
 from memex.index.graph_store import GraphStore
 from memex.index.pipeline import index_document, reindex_vault, retitle_document
 from memex.ingest.pipeline import (
@@ -166,6 +168,80 @@ async def _ingest_path_chain(
             results.append(await _process_one(p))
 
     return results
+
+
+def _render_chat_response(response: FinalResponse) -> str:
+    """Concise console rendering of one grounded chat turn — the answer + cited claims,
+    or a refusal with related-doc suggestions (the CLI analogue of `_answer.html`)."""
+    if not response.answered:
+        lines = [f"⊘ {response.refusal_reason or 'No grounded answer from your vault.'}"]
+        if response.related_documents:
+            titles = ", ".join(d.title for d in response.related_documents[:3])
+            lines.append(f"  You might look at: {titles}")
+        return "\n".join(lines)
+    lines = [response.summary or ""]
+    for c in response.claims:
+        lines.append(f"  • {c.claim}")
+    if response.wikilinks:
+        lines.append(f"  sources: {', '.join(response.wikilinks)}")
+    return "\n".join(line for line in lines if line)
+
+
+async def run_chat_repl(
+    read_line: Callable[[], str | None],
+    emit: Callable[[str], None],
+    *,
+    scope_doc_ids: list[str] | None = None,
+    resume_id: str | None = None,
+) -> str:
+    """Drive a grounded multi-turn chat loop over `answer_turn`, surface-agnostic and
+    testable: `read_line()` returns the next user line (or `None` on EOF), `emit()` writes
+    a line back. Returns the conversation id. `/exit` or `/quit` (or EOF) ends the loop.
+
+    Each line runs the unchanged grounded pipeline (per-turn HARD gates intact); the
+    conversation persists in the sqlite sidecar so `--resume` rehydrates it.
+    """
+    from memex.core.config import get_settings
+    from memex.core.errors import ConfigurationError
+
+    store = await ConversationStore.open(get_settings().vault_path)
+    try:
+        if resume_id:
+            convo = await store.load(resume_id)
+            if convo is None:
+                raise ConfigurationError(
+                    "no such conversation", context={"conversation_id": resume_id}
+                )
+            conversation_id = resume_id
+            emit(f"Resumed conversation {conversation_id} ({convo.turn_count} prior turns).")
+            for t in convo.turns:
+                emit(f"you › {t.user_text}")
+                emit(f"  {t.answer_summary}")
+        else:
+            convo = await store.create_conversation(scope_doc_ids=scope_doc_ids)
+            conversation_id = convo.conversation_id
+            scope_note = (
+                f" (scoped to {len(convo.scope_doc_ids)} doc[s])" if convo.scope_doc_ids else ""
+            )
+            emit(
+                f"New conversation {conversation_id}{scope_note}. "
+                "Grounded in your vault — type /exit to quit."
+            )
+    finally:
+        await store.close()
+
+    while True:
+        line = read_line()
+        if line is None:
+            break
+        line = line.strip()
+        if not line:
+            continue
+        if line in ("/exit", "/quit"):
+            break
+        result = await answer_turn(conversation_id, line)
+        emit(_render_chat_response(result.response))
+    return conversation_id
 
 
 def register(app: typer.Typer) -> None:
@@ -421,6 +497,62 @@ def register(app: typer.Typer) -> None:
         _print(asyncio.run(_run()))
 
     @app.command()
+    def chat(
+        resume: str = _Option(
+            "", "--resume", help="Resume a conversation by its id (printed when a chat starts)."
+        ),
+        doc: list[str] = _Option(  # noqa: B008  # typer Option default sentinel
+            [],
+            "--doc",
+            help="Scope the whole conversation to this document id (repeatable).",
+        ),
+        scope_set: str = _Option(
+            "", "--scope-set", help="Scope the conversation to a saved scope set by name."
+        ),
+    ) -> None:
+        """Grounded multi-turn chat over the vault (Surface A).
+
+        A conversational `ask`: each turn is answered ONLY from your documents — it
+        refuses rather than invent — with memory of the conversation. State persists,
+        so `--resume <id>` continues a thread. Type /exit (or Ctrl-D) to quit.
+        """
+
+        async def _run() -> str:
+            bootstrap()
+            scope_ids = list(doc)
+            if scope_set.strip():
+                from memex.core.config import get_settings
+                from memex.core.scope_sets import get_scope_set, list_scope_sets
+
+                vault_path = get_settings().vault_path
+                found = await get_scope_set(vault_path, scope_set)
+                if found is None:
+                    available = [s.name for s in await list_scope_sets(vault_path)]
+                    hint = ", ".join(available) if available else "(none saved yet)"
+                    err.print(f"[red]No scope set named {scope_set!r}.[/red] Available: {hint}")
+                    raise typer.Exit(code=2)
+                scope_ids.extend(found.doc_ids)
+            merged = list(dict.fromkeys(scope_ids))
+
+            def _read() -> str | None:
+                try:
+                    return console.input("[bold blue]you ›[/bold blue] ")
+                except EOFError:
+                    return None
+
+            def _emit(text: str) -> None:
+                console.print(text)
+
+            return await run_chat_repl(
+                _read,
+                _emit,
+                scope_doc_ids=merged or None,
+                resume_id=resume.strip() or None,
+            )
+
+        asyncio.run(_run())
+
+    @app.command()
     def summarize(
         doc_id: str = _Argument(..., help="Document id to summarise."),
         instruction: str = _Option("", "--instruction", "-i", help="Optionally focus the summary."),
@@ -661,6 +793,27 @@ def register(app: typer.Typer) -> None:
         async def _run():
             bootstrap()
             return await run_summary_eval(query_set)
+
+        _print(asyncio.run(_run()))
+
+    @app.command(name="eval-chat")
+    def eval_chat_cmd(
+        query_set: Path = _Argument(  # noqa: B008
+            ...,
+            exists=True,
+            dir_okay=False,
+            help="JSON of multi-turn chat cases: per-case history + follow_up + the gold "
+            "relevant_chunk_ids the rewritten query should retrieve. Measures the "
+            "query-rewrite's gold-chunk recall (the A-1.5 follow-up-resolution metric). "
+            "See docs/specs/grounded-agentic-chat.md §9.1.",
+        ),
+    ) -> None:
+        """Score the grounded-chat query-rewrite: gold-chunk recall@k of `hybrid_search`
+        on each follow-up's rewritten query (retrieval-isolated, no rerank/LLM)."""
+
+        async def _run():
+            bootstrap()
+            return await run_chat_eval(query_set)
 
         _print(asyncio.run(_run()))
 

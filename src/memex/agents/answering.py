@@ -489,6 +489,14 @@ class AnswerState(BaseModel):
     # Empty = fall back to artifact inference / the full-corpus path. Input only.
     scope_doc_ids: list[str] = []
 
+    # The grounded multi-turn chat's bounded prior-chunk carry (Surface A,
+    # docs/specs/grounded-agentic-chat.md): chunk_ids from the immediately-prior
+    # answered turn, re-admitted in `retrieve` as extra rerank CANDIDATES so a tight
+    # follow-up keeps its referents. Input only; default empty → byte-identical to a
+    # bare `/ask`. A carried chunk only reaches grounding if it SURVIVES rerank against
+    # the (rewritten) query — `verify` is untouched, so grounding stays safe.
+    prior_carry_chunk_ids: list[str] = []
+
     # --- Graph-expansion budgets ---
     # Toggle the whole expansion step off (e.g. when the graph store
     # isn't available or for benchmarking pure flat retrieval).
@@ -557,10 +565,34 @@ class AnswerState(BaseModel):
 
 
 async def retrieve(state: AnswerState) -> AnswerStateUpdate:
-    """Hybrid search: BM25 (SQLite FTS5) + dense (LanceDB) + RRF fusion."""
+    """Hybrid search: BM25 (SQLite FTS5) + dense (LanceDB) + RRF fusion.
+
+    When the grounded multi-turn chat supplies a bounded prior-chunk carry
+    (`state.prior_carry_chunk_ids`), those chunks are fetched verbatim from the FTS
+    store and unioned into the candidate pool — the SAME candidate-merge seam
+    `expand_graph` uses (the documented `agents/ → index/` lazy-store-open edge). They
+    must still SURVIVE rerank against the (rewritten) query to reach grounding, so a
+    stale referent is reranked out and `verify` is unchanged. Empty carry → byte-identical.
+    """
     log = logger.bind(node="retrieve")
     log.info("start", query_len=len(state.query))
     candidates = await hybrid_search(state.query, k=50)
+
+    if state.prior_carry_chunk_ids:
+        from memex.core.config import get_settings
+        from memex.index.fts_store import FTSStore
+
+        existing = {c.chunk_id for c in candidates}
+        carry_ids = [cid for cid in state.prior_carry_chunk_ids if cid not in existing]
+        if carry_ids:
+            store = await FTSStore.open(get_settings().vault_path)
+            try:
+                carried = await store.chunks_by_ids(carry_ids)
+            finally:
+                await store.close()
+            candidates = candidates + carried
+            log.info("carry_merged", carried=len(carried))
+
     log.info("done", candidate_count=len(candidates))
     return {
         "candidates": candidates,
@@ -2257,6 +2289,7 @@ async def answer_query(
     graph_expansion_budget: int = 3,
     chunks_per_neighbor: int = 2,
     scope_doc_ids: list[str] | None = None,
+    prior_carry_chunk_ids: list[str] | None = None,
     correlation_id: str | None = None,
     on_node: Callable[[str], None] | None = None,
 ) -> FinalResponse:
@@ -2284,6 +2317,12 @@ async def answer_query(
     retrieval to — takes precedence over inferred artifact-scope (#256). Empty /
     None = the full-corpus path. The applied scope is surfaced on
     `FinalResponse.artifact_scope_doc_ids`.
+
+    `prior_carry_chunk_ids` (the grounded multi-turn chat): chunk_ids from the
+    immediately-prior answered turn, re-admitted as extra rerank candidates in
+    `retrieve` so a tight follow-up keeps its referents (Surface A,
+    `docs/specs/grounded-agentic-chat.md`). None/[] → byte-identical to a bare `/ask`.
+    A carried chunk only reaches grounding if it survives rerank; `verify` is unchanged.
 
     `correlation_id` (optional): a caller-supplied id used instead of a fresh
     ULID — it drives the structlog/Langfuse binding AND
@@ -2329,6 +2368,10 @@ async def answer_query(
         allow_partial_grounded=allow_partial_grounded,
         numeric_grounding_backstop=numeric_grounding_backstop,
         scope_doc_ids=scope_doc_ids or [],
+        # The grounded multi-turn chat's bounded prior-chunk carry (Surface A). Default
+        # None/[] → byte-identical to a bare `/ask`; `retrieve` unions these into the
+        # candidate pool where they must survive rerank to reach grounding.
+        prior_carry_chunk_ids=prior_carry_chunk_ids or [],
         # A caller-supplied correlation_id (e.g. the webui's progress key) drives
         # both the structlog/Langfuse binding and FinalResponse.correlation_id, so
         # logs + trace + the progress registry stay joined (ADR-0004). None → mint

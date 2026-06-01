@@ -1,0 +1,5 @@
+{# The POST /chat/{id}/turn return: the user's message bubble + the long-poll
+   progress fragment. The progress (hx-swap=outerHTML on itself) self-replaces with
+   the grounded assistant bubble (_chat_assistant.html) when the answer completes. #}
+<div class="chat-user"><span class="chat-role">you</span> <span class="chat-text">{{ user_text }}</span></div>
+{% include "_progress.html" %}

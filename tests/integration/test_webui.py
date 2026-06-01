@@ -1926,3 +1926,130 @@ def test_resources_mode_unknown_flashes_error(client: TestClient) -> None:
     r = client.post("/resources/mode", data={"mode": "turbo"})
     assert r.status_code == 400
     assert "Unknown mode" in r.text
+
+
+# ----- Grounded multi-turn chat (Surface A) -----
+
+
+@pytest.fixture
+def fake_chat_answered(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _fake(conversation_id: str, user_text: str, **_kw: Any) -> Any:
+        from memex.agents.chat import ChatTurnResult
+        from memex.core.types import ConversationTurn
+
+        resp = FinalResponse(
+            answered=True,
+            summary="Chat grounded answer.",
+            claims=[CitedClaim(claim="a chat claim", source_chunk_id="d1#a", confidence="high")],
+            used_chunks=[Chunk(chunk_id="d1#a", document_id="d1", document_title="Doc One", text="x")],
+            wikilinks=["[[d1#Section]]"],
+            correlation_id="01HZCHATWEBUI00000000000000",
+            tokens_used=7,
+            nodes_traversed=5,
+            regenerate_attempts=0,
+        )
+        turn = ConversationTurn(
+            turn_id="t",
+            conversation_id=conversation_id,
+            turn_index=0,
+            user_text=user_text,
+            standalone_query=user_text,
+        )
+        return ChatTurnResult(
+            response=resp, turn=turn, standalone_query=user_text, is_followup=False
+        )
+
+    monkeypatch.setattr("memex.webui.app.answer_turn", _fake)
+
+
+async def _chat_turn_to_completion(app: Any, message: str) -> str:
+    """Open a conversation, POST a turn, and long-poll the chat status until the
+    grounded assistant bubble replaces the progress fragment (mirrors _ask_to_completion)."""
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        opened = await ac.get("/chat", follow_redirects=False)
+        assert opened.status_code == 303
+        conv = opened.headers["location"].rsplit("/", 1)[-1]
+        r = await ac.post(f"/chat/{conv}/turn", data={"message": message})
+        assert r.status_code == 200, r.text
+        text = r.text
+        m = re.search(r"/chat/[^/]+/status\?cid=([^&\"]+)&(?:amp;)?v=(\d+)", text)
+        assert m is not None, f"POST turn did not return a progress fragment: {text[:300]}"
+        cid, v = m.group(1), int(m.group(2))
+        for _ in range(100):
+            await asyncio.sleep(0.01)
+            r = await ac.get(f"/chat/{conv}/status?cid={cid}&v={v}")
+            assert r.status_code == 200
+            text = r.text
+            if 'class="progress"' not in text:
+                return text
+            mv = re.search(r"&(?:amp;)?v=(\d+)", text)
+            if mv is not None:
+                v = int(mv.group(1))
+        raise AssertionError(f"chat turn did not complete: {text[:300]}")
+
+
+def test_chat_nav_link_and_redirect(client: TestClient) -> None:
+    assert '/chat"' in client.get("/").text  # nav link on every page
+    r = client.get("/chat", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"].startswith("/chat/")
+
+
+def test_chat_view_renders_composer(client: TestClient) -> None:
+    loc = client.get("/chat", follow_redirects=False).headers["location"]
+    r = client.get(loc)
+    assert r.status_code == 200
+    assert "chat-composer" in r.text
+    assert 'name="message"' in r.text
+    assert f'hx-post="{loc}/turn"' in r.text
+
+
+def test_chat_view_404_on_missing(client: TestClient) -> None:
+    assert client.get("/chat/01HZNOPECONVERSATION00000000").status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_chat_turn_renders_grounded_answer(
+    client: TestClient, fake_chat_answered: None
+) -> None:
+    text = await _chat_turn_to_completion(client.app, "What does Smith argue?")
+    assert "<html" not in text  # a fragment, not a full page
+    assert "Chat grounded answer." in text
+    assert "a chat claim" in text
+    assert "01HZCHATWEBUI" in text  # the audit correlation id
+
+
+async def test_chat_view_rehydrates_thread(settings: MemexSettings) -> None:
+    from memex.core.conversation_store import ConversationStore
+
+    resp = FinalResponse(
+        answered=True,
+        summary="Persisted answer.",
+        claims=[CitedClaim(claim="persisted claim", source_chunk_id="d1#a", confidence="high")],
+        used_chunks=[Chunk(chunk_id="d1#a", document_id="d1", document_title="Doc One", text="x")],
+        wikilinks=["[[d1#S]]"],
+        correlation_id="01HZPERSISTCHAT0000000000000",
+        tokens_used=3,
+        nodes_traversed=4,
+        regenerate_attempts=0,
+    )
+    store = await ConversationStore.open(settings.vault_path)
+    convo = await store.create_conversation()
+    await store.append_turn(
+        convo.conversation_id,
+        user_text="prior question",
+        standalone_query="prior question",
+        is_followup=False,
+        answered=True,
+        answer_summary="Persisted answer.",
+        cited_chunk_ids=["d1#a"],
+        response_json=resp.model_dump_json(),
+        correlation_id="cid",
+    )
+    await store.close()
+
+    r = TestClient(create_app()).get(f"/chat/{convo.conversation_id}")
+    assert r.status_code == 200
+    assert "prior question" in r.text  # the user bubble
+    assert "Persisted answer." in r.text  # the assistant bubble, rehydrated from response_json
+    assert "persisted claim" in r.text

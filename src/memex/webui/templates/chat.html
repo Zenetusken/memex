@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Memex — Chat{% endblock %}
+{% block content %}
+<div class="chat-layout">
+  <main class="chat-main">
+    <div class="chat-head">
+      <h1 class="text-2xl font-semibold">Chat</h1>
+      <p class="text-zinc-400 text-sm">Grounded in your documents — each turn is verified, and it refuses rather than guess.</p>
+    </div>
+
+    <div id="conversation-log" class="chat-log">
+      {% for t in turns %}
+      <div class="chat-user"><span class="chat-role">you</span> <span class="chat-text">{{ t.user_text }}</span></div>
+      {% if t.assistant %}
+      {% with response=t.assistant.response, error=t.assistant.error, chunk_refs=t.assistant.chunk_refs, doc_titles=t.assistant.doc_titles, related=t.assistant.related %}
+      {% include "_chat_assistant.html" %}
+      {% endwith %}
+      {% endif %}
+      {% endfor %}
+    </div>
+
+    <form class="chat-composer"
+          hx-post="/chat/{{ conversation.conversation_id }}/turn"
+          hx-target="#conversation-log"
+          hx-swap="beforeend"
+          hx-disabled-elt="button[type='submit']"
+          hx-on::after-request="this.querySelector('textarea').value=''">
+      <textarea name="message" rows="2" required autofocus
+                placeholder="{% if turns %}Ask a follow-up…{% else %}Ask your documents…{% endif %}"
+                class="chat-input"></textarea>
+      {% if show_picker %}
+      {% include "_scope_picker.html" %}
+      {% endif %}
+      <div class="chat-actions">
+        <button type="submit" class="chat-send">Send</button>
+        <a href="/chat" class="chat-new">New conversation</a>
+      </div>
+    </form>
+  </main>
+
+  <aside class="chat-rail">
+    <p class="chat-rail-title">Recent</p>
+    {% for c in recent %}
+    <a class="chat-rail-item{% if c.conversation_id == conversation.conversation_id %} chat-rail-active{% endif %}"
+       href="/chat/{{ c.conversation_id }}">{{ c.title or "(untitled)" }}</a>
+    {% else %}
+    <p class="chat-rail-empty">No conversations yet.</p>
+    {% endfor %}
+  </aside>
+</div>
+{% endblock %}

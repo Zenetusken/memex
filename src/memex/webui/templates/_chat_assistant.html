@@ -1,0 +1,42 @@
+{# The grounded assistant bubble for one chat turn. Reuses the answer panel's
+   semantic classes (.ans-*/.claim-*/.conf-*) in a transcript-friendly layout.
+   Context: response (FinalResponse|None), error, chunk_refs, doc_titles, related. #}
+{% if error %}
+<div class="chat-assistant chat-refused">
+  <p class="ans-flash-msg">{{ error }}</p>
+</div>
+{% elif response.answered %}
+<div class="chat-assistant">
+  <div class="ans-answer"><p>{{ response.summary }}</p></div>
+  {% if response.claims %}
+  <ul class="chat-claims">
+    {% for c in response.claims %}
+    <li class="chat-claim">
+      <span class="chat-claim-text">{{ c.claim }}</span>
+      <span class="chat-claim-meta">
+        <span class="conf conf-{{ c.confidence }}">{{ c.confidence }}</span>
+        {% set ref = chunk_refs.get(c.source_chunk_id) %}
+        {% if ref %}<a class="claim-source-link" href="{{ ref.href }}" title="{{ c.source_chunk_id }}">{{ ref.title }}{% if ref.section %} › {{ ref.section }}{% endif %}</a>{% endif %}
+      </span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if response.wikilinks %}
+  <p class="chat-sources"><span class="chat-sources-label">sources</span>
+    {% for w in response.wikilinks %}{{ w | render_wikilink(doc_titles) }}{% if not loop.last %} · {% endif %}{% endfor %}
+  </p>
+  {% endif %}
+  <p class="chat-cid"><span class="chunk-id">{{ response.correlation_id }}</span></p>
+</div>
+{% else %}
+<div class="chat-assistant chat-refused">
+  <p class="ans-eyebrow">No grounded answer</p>
+  <p class="ans-flash-msg">{{ response.refusal_reason }}</p>
+  {% if related %}
+  <p class="chat-sources"><span class="chat-sources-label">you might look at</span>
+    {% for r in related %}<a class="related-link" href="/documents/{{ r.doc_id }}">{{ r.title }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
+  </p>
+  {% endif %}
+</div>
+{% endif %}
