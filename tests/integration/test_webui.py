@@ -2276,10 +2276,10 @@ def _install_fake_bridge(
     monkeypatch.setattr("memex.webui.app.reason_then_ground", _fake)
 
 
-async def _bridge_to_completion(app: Any, question: str) -> str:
+async def _bridge_to_completion(app: Any, question: str, **form: Any) -> str:
     """POST /bridge, then long-poll /bridge/status until the answer fragment swaps in."""
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
-        r = await ac.post("/bridge", data={"question": question})
+        r = await ac.post("/bridge", data={"question": question, **form})
         assert r.status_code == 200, r.text
         text = r.text
         m = re.search(r"/bridge/status\?cid=([^&\"]+)&(?:amp;)?v=(\d+)", text)
@@ -2400,3 +2400,61 @@ async def test_ask_scoped_refusal_escalation_carries_scope(
     # (not silently widened to the whole vault).
     assert 'name="scope_doc_ids" value="d1"' in text
     assert 'name="scope_doc_ids" value="d2"' in text
+
+
+# ── Standalone /bridge document scope-picker (§11) ──
+
+
+@pytest.mark.asyncio
+async def test_bridge_composer_renders_scope_picker(expert_client: TestClient) -> None:
+    """The /bridge "Analysis" composer offers the SAME document scope-picker as /ask."""
+    lec = await ingest_markdown_passthrough(
+        "# OSPF\n\nOpen Shortest Path First.\n", source_stem="ENSA Module 1 OSPF"
+    )
+    r = expert_client.get("/bridge")
+    assert r.status_code == 200
+    assert "Scope to documents" in r.text
+    assert 'name="scope_doc_ids"' in r.text
+    assert f'value="{lec.doc_id}"' in r.text
+    assert "ENSA Module 1 OSPF" in r.text  # offered by human title
+
+
+@pytest.mark.asyncio
+async def test_bridge_scopes_to_selected_docs(
+    expert_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ticking docs on /bridge forwards `scope_doc_ids` to `reason_then_ground`, and the
+    result shows the 'Scoped to your selected document:' note (parity with /ask)."""
+    from memex.agents.bridge import BRIDGE_PROVENANCE_NOTE, BridgeAnswer
+
+    lec = await ingest_markdown_passthrough(
+        "# OSPF\n\nOpen Shortest Path First.\n", source_stem="ENSA Module 1 OSPF"
+    )
+    captured: dict[str, Any] = {}
+
+    async def _fake(question: str, **kw: Any) -> BridgeAnswer:
+        captured["scope_doc_ids"] = kw.get("scope_doc_ids")
+        on_phase = kw.get("on_phase")
+        if callable(on_phase):
+            on_phase("Retrieving evidence")
+            on_phase("Reasoning")
+            on_phase("Grounding claims")
+        return BridgeAnswer(
+            question=question,
+            analysis="OSPF is a link-state protocol.",
+            provenance_note=BRIDGE_PROVENANCE_NOTE,
+            n_extracted=0,
+            n_grounded=0,
+            model="m",
+            tokens=10,
+            scope_doc_ids=[lec.doc_id],
+            correlation_id=kw.get("correlation_id") or "cid",
+        )
+
+    monkeypatch.setattr("memex.webui.app.reason_then_ground", _fake)
+    text = await _bridge_to_completion(
+        expert_client.app, "How does OSPF converge?", scope_doc_ids=[lec.doc_id]
+    )
+    assert captured["scope_doc_ids"] == [lec.doc_id]  # the route forwarded the selection
+    assert "Scoped to your selected document" in text  # the result-side scope note
+    assert "ENSA Module 1 OSPF" in text  # scoped doc shown by title

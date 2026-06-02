@@ -41,6 +41,13 @@
 
   <p class="expert-provenance" role="note">⚠ {{ answer.provenance_note }}</p>
 
+  {% if scope_docs %}
+  <p class="ans-scope" role="note">
+    <span class="ans-scope-label">{% if scope_source == "selected" %}Scoped to your selected document{{ "s" if scope_docs|length > 1 else "" }}:{% else %}Scoped to the document{{ "s" if scope_docs|length > 1 else "" }} you named:{% endif %}</span>
+    {% for d in scope_docs %}<a class="ans-scope-doc" href="/documents/{{ d.doc_id }}" title="{{ d.doc_id }}">{{ d.title }}</a>{% endfor %}
+  </p>
+  {% endif %}
+
   <p class="ans-footer">
     <span>correlation_id <code>{{ answer.correlation_id }}</code></span>
     <span class="tabular">grounded {{ answer.n_grounded }}/{{ answer.n_extracted }}</span>

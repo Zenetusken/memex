@@ -27,6 +27,11 @@
     <textarea name="question" rows="3" required autofocus
               placeholder="Ask an analytical, advisory, or synthesis question…"
               class="expert-input">{{ question }}</textarea>
+
+    {% if documents %}
+    {% include "_scope_picker.html" %}
+    {% endif %}
+
     <div class="expert-actions">
       <button type="submit" class="expert-send">Reason &amp; ground</button>
     </div>

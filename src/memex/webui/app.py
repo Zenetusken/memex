@@ -1299,13 +1299,14 @@ def create_app() -> FastAPI:
 
     @app.get("/bridge", response_class=HTMLResponse)
     async def bridge_home(request: Request) -> HTMLResponse:
-        """The reason-then-ground surface: a question form + the dual-contract banner. When the
+        """The reason-then-ground surface: a question form + the dual-contract banner + the
+        document scope-picker (same as /ask — tick docs to scope the analysis to them). When the
         feature is disabled (the same flag as expert mode), the template explains how to enable it."""
-        return templates.TemplateResponse(
-            request,
-            "bridge.html",
-            {"enabled": get_settings().agents.expert_mode_enabled, "question": ""},
+        ctx = await _scope_picker_context(
+            get_settings().vault_path, checked_ids=[], flash=None, picker_open=False
         )
+        ctx.update({"enabled": get_settings().agents.expert_mode_enabled, "question": ""})
+        return templates.TemplateResponse(request, "bridge.html", ctx)
 
     @app.post("/bridge", response_class=HTMLResponse)
     async def bridge_run(
@@ -1397,8 +1398,22 @@ def create_app() -> FastAPI:
             }
             for c in answer.grounded_sources
         }
+        # Resolve the scope this analysis ran over → titles, for the "Scoped to …" note (parity
+        # with /ask). Empty (whole-vault) → [] → the note is omitted. Mirrors `_answer_context`.
+        scope_docs = [
+            {"doc_id": d, "title": await _safe_doc_title(get_settings().vault_path, d)}
+            for d in answer.scope_doc_ids
+        ]
         return templates.TemplateResponse(
-            request, "_bridge.html", {"answer": answer, "sources": sources, "error": None}
+            request,
+            "_bridge.html",
+            {
+                "answer": answer,
+                "sources": sources,
+                "error": None,
+                "scope_docs": scope_docs,
+                "scope_source": entry.scope_source,
+            },
         )
 
     @app.get("/documents/{doc_id}/source")
