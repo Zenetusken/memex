@@ -33,7 +33,13 @@ from memex.agents.expert import ExpertAnswer
 from memex.cli.bootstrap import bootstrap
 from memex.core.conversation_store import ConversationStore
 from memex.enrich.pipeline import enrich_document
-from memex.eval.runner import run_chat_eval, run_eval, run_parse_eval, run_summary_eval
+from memex.eval.runner import (
+    run_chat_eval,
+    run_eval,
+    run_expert_eval,
+    run_parse_eval,
+    run_summary_eval,
+)
 from memex.index.graph_store import GraphStore
 from memex.index.pipeline import index_document, reindex_vault, retitle_document
 from memex.ingest.pipeline import (
@@ -878,6 +884,45 @@ def register(app: typer.Typer) -> None:
         async def _run():
             bootstrap()
             return await run_chat_eval(query_set)
+
+        _print(asyncio.run(_run()))
+
+    @app.command(name="eval-expert")
+    def eval_expert_cmd(
+        query_set: Path = _Argument(  # noqa: B008
+            ...,
+            exists=True,
+            dir_okay=False,
+            help="JSON of expert-eval cases (Surface B / ADR-0013): per-case question + "
+            "blocklists (must_not_assert / blocked_figures / blocked_quotes / "
+            "must_not_recommend) + must_mention + is_ood/is_gated flags. Runs the UNGROUNDED "
+            "expert surface N times and scores a deterministic HONESTY floor + a separate "
+            "USEFULNESS floor; the LLM judge is a REPORTED verifier. NOT the grounded "
+            "refusal_cf gate. See docs/specs/expert-eval.md.",
+        ),
+        runs: int = _Option(3, "--runs", help="Surface runs per non-gated case (gated cases force 5)."),
+        judge_model: str = _Option(
+            "",
+            "--judge-model",
+            help="Judge model id (empty = the orchestrator). Point at the 8B kill-switch "
+            "model for a NON-circular cross-check of the 4B's own answers.",
+        ),
+    ) -> None:
+        """Score the ungrounded expert surface (ADR-0013): deterministic HONESTY gates
+        (vault-contradiction / fabricated-specifics / structural / ood-doc-attribution /
+        advisory-safety) + a SEPARATE usefulness floor; the LLM judge is a REPORTED verifier.
+        Analytical CORRECTNESS is out of scope (a coherent wrong answer passes green)."""
+
+        async def _run():
+            import os
+
+            # Force-enable the fenced surface BEFORE bootstrap so eval-expert never silently
+            # passes when the surface is off (surfaced as `expert_mode_forced` in the report).
+            os.environ["MEMEX_AGENTS__EXPERT_MODE_ENABLED"] = "true"
+            bootstrap()
+            return await run_expert_eval(
+                query_set, runs_default=runs, judge_model=judge_model or None
+            )
 
         _print(asyncio.run(_run()))
 

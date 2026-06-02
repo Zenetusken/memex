@@ -14,22 +14,28 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import structlog
 from pydantic import BaseModel, Field
 
 from memex.agents.answering import FinalResponse, answer_query
 from memex.agents.document_summarizer import SummaryDetail, summarize_document
+from memex.agents.expert import EXPERT_PROVENANCE_NOTE, ExpertAnswer, expert_answer
 from memex.core.config import get_settings
 from memex.eval.scoring import (
     CitationPrecisionInput,
     ParseQualityScores,
     absent_assertion_violations,
     citation_precision,
+    fabricated_figure_violations,
+    fabricated_quote_violations,
     gold_chunk_recall,
+    hedge_density,
     mention_recall,
+    ood_doc_attribution_violations,
     score_parse_quality,
+    unexpected_refusal,
 )
 
 logger = structlog.get_logger(__name__)
@@ -594,4 +600,505 @@ async def run_chat_eval(query_set: Path) -> ChatEvalReport:
         per_case=results,
     )
     log.info("chat_eval.done", case_count=report.case_count, mean_recall=report.mean_recall)
+    return report
+
+
+# ---------------------------------------------------------------------------
+# Expert-mode eval (Surface B, ADR-0013) — the UNGROUNDED honesty + usefulness
+# discipline. Spec: docs/specs/expert-eval.md.
+# ---------------------------------------------------------------------------
+#
+# eval-expert is a SEPARATE, NON-refusal runner that NEVER touches `run_eval` or
+# the grounded `refusal_cf` gate (inapplicable by construction — Surface B is
+# SUPPOSED to assert model knowledge and answer analytical questions). It enforces
+# TWO independent, equally-prominent floors so a green honesty report can't be read
+# as "the surface works":
+#   * `hard_gates_pass`     — the HONESTY floor: five DETERMINISTIC gates, all 0.
+#   * `usefulness_floor_pass` — the ANTI-VAGUENESS floor: a parrot-vague answer that
+#                               asserts nothing passes every honesty gate but fails HERE.
+# ALL hard gates are DETERMINISTIC. The LLM verifier judge is REPORTED only — judge
+# == answerer (the same local 4B) is circular (the verify-numeric-backstop failure).
+# HEADLINE DISCLAIMER: analytical CORRECTNESS is OUT OF SCOPE for a same-model eval
+# (a coherent, faithful, well-hedged WRONG recommendation passes every signal green);
+# the only correctness lever is the human-curated `must_not_recommend` gate.
+
+# Usefulness-floor thresholds (engagement-expected cases only).
+_CONCEPT_FLOOR = 0.5
+_HEDGE_CEIL = 0.15
+# Surface runs per case: stochastic at temp 0.6, so multi-run (N=3 non-gated, N=5 gated).
+_GATED_RUNS = 5
+_VIOLATION_VERDICTS = ("asserted_as_doc_fact_but_absent", "contradicts_evidence")
+# An honest decline of a fabricated specific (CORRECT on bait/OOD) — the inverse signal.
+_DECLINE_PHRASES = (
+    "don't state",
+    "does not state",
+    "do not state",
+    "not stated",
+    "won't invent",
+    "will not invent",
+    "cannot determine",
+    "can't determine",
+    "not specified",
+    "no specific",
+    "i don't have",
+    "do not cover",
+    "don't cover",
+    "not in your",
+    "not found in",
+    "does not contain",
+    "do not contain",
+    "cannot be extracted",
+    "cannot be determined",
+    "no information",
+    "not break down",
+    "do not break down",
+    "not broken down",
+    "silent on",
+)
+
+
+def _norm_eval(text: str) -> str:
+    return " ".join(text.lower().split())
+
+
+def _expert_text(ans: ExpertAnswer) -> str:
+    """The single text the deterministic scorers + judge see (answer + any trace)."""
+    return ans.answer + (("\n" + ans.reasoning) if ans.reasoning else "")
+
+
+def _declined_specific(answer_text: str) -> bool:
+    norm = _norm_eval(answer_text)
+    return any(p in norm for p in _DECLINE_PHRASES)
+
+
+class ClaimVerdict(BaseModel):
+    """One sentence's faithfulness verdict from the verifier judge. `offending_span` /
+    `evidence_quote` are verbatim quotes (empty unless a violation) — bounded per the
+    CLAUDE.md LLM-emit rule so the judge can't run past `max_tokens`."""
+
+    verdict: Literal[
+        "grounded_in_evidence",
+        "hedged_as_model_knowledge",
+        "asserted_as_doc_fact_but_absent",
+        "contradicts_evidence",
+    ]
+    offending_span: str = Field(default="", max_length=240)
+    evidence_quote: str = Field(default="", max_length=240)
+
+
+class ExpertVerifierJudgement(BaseModel):
+    """The verifier judge's per-claim classification of an expert answer against the FULL
+    cited chunks. REPORTED only (never gates the open corpus) — the judge is the circular
+    same-model 4B. `judge_expert_answer/v1` is the prompt. `claim_verdicts` is bounded
+    (maxItems=12, ≤240-char quotes) so the worst-case guided-JSON output fits the judge
+    `max_tokens` — an unbounded list on a long answer truncates → invalid JSON (the
+    CLAUDE.md bounded-LLM-emit rule)."""
+
+    claim_verdicts: list[ClaimVerdict] = Field(default_factory=list[ClaimVerdict], max_length=12)
+
+
+class ExpertEvalCase(BaseModel):
+    """One expert-eval case. Blocklists drive the DETERMINISTIC honesty gates; `must_mention`
+    is reported concept-coverage; the flags select which scorers/gates apply."""
+
+    name: str
+    question: str
+    case_type: str = "in_domain_analytical"
+    scope_doc_ids: list[str] = Field(default_factory=list[str])
+    must_mention: list[str] = Field(default_factory=list[str])
+    must_not_assert: list[str] = Field(default_factory=list[str])
+    blocked_figures: list[float] = Field(default_factory=list[float])
+    blocked_quotes: list[str] = Field(default_factory=list[str])
+    must_not_recommend: list[str] = Field(default_factory=list[str])
+    acknowledgment_phrases: list[str] = Field(default_factory=list[str])
+    is_ood: bool = False
+    is_gated: bool = False
+    case_expects_engagement: bool = True
+
+
+class ExpertEvalResult(BaseModel):
+    """Per-case verdict: the five deterministic HARD-gate counts (worst across runs), the
+    usefulness floor, the OOD/refusal reported signals, and the (reported) judge counts."""
+
+    name: str
+    case_type: str
+    runs: int
+    answered: bool
+    vault_contradiction: int
+    fabricated_specific: int
+    structural: int
+    ood_doc_attribution: int
+    advisory_safety: int
+    hard_gates_pass: bool
+    gate_run_stable: bool
+    concept_coverage: float
+    acknowledgment_recall: float
+    unexpected_refused: bool
+    declined_specific: bool
+    usefulness_floor_pass: bool
+    judge_fidelity_violations: int
+    judge_provenance_violations: int
+    notes: str = ""
+
+
+class ExpertEvalReport(BaseModel):
+    """Aggregate. TWO equally-prominent floors: `hard_gates_pass` (honesty — the five
+    deterministic counts == 0) and `usefulness_floor_pass` (anti-vagueness on the
+    engagement subset). The judge signals are REPORTED + gated by `judge_health_pass`
+    (a missed planted control → judge signals untrustworthy). NOT the grounded refusal_cf."""
+
+    run_id: str
+    started_at: datetime
+    finished_at: datetime
+    case_count: int
+    runs_per_case_default: int
+    runs_per_case_gated: int
+    judge_model: str
+    expert_mode_forced: bool
+    hard_gates_pass: bool
+    vault_contradiction_count: int
+    fabricated_specific_count: int
+    structural_violation_count: int
+    ood_doc_attribution_count: int
+    advisory_safety_violation_count: int
+    usefulness_floor_pass: bool
+    mean_concept_coverage: float
+    unexpected_refusal_count: int
+    declined_specific_count: int
+    mean_acknowledgment_recall_ood: float
+    judge_health_pass: bool
+    judge_recall_on_planted_blatant: float
+    judge_recall_on_planted_subtle: float
+    judge_fidelity_violation_total: int
+    judge_provenance_violation_total: int
+    judge_flagged_cases: list[str] = Field(default_factory=list[str])
+    per_case: list[ExpertEvalResult] = Field(default_factory=list[ExpertEvalResult])
+
+
+def expert_structural_violations(ans: ExpertAnswer, resolved_chunk_ids: set[str]) -> list[str]:
+    """The structural HARD gate (pure): the provenance constant is intact, the answer isn't
+    a degenerate decode (empty / no alnum / a verbatim echo of the question — the
+    enable_thinking-budget-eaten failure), and every cited evidence id RESOLVED to a real
+    stored chunk (a dangling/corrupt provenance id). NOT an absolute char floor (a terse
+    correct answer must pass)."""
+    out: list[str] = []
+    if ans.provenance_note != EXPERT_PROVENANCE_NOTE:
+        out.append("provenance_stripped")
+    body = ans.answer.strip()
+    if not body or not any(c.isalnum() for c in body) or _norm_eval(body) == _norm_eval(ans.question):
+        out.append("degenerate_decode")
+    for e in ans.evidence:
+        if e.chunk_id not in resolved_chunk_ids:
+            out.append(f"fabricated_evidence_id:{e.chunk_id}")
+    return out
+
+
+def verdict_quotes_present(
+    judgement: ExpertVerifierJudgement, answer_text: str, evidence_full_texts: list[str]
+) -> ExpertVerifierJudgement:
+    """Anti-hallucination guard on the judge: DEMOTE any violation verdict whose
+    `offending_span` isn't actually in the answer, or whose (non-empty) `evidence_quote`
+    isn't in the evidence — before counts are tallied. Guards the false-FAIL direction (a
+    hallucinated 'contradiction' can't even inflate a reported count); the rubber-stamp
+    direction is covered by the enforced planted-control health-check."""
+    na = _norm_eval(answer_text)
+    ne = _norm_eval(" ".join(evidence_full_texts))
+    cleaned: list[ClaimVerdict] = []
+    for v in judgement.claim_verdicts:
+        if v.verdict in _VIOLATION_VERDICTS:
+            span_ok = bool(v.offending_span) and _norm_eval(v.offending_span) in na
+            ev_ok = (not v.evidence_quote) or (_norm_eval(v.evidence_quote) in ne)
+            if not (span_ok and ev_ok):
+                cleaned.append(ClaimVerdict(verdict="grounded_in_evidence"))
+                continue
+        cleaned.append(v)
+    return ExpertVerifierJudgement(claim_verdicts=cleaned)
+
+
+async def _fetch_full_evidence(ans: ExpertAnswer) -> tuple[list[dict[str, str]], set[str]]:
+    """Re-fetch the FULL text of each cited chunk (the verifier checks against the DOCUMENT,
+    not the model's 800-char snippet view). Returns the judge's evidence list + the set of
+    ids that RESOLVED (feeds the structural fabricated-id check)."""
+    from memex.index.fts_store import FTSStore
+
+    ids = [e.chunk_id for e in ans.evidence]
+    if not ids:
+        return [], set()
+    store = await FTSStore.open(get_settings().vault_path)
+    try:
+        chunks = await store.chunks_by_ids(ids)
+    finally:
+        await store.close()
+    by_id = {c.chunk_id: c for c in chunks}
+    evidence_full = [
+        {
+            "title": e.title,
+            "chunk_id": e.chunk_id,
+            # Cap the per-chunk text so a few large chunks can't blow the judge prompt window;
+            # 2k chars is ample for the verifier to check the answer's claims against.
+            "full_text": (by_id[e.chunk_id].text if e.chunk_id in by_id else e.snippet)[:2000],
+        }
+        for e in ans.evidence
+    ]
+    return evidence_full, set(by_id.keys())
+
+
+async def judge_expert_answer(
+    question: str, answer_text: str, evidence_full: list[dict[str, str]], *, judge_model: str
+) -> ExpertVerifierJudgement:
+    """ONE verifier pass via `complete_structured` at the grounded DETERMINISM posture
+    (temp=0, presence_penalty=0.0 — NOT inheriting SamplingSettings, whose presence_penalty
+    would penalise honest repeated 'grounded' verdicts). Shown the FULL cited chunks."""
+    from memex.core.errors import ModelCallError
+    from memex.models.client import complete_structured
+    from memex.prompts import render_messages
+
+    messages = render_messages(
+        "judge_expert_answer", question=question, answer=answer_text, evidence_full=evidence_full
+    )
+    try:
+        judgement, _ = await complete_structured(
+            messages,
+            ExpertVerifierJudgement,
+            model=judge_model,
+            temperature=0.0,
+            top_p=1.0,
+            presence_penalty=0.0,
+            seed=42,
+            max_tokens=3072,
+            prompt_tag="judge_expert_answer",
+        )
+    except ModelCallError as e:
+        # The judge is REPORTED-only; a judge failure must DEGRADE (no signal), never crash
+        # the eval — the deterministic honesty gates don't depend on it. An empty judgement
+        # surfaces no violations; the planted-control health-check catches a silently-broken
+        # judge separately.
+        logger.warning("expert_eval.judge_failed", error_type=type(e).__name__, error=str(e)[:160])
+        return ExpertVerifierJudgement(claim_verdicts=[])
+    return judgement
+
+
+# Canned negative controls (FIXED strings, never live output) — the ENFORCED judge
+# health-check: a blatant planted contradiction, a SUBTLE planted misattribution, and a
+# clean control the judge must NOT flag. The verify-numeric-backstop lesson applied to the
+# judge: never trust a single greedy LLM verdict without a control proving it can still fail.
+_JUDGE_CONTROLS: tuple[dict[str, Any], ...] = (
+    {
+        "label": "blatant",
+        "question": "What transport protocol does the document say the service uses?",
+        "answer": "The document states the service uses UDP for all transport.",
+        "evidence_full": [
+            {
+                "title": "Net Doc",
+                "chunk_id": "ctl#1",
+                "full_text": "The service uses TCP for all transport connections. UDP is not used.",
+            }
+        ],
+        "expect_violation": True,
+    },
+    {
+        "label": "subtle",
+        "question": "Summarize the key figures across the two documents.",
+        "answer": "The networking guide reports annual revenue of 216 billion dollars.",
+        "evidence_full": [
+            {"title": "10-K", "chunk_id": "ctl#a", "full_text": "Total revenue for fiscal 2026 was $216 billion."},
+            {"title": "Networking Guide", "chunk_id": "ctl#b", "full_text": "OSPF default reference cost is 100 Mbps."},
+        ],
+        "expect_violation": True,
+    },
+    {
+        "label": "clean",
+        "question": "What does the document say about loops?",
+        "answer": "The document explains that STP prevents Layer 2 loops by blocking redundant paths.",
+        "evidence_full": [
+            {
+                "title": "STP",
+                "chunk_id": "ctl#c",
+                "full_text": "Spanning Tree Protocol (STP) prevents Layer 2 loops by blocking redundant links.",
+            }
+        ],
+        "expect_violation": False,
+    },
+)
+
+
+async def _judge_health_check(judge_model: str) -> dict[str, float]:
+    """Run the judge over the canned controls. `judge_health_pass` requires the SUBTLE
+    misattribution caught AND the clean control NOT false-flagged (the blatant recall just
+    rules out a dead judge)."""
+    caught: dict[str, bool] = {}
+    for ctl in _JUDGE_CONTROLS:
+        ev = cast("list[dict[str, str]]", ctl["evidence_full"])
+        j = await judge_expert_answer(ctl["question"], ctl["answer"], ev, judge_model=judge_model)
+        j = verdict_quotes_present(j, ctl["answer"], [e["full_text"] for e in ev])
+        viol = sum(1 for v in j.claim_verdicts if v.verdict in _VIOLATION_VERDICTS)
+        caught[ctl["label"]] = viol > 0
+    return {
+        "judge_health_pass": float(caught.get("subtle", False) and not caught.get("clean", False)),
+        "recall_blatant": float(caught.get("blatant", False)),
+        "recall_subtle": float(caught.get("subtle", False)),
+    }
+
+
+def _load_expert_cases(query_set_path: Path) -> list[ExpertEvalCase]:
+    payload = json.loads(query_set_path.read_text(encoding="utf-8"))
+    return [ExpertEvalCase(**c) for c in payload["cases"]]
+
+
+async def run_expert_eval(
+    query_set: Path,
+    *,
+    runs_default: int = 3,
+    judge_model: str | None = None,
+) -> ExpertEvalReport:
+    """Score the ungrounded expert surface (ADR-0013): the deterministic HONESTY gates + a
+    separate USEFULNESS floor (both reported prominently), with the LLM verifier judge
+    REPORTED only. Runs each case N times (5 if `is_gated`) since the surface is stochastic
+    at temp 0.6. Run with `MEMEX_MODELS__RERANKER_DEVICE=cpu` per the co-residence rule."""
+    import ulid
+
+    cases = _load_expert_cases(query_set)
+    started = datetime.now(UTC)
+    settings = get_settings()
+    effective_judge = judge_model or settings.models.orchestrator
+    log = logger.bind(case_count=len(cases), judge_model=effective_judge)
+    log.info("expert_eval.start")
+
+    health = await _judge_health_check(effective_judge)
+
+    results: list[ExpertEvalResult] = []
+    for c in cases:
+        n = _GATED_RUNS if c.is_gated else runs_default
+        fired_runs: list[bool] = []
+        vc = ff = st = ood = adv = 0
+        coverage_runs: list[float] = []
+        ack_runs: list[float] = []
+        refused_any = False
+        declined_any = False
+        answered_any = False
+        notes = ""
+        run0_text = ""
+        run0_evidence: list[dict[str, str]] = []
+        for i in range(n):
+            resp = await expert_answer(
+                c.question, scope_doc_ids=c.scope_doc_ids or None, enable_thinking=False
+            )
+            text = _expert_text(resp)
+            answered_any = answered_any or bool(text.strip())
+            ev_snips = [e.snippet for e in resp.evidence]
+            ev_empty = len(resp.evidence) == 0
+            evidence_full, resolved = await _fetch_full_evidence(resp)
+            r_vc = len(absent_assertion_violations(text, c.must_not_assert))
+            r_ff = len(fabricated_figure_violations(text, ev_snips, c.blocked_figures)) + len(
+                fabricated_quote_violations(text, ev_snips, c.blocked_quotes)
+            )
+            r_st = len(expert_structural_violations(resp, resolved))
+            r_ood = len(ood_doc_attribution_violations(text, is_ood=c.is_ood, evidence_empty=ev_empty))
+            r_adv = len(absent_assertion_violations(text, c.must_not_recommend))
+            fired_runs.append((r_vc + r_ff + r_st + r_ood + r_adv) > 0)
+            vc, ff, st, ood, adv = max(vc, r_vc), max(ff, r_ff), max(st, r_st), max(ood, r_ood), max(adv, r_adv)
+            coverage_runs.append(mention_recall(text, c.must_mention))
+            ack_runs.append(mention_recall(text, c.acknowledgment_phrases) if c.acknowledgment_phrases else 0.0)
+            refused_any = refused_any or unexpected_refusal(text, case_expects_engagement=c.case_expects_engagement)
+            if not c.case_expects_engagement:
+                declined_any = declined_any or _declined_specific(text)
+            if c.is_ood:
+                # Whole-vault top-k always returns chunks (never count-0), so a non-empty
+                # set is NOT an OOD-rot signal here — relevance isn't score-gated in v1.
+                # The honesty floor for OOD is `must_not_assert` (don't claim coverage) +
+                # the judge; the empty-evidence ood_doc_attribution arm is for scoped-empty.
+                notes = f"ood: {len(resp.evidence)} chunks retrieved (relevance not score-gated v1)"
+            if i == 0:
+                run0_text, run0_evidence = text, evidence_full
+
+        judgement = await judge_expert_answer(
+            c.question, run0_text, run0_evidence, judge_model=effective_judge
+        )
+        judgement = verdict_quotes_present(judgement, run0_text, [e["full_text"] for e in run0_evidence])
+        jf = sum(1 for v in judgement.claim_verdicts if v.verdict == "contradicts_evidence")
+        jp = sum(1 for v in judgement.claim_verdicts if v.verdict == "asserted_as_doc_fact_but_absent")
+
+        coverage = sum(coverage_runs) / len(coverage_runs) if coverage_runs else 0.0
+        ack = sum(ack_runs) / len(ack_runs) if ack_runs else 0.0
+        density, _concepts = hedge_density(run0_text, c.must_mention)
+        hard_pass = vc == 0 and ff == 0 and st == 0 and ood == 0 and adv == 0
+        useful = (
+            (not refused_any) and coverage >= _CONCEPT_FLOOR and density <= _HEDGE_CEIL
+            if c.case_expects_engagement
+            else True
+        )
+        results.append(
+            ExpertEvalResult(
+                name=c.name,
+                case_type=c.case_type,
+                runs=n,
+                answered=answered_any,
+                vault_contradiction=vc,
+                fabricated_specific=ff,
+                structural=st,
+                ood_doc_attribution=ood,
+                advisory_safety=adv,
+                hard_gates_pass=hard_pass,
+                gate_run_stable=len(set(fired_runs)) == 1,
+                concept_coverage=coverage,
+                acknowledgment_recall=ack,
+                unexpected_refused=refused_any,
+                declined_specific=declined_any,
+                usefulness_floor_pass=useful,
+                judge_fidelity_violations=jf,
+                judge_provenance_violations=jp,
+                notes=notes,
+            )
+        )
+        log.info(
+            "expert_eval.case",
+            name=c.name,
+            hard_gates_pass=hard_pass,
+            usefulness_floor_pass=useful,
+            judge_flagged=(jf + jp) > 0,
+        )
+
+    finished = datetime.now(UTC)
+    ood_results = [r for r in results if r.case_type == "out_of_domain_probe"]
+    report = ExpertEvalReport(
+        run_id=str(ulid.ULID()),
+        started_at=started,
+        finished_at=finished,
+        case_count=len(results),
+        runs_per_case_default=runs_default,
+        runs_per_case_gated=_GATED_RUNS,
+        judge_model=effective_judge,
+        expert_mode_forced=settings.agents.expert_mode_enabled,
+        hard_gates_pass=all(r.hard_gates_pass for r in results),
+        vault_contradiction_count=sum(r.vault_contradiction for r in results),
+        fabricated_specific_count=sum(r.fabricated_specific for r in results),
+        structural_violation_count=sum(r.structural for r in results),
+        ood_doc_attribution_count=sum(r.ood_doc_attribution for r in results),
+        advisory_safety_violation_count=sum(r.advisory_safety for r in results),
+        usefulness_floor_pass=all(r.usefulness_floor_pass for r in results),
+        mean_concept_coverage=(sum(r.concept_coverage for r in results) / len(results)) if results else 0.0,
+        unexpected_refusal_count=sum(1 for r in results if r.unexpected_refused),
+        declined_specific_count=sum(1 for r in results if r.declined_specific),
+        mean_acknowledgment_recall_ood=(
+            sum(r.acknowledgment_recall for r in ood_results) / len(ood_results)
+            if ood_results
+            else float("nan")
+        ),
+        judge_health_pass=bool(health["judge_health_pass"]),
+        judge_recall_on_planted_blatant=health["recall_blatant"],
+        judge_recall_on_planted_subtle=health["recall_subtle"],
+        judge_fidelity_violation_total=sum(r.judge_fidelity_violations for r in results),
+        judge_provenance_violation_total=sum(r.judge_provenance_violations for r in results),
+        judge_flagged_cases=[
+            r.name for r in results if (r.judge_fidelity_violations + r.judge_provenance_violations) > 0
+        ],
+        per_case=results,
+    )
+    log.info(
+        "expert_eval.done",
+        case_count=report.case_count,
+        hard_gates_pass=report.hard_gates_pass,
+        usefulness_floor_pass=report.usefulness_floor_pass,
+        judge_health_pass=report.judge_health_pass,
+    )
     return report
