@@ -35,12 +35,14 @@ from pydantic import BaseModel, Field
 from memex.core.config import get_settings
 from memex.core.errors import ConfigurationError
 from memex.core.manifest import (
+    ChartExtraction,
     IndexStage,
     now_utc,
     read_manifest,
     update_manifest,
 )
 from memex.core.table_linearize import linearize_gfm_tables
+from memex.core.text import reattach_chart_extractions
 from memex.core.types import Chunk
 from memex.index.chunker import chunk_document
 from memex.index.embed_prompts import (
@@ -193,16 +195,20 @@ async def index_document(doc_id: str, *, force: bool = False) -> IndexResult:
     # anchors; no regression). Same fallback when there's no manifest yet (very
     # first index call).
     page_char_counts: list[tuple[int, int]] | None = None
+    chart_extractions: list[ChartExtraction] = []
     if prior_manifest is not None and prior_manifest.parse is not None:
         page_char_counts = [(p.page, p.char_count) for p in prior_manifest.parse.pages]
-    # Re-derive the `[table-rows]` linearization here (NOT in the vault `.md`, which is
-    # content-only since audit-10). `linearize_gfm_tables` is idempotent, so this is the
-    # SAME input the chunker saw when the `.md` carried the blocks — chunk_ids stay stable
-    # whether the on-disk `.md` is already clean (new parse) or still-polluted (pre-migration).
-    # The chunk text thus still co-locates each cell with its column label for BM25/dense
-    # retrieval, while the vault file (and the webui raw view) stay clean. Page offsets are
-    # navigation-grade and unchanged (same linearized body the chunker always saw).
-    indexed_doc = doc.model_copy(update={"body": linearize_gfm_tables(doc.body)})
+        chart_extractions = prior_manifest.parse.chart_extractions
+    # Re-attach the chart-OCR `[chart-extracted]` blocks (from the parse manifest sidecar) at the
+    # `<!-- image -->` positions, then re-derive the `[table-rows]` linearization — NEITHER lives
+    # in the vault `.md`, which is content-only since audit-10. Both transforms reproduce the SAME
+    # body the chunker saw when the `.md` carried the blocks → chunk_ids stay stable whether the
+    # on-disk `.md` is already clean (new parse, non-empty sidecar) or still-polluted (pre-migration,
+    # empty sidecar → re-attach is a no-op on the already-inline blocks). The chunk text thus carries
+    # the chart content for retrieval/answering while the vault file (and the webui raw view) stay
+    # clean. Order matches parse time: chart re-attach (the old stitch) THEN table linearization.
+    reattached_body = reattach_chart_extractions(doc.body, chart_extractions)
+    indexed_doc = doc.model_copy(update={"body": linearize_gfm_tables(reattached_body)})
     new_chunks = chunk_document(indexed_doc, page_char_counts=page_char_counts)
     new_by_id = {c.chunk_id: c for c in new_chunks}
     new_ids = set(new_by_id.keys())

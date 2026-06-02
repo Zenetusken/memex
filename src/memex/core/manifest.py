@@ -57,6 +57,25 @@ class PageDecision(BaseModel):
     char_count: int = 0
 
 
+class ChartExtraction(BaseModel):
+    """One chart-OCR block, stored in the parse manifest sidecar (audit-10 W-series follow-on).
+
+    The canonical vault `.md` is content-only (a `<!-- image -->` placeholder where each chart
+    was), so the chart-OCR output — which is NON-re-derivable from the `.md` (the chart image is
+    gone; the OCR is non-deterministic + cached) — is persisted here and RE-ATTACHED at index time
+    (`core/text.reattach_chart_extractions`) at the placeholder positions, reproducing the historical
+    stitched body byte-for-byte so chunk_ids stay stable. The `[table-rows]` pattern, sidecar-backed.
+
+    `placeholder_index` is the 0-based ordinal of the `<!-- image -->` placeholder (in document
+    order) this block attaches AFTER; `markdown` is the verbatim chart-OCR markdown (what the old
+    parse stitch inserted). A skipped figure (empty/errored extraction) emits NO entry, so the
+    stored blocks are a SUBSET of placeholders — the explicit ordinal keeps each pinned exactly.
+    """
+
+    placeholder_index: int
+    markdown: str
+
+
 class ParseStage(BaseModel):
     """Audit record for the parse step — per-page routing decisions
     (Docling / VLM / PyMuPDF / passthrough), counts of figures /
@@ -74,6 +93,10 @@ class ParseStage(BaseModel):
     duration_ms: int = 0
     crashed: bool = False
     crash_message: str | None = None
+    # Chart-OCR sidecar (audit-10 follow-on): the chart blocks stripped from the canonical
+    # `.md` at parse, re-attached at index time. Empty default → legacy manifests load
+    # unchanged + the re-attach is a no-op for non-chart docs.
+    chart_extractions: list[ChartExtraction] = Field(default_factory=list[ChartExtraction])
 
 
 class EnrichStage(BaseModel):

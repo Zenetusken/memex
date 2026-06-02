@@ -9,6 +9,20 @@ no `agents/ → index/`).
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING, Final
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from memex.core.manifest import ChartExtraction
+
+# Matches the bare `<!-- image -->` placeholder AND the enriched
+# `<!-- image: kind=line-chart -->` form (docling_worker folds the PictureClassifier
+# label into the marker, audit-10 step 2). ONE home for the regex (was parse-local)
+# so the parse-time chart extraction and the index-time re-attach share it.
+IMAGE_PLACEHOLDER_RE: Final[re.Pattern[str]] = re.compile(
+    r"<!--\s*image(?::[^>]*)?\s*-->", re.IGNORECASE
+)
 
 # Matches a `[chart-extracted]...[/chart-extracted]` block emitted by
 # the P3.3 chart-OCR stitch step (see parse/pipeline.py::_stitch_chart_
@@ -103,6 +117,41 @@ def is_inside_any_span(offset: int, spans: list[tuple[int, int]]) -> bool:
     blocks. O(len(spans)); fine for typical doc sizes (<100 chart
     blocks)."""
     return any(start <= offset < end for start, end in spans)
+
+
+def reattach_chart_extractions(body: str, blocks: Sequence[ChartExtraction]) -> str:
+    """Re-insert the chart-OCR `[chart-extracted]` blocks (from the parse manifest sidecar)
+    into a CLEAN body at the `<!-- image -->` placeholder positions — the index-time inverse
+    of the parse-time extraction (audit-10 follow-on). Mirrors `[table-rows]` re-derivation,
+    but sidecar-backed because chart-OCR output isn't re-derivable from the `.md`.
+
+    LOAD-BEARING byte-equality contract: this reproduces the historical stitched body
+    BYTE-FOR-BYTE — identical framing (`\\n\\n[chart-extracted]\\n{markdown}\\n[/chart-extracted]`)
+    and identical LAST-TO-FIRST splice order as the old parse stitch
+    (`parse/pipeline.py::_stitch_chart_extractions`) — so the chunker/embedder/FTS see the same
+    bytes and chunk_ids (content-addressed) stay stable. A `placeholder_index` with no matching
+    placeholder is skipped (defensive); empty `blocks` → identity (non-chart docs + already-inline
+    legacy bodies, so the change is back-compat and safe to land before a re-parse migration)."""
+    if not blocks:
+        return body
+    by_index: dict[int, str] = {b.placeholder_index: b.markdown for b in blocks if b.markdown}
+    placeholders = list(IMAGE_PLACEHOLDER_RE.finditer(body))
+    new_body = body
+    # Last-to-first so each splice doesn't shift the offsets of earlier placeholders.
+    for i, placeholder in reversed(list(enumerate(placeholders))):
+        md = by_index.get(i)
+        if not md:
+            continue
+        start, end = placeholder.span()
+        new_body = (
+            new_body[:start]
+            + placeholder.group(0)
+            + "\n\n[chart-extracted]\n"
+            + md
+            + "\n[/chart-extracted]"
+            + new_body[end:]
+        )
+    return new_body
 
 
 # ----- Table-RAG linearization helpers (Phase 1) -----------------------------

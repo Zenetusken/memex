@@ -14,7 +14,8 @@ from __future__ import annotations
 
 from typing import Literal
 
-from memex.core.manifest import PageDecision
+from memex.core.manifest import ChartExtraction, PageDecision
+from memex.core.text import reattach_chart_extractions
 from memex.parse.chart_ocr_backend import (
     ChartOCROutput,
     PDFFigureRenderError,
@@ -24,7 +25,12 @@ from memex.parse.docling_backend import (
     DoclingPageOutput,
     FigureMetadata,
 )
-from memex.parse.pipeline import _figures_for_chart_ocr, _stitch_chart_extractions
+from memex.parse.pipeline import (
+    _figures_for_chart_ocr,
+    _finalize_body,
+    _stitch_chart_extractions,
+    build_chart_extractions,
+)
 
 
 def _conv(markdown: str) -> DoclingConversion:
@@ -398,3 +404,126 @@ def test_finalize_body_demotes_layout_table_and_keeps_data_table() -> None:
     assert "- References\n- S62162 Deep Dive" in out
     assert "| API | Application Programming Interface |" in out  # real table preserved
     assert "[table-rows]" not in out  # canonical .md stays content-only (W1)
+
+
+# ----- audit-10 follow-on: the chart-extracted SIDECAR + index-time RE-ATTACH ---------
+#
+# The canonical `.md` is now content-only; chart blocks live in the manifest sidecar
+# (`build_chart_extractions`) and are re-attached at index time (`reattach_chart_extractions`)
+# reproducing the historical stitched body byte-for-byte → chunk_ids stable.
+
+
+def test_build_chart_extractions_records_each_block_with_its_placeholder_ordinal() -> None:
+    md = "# Doc\n\n<!-- image -->\n\nmid\n\n<!-- image -->\n"
+    conv = _conv(md)
+    ext = [
+        ChartOCROutput(page_no=1, bbox=(0.0, 0.0, 1.0, 1.0), markdown="On Time: 22\nLate: 8"),
+        ChartOCROutput(page_no=1, bbox=(0.0, 0.0, 1.0, 1.0), markdown="FP16: 0.5x"),
+    ]
+    blocks = build_chart_extractions(conv, ext)
+    assert [(b.placeholder_index, b.markdown) for b in blocks] == [
+        (0, "On Time: 22\nLate: 8"),
+        (1, "FP16: 0.5x"),
+    ]
+
+
+def test_build_chart_extractions_skips_empty_and_exception_keeping_ordinals() -> None:
+    md = "<!-- image -->\n\n<!-- image -->\n\n<!-- image -->\n"
+    conv = _conv(md)
+    ext = [
+        ChartOCROutput(page_no=1, bbox=(0.0, 0.0, 1.0, 1.0), markdown="data-0"),
+        ChartOCROutput(page_no=1, bbox=(0.0, 0.0, 1.0, 1.0), markdown="   \n "),  # empty → skipped
+        ChartOCROutput(page_no=1, bbox=(0.0, 0.0, 1.0, 1.0), markdown="data-2"),
+    ]
+    blocks = build_chart_extractions(conv, ext)
+    # the middle placeholder gets NO block; the ordinals are 0 and 2 (a gap is normal).
+    assert [(b.placeholder_index, b.markdown) for b in blocks] == [(0, "data-0"), (2, "data-2")]
+
+
+def test_build_chart_extractions_aborts_on_count_mismatch() -> None:
+    # one placeholder, two extractions → abort (return []) exactly like the old stitch.
+    conv = _conv("<!-- image -->\n")
+    ext = [
+        ChartOCROutput(page_no=1, bbox=(0.0, 0.0, 1.0, 1.0), markdown="a"),
+        ChartOCROutput(page_no=1, bbox=(0.0, 0.0, 1.0, 1.0), markdown="b"),
+    ]
+    assert build_chart_extractions(conv, ext) == []
+
+
+def test_reattach_empty_blocks_is_identity() -> None:
+    body = "# Doc\n\n<!-- image -->\n\nprose\n"
+    assert reattach_chart_extractions(body, []) == body
+
+
+def test_reattach_inserts_blocks_at_their_placeholder_ordinals() -> None:
+    body = "a\n\n<!-- image -->\n\nb\n\n<!-- image -->\n\nc\n"
+    blocks = [
+        ChartExtraction(placeholder_index=0, markdown="zero"),
+        ChartExtraction(placeholder_index=1, markdown="one"),
+    ]
+    out = reattach_chart_extractions(body, blocks)
+    assert out == (
+        "a\n\n<!-- image -->\n\n[chart-extracted]\nzero\n[/chart-extracted]\n\nb\n\n"
+        "<!-- image -->\n\n[chart-extracted]\none\n[/chart-extracted]\n\nc\n"
+    )
+
+
+def test_reattach_index_gap_leaves_unmatched_placeholder_clean() -> None:
+    body = "<!-- image -->\n\n<!-- image -->\n"
+    # only the 2nd placeholder has a block (index 1); placeholder 0 stays clean.
+    out = reattach_chart_extractions(body, [ChartExtraction(placeholder_index=1, markdown="d")])
+    assert out == "<!-- image -->\n\n<!-- image -->\n\n[chart-extracted]\nd\n[/chart-extracted]\n"
+
+
+def _golden(md: str, ext: list[ChartOCROutput]) -> None:
+    """The byte-equality ORACLE: the NEW path (finalize clean → re-attach the sidecar) must
+    reproduce the OLD path (finalize the stitched body) EXACTLY — so chunk_ids stay stable."""
+    conv = _conv(md)
+    old = _finalize_body(_stitch_chart_extractions(conv, list(ext)).markdown)
+    blocks = build_chart_extractions(conv, list(ext))
+    new = reattach_chart_extractions(_finalize_body(conv.markdown), blocks)
+    assert new == old, f"byte mismatch:\nOLD={old!r}\nNEW={new!r}"
+
+
+def test_golden_byte_equality_single_block() -> None:
+    _golden(
+        "# Module 5\n\nThe convergence chart:\n\n<!-- image -->\n\nMore prose here.\n",
+        [ChartOCROutput(page_no=1, bbox=(0.0, 0.0, 1.0, 1.0), markdown="On Time: 22\nLate: 8")],
+    )
+
+
+def test_golden_byte_equality_multi_block_with_prose_and_headings() -> None:
+    _golden(
+        "# Deck\n\nintro prose\n\n<!-- image -->\n\n## Section\n\n<!-- image -->\n\n"
+        "- a bullet\n- another\n\n<!-- image -->\n\nclosing.\n",
+        [
+            ChartOCROutput(page_no=1, bbox=(0.0, 0.0, 1.0, 1.0), markdown="CameraGestureBase: 2070 ms"),
+            ChartOCROutput(page_no=1, bbox=(0.0, 0.0, 1.0, 1.0), markdown="NVLink C2C: 900 GB/s"),
+            ChartOCROutput(page_no=1, bbox=(0.0, 0.0, 1.0, 1.0), markdown="principles: 4"),
+        ],
+    )
+
+
+def test_golden_byte_equality_with_skipped_middle() -> None:
+    _golden(
+        "<!-- image -->\n\nx\n\n<!-- image -->\n\ny\n\n<!-- image -->\n",
+        [
+            ChartOCROutput(page_no=1, bbox=(0.0, 0.0, 1.0, 1.0), markdown="first"),
+            ChartOCROutput(page_no=1, bbox=(0.0, 0.0, 1.0, 1.0), markdown=""),  # skipped
+            ChartOCROutput(page_no=1, bbox=(0.0, 0.0, 1.0, 1.0), markdown="third"),
+        ],
+    )
+
+
+def test_manifest_chart_extractions_roundtrip_and_legacy_default() -> None:
+    from memex.core.manifest import ParseStage, now_utc
+
+    stage = ParseStage(
+        correlation_id="c", parsed_at=now_utc(), parser_version="v",
+        chart_extractions=[ChartExtraction(placeholder_index=2, markdown="k: v")],
+    )
+    loaded = ParseStage.model_validate_json(stage.model_dump_json())
+    assert loaded.chart_extractions == [ChartExtraction(placeholder_index=2, markdown="k: v")]
+    # legacy manifest (no chart_extractions key) → empty default, loads unchanged.
+    legacy = ParseStage.model_validate({"correlation_id": "c", "parsed_at": now_utc().isoformat(), "parser_version": "v"})
+    assert legacy.chart_extractions == []

@@ -301,9 +301,9 @@ def test_clean_docling_markdown_unescapes_entities_and_rstrips() -> None:
 def test_image_placeholder_re_matches_both_bare_and_enriched() -> None:
     """The chart-OCR stitch regex must match the enriched marker too (one placeholder either
     way → figure-count alignment unchanged)."""
-    from memex.parse.pipeline import _IMAGE_PLACEHOLDER_RE
+    from memex.core.text import IMAGE_PLACEHOLDER_RE
 
-    assert _IMAGE_PLACEHOLDER_RE.findall("a <!-- image --> b <!-- image: kind=line-chart --> c") == [
+    assert IMAGE_PLACEHOLDER_RE.findall("a <!-- image --> b <!-- image: kind=line-chart --> c") == [
         "<!-- image -->",
         "<!-- image: kind=line-chart -->",
     ]

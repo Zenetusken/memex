@@ -38,6 +38,7 @@ from memex.core.breakers import CircuitBreaker, CircuitBreakerOpen
 from memex.core.config import get_settings
 from memex.core.errors import ConfigurationError, ParseConfidenceTooLow, VaultIntegrityError
 from memex.core.manifest import (
+    ChartExtraction,
     PageDecision,
     ParseStage,
     now_utc,
@@ -50,6 +51,7 @@ from memex.core.table_linearize import (
     parse_gfm_table,
     table_cell_lines,
 )
+from memex.core.text import IMAGE_PLACEHOLDER_RE
 from memex.parse.chart_ocr_backend import (
     ChartOCROutput,
     ChartOCRUnavailable,
@@ -686,13 +688,8 @@ async def derive_title(vault_path: Path, doc_id: str) -> str:
     return doc_id
 
 
-# Matches the bare `<!-- image -->` AND the enriched `<!-- image: kind=line-chart -->` form
-# (docling_worker folds the PictureClassifier label into the marker, audit-10 step 2). The
-# optional `: …` keeps chart-OCR stitching + the figure-count alignment working on both forms
-# (one placeholder either way, so the count is unchanged).
-_IMAGE_PLACEHOLDER_RE: Final[re.Pattern[str]] = re.compile(
-    r"<!--\s*image(?::[^>]*)?\s*-->", re.IGNORECASE
-)
+# `IMAGE_PLACEHOLDER_RE` now lives in `core/text.py` (one home, shared with the index-time
+# re-attach `reattach_chart_extractions` so both find byte-identical placeholders).
 
 
 async def _vllm_reachable(base_url: str, timeout_s: float = 2.0) -> bool:
@@ -915,7 +912,7 @@ def _figures_for_chart_ocr(
     return [f for f in figures if f.page_no not in escalated]
 
 
-def _stitch_chart_extractions(
+def _stitch_chart_extractions(  # pyright: ignore[reportUnusedFunction]  # retained as the byte-equality REFERENCE for the golden test (reattach must reproduce its output); not on the vault-write path since audit-10
     conversion: DoclingConversion,
     extractions: list[ChartOCROutput | Exception],
 ) -> DoclingConversion:
@@ -935,7 +932,7 @@ def _stitch_chart_extractions(
     reliable and we prefer no-stitch over wrong-stitch.
     """
     log = logger.bind(component="chart_ocr.stitch")
-    placeholders = list(_IMAGE_PLACEHOLDER_RE.finditer(conversion.markdown))
+    placeholders = list(IMAGE_PLACEHOLDER_RE.finditer(conversion.markdown))
     if len(placeholders) != len(extractions):
         log.warning(
             "stitch_count_mismatch",
@@ -962,6 +959,40 @@ def _stitch_chart_extractions(
         )
 
     return conversion.model_copy(update={"markdown": new_markdown})
+
+
+def build_chart_extractions(
+    conversion: DoclingConversion,
+    extractions: list[ChartOCROutput | Exception],
+) -> list[ChartExtraction]:
+    """The sidecar producer (audit-10 follow-on): the alignment/skip logic of
+    `_stitch_chart_extractions`, but RECORDING each surviving chart block as a
+    `ChartExtraction(placeholder_index, markdown)` instead of stitching it into the body.
+
+    The canonical `.md` then stays content-only (the `<!-- image -->` placeholders are kept,
+    NOT replaced by blocks); the blocks are persisted on `ParseStage.chart_extractions` and
+    re-attached at index time (`core/text.reattach_chart_extractions`), which reproduces the
+    historical stitched body byte-for-byte. Same skips as the old stitch (count-mismatch abort →
+    `[]`; exception/empty extractions emit no entry), and `placeholder_index` is the forward
+    `enumerate` ordinal of the placeholder — identical to the slot the old stitch inserted into,
+    so the re-attach is byte-equal."""
+    placeholders = list(IMAGE_PLACEHOLDER_RE.finditer(conversion.markdown))
+    if len(placeholders) != len(extractions):
+        logger.bind(component="chart_ocr.stitch").warning(
+            "stitch_count_mismatch",
+            placeholders=len(placeholders),
+            extractions=len(extractions),
+        )
+        return []
+    out: list[ChartExtraction] = []
+    for i, extraction in enumerate(extractions):
+        if isinstance(extraction, Exception):
+            continue
+        text = extraction.markdown.strip()
+        if not text:
+            continue
+        out.append(ChartExtraction(placeholder_index=i, markdown=text))
+    return out
 
 
 # A dot-leader run (≥4 dots) + the page number that trails it — the TOC / List-of-Figures /
@@ -1155,7 +1186,7 @@ def _dedup_is_excluded(block_lines: list[str]) -> bool:
         return True
     nonblank = [ln.strip() for ln in block_lines if ln.strip()]
     return bool(nonblank) and all(
-        _IMAGE_PLACEHOLDER_RE.fullmatch(ln) or _DEDUP_FURNITURE_RE.match(ln) for ln in nonblank
+        IMAGE_PLACEHOLDER_RE.fullmatch(ln) or _DEDUP_FURNITURE_RE.match(ln) for ln in nonblank
     )
 
 
@@ -1447,6 +1478,7 @@ async def _parse_with_docling(
     # block of the pause context manager. Skips entirely when the
     # feature is disabled OR Docling reported no figures.
     chart_ocr_count = 0
+    chart_blocks: list[ChartExtraction] = []
     # Skip figures on VLM-escalated pages — their `<!-- image -->` placeholders
     # are gone (replaced by VLM prose), so chart-OCR'ing them would abort the
     # whole stitch on a count mismatch. See `_figures_for_chart_ocr`.
@@ -1483,19 +1515,13 @@ async def _parse_with_docling(
                     await get_registry().unload("chart_ocr")
                 except Exception as ex:
                     log.warning("chart_ocr.unload_failed", error=str(ex))
-            pre_stitch = conversion
-            conversion = _stitch_chart_extractions(conversion, extractions)
-            # `_stitch_chart_extractions` returns the SAME object unchanged when it
-            # aborts on a placeholder/extraction count mismatch (and a `model_copy`
-            # otherwise) — so an identity check tells us whether anything was actually
-            # stitched. Don't log a non-zero `stitched` on an abort (0 blocks inserted).
-            chart_ocr_count = (
-                0
-                if conversion is pre_stitch
-                else sum(
-                    1 for e in extractions if isinstance(e, ChartOCROutput) and e.markdown.strip()
-                )
-            )
+            # audit-10 follow-on: do NOT stitch the chart blocks into the body that gets
+            # written to the canonical `.md` — keep `conversion` content-only (placeholders
+            # intact) and record the blocks on the manifest sidecar (threaded onto ParseStage
+            # below). They're re-attached at index time (`reattach_chart_extractions`),
+            # reproducing the historical stitched body byte-for-byte → chunk_ids stable.
+            chart_blocks = build_chart_extractions(conversion, extractions)
+            chart_ocr_count = len(chart_blocks)
             log.info(
                 "chart_ocr.done",
                 processed=len(extractions),
@@ -1559,6 +1585,7 @@ async def _parse_with_docling(
         table_count=conversion.table_count,
         equation_count=conversion.equation_count,
         duration_ms=duration_ms,
+        chart_extractions=chart_blocks,
     )
     await update_manifest(
         vault_path,
