@@ -317,6 +317,55 @@ def extract_heading_texts(body: str, *, skip_chart_blocks: bool = True) -> list[
     return out
 
 
+# A chunk is "name-only" when it carries NO substantive prose — only a heading and/or a bare
+# list of short name fragments (e.g. a slide that lists access-control type NAMES:
+# `### Contrôle d'accès` + `- Role-Based Access Control (RBAC)` + `- Attribute-Based …`). A claim
+# whose cited chunk is name-only is grounded only by the coincidental presence of the entity NAME,
+# not by any sentence that establishes the claim — so the reason-then-ground bridge keeps such
+# claims OUT of a PRESENT-AS-ANSWER surface (ADR-0016; presentation-only, never affects grounding).
+_NAME_ONLY_MIN_SENTENCE_WORDS: Final[int] = 8  # ≥ this many words on one line ⇒ a real sentence
+_NAME_ONLY_MIN_LIST_LINES: Final[int] = 2  # floor: need ≥ this many short non-heading lines
+
+
+def is_name_only_chunk(text: str) -> bool:
+    """True when `text` has no substantive prose sentence — only a heading and/or ≥2 short
+    name-like list lines. False when a real descriptive line, a markdown table, or a
+    `[chart-extracted]` / `[table-rows]` block is present (structured data is substantive support).
+
+    Deliberately DIVERGES from `parse/*_worker.py::_looks_like_prose_heading` (`>15 words OR
+    (≥4 words AND ends in .!?)`): slide bullets lack terminal punctuation, and a real ~12-word
+    descriptive line without a period (e.g. "User accounts must be configured locally on each
+    device which is not scalable") MUST count as substantive — the terminal-punct rule would
+    false-flag such a well-grounded chunk. So the test here is a per-line word count (≥8 words)
+    with a ≥2-short-line floor; do NOT "unify" the two heuristics.
+
+    Conservative by construction: it can only cause a present-as-answer claim to be HELD BACK
+    (fall back to the labelled analysis), never assert anything. A single terse sentence or a
+    heading-only chunk is NOT confidently a name list, so it is kept. Known residual (documented):
+    `.split()` is Latin-centric (CJK no-space prose is under-counted); the floor mitigates the
+    single-line case. The repo corpora are FR+EN.
+    """
+    # Structured data is substantive support — never name-only (marker-first short-circuit).
+    if "[table-rows]" in text or "[chart-extracted]" in text or _GFM_TABLE_RE.search(text):
+        return False
+    list_like_short_lines = 0
+    has_any_content_line = False
+    for raw in text.splitlines():
+        line = IMAGE_PLACEHOLDER_RE.sub("", raw).strip()
+        if not line:
+            continue
+        if _MARKDOWN_HEADING_RE.match(line):
+            continue  # a heading is a label, not a sentence that supports a claim
+        has_any_content_line = True
+        stripped = line.lstrip("-*+>").strip().strip("|").strip()
+        if len(stripped.split()) >= _NAME_ONLY_MIN_SENTENCE_WORDS:
+            return False  # a substantive sentence exists ⇒ NOT name-only
+        list_like_short_lines += 1
+    # Floor: only name-only when ≥2 short non-heading lines AND no long line. A 1-line terse chunk
+    # or a heading-only chunk is NOT confidently a name list ⇒ keep it (the safe direction).
+    return has_any_content_line and list_like_short_lines >= _NAME_ONLY_MIN_LIST_LINES
+
+
 # Bilingual (FR+EN) stopwords + a diacritics-/hyphen-aware word tokenizer, used by the
 # artifact-scope qualifier resolver (`agents/artifact_scope.py`). Lives in `core/` (rather
 # than `agents/`) so any module may share it without importing UP from `agents/` (the

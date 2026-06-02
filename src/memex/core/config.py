@@ -658,6 +658,15 @@ class AgentsSettings(BaseModel):
     # `MEMEX_AGENTS__EXPERT_MODE_ENABLED=true`. See [[reasoning-expert-mode-scope-2026-05-29]].
     expert_mode_enabled: bool = False
 
+    # The reason-then-ground bridge's PRESENT-AS-ANSWER name-only guard (ADR-0016, audit rec 1) —
+    # DEFAULT ON, fail-open. When true, a present-as-answer escalation HOLDS BACK any grounded
+    # claim whose cited chunk merely NAMES the entity (a bare list/heading, no substantive
+    # sentence — `core/text.is_name_only_chunk`) so it is not shown in the VERIFIED answer; if
+    # nothing presentable survives, the surface falls back to the labelled analysis. PRESENTATION-
+    # ONLY — never alters `ground_claims`, the standalone grounded subset, the footer counts, or
+    # the `/ask` path. `MEMEX_AGENTS__BRIDGE_NAME_ONLY_GUARD_ENABLED=false` reverts (audit lever).
+    bridge_name_only_guard_enabled: bool = True
+
 
 class MemexSettings(BaseSettings):
     """Top-level settings. Construct once at startup; treat as immutable."""

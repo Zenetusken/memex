@@ -2279,6 +2279,9 @@ def _install_fake_bridge(
             responsive=(responsive if gate_runs else None),
             relevance_reason=("" if responsive else "answers a related question") if gate_runs else "",
             answer_headline=(" ".join(c.claim for c in claims) if gate_runs else ""),
+            # The name-only guard normally filters this; the fake's chunk text is substantive,
+            # so presentable == grounded (the surface renders presented_claims when presented).
+            presented_claims=(claims if gate_runs else []),
         )
 
     monkeypatch.setattr("memex.webui.app.reason_then_ground", _fake)
@@ -2445,6 +2448,46 @@ async def test_bridge_standalone_post_is_not_presented(
     text = await _bridge_to_completion(expert_client.app, "Compare OSPF and BGP.")
     assert "Reasoned, then grounded" not in text
     assert "Grounded claims" in text  # the labelled-subset surface
+
+
+@pytest.mark.asyncio
+async def test_bridge_presented_renders_only_presented_claims_with_held_back_note(
+    expert_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The name-only guard (ADR-0016): the presented body renders `presented_claims` only; a
+    held-back (name-only-cited) grounded claim does NOT appear, and a held-back note explains it."""
+    from memex.agents.answering import CitedClaim
+    from memex.agents.bridge import BRIDGE_PROVENANCE_NOTE, BridgeAnswer
+
+    shown = CitedClaim(claim="Shown grounded claim.", source_chunk_id="d1#a", confidence="high")
+    held = CitedClaim(claim="Held back name-only claim.", source_chunk_id="d1#b", confidence="high")
+
+    async def _fake(question: str, **kw: Any) -> BridgeAnswer:
+        on_phase = kw.get("on_phase")
+        if callable(on_phase):
+            for p in ("Retrieving evidence", "Reasoning", "Grounding claims"):
+                on_phase(p)
+        return BridgeAnswer(
+            question=question,
+            analysis="Ungrounded reasoning.",
+            grounded_claims=[shown, held],  # full gate output
+            grounded_sources=[],
+            provenance_note=BRIDGE_PROVENANCE_NOTE,
+            n_extracted=2,
+            n_grounded=2,
+            present_as_answer=True,
+            responsive=True,
+            answer_headline="Shown grounded claim.",
+            presented_claims=[shown],  # `held` filtered by the name-only guard
+            correlation_id=kw.get("correlation_id") or "cid",
+        )
+
+    monkeypatch.setattr("memex.webui.app.reason_then_ground", _fake)
+    text = await _bridge_to_completion(expert_client.app, "Q?", present_as_answer="true")
+    assert "Reasoned, then grounded" in text
+    assert "Shown grounded claim." in text
+    assert "Held back name-only claim." not in text  # held back from the presented body
+    assert "held back from the answer" in text  # the held-back note
 
 
 @pytest.mark.asyncio

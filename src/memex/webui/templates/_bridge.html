@@ -18,7 +18,7 @@
     <p class="ans-eyebrow ans-reasoned">Reasoned, then grounded <span class="ans-reasoned-tag">verified</span></p>
     <p class="ans-reasoned-note">Reasoned from your vault, then verified — every claim below passed the same vault-grounding and responsiveness checks as Ask.</p>
     <ul class="claim-list">
-      {% for claim in answer.grounded_claims %}
+      {% for claim in answer.presented_claims %}
       <li class="claim">
         <p class="claim-text">{{ claim.claim }}</p>
         <p class="claim-meta">
@@ -31,6 +31,10 @@
       </li>
       {% endfor %}
     </ul>
+    {% set held_back = answer.grounded_claims|length - answer.presented_claims|length %}
+    {% if held_back > 0 %}
+    <p class="bridge-held-back" role="note">{{ held_back }} supporting claim{{ "s" if held_back > 1 else "" }} {{ "were" if held_back > 1 else "was" }} grounded only to a list or heading (not a substantive passage) and held back from the answer — see the reasoning below.</p>
+    {% endif %}
   </section>
 
   <details class="bridge-reasoning">

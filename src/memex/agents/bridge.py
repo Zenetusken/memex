@@ -44,6 +44,7 @@ from memex.agents.expert import (
 from memex.agents.grounding import assess_responsiveness, ground_claims
 from memex.core.config import get_settings
 from memex.core.errors import ModelCallError
+from memex.core.text import is_name_only_chunk
 from memex.core.types import Chunk
 from memex.models.client import complete_structured, split_think
 from memex.observability import bind_run_context, clear_run_context
@@ -89,15 +90,22 @@ class BridgeAnswer(BaseModel):
     present_as_answer: bool = False
     responsive: bool | None = None  # None = the gate was not run (standalone / zero-grounded)
     relevance_reason: str = ""
-    # Deterministic synthesis of the grounded claims — the `assess_responsiveness` input. NEVER
+    # Deterministic synthesis of the PRESENTED claims — the `assess_responsiveness` input. NEVER
     # the ungrounded analysis or the extractor's free summary (no ungrounded text reaches the answer).
     answer_headline: str = ""
+    # The name-only-filtered subset actually shown when presenting (ADR-0016 audit rec 1):
+    # `presented_claims ⊆ grounded_claims`, with claims whose cited chunk only NAMES the entity
+    # (a bare list/heading) held back. The presented surface renders THIS; the labelled-analysis
+    # fallback + the footer counts keep `grounded_claims` (the full gate output). Empty on the
+    # standalone path (gate not run).
+    presented_claims: list[CitedClaim] = []
 
     @property
     def presented(self) -> bool:
-        """True only when the consented escalation asked to present-as-answer AND the grounded
-        subset is non-empty AND responsive — the single switch the surfaces branch on."""
-        return self.present_as_answer and bool(self.grounded_claims) and self.responsive is True
+        """True only when the consented escalation asked to present-as-answer AND a non-empty
+        PRESENTABLE subset survived the name-only guard AND it is responsive — the single switch
+        the surfaces branch on."""
+        return self.present_as_answer and bool(self.presented_claims) and self.responsive is True
 
 
 async def reason_then_ground(
@@ -184,21 +192,43 @@ async def reason_then_ground(
         grounded_ids = {gc.source_chunk_id for gc in grounded}
         grounded_sources = [c for c in reranked if c.chunk_id in grounded_ids]
 
-        # Present-as-answer (ADR-0016): ONLY the consented escalation, and ONLY when something
-        # grounded — promote the grounded subset to a presented answer IFF it is also responsive.
-        # The headline is a DETERMINISTIC join of the grounded claims (the gate input + an optional
-        # lede) — never the ungrounded analysis, never the extractor's free summary.
+        # Present-as-answer (ADR-0016): ONLY the consented escalation, and ONLY when a non-empty
+        # PRESENTABLE subset survives — promote it to a presented answer IFF it is also responsive.
+        # NAME-ONLY GUARD (audit rec 1): hold back any grounded claim whose cited chunk merely
+        # NAMES the entity (a bare list/heading, no substantive sentence) — its grounding is
+        # nominal, not substantive. PRESENTATION-ONLY: `grounded`/`grounded_claims` are unchanged.
+        # The headline is a DETERMINISTIC join of the PRESENTABLE claims — never the ungrounded
+        # analysis, never the extractor's free summary.
         responsive: bool | None = None
         relevance_reason = ""
         answer_headline = ""
+        presented_claims: list[CitedClaim] = []
         t_relevance = 0
         if present_as_answer and grounded:
-            answer_headline = " ".join(c.claim for c in grounded)
-            verdict, t_relevance = await assess_responsiveness(
-                question, answer_headline, [c.claim for c in grounded]
-            )
-            responsive = verdict.responsive
-            relevance_reason = verdict.reason
+            src_by_id = {c.chunk_id: c for c in grounded_sources}
+            guard_on = settings.agents.bridge_name_only_guard_enabled
+            presentable = [
+                c
+                for c in grounded
+                if not (
+                    guard_on
+                    and c.source_chunk_id in src_by_id
+                    and is_name_only_chunk(src_by_id[c.source_chunk_id].text)
+                )
+            ]
+            held_back = len(grounded) - len(presentable)
+            if held_back:
+                logger.info("bridge.name_only_held_back", held_back=held_back, grounded=len(grounded))
+            # Guard the gate on `presentable` (not `grounded`): an all-filtered case skips the
+            # responsiveness call entirely (no phantom `responsive=True` on a result that falls back).
+            if presentable:
+                answer_headline = " ".join(c.claim for c in presentable)
+                verdict, t_relevance = await assess_responsiveness(
+                    question, answer_headline, [c.claim for c in presentable]
+                )
+                responsive = verdict.responsive
+                relevance_reason = verdict.reason
+                presented_claims = presentable
 
         logger.info(
             "bridge.done",
@@ -206,6 +236,7 @@ async def reason_then_ground(
             groundable=len(groundable),
             grounded=len(grounded),
             present_as_answer=present_as_answer,
+            presented=len(presented_claims),
             responsive=responsive,
         )
         return BridgeAnswer(
@@ -224,6 +255,7 @@ async def reason_then_ground(
             responsive=responsive,
             relevance_reason=relevance_reason,
             answer_headline=answer_headline,
+            presented_claims=presented_claims,
         )
     finally:
         clear_run_context()

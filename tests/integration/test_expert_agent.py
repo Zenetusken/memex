@@ -285,6 +285,7 @@ def _bridge_answer(*, presented: bool):
         present_as_answer=presented,
         responsive=(True if presented else None),
         answer_headline=("OSPF is link-state." if presented else ""),
+        presented_claims=([claim] if presented else []),
     )
 
 

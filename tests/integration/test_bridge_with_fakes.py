@@ -314,6 +314,73 @@ async def test_standalone_default_never_runs_gate(
     assert "RelevanceAssessment" not in seen  # standalone never runs the responsiveness gate
 
 
+# --- Name-only presentation guard (ADR-0016 audit rec 1): hold back a presented claim whose cited
+# chunk merely NAMES the entity (a bare list/heading). PRESENTATION-ONLY — `grounded_claims` stays
+# the full gate output; only `presented_claims` is filtered. ---
+
+_NAME_ONLY_TEXT = (
+    "### Contrôle d'accès\n- Role-Based Access Control (RBAC)\n- Attribute-Based Access Control (ABAC)"
+)
+
+
+@pytest.mark.asyncio
+async def test_name_only_claim_held_back_from_presented(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A claim cited to a name-only chunk is held back from the presented answer; a prose-cited
+    claim is presented. `grounded_claims` keeps BOTH (full gate output)."""
+    reranked = [_chunk("d#a", text=_NAME_ONLY_TEXT), _chunk("d#b", text="prose " * 12)]
+    _patch_stage1(monkeypatch, "Analysis.", reranked)
+    _patch_extract(monkeypatch, [_claim("name-only claim", "d#a"), _claim("prose claim", "d#b")])
+    _patch_ground(monkeypatch, grounded=[0, 1], responsive=True)
+
+    ans = await reason_then_ground("Q?", present_as_answer=True)
+
+    assert ans.presented is True
+    assert [c.claim for c in ans.presented_claims] == ["prose claim"]  # name-only held back
+    assert {c.claim for c in ans.grounded_claims} == {"name-only claim", "prose claim"}  # full gate
+    assert ans.answer_headline == "prose claim"  # headline = presentable only
+    assert ans.n_grounded == 2  # footer count unchanged
+
+
+@pytest.mark.asyncio
+async def test_all_name_only_falls_back_and_skips_gate(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When every grounded claim is name-only, nothing is presentable → the gate is SKIPPED
+    (no phantom responsive=True), presented is False, and the full grounded subset is retained."""
+    reranked = [_chunk("d#a", text=_NAME_ONLY_TEXT)]
+    _patch_stage1(monkeypatch, "Analysis.", reranked)
+    _patch_extract(monkeypatch, [_claim("name-only claim", "d#a")])
+    seen = _patch_ground(monkeypatch, grounded=[0], responsive=True)
+
+    ans = await reason_then_ground("Q?", present_as_answer=True)
+
+    assert ans.presented is False
+    assert ans.responsive is None  # gate skipped — guarded on `presentable`, not `grounded`
+    assert ans.presented_claims == []
+    assert [c.claim for c in ans.grounded_claims] == ["name-only claim"]  # full subset for fallback
+    assert "RelevanceAssessment" not in seen
+
+
+@pytest.mark.asyncio
+async def test_name_only_guard_kill_switch_off(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`bridge_name_only_guard_enabled=False` reverts to no filtering — the name-only claim is
+    presented (the prior behavior)."""
+    settings.agents.bridge_name_only_guard_enabled = False
+    reranked = [_chunk("d#a", text=_NAME_ONLY_TEXT)]
+    _patch_stage1(monkeypatch, "Analysis.", reranked)
+    _patch_extract(monkeypatch, [_claim("name-only claim", "d#a")])
+    _patch_ground(monkeypatch, grounded=[0], responsive=True)
+
+    ans = await reason_then_ground("Q?", present_as_answer=True)
+
+    assert ans.presented is True
+    assert [c.claim for c in ans.presented_claims] == ["name-only claim"]
+
+
 def test_bridge_isolated_from_ask_graph() -> None:
     """HARD-gate isolation: the `/ask` graph + the eval runner must NEVER import or construct the
     bridge — it is a fenced sibling, unreachable from `answer_query`/`run_eval`. Holds even with

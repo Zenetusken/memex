@@ -12,6 +12,7 @@ from __future__ import annotations
 from memex.core.text import (
     chart_extracted_spans,
     is_inside_any_span,
+    is_name_only_chunk,
     strip_chart_extracted_for_index,
 )
 
@@ -143,3 +144,85 @@ def test_strip_does_not_remove_orphan_opener() -> None:
     text after the orphan opener is still just text."""
     text = "before [chart-extracted]orphan content"
     assert strip_chart_extracted_for_index(text) == text
+
+
+# ----------------------------------------------------------------------
+# is_name_only_chunk — the present-as-answer guard detector (ADR-0016 audit rec 1)
+# ----------------------------------------------------------------------
+
+_NAME_LIST_SLIDE = (
+    "### Contrôle d'accès\n"
+    "- Role-Based Access Control (RBAC)\n"
+    "- Attribute-Based Access Control (ABAC)\n"
+    "- Mandatory Access Control (MAC)\n"
+    "- Discretionary Access Control (DAC)\n\n"
+    "<!-- image: kind=icon -->"
+)
+
+
+def test_name_only_flags_the_name_list_slide() -> None:
+    """The audit pathology: a heading + ≥2 bare short name bullets, no substantive sentence."""
+    assert is_name_only_chunk(_NAME_LIST_SLIDE) is True
+
+
+def test_name_only_keeps_prose_bullets() -> None:
+    text = (
+        "### OSPF Features\n"
+        "- OSPF is a link-state routing protocol that was developed as an alternative for RIP.\n"
+        "- OSPF offers faster convergence and scales to much larger network implementations."
+    )
+    assert is_name_only_chunk(text) is False
+
+
+def test_name_only_keeps_plain_prose() -> None:
+    text = (
+        "This definition focuses on preventing unauthorized access to data and services "
+        "coupled with making the access control enforcement as granular as possible."
+    )
+    assert is_name_only_chunk(text) is False
+
+
+def test_name_only_short_circuits_on_chart_block() -> None:
+    """A `[chart-extracted]` block is structured data — substantive support, never name-only."""
+    text = "### Config\n[chart-extracted]\nR1(config)# ip domain-name example.com\n[/chart-extracted]"
+    assert is_name_only_chunk(text) is False
+
+
+def test_name_only_short_circuits_on_table_rows() -> None:
+    text = "### T\n[table-rows]\ncol=Revenue value=215.9\n[/table-rows]"
+    assert is_name_only_chunk(text) is False
+
+
+def test_name_only_short_circuits_on_gfm_table() -> None:
+    text = "| Metric | Value |\n|---|---|\n| Revenue | 215.9 |\n| Margin | 71.1 |"
+    assert is_name_only_chunk(text) is False
+
+
+def test_name_only_keeps_single_terse_sentence() -> None:
+    """The FLOOR: a 1-line chunk is NOT confidently a name list — keep it (safe direction)."""
+    assert is_name_only_chunk("OSPF is link-state.") is False
+
+
+def test_name_only_keeps_short_fake_chunk_text() -> None:
+    """The bridge/webui test fakes use this 4-word single-line chunk — the floor keeps it."""
+    assert is_name_only_chunk("some grounded body text") is False
+
+
+def test_name_only_keeps_heading_only_chunk() -> None:
+    assert is_name_only_chunk("### OSPF Features and Characteristics") is False
+
+
+def test_name_only_keeps_eight_word_bullet() -> None:
+    """An ≥8-word bullet is a substantive sentence, not a bare name."""
+    text = "### Access\n- Role-Based Access Control assigns permissions to enterprise roles directly"
+    assert is_name_only_chunk(text) is False
+
+
+def test_name_only_flags_two_short_bullets_with_heading() -> None:
+    text = "### Models\n- Role-Based Access Control\n- Mandatory Access Control"
+    assert is_name_only_chunk(text) is True
+
+
+def test_name_only_empty_text_is_not_name_only() -> None:
+    assert is_name_only_chunk("") is False
+    assert is_name_only_chunk("\n\n   \n") is False

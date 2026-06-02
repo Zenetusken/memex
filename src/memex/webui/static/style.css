@@ -1358,6 +1358,19 @@ html { scroll-behavior: smooth; }
 .bridge-reasoning-body p { margin: 0; }
 .bridge-reasoning-body p + p { margin-top: 0.55rem; }
 
+/* Present-as-answer name-only guard (ADR-0016 audit rec 1): N grounded claims were cited only to a
+   list/heading and held back from the VERIFIED answer — a quiet audit-trail note below the claims. */
+.bridge-held-back {
+  margin: 0.7rem 0 0;
+  padding: 0.5rem 0.7rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: rgb(161 161 170);                  /* zinc-400 — AA secondary */
+  background: rgb(39 39 42 / 0.5);          /* zinc-800 tint */
+  border-left: 2px solid rgb(82 82 91);     /* zinc-600 — decorative divider, exempt */
+  border-radius: 0.25rem;
+}
+
 /* Escalation grounded a subset, but it answers a related question (assess_relevance non-responsive)
    — surfaced quietly above the grounded claims, NOT presented as the answer. */
 .bridge-nonresponsive {

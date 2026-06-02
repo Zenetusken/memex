@@ -27,7 +27,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from memex.agents.answering import FinalResponse, answer_query
+from memex.agents.answering import CitedClaim, FinalResponse, answer_query
 from memex.agents.bridge import BridgeAnswer
 from memex.agents.chat import answer_turn
 from memex.agents.expert import ExpertAnswer
@@ -206,11 +206,11 @@ def _render_expert_answer(answer: ExpertAnswer) -> str:
     return "\n".join(lines)
 
 
-def _render_claim_lines(answer: BridgeAnswer) -> list[str]:
-    """The cited grounded-claim bullets, shared by both renderings."""
+def _render_claim_lines(answer: BridgeAnswer, claims: list[CitedClaim]) -> list[str]:
+    """The cited claim bullets for `claims` (a subset of the gate output), shared by both renderings."""
     lines: list[str] = []
     src_by_id = {c.chunk_id: c for c in answer.grounded_sources}
-    for c in answer.grounded_claims:
+    for c in claims:
         src = src_by_id.get(c.source_chunk_id)
         cite = ""
         if src is not None:
@@ -225,12 +225,20 @@ def _render_bridge_answer(answer: BridgeAnswer) -> str:
     """Console rendering of a reason-then-ground result (Surface §11, ADR-0016).
 
     When the consented escalation presented the grounded subset AS an answer (`presented` —
-    `--answer` + grounded + responsive), the grounded claims lead as the ANSWER and the ungrounded
-    reasoning follows, fenced. Otherwise the ungrounded analysis leads, then the grounded-claims
-    subset that passed the SAME grounding gate as `ask`, then the provenance caveat."""
+    `--answer` + a non-empty, responsive PRESENTABLE subset), the presented claims lead as the
+    ANSWER and the ungrounded reasoning follows, fenced. Otherwise the ungrounded analysis leads,
+    then the grounded-claims subset that passed the SAME grounding gate as `ask`, then the caveat."""
     if answer.presented:
         lines = ["ANSWER (grounded — reasoned from your vault, then verified)", ""]
-        lines.extend(_render_claim_lines(answer))
+        lines.extend(_render_claim_lines(answer, answer.presented_claims))
+        held_back = len(answer.grounded_claims) - len(answer.presented_claims)
+        if held_back:
+            plural = "s" if held_back > 1 else ""
+            lines += [
+                "",
+                f"({held_back} supporting claim{plural} grounded only to a list/heading were held "
+                "back from the answer — see the reasoning.)",
+            ]
         lines += ["", "REASONING (ungrounded — model reasoning):", "", answer.analysis.strip(), ""]
         lines.append(f"⚠ {answer.provenance_note}")
         return "\n".join(lines)
@@ -242,7 +250,7 @@ def _render_bridge_answer(answer: BridgeAnswer) -> str:
             why = f" — {answer.relevance_reason}" if answer.relevance_reason else ""
             note = f"  (related, not a direct answer{why})"
         lines.append(f"GROUNDED CLAIMS · {answer.n_grounded}  (verified against your vault){note}")
-        lines.extend(_render_claim_lines(answer))
+        lines.extend(_render_claim_lines(answer, answer.grounded_claims))
     else:
         lines.append(
             f"GROUNDED CLAIMS · 0 — none of the {answer.n_extracted} extracted claim(s) could be "
