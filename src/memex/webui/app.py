@@ -1045,9 +1045,17 @@ def create_app() -> FastAPI:
             if t.response_json:
                 try:
                     resp = FinalResponse.model_validate_json(t.response_json)
-                    assistant = _chat_assistant_ctx(resp)
                 except ValueError:
                     assistant = None
+                else:
+                    # A degenerate refusal (answered=False with no reason — a model glitch
+                    # or a forward-incompatible response_json) would render a blank bubble;
+                    # drop it to a user-only turn rather than show an empty assistant.
+                    if not resp.answered and not (resp.refusal_reason or "").strip():
+                        logger.warning("chat.resume_empty_refusal", turn_id=t.turn_id)
+                        assistant = None
+                    else:
+                        assistant = _chat_assistant_ctx(resp)
             turns.append({"user_text": t.user_text, "assistant": assistant})
 
         # The scope picker shows only on a fresh conversation (turn 0); later turns

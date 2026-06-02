@@ -2053,3 +2053,60 @@ async def test_chat_view_rehydrates_thread(settings: MemexSettings) -> None:
     assert "prior question" in r.text  # the user bubble
     assert "Persisted answer." in r.text  # the assistant bubble, rehydrated from response_json
     assert "persisted claim" in r.text
+    assert "scope-picker" not in r.text  # picker hidden after turn 0 (turn_count > 0)
+
+
+@pytest.fixture
+def fake_chat_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _fake(conversation_id: str, user_text: str, **_kw: Any) -> Any:
+        from memex.agents.chat import ChatTurnResult
+        from memex.core.types import ConversationTurn
+
+        resp = FinalResponse(
+            answered=False,
+            refusal_reason="The vault does not cover that topic.",
+            correlation_id="01HZCHATREFUSE000000000000",
+            tokens_used=3,
+            nodes_traversed=3,
+            regenerate_attempts=0,
+        )
+        turn = ConversationTurn(
+            turn_id="t",
+            conversation_id=conversation_id,
+            turn_index=0,
+            user_text=user_text,
+            standalone_query=user_text,
+        )
+        return ChatTurnResult(
+            response=resp, turn=turn, standalone_query=user_text, is_followup=False
+        )
+
+    monkeypatch.setattr("memex.webui.app.answer_turn", _fake)
+
+
+@pytest.mark.asyncio
+async def test_chat_turn_renders_refusal(client: TestClient, fake_chat_refused: None) -> None:
+    text = await _chat_turn_to_completion(client.app, "something the vault can't answer")
+    assert "No grounded answer" in text
+    assert "The vault does not cover that topic." in text
+    assert "chat-refused" in text
+    assert "chat-claim" not in text  # a refusal has no grounded claims
+
+
+async def test_chat_turn_zero_persists_scope_pin(
+    settings: MemexSettings, fake_chat_answered: None
+) -> None:
+    from memex.core.conversation_store import ConversationStore
+
+    app = create_app()
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        conv = (await ac.get("/chat", follow_redirects=False)).headers["location"].rsplit("/", 1)[-1]
+        r = await ac.post(
+            f"/chat/{conv}/turn", data={"message": "q", "scope_doc_ids": ["d1", "d2"]}
+        )
+        assert r.status_code == 200
+    store = await ConversationStore.open(settings.vault_path)
+    c = await store.load(conv)
+    await store.close()
+    assert c is not None
+    assert c.scope_doc_ids == ["d1", "d2"]  # the turn-0 selection persisted as the pin

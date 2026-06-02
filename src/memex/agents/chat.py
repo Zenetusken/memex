@@ -141,8 +141,13 @@ async def _digest(prior_summary: str, turns_to_fold: list[ConversationTurn]) -> 
             prompt_tag="conversation_digest@v1",
         )
     except ModelCallError:
-        logger.warning("chat.digest_failed", fallback="keep_prior_summary")
-        return prior_summary
+        # Fail-open WITHOUT bloating: a string of digest failures must not let the
+        # running summary grow unbounded (it feeds the rewrite prompt and eats its
+        # budget). Mechanically fold the evicted turns' headlines and re-cap, so the
+        # window stays bounded and the evicted context isn't silently lost.
+        logger.warning("chat.digest_failed", fallback="mechanical_truncate")
+        folded = " ".join(t.answer_summary for t in turns_to_fold if t.answer_summary)
+        return f"{prior_summary} {folded}".strip()[:_RUNNING_SUMMARY_MAX] or prior_summary
     joined = " ".join(s.strip() for s in result.sentences if s.strip()).strip()
     return joined[:_RUNNING_SUMMARY_MAX] or prior_summary
 
@@ -218,6 +223,8 @@ async def answer_turn(
         response = await answer_query(
             standalone_query,
             scope_doc_ids=effective_scope or None,
+            # `[] or None` → None; `retrieve`'s `if state.prior_carry_chunk_ids:` treats
+            # both as no-carry, so an empty carry is byte-identical to a bare /ask.
             prior_carry_chunk_ids=carry_ids or None,
             correlation_id=correlation_id,
             on_node=on_node,

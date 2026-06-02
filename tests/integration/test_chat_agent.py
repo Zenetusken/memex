@@ -187,6 +187,82 @@ async def test_retrieve_node_merges_prior_carry(
     out2 = await retrieve(AnswerState(query="q"))
     assert {c.chunk_id for c in out2["candidates"]} == {"fresh#1"}
 
+    # Overlap: a carried id that is ALSO a fresh hit is deduped (kept once).
+    out3 = await retrieve(AnswerState(query="q", prior_carry_chunk_ids=["fresh#1", "carry#1"]))
+    ids3 = [c.chunk_id for c in out3["candidates"]]
+    assert sorted(ids3) == ["carry#1", "fresh#1"]
+    assert ids3.count("fresh#1") == 1
+
+
+async def test_refusal_turn_does_not_carry_to_next_followup(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The safety invariant: a REFUSED turn must NOT carry chunks to the next follow-up
+    (the carry seeds only from answered turns). Validates the `t.answered` filter."""
+    captured: list[list[str] | None] = []
+
+    async def fake_answer_query(query: str, **kw: object) -> FinalResponse:
+        captured.append(kw.get("prior_carry_chunk_ids"))  # type: ignore[arg-type]
+        if len(captured) == 1:
+            # Turn 0 REFUSES, but its reranked pool (used_chunks) is non-empty.
+            return _final("refused", ["d#a", "d#b"], answered=False)
+        return _final(f"a:{query}", ["d#c"])
+
+    llm = _FakeChatLLM()
+    monkeypatch.setattr("memex.agents.chat.answer_query", fake_answer_query)
+    monkeypatch.setattr("memex.agents.chat.complete_structured", llm)
+
+    cid = await _new_conversation(settings)
+    await answer_turn(cid, "first question")  # refuses
+    llm.rewrites.append(StandaloneQuery(standalone_query="the follow-up", is_followup=True))
+    await answer_turn(cid, "and the follow-up?")
+    # The prior turn was a refusal → no answered turn to carry from → carry is empty.
+    assert captured[-1] is None
+
+
+async def test_digest_failure_keeps_running_summary_bounded(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A1: a string of digest failures must NOT let running_summary grow unbounded — the
+    mechanical-truncate fallback keeps it capped (and non-empty) so the rewrite budget holds."""
+    from memex.core.errors import ModelCallError
+
+    async def fake_answer_query(query: str, **kw: object) -> FinalResponse:
+        # A long summary (FinalResponse.summary is unbounded; the per-turn answer_summary
+        # is capped to 600 at persist) with no claims (CitedClaim.claim caps at 300).
+        return FinalResponse(
+            answered=True,
+            summary="S" * 600,
+            claims=[],
+            used_chunks=[Chunk(chunk_id="d#a", document_id="d", document_title="D", text="x")],
+            correlation_id="cid",
+            tokens_used=1,
+            nodes_traversed=1,
+            regenerate_attempts=0,
+        )
+
+    class _DigestAlwaysFails:
+        async def __call__(self, *, prompt: object, schema: type, **_kw: object) -> tuple[Any, int]:
+            if schema is StandaloneQuery:
+                return StandaloneQuery(standalone_query="q", is_followup=True), 5
+            raise ModelCallError("digest down", context={})
+
+    monkeypatch.setattr("memex.agents.chat.answer_query", fake_answer_query)
+    monkeypatch.setattr("memex.agents.chat.complete_structured", _DigestAlwaysFails())
+
+    cid = await _new_conversation(settings)
+    for i in range(8):  # >4 turns → compaction fires repeatedly; the digest always fails
+        await answer_turn(cid, f"q{i}")
+
+    store = await ConversationStore.open(settings.vault_path)
+    convo = await store.load(cid)
+    await store.close()
+    assert convo is not None
+    assert convo.turn_count == 8
+    from memex.agents.chat import _RUNNING_SUMMARY_MAX
+
+    assert 0 < len(convo.running_summary) <= _RUNNING_SUMMARY_MAX
+
 
 async def test_run_chat_eval_scores_rewrite_recall(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
