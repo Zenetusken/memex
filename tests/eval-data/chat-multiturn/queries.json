@@ -1,24 +1,39 @@
 {
  "_description": "Grounded multi-turn chat query-rewrite eval (Surface A, docs/specs/grounded-agentic-chat.md §9.1). Each case is a conversation HISTORY + a FOLLOW-UP whose references the control-layer rewrite must resolve; the score is gold-chunk recall@k of hybrid_search on the REWRITTEN query (retrieval-isolated — no rerank/LLM in the inner metric).",
- "_doc_note": "Source documents stay LOCAL (tests/eval-data/README.md); only this case set ships. `relevant_chunk_ids` are GOLD chunks from THIS vault — resolve them against your live index before running. The cases below are ILLUSTRATIVE placeholders (the chunk ids are NOT real) showing the format; replace with real gold ids (and add cases) for a meaningful baseline.",
+ "_doc_note": "Source documents stay LOCAL (tests/eval-data/README.md); only this case set ships. `relevant_chunk_ids` are GOLD chunks from THIS reference vault (CCNA SRWE modules + NIST SP 800-207), resolved live 2026-06-01. Re-resolve against your own index if your vault differs.",
  "_metric": "mean_recall = mean over cases of gold_chunk_recall(hybrid_search(rewritten_query)[:k], relevant_chunk_ids, k). A case < 1.0 means the rewrite failed to surface a gold chunk for that follow-up — the A-1.5 follow-up-resolution gap (the trigger for prompt tuning, spec §9.1).",
  "_run": "MEMEX_MODELS__RERANKER_DEVICE=cpu uv run memex eval-chat tests/eval-data/chat-multiturn/queries.json",
- "_baseline": "(none yet — author real gold ids on the live vault, then record a mean_recall baseline here)",
+ "_baseline_2026_06_01": {
+  "case_count": 3,
+  "mean_recall": 1.0,
+  "_note": "rewrite_followup/v1 on the Qwen3.5-4B orchestrator. Every follow-up's referent resolved ('it'->Spanning Tree Protocol / DHCPv4 / NIST SP 800-207 zero trust) and every gold chunk retrieved within top-50. mean_recall=1.0 — no A-1.5 gap on this set. NB the model judged is_followup=false on these (the rewrite still resolved the referent, which is what recall measures); is_followup accuracy is a separate, non-gated signal."
+ },
  "cases": [
   {
-   "name": "stp-timers-followup",
+   "name": "stp-port-states-followup",
    "history": [
     {"user_text": "What is STP?", "answer_summary": "Spanning Tree Protocol (STP) prevents Layer-2 loops by blocking redundant paths."}
    ],
-   "follow_up": "what about its timers?",
-   "relevant_chunk_ids": ["REPLACE-with-a-real-STP-timers-chunk-id"],
+   "follow_up": "what port states does it use?",
+   "relevant_chunk_ids": ["753a17ed-srwe-module-5-2021#7d04c77d4b", "753a17ed-srwe-module-5-2021#0fc424ab58"],
    "k": 50
   },
   {
-   "name": "self-contained-no-rewrite-needed",
-   "history": [],
-   "follow_up": "What does the NIST zero-trust document say about the policy enforcement point?",
-   "relevant_chunk_ids": ["REPLACE-with-a-real-PEP-chunk-id"],
+   "name": "dhcp-messages-followup",
+   "history": [
+    {"user_text": "What is DHCPv4 used for?", "answer_summary": "DHCPv4 dynamically assigns IPv4 addressing to hosts."}
+   ],
+   "follow_up": "what messages does it use?",
+   "relevant_chunk_ids": ["bc6effb8-srwe-module-7-2021#5f88716848", "bc6effb8-srwe-module-7-2021#8a5256a9cb"],
+   "k": 50
+  },
+  {
+   "name": "zerotrust-pep-followup",
+   "history": [
+    {"user_text": "What does NIST SP 800-207 define as zero trust architecture?", "answer_summary": "ZTA enforces per-request access decisions over enterprise resources."}
+   ],
+   "follow_up": "what is the role of the policy enforcement point in it?",
+   "relevant_chunk_ids": ["0290d6ec-nist-sp-800-207#e2f6a38308", "0290d6ec-nist-sp-800-207#8d6068fc72"],
    "k": 50
   }
  ]
