@@ -1,0 +1,51 @@
+{# Reason-then-ground result (Surface §11). HTMX swap target of the /bridge form and the
+   /bridge/status long-poll. Two zones: the ungrounded ANALYSIS (.ans-* like Expert), then
+   the GROUNDED CLAIMS subset that passed the same gate as Ask (.claim-* like _answer.html). #}
+{% if error %}
+<div class="ans-flash ans-flash-error" role="alert">
+  <p class="ans-eyebrow">Error</p>
+  <p class="ans-flash-msg">{{ error }}</p>
+</div>
+{% elif answer %}
+<article class="ans">
+  <section>
+    <p class="ans-eyebrow">Analysis <span class="expert-banner-tag">ungrounded</span></p>
+    <div class="ans-answer">
+      {% for para in answer.analysis.split("\n\n") %}
+      {% if para.strip() %}<p>{{ para }}</p>{% endif %}
+      {% endfor %}
+    </div>
+  </section>
+
+  {% if answer.grounded_claims %}
+  <section>
+    <p class="ans-eyebrow">Grounded claims <span class="count">· {{ answer.n_grounded }}</span> <span class="bridge-grounded-note">verified against your vault</span></p>
+    <ul class="claim-list">
+      {% for claim in answer.grounded_claims %}
+      <li class="claim">
+        <p class="claim-text">{{ claim.claim }}</p>
+        <p class="claim-meta">
+          <span class="conf conf-{{ claim.confidence }}">{{ claim.confidence }} confidence</span>
+          <span class="claim-src">source</span>
+          {% set ref = (sources or {}).get(claim.source_chunk_id) -%}
+          {%- if ref %}<a class="claim-source-link" href="{{ ref.href }}" title="{{ claim.source_chunk_id }}"{% if ref.page %} data-page="{{ ref.page }}"{% endif %}>{{ ref.title }}{% if ref.section %} › {{ ref.section }}{% endif %}{% if ref.page %} · p. {{ ref.page }}{% endif %}</a>
+          {%- else %}<code class="chunk-id" title="chunk id">{{ claim.source_chunk_id }}</code>{% endif %}
+        </p>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% else %}
+  <p class="bridge-grounded-empty" role="note">No claim in this analysis could be verified against your vault{% if answer.n_extracted %} ({{ answer.n_extracted }} candidate{{ "s" if answer.n_extracted > 1 else "" }} checked){% endif %} — treat the analysis as unverified reasoning.</p>
+  {% endif %}
+
+  <p class="expert-provenance" role="note">⚠ {{ answer.provenance_note }}</p>
+
+  <p class="ans-footer">
+    <span>correlation_id <code>{{ answer.correlation_id }}</code></span>
+    <span class="tabular">grounded {{ answer.n_grounded }}/{{ answer.n_extracted }}</span>
+    <span class="tabular">tokens {{ answer.tokens }}</span>
+    <span class="tabular">model <code>{{ answer.model }}</code></span>
+  </p>
+</article>
+{% endif %}

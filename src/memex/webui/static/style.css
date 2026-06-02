@@ -1272,3 +1272,25 @@ html { scroll-behavior: smooth; }
   border-left: 2px solid rgb(146 64 14);    /* amber-800 */
   border-radius: 0.25rem;
 }
+
+/* Reason-then-ground bridge (§11): the grounded-claims zone reuses .ans-*/.claim-*/.conf-*;
+   only these two quiet notes are new. */
+.bridge-grounded-note {
+  margin-left: 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  color: rgb(161 161 170);                  /* zinc-400 — AA secondary tier */
+}
+
+.bridge-grounded-empty {
+  margin-top: 0.9rem;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: rgb(161 161 170);                  /* zinc-400 */
+  background: rgb(39 39 42 / 0.5);          /* zinc-800 tint */
+  border-left: 2px solid rgb(82 82 91);     /* zinc-600 — decorative divider, exempt */
+  border-radius: 0.25rem;
+}

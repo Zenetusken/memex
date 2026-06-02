@@ -30,23 +30,21 @@ from collections.abc import Callable
 from contextlib import AsyncExitStack
 from itertools import pairwise
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
 import structlog
 import ulid
-from pydantic import Field, create_model
 
 from memex.agents.answering import (
     CitedClaim,
     DocAbstract,
-    DraftAnswer,
     FinalResponse,
     ReportConfidence,
     ReportStructure,
     SectionSummary,
-    VerificationResult,
     repair_claim_chunk_ids,
 )
+from memex.agents.grounding import ground_claims
 from memex.agents.table_sql import coerce_number
 from memex.core.config import get_settings
 from memex.core.errors import MemexError, ModelCallError
@@ -384,53 +382,6 @@ async def _map_section(
         logger.bind(section=section_title).warning("summarize.section_failed", error=str(e)[:160])
         return None, 0
     return section, tokens
-
-
-def _bounded_verification(n: int) -> type[VerificationResult]:
-    """Per-call `VerificationResult` with the index lists bounded to `n`
-    (mirrors `answering.verify`). xgrammar enforces the list bounds."""
-    return create_model(
-        "VerificationResult",
-        __base__=VerificationResult,
-        grounded=(Annotated[list[int], Field(max_length=n)], Field(default_factory=list)),
-        ungrounded=(Annotated[list[int], Field(max_length=n)], Field(default_factory=list)),
-        ungrounded_reasons=(
-            Annotated[list[Annotated[str, Field(max_length=250)]], Field(max_length=n)],
-            Field(default_factory=list),
-        ),
-    )
-
-
-async def _ground_points(
-    digest: str, key_points: list[CitedClaim], chunks: list[Chunk]
-) -> tuple[list[CitedClaim], int]:
-    """Keep only the key-points the verifier confirms are supported by their cited
-    chunk — reusing `verify_grounding/v2` exactly (a section's key-points ARE
-    `CitedClaim`s, so we wrap them in a `DraftAnswer` and run the same prompt).
-    Conservative: a point survives only if explicitly grounded (missing → dropped)."""
-    if not key_points:
-        return [], 0
-    # DraftAnswer.summary is bounded to 300; the digest is only context for the
-    # verifier (it grounds the CLAIMS), so truncating is harmless.
-    draft = DraftAnswer(summary=digest[:300], claims=key_points)
-    chunk_by_id = {c.chunk_id: c for c in chunks}
-    prompt = render_prompt("verify_grounding", draft=draft, chunk_by_id=chunk_by_id)
-    n = len(key_points)
-    try:
-        bounded, tokens = await complete_structured(
-            prompt=prompt,
-            schema=_bounded_verification(n),
-            max_tokens=_VERIFY_MAX_TOKENS,
-            prompt_tag="verify_grounding@v2",
-        )
-    except ModelCallError as e:
-        # If grounding itself fails, drop the section's points (never ship ungrounded).
-        logger.warning("summarize.grounding_failed", error=str(e)[:160])
-        return [], 0
-    grounded_idx = [i for i in bounded.grounded if 0 <= i < n]
-    ungrounded_idx = {i for i in bounded.ungrounded if 0 <= i < n}
-    kept = [key_points[i] for i in grounded_idx if i not in ungrounded_idx]
-    return kept, tokens
 
 
 def _select_doc_key_points(
@@ -978,7 +929,9 @@ async def _key_figures_section(
     # Repair MAP-emitted ids (the synthetic `{doc}#tblN`) against the shown table
     # chunks before grounding — same id-transcription fix as the prose path.
     repaired_points, _ = repair_claim_chunk_ids(mapped.key_points, shown)
-    grounded, t_g = await _ground_points(mapped.digest, repaired_points, shown)
+    grounded, t_g = await ground_claims(
+        mapped.digest[:300], repaired_points, shown, max_tokens=_VERIFY_MAX_TOKENS
+    )
     # Deterministic backstop: drop any grounded figure whose number is absent from its cited
     # chunk (the LLM verifier false-positives near-numbers; a key figure must be verbatim).
     chunk_text_by_id = {c.chunk_id: c.text for c in shown}
@@ -1176,7 +1129,9 @@ async def summarize_document(
                 # so verify + the final stored ids both see the corrected id. Same
                 # problem + fix as `answer` (`repair_claim_chunk_ids`).
                 repaired_points, _ = repair_claim_chunk_ids(mapped.key_points, batch)
-                grounded, t_g = await _ground_points(mapped.digest, repaired_points, batch)
+                grounded, t_g = await ground_claims(
+                    mapped.digest[:300], repaired_points, batch, max_tokens=_VERIFY_MAX_TOKENS
+                )
                 tokens_total += t_g
                 sec_title = mapped.section_title or title
                 if len(batches) > 1:

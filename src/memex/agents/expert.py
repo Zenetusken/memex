@@ -91,7 +91,7 @@ class ExpertAnswer(BaseModel):
     correlation_id: str = ""
 
 
-def _to_evidence(chunk: Chunk) -> ExpertEvidence:
+def to_evidence(chunk: Chunk) -> ExpertEvidence:
     section = chunk.heading_path[-1] if chunk.heading_path else None
     snippet = chunk.text.strip()
     if len(snippet) > _SNIPPET_CHARS:
@@ -106,6 +106,59 @@ def _to_evidence(chunk: Chunk) -> ExpertEvidence:
     )
 
 
+async def reason_over_evidence(
+    question: str,
+    *,
+    scope_doc_ids: list[str] | None = None,
+    evidence_k: int = _EVIDENCE_K,
+    enable_thinking: bool = False,
+    on_phase: Callable[[str], None] | None = None,
+) -> tuple[str, list[Chunk], int]:
+    """Stage 1 of BOTH expert mode and the reason-then-ground bridge (Surface §11): retrieve
+    (optionally scoped) → rerank → ONE free-text reasoning pass over the evidence. Returns
+    `(raw_text, reranked, tokens)` — `reranked` are the REAL `Chunk`s (expert renders them as
+    `ExpertEvidence`; the bridge grounds its extracted claims against them), and `raw_text` is
+    the un-split model output (the caller runs `split_think`).
+
+    Observability-agnostic: the CALLER owns run-context binding (so the bound `correlation_id`
+    threads these logs) and the model-id choice. `on_phase` (if given) receives the
+    "Retrieving evidence" / "Reasoning" progress phases; a failing sink never aborts the call.
+    """
+
+    def _emit(phase: str) -> None:
+        if on_phase is None:
+            return
+        try:
+            on_phase(phase)
+        except Exception:
+            logger.warning("reason.on_phase_failed", phase=phase)
+
+    # Blank-strip + dedup (order-preserving), mirroring the grounded scope path.
+    scope = list(dict.fromkeys(d.strip() for d in (scope_doc_ids or []) if d.strip()))
+
+    _emit("Retrieving evidence")
+    if scope:
+        candidates = await hybrid_search_in_docs(question, scope, k=_CANDIDATE_K)
+    else:
+        candidates = await hybrid_search(question, k=_CANDIDATE_K)
+    reranked = (
+        await cross_encoder_rerank(question, candidates, top_k=evidence_k) if candidates else []
+    )
+    evidence = [to_evidence(c) for c in reranked]
+    logger.info("reason.retrieved", candidates=len(candidates), evidence=len(evidence))
+
+    _emit("Reasoning")
+    messages = render_messages("expert_answer", question=question, evidence=evidence)
+    text, tokens = await complete_reasoning(
+        messages,
+        enable_thinking=enable_thinking,
+        max_tokens=_ANSWER_MAX_TOKENS,
+        prompt_tag="expert_answer",
+    )
+    logger.info("reason.done", tokens=tokens, chars=len(text))
+    return text, reranked, tokens
+
+
 async def expert_answer(
     question: str,
     *,
@@ -117,72 +170,41 @@ async def expert_answer(
 ) -> ExpertAnswer:
     """Answer `question` in ungrounded expert mode (Surface B, ADR-0013).
 
-    Retrieves evidence (optionally scoped to `scope_doc_ids`), reranks it, and runs ONE
-    free-text reasoning pass over it. Does NOT verify or gate — the answer is the model's
-    reasoned opinion, labelled `EXPERT_PROVENANCE_NOTE`. `on_phase` is an observe-only
-    progress sink (the webui's live indicator); a failing sink never aborts the call.
+    A thin wrapper over the shared `reason_over_evidence` Stage-1 core: it owns the run-context
+    lifecycle + the model-id label, then packages the reasoning into an `ExpertAnswer`. Does NOT
+    verify or gate — the answer is the model's reasoned opinion, labelled `EXPERT_PROVENANCE_NOTE`.
 
-    `enable_thinking` defaults to FALSE: on the live 4B (verified 2026-06-01) the thinking
-    mode emits a verbose, UNTAGGED "Thinking Process" scratchpad that consumes the whole
-    token budget BEFORE reaching the answer and can't be cleanly split from it — poor for a
-    reader-facing surface. The model still reasons over the evidence in its prose. The kwarg
-    is plumbed through (with `split_think`) as an opt-in for a future model/reasoning-parser
-    that emits a separable trace.
+    `enable_thinking` defaults to FALSE: on the live 4B (verified 2026-06-01) the thinking mode
+    emits a verbose, UNTAGGED scratchpad that consumes the whole token budget before the answer
+    and can't be cleanly split; the model still reasons in its prose. The kwarg (with `split_think`)
+    is plumbed for a future model that emits a separable trace.
     """
     correlation_id = correlation_id or str(ulid.ULID())
-    # Defensively reset any leaked prior context BEFORE the try; the bind itself lives INSIDE
-    # the try so the `finally: clear_run_context()` always unbinds it — a raise in the pre-try
-    # setup (e.g. get_settings()) then can't leak this call's correlation_id into the next.
+    # Defensively reset any leaked prior context BEFORE the try; the bind lives INSIDE the try
+    # so `finally: clear_run_context()` always unbinds it (a pre-try raise can't leak it).
     clear_run_context()
-    log = logger.bind(node="expert")
-
-    def _emit(phase: str) -> None:
-        if on_phase is None:
-            return
-        try:
-            on_phase(phase)
-        except Exception:
-            log.warning("expert.on_phase_failed", phase=phase)
-
     settings = get_settings()
     # `models.reasoner` is a RESERVED hook (ADR-0013, UNUSED in v1): when set it retargets the
     # reasoning call to that id, but v1 does NOT serve it — it must already be the live daemon's
     # served model (no auto swap-in; a mis-set id 404s). Default None → the orchestrator answers.
     model = settings.models.reasoner or settings.models.orchestrator
-    # Blank-strip + dedup (order-preserving), mirroring the grounded scope path.
     scope = list(dict.fromkeys(d.strip() for d in (scope_doc_ids or []) if d.strip()))
 
     try:
         bind_run_context(correlation_id, query_preview=f"expert {question[:60]}")
-        _emit("Retrieving evidence")
-        if scope:
-            candidates = await hybrid_search_in_docs(question, scope, k=_CANDIDATE_K)
-        else:
-            candidates = await hybrid_search(question, k=_CANDIDATE_K)
-        reranked = (
-            await cross_encoder_rerank(question, candidates, top_k=evidence_k)
-            if candidates
-            else []
-        )
-        evidence = [_to_evidence(c) for c in reranked]
-        log.info("expert.retrieved", candidates=len(candidates), evidence=len(evidence))
-
-        _emit("Reasoning")
-        messages = render_messages("expert_answer", question=question, evidence=evidence)
-        text, tokens = await complete_reasoning(
-            messages,
+        text, reranked, tokens = await reason_over_evidence(
+            question,
+            scope_doc_ids=scope,
+            evidence_k=evidence_k,
             enable_thinking=enable_thinking,
-            max_tokens=_ANSWER_MAX_TOKENS,
-            prompt_tag="expert_answer",
+            on_phase=on_phase,
         )
         trace, body = split_think(text)
-        log.info("expert.done", tokens=tokens, has_trace=trace is not None, chars=len(text))
-
         return ExpertAnswer(
             question=question,
             answer=body or text,
             reasoning=trace,
-            evidence=evidence,
+            evidence=[to_evidence(c) for c in reranked],
             model=model,
             tokens=tokens,
             scope_doc_ids=scope,

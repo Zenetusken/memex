@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Memex — Analysis{% endblock %}
+{% block content %}
+<div class="expert-layout">
+  <div class="expert-head">
+    <h1 class="text-2xl font-semibold">Reason &amp; ground</h1>
+    <p class="text-zinc-400 text-sm">Reason over your vault like Expert, then verify each claim — the analysis is ungrounded, but the <strong>grounded claims</strong> pass the same check as Ask.</p>
+  </div>
+
+  {% if not enabled %}
+  <div class="expert-disabled" role="status">
+    <p class="ans-eyebrow">Disabled</p>
+    <p>Reason-then-ground is fenced behind the <strong>ungrounded</strong> expert surface (ADR-0013): it reasons beyond your documents, then surfaces only the subset of claims it can verify against your vault.</p>
+    <p>Enable it by setting <code>MEMEX_AGENTS__EXPERT_MODE_ENABLED=true</code> (or <code>agents.expert_mode_enabled = true</code> in <code>config.toml</code>) and restarting the web server.</p>
+  </div>
+  {% else %}
+  <div class="expert-banner" role="note">
+    <span class="expert-banner-tag">reason + ground</span>
+    <span>The analysis is model reasoning (treat as claims to verify); the grounded claims below passed the same vault-grounding check as <a href="/">Ask</a>. For a purely grounded answer use Ask; for pure reasoning use <a href="/expert">Expert</a>.</span>
+  </div>
+
+  <form class="expert-composer"
+        hx-post="/bridge"
+        hx-target="#bridge-result"
+        hx-swap="innerHTML"
+        hx-disabled-elt="button[type='submit']">
+    <textarea name="question" rows="3" required autofocus
+              placeholder="Ask an analytical, advisory, or synthesis question…"
+              class="expert-input">{{ question }}</textarea>
+    <div class="expert-actions">
+      <button type="submit" class="expert-send">Reason &amp; ground</button>
+    </div>
+  </form>
+
+  <div id="bridge-result" class="expert-result"></div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -26,6 +26,19 @@ from memex.core.config import MemexSettings, set_settings
 from memex.core.types import Chunk, StoredTable
 
 
+@pytest.fixture(autouse=True)
+def _route_grounding_to_ds(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The per-claim grounding LLM call moved to `agents/grounding.py` (shared with the bridge);
+    these tests patch `ds.complete_structured`. Route `grounding.complete_structured` to whatever
+    `ds` currently has (looked up lazily at call time) so the existing fakes intercept it too."""
+    from memex.agents import grounding
+
+    async def _delegate(*args: Any, **kwargs: Any) -> Any:
+        return await ds.complete_structured(*args, **kwargs)
+
+    monkeypatch.setattr(grounding, "complete_structured", _delegate)
+
+
 @pytest.fixture
 def _settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> MemexSettings:
     monkeypatch.setenv("MEMEX_OBSERVABILITY__LANGFUSE_ENABLED", "false")

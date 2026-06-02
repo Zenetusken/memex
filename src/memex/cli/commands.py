@@ -28,6 +28,7 @@ from rich.console import Console
 from rich.table import Table
 
 from memex.agents.answering import FinalResponse, answer_query
+from memex.agents.bridge import BridgeAnswer
 from memex.agents.chat import answer_turn
 from memex.agents.expert import ExpertAnswer
 from memex.cli.bootstrap import bootstrap
@@ -201,6 +202,32 @@ def _render_expert_answer(answer: ExpertAnswer) -> str:
     if answer.evidence:
         titles = ", ".join(dict.fromkeys(e.title for e in answer.evidence))
         lines.append(f"evidence consulted: {titles}")
+    lines.append(f"⚠ {answer.provenance_note}")
+    return "\n".join(lines)
+
+
+def _render_bridge_answer(answer: BridgeAnswer) -> str:
+    """Console rendering of a reason-then-ground result (Surface §11): the ungrounded analysis,
+    then the subset of its claims that passed the SAME grounding gate as `ask` (cited), then the
+    provenance caveat clarifying which half is verified."""
+    lines = ["ANALYSIS (ungrounded — model reasoning)", "", answer.analysis.strip(), ""]
+    if answer.grounded_claims:
+        lines.append(f"GROUNDED CLAIMS · {answer.n_grounded}  (verified against your vault)")
+        src_by_id = {c.chunk_id: c for c in answer.grounded_sources}
+        for c in answer.grounded_claims:
+            src = src_by_id.get(c.source_chunk_id)
+            cite = ""
+            if src is not None:
+                section = src.heading_path[-1] if src.heading_path else None
+                title = src.document_title or src.document_id
+                cite = f"  ▸ {title}" + (f" › {section}" if section else "")
+            lines.append(f"  • {c.claim}{cite}")
+    else:
+        lines.append(
+            f"GROUNDED CLAIMS · 0 — none of the {answer.n_extracted} extracted claim(s) could be "
+            "verified against your vault."
+        )
+    lines.append("")
     lines.append(f"⚠ {answer.provenance_note}")
     return "\n".join(lines)
 
@@ -665,6 +692,58 @@ def register(app: typer.Typer) -> None:
 
             answer = await expert_answer(question, scope_doc_ids=merged or None)
             return _render_expert_answer(answer)
+
+        console.print(asyncio.run(_run()))
+
+    @app.command()
+    def bridge(
+        question: str = _Argument(..., help="An analytical / advisory question to reason about."),
+        doc: list[str] = _Option(  # noqa: B008  # typer Option default sentinel
+            [], "--doc", help="Limit the consulted evidence to this document id (repeatable)."
+        ),
+        scope_set: str = _Option(
+            "", "--scope-set", help="Limit the consulted evidence to a saved scope set by name."
+        ),
+    ) -> None:
+        """Reason-then-ground ANALYSIS (Surface §11) — reason, THEN verify each claim.
+
+        Reasons over retrieved evidence like `expert`, then runs each reasoned claim back through
+        the SAME grounding gate as `ask`: the analysis is ungrounded model reasoning, but the
+        GROUNDED CLAIMS it surfaces are vault-verified and cited. Fenced behind the same flag as
+        expert mode — disabled unless `MEMEX_AGENTS__EXPERT_MODE_ENABLED=true` (or
+        `agents.expert_mode_enabled` in config).
+        """
+
+        async def _run() -> str:
+            bootstrap()
+            from memex.agents.bridge import reason_then_ground
+            from memex.core.config import get_settings
+
+            if not get_settings().agents.expert_mode_enabled:
+                err.print(
+                    "[yellow]Reason-then-ground is disabled.[/yellow] It is fenced behind the "
+                    "ungrounded expert surface (ADR-0013). Enable it with "
+                    "MEMEX_AGENTS__EXPERT_MODE_ENABLED=true (or agents.expert_mode_enabled in "
+                    "config.toml)."
+                )
+                raise typer.Exit(code=2)
+
+            scope_ids = list(doc)
+            if scope_set.strip():
+                from memex.core.scope_sets import get_scope_set, list_scope_sets
+
+                vault_path = get_settings().vault_path
+                found = await get_scope_set(vault_path, scope_set)
+                if found is None:
+                    available = [s.name for s in await list_scope_sets(vault_path)]
+                    hint = ", ".join(available) if available else "(none saved yet)"
+                    err.print(f"[red]No scope set named {scope_set!r}.[/red] Available: {hint}")
+                    raise typer.Exit(code=2)
+                scope_ids.extend(found.doc_ids)
+            merged = list(dict.fromkeys(scope_ids))
+
+            answer = await reason_then_ground(question, scope_doc_ids=merged or None)
+            return _render_bridge_answer(answer)
 
         console.print(asyncio.run(_run()))
 

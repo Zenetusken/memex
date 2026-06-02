@@ -2228,3 +2228,127 @@ async def test_expert_post_then_answer(expert_client: TestClient, fake_expert: N
     assert "RSTP Guide" in text
     assert "ungrounded" in text.lower()  # the standing provenance caveat
     assert "correlation_id" in text
+
+
+# ── Reason-then-ground bridge surface (§11) — gated on the SAME flag as expert mode ──
+
+
+def _install_fake_bridge(
+    monkeypatch: pytest.MonkeyPatch, *, grounded: bool
+) -> None:
+    from memex.agents.answering import CitedClaim
+    from memex.agents.bridge import BRIDGE_PROVENANCE_NOTE, BridgeAnswer
+    from memex.agents.expert import ExpertEvidence
+    from memex.core.types import Chunk
+
+    async def _fake(question: str, **kw: Any) -> BridgeAnswer:
+        on_phase = kw.get("on_phase")
+        if callable(on_phase):
+            on_phase("Retrieving evidence")
+            on_phase("Reasoning")
+            on_phase("Grounding claims")
+        claims = (
+            [CitedClaim(claim="OSPF is a link-state protocol.", source_chunk_id="d1#a", confidence="high")]
+            if grounded
+            else []
+        )
+        sources = (
+            [Chunk(chunk_id="d1#a", document_id="d1", document_title="OSPF Guide",
+                   text="OSPF is link-state.", heading_path=["Intro"])]
+            if grounded
+            else []
+        )
+        return BridgeAnswer(
+            question=question,
+            analysis="OSPF converges quickly; BGP is policy-driven.",
+            grounded_claims=claims,
+            grounded_sources=sources,
+            evidence=[ExpertEvidence(chunk_id="d1#a", document_id="d1", title="OSPF Guide",
+                                     section="Intro", snippet="…")],
+            provenance_note=BRIDGE_PROVENANCE_NOTE,
+            n_extracted=2,
+            n_grounded=len(claims),
+            model="m",
+            tokens=99,
+            correlation_id=kw.get("correlation_id") or "cid",
+        )
+
+    monkeypatch.setattr("memex.webui.app.reason_then_ground", _fake)
+
+
+async def _bridge_to_completion(app: Any, question: str) -> str:
+    """POST /bridge, then long-poll /bridge/status until the answer fragment swaps in."""
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.post("/bridge", data={"question": question})
+        assert r.status_code == 200, r.text
+        text = r.text
+        m = re.search(r"/bridge/status\?cid=([^&\"]+)&(?:amp;)?v=(\d+)", text)
+        assert m is not None, f"POST /bridge did not return a progress fragment: {text[:300]}"
+        cid, v = m.group(1), int(m.group(2))
+        for _ in range(100):
+            await asyncio.sleep(0.01)
+            r = await ac.get(f"/bridge/status?cid={cid}&v={v}")
+            assert r.status_code == 200
+            text = r.text
+            if 'class="progress"' not in text:
+                return text
+            mv = re.search(r"&(?:amp;)?v=(\d+)", text)
+            if mv is not None:
+                v = int(mv.group(1))
+        raise AssertionError(f"bridge did not complete after polling: {text[:300]}")
+
+
+def test_nav_hides_analysis_when_disabled(client: TestClient) -> None:
+    r = client.get("/")
+    assert 'href="/bridge"' not in r.text  # default off → no dead nav link
+
+
+def test_nav_shows_analysis_when_enabled(expert_client: TestClient) -> None:
+    r = expert_client.get("/")
+    assert 'href="/bridge"' in r.text
+
+
+def test_bridge_home_disabled_explains_how_to_enable(client: TestClient) -> None:
+    r = client.get("/bridge")
+    assert r.status_code == 200
+    assert "Disabled" in r.text
+    assert "MEMEX_AGENTS__EXPERT_MODE_ENABLED" in r.text
+    assert 'name="question"' not in r.text  # no form while disabled
+
+
+def test_bridge_home_renders_form_and_banner(expert_client: TestClient) -> None:
+    r = expert_client.get("/bridge")
+    assert r.status_code == 200
+    assert 'name="question"' in r.text
+    assert 'hx-post="/bridge"' in r.text
+    assert "grounded" in r.text.lower()  # the dual-contract banner
+
+
+def test_bridge_disabled_post_refuses(client: TestClient) -> None:
+    r = client.post("/bridge", data={"question": "anything"})
+    assert r.status_code == 200
+    assert "disabled" in r.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_bridge_post_then_answer(
+    expert_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_fake_bridge(monkeypatch, grounded=True)
+    text = await _bridge_to_completion(expert_client.app, "Compare OSPF and BGP.")
+    assert "OSPF converges quickly" in text  # the ungrounded analysis
+    assert "OSPF is a link-state protocol." in text  # the grounded claim
+    assert "OSPF Guide" in text  # the grounded source rendered by title
+    assert "Grounded claims" in text
+    assert "correlation_id" in text
+
+
+@pytest.mark.asyncio
+async def test_bridge_zero_grounded_shows_note_not_refusal(
+    expert_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_fake_bridge(monkeypatch, grounded=False)
+    text = await _bridge_to_completion(expert_client.app, "An unverifiable question?")
+    assert "OSPF converges quickly" in text  # the analysis is still returned
+    assert "could be verified against your vault" in text  # the empty-grounded note
+    assert 'class="ans-flash-error"' not in text  # NOT a refusal/error

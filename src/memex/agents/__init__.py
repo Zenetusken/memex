@@ -18,6 +18,7 @@ from memex.agents.answering import (
     answer_query,
     build_answering_graph,
 )
+from memex.agents.bridge import BridgeAnswer, reason_then_ground
 from memex.agents.chat import ChatTurnResult, answer_turn
 from memex.agents.expert import (
     EXPERT_PROVENANCE_NOTE,
@@ -30,6 +31,7 @@ from memex.agents.table_sql import coerce_number, query_doc_tables
 __all__ = [
     "EXPERT_PROVENANCE_NOTE",
     "AnswerState",
+    "BridgeAnswer",
     "ChatTurnResult",
     "CitedClaim",
     "DraftAnswer",
@@ -44,4 +46,5 @@ __all__ = [
     "coerce_number",
     "expert_answer",
     "query_doc_tables",
+    "reason_then_ground",
 ]

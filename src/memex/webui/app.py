@@ -55,6 +55,7 @@ from fastapi.templating import Jinja2Templates
 from jinja2 import Environment, FileSystemLoader
 
 from memex.agents.answering import FinalResponse, answer_query
+from memex.agents.bridge import BridgeAnswer, reason_then_ground
 from memex.agents.chat import answer_turn
 from memex.agents.document_summarizer import SummaryDetail, summarize_document
 from memex.agents.expert import ExpertAnswer, expert_answer
@@ -111,10 +112,12 @@ from memex.vault.store import (
     write_document,
 )
 from memex.webui.progress import (
+    BRIDGE_PHASES,
     EXPERT_PHASES,
     PHASES,
     SUMMARY_PHASES,
     ProgressRegistry,
+    bridge_phase_index,
     expert_phase_index,
     phase_for,
     summary_phase_view,
@@ -1266,6 +1269,120 @@ def create_app() -> FastAPI:
                 {"answer": None, "error": entry.error or "Reasoning produced no result."},
             )
         return templates.TemplateResponse(request, "_expert.html", {"answer": answer, "error": None})
+
+    async def _run_bridge(cid: str, question: str, scope_doc_ids: list[str]) -> None:
+        """Background runner: reason-then-ground, streaming phase updates into the registry.
+        Top of a fire-and-forget task — never crash silently."""
+        from memex.core.errors import MemexError
+
+        try:
+            answer = await reason_then_ground(
+                question,
+                scope_doc_ids=scope_doc_ids or None,
+                correlation_id=cid,
+                on_phase=lambda p: progress.set_phase(cid, p),
+            )
+            progress.finish(cid, response=answer)
+        except MemexError as e:
+            logger.warning("bridge.failed", error_type=type(e).__name__, error=str(e)[:200])
+            progress.finish(cid, error=f"Couldn't reason: {type(e).__name__}. {str(e)[:160]}")
+        except Exception as e:
+            logger.error("bridge.crashed", error_type=type(e).__name__, error=str(e)[:200])
+            progress.finish(cid, error="An unexpected error occurred while reasoning.")
+
+    @app.get("/bridge", response_class=HTMLResponse)
+    async def bridge_home(request: Request) -> HTMLResponse:
+        """The reason-then-ground surface: a question form + the dual-contract banner. When the
+        feature is disabled (the same flag as expert mode), the template explains how to enable it."""
+        return templates.TemplateResponse(
+            request,
+            "bridge.html",
+            {"enabled": get_settings().agents.expert_mode_enabled, "question": ""},
+        )
+
+    @app.post("/bridge", response_class=HTMLResponse)
+    async def bridge_run(request: Request, question: str = Form("")) -> HTMLResponse:
+        """Start the reason-then-ground pass in a background task and IMMEDIATELY return the
+        `_progress.html` fragment, which long-polls `/bridge/status` until the answer swaps in."""
+        if not get_settings().agents.expert_mode_enabled:
+            return templates.TemplateResponse(
+                request,
+                "_bridge.html",
+                {
+                    "answer": None,
+                    "sources": {},
+                    "error": "Reason-then-ground is disabled (set MEMEX_AGENTS__EXPERT_MODE_ENABLED=true).",
+                },
+            )
+        q = question.strip()
+        if not q:
+            return templates.TemplateResponse(
+                request,
+                "_bridge.html",
+                {"answer": None, "sources": {}, "error": "Ask an analytical question first."},
+            )
+        cid = str(ulid.ULID())
+        progress.new(cid, scope_doc_ids=[], scope_source="named")
+        task = asyncio.create_task(_run_bridge(cid, q, []))
+        progress.attach_task(cid, task)
+        return templates.TemplateResponse(
+            request,
+            "_progress.html",
+            {
+                "poll_url": f"/bridge/status?cid={cid}&v=0",
+                "phases": BRIDGE_PHASES,
+                "active_index": 0,
+                "elapsed": 0,
+                "detail": "",
+            },
+        )
+
+    @app.get("/bridge/status", response_class=HTMLResponse)
+    async def bridge_status(request: Request, cid: str = "", v: int = 0) -> HTMLResponse:
+        """Long-poll the in-flight reason-then-ground pass: `_progress.html` until the run
+        finishes, then `_bridge.html` (the ungrounded analysis + the grounded-claims subset).
+        Always HTTP 200; done/expired carry no poll trigger so the chain stops itself."""
+        entry = await progress.wait_for_change(cid, v)
+        if entry is None:
+            return templates.TemplateResponse(request, "_progress_expired.html", {})
+        if not entry.done:
+            return templates.TemplateResponse(
+                request,
+                "_progress.html",
+                {
+                    "poll_url": f"/bridge/status?cid={cid}&v={entry.version}",
+                    "phases": BRIDGE_PHASES,
+                    "active_index": bridge_phase_index(entry.phase),
+                    "elapsed": entry.phase_elapsed_s(),
+                    "detail": "",
+                },
+            )
+        progress.evict(cid)
+        answer = entry.response
+        if entry.error is not None or not isinstance(answer, BridgeAnswer):
+            return templates.TemplateResponse(
+                request,
+                "_bridge.html",
+                {
+                    "answer": None,
+                    "sources": {},
+                    "error": entry.error or "Reasoning produced no result.",
+                },
+            )
+        # Build the per-claim source view-model from the grounded chunks (no extra I/O — the
+        # same data the answer panel shows), mirroring `_source_view`'s {chunk_id → {…}} shape.
+        sources = {
+            c.chunk_id: {
+                "title": c.document_title or c.document_id,
+                "section": (c.heading_path[-1] if c.heading_path else None),
+                "href": f"/documents/{c.document_id}" + (f"?page={c.page}" if c.page else ""),
+                "page": c.page,
+            }
+            for c in answer.grounded_sources
+        }
+        return templates.TemplateResponse(
+            request, "_bridge.html", {"answer": answer, "sources": sources, "error": None}
+        )
 
     @app.get("/documents/{doc_id}/source")
     async def document_source(doc_id: str) -> FileResponse:

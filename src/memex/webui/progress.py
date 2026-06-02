@@ -20,6 +20,7 @@ import time
 from dataclasses import dataclass, field
 
 from memex.agents.answering import FinalResponse
+from memex.agents.bridge import BridgeAnswer
 from memex.agents.expert import ExpertAnswer
 
 # The ordered user-facing phases — the step list the UI renders. Every agent
@@ -97,6 +98,19 @@ def expert_phase_index(label: str) -> int:
         return 0
 
 
+# The reason-then-ground bridge's phases (Surface §11 — linear, like expert mode plus a
+# trailing grounding step: `reason_then_ground` emits these exact labels via its `on_phase`).
+BRIDGE_PHASES: tuple[str, ...] = ("Retrieving evidence", "Reasoning", "Grounding claims")
+
+
+def bridge_phase_index(label: str) -> int:
+    """Map a bridge phase label → its index in ``BRIDGE_PHASES`` (unknown → 0)."""
+    try:
+        return BRIDGE_PHASES.index(label)
+    except ValueError:
+        return 0
+
+
 @dataclass
 class ProgressEntry:
     """The live state of one in-flight ``/ask``, keyed by ``correlation_id``."""
@@ -108,9 +122,10 @@ class ProgressEntry:
     started_at: float = field(default_factory=time.monotonic)
     phase_started_at: float = field(default_factory=time.monotonic)
     done: bool = False
-    # FinalResponse for /ask, summarize, and chat; ExpertAnswer for the ungrounded
-    # expert surface (Surface B). The status route knows which it launched.
-    response: FinalResponse | ExpertAnswer | None = None
+    # FinalResponse for /ask, summarize, and chat; ExpertAnswer for the ungrounded expert
+    # surface (Surface B); BridgeAnswer for the reason-then-ground bridge (§11). The status
+    # route knows which it launched.
+    response: FinalResponse | ExpertAnswer | BridgeAnswer | None = None
     error: str | None = None
     changed: asyncio.Event = field(default_factory=asyncio.Event)
     task: asyncio.Task[None] | None = None
@@ -156,7 +171,7 @@ class ProgressRegistry:
         self,
         cid: str,
         *,
-        response: FinalResponse | ExpertAnswer | None = None,
+        response: FinalResponse | ExpertAnswer | BridgeAnswer | None = None,
         error: str | None = None,
     ) -> None:
         entry = self._entries.get(cid)
