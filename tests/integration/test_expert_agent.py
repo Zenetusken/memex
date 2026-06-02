@@ -221,6 +221,42 @@ async def test_expert_clears_run_context_on_pre_try_failure(
     assert structlog.contextvars.get_contextvars() == {}
 
 
+def test_bridge_escalation_hint_on_refusal_when_enabled() -> None:
+    """§11 consented escalation: a CLI `ask` REFUSAL with expert mode on names `memex bridge`
+    with the verbatim question (a hint the user chooses to run — never auto-executed)."""
+    from memex.cli.commands import _bridge_escalation_hint
+
+    hint = _bridge_escalation_hint(False, "why is the sky blue?", expert_enabled=True)
+    assert hint is not None
+    assert "memex bridge" in hint
+    assert "why is the sky blue?" in hint  # shlex-quoted, but the question text is preserved
+
+
+def test_bridge_escalation_hint_shell_quotes_the_query() -> None:
+    """A question containing a double-quote must produce a copy-paste-safe command."""
+    import shlex
+
+    from memex.cli.commands import _bridge_escalation_hint
+
+    hint = _bridge_escalation_hint(False, 'say "hi" now', expert_enabled=True)
+    assert hint is not None
+    assert shlex.quote('say "hi" now') in hint
+
+
+def test_bridge_escalation_hint_none_when_answered() -> None:
+    from memex.cli.commands import _bridge_escalation_hint
+
+    # Refusal-only: a grounded answer prints no escalation hint.
+    assert _bridge_escalation_hint(True, "q", expert_enabled=True) is None
+
+
+def test_bridge_escalation_hint_none_when_expert_disabled() -> None:
+    from memex.cli.commands import _bridge_escalation_hint
+
+    # Gated on the ungrounded surface being enabled.
+    assert _bridge_escalation_hint(False, "q", expert_enabled=False) is None
+
+
 def test_cli_render_expert_answer() -> None:
     from memex.agents.expert import ExpertAnswer, ExpertEvidence
     from memex.cli.commands import _render_expert_answer

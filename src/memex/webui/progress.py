@@ -117,6 +117,7 @@ class ProgressEntry:
 
     scope_doc_ids: list[str]  # always supplied by ProgressRegistry.new()
     scope_source: str
+    question: str = ""  # the original /ask question — carried for the consented A→B escalation (§11)
     phase: str = PHASES[0]
     version: int = 0
     started_at: float = field(default_factory=time.monotonic)
@@ -151,9 +152,13 @@ class ProgressRegistry:
     def __init__(self) -> None:
         self._entries: dict[str, ProgressEntry] = {}
 
-    def new(self, cid: str, *, scope_doc_ids: list[str], scope_source: str) -> ProgressEntry:
+    def new(
+        self, cid: str, *, scope_doc_ids: list[str], scope_source: str, question: str = ""
+    ) -> ProgressEntry:
         self._sweep()
-        entry = ProgressEntry(scope_doc_ids=list(scope_doc_ids), scope_source=scope_source)
+        entry = ProgressEntry(
+            scope_doc_ids=list(scope_doc_ids), scope_source=scope_source, question=question
+        )
         self._entries[cid] = entry
         return entry
 

@@ -232,6 +232,20 @@ def _render_bridge_answer(answer: BridgeAnswer) -> str:
     return "\n".join(lines)
 
 
+def _bridge_escalation_hint(answered: bool, query: str, *, expert_enabled: bool) -> str | None:
+    """The consented A→B escalation hint (§11) for a CLI `ask` REFUSAL — `None` unless the
+    answer refused AND the ungrounded expert surface is enabled. A HINT only: it names the
+    `memex bridge` command (the user CHOOSES to run it = explicit consent); it never
+    auto-executes the bridge. Refusal-only so a grounded answer prints nothing extra."""
+    if answered or not expert_enabled:
+        return None
+    import shlex
+
+    # shlex.quote → the suggested command is copy-paste-correct even if the question
+    # contains quotes/specials (e.g. `say "hi"` → `memex bridge 'say "hi"'`).
+    return f"↳ No grounded answer. To reason over it (ungrounded analysis): memex bridge {shlex.quote(query)}"
+
+
 async def run_chat_repl(
     read_line: Callable[[], str | None],
     emit: Callable[[str], None],
@@ -539,7 +553,19 @@ def register(app: typer.Typer) -> None:
             )
             return response
 
-        _print(asyncio.run(_run()))
+        from memex.core.config import get_settings
+
+        response = asyncio.run(_run())
+        _print(response)
+        # Consented A→B escalation hint (§11): refusal-only + expert-gated. To stderr so it
+        # never pollutes the stdout JSON data channel on a pipe.
+        hint = _bridge_escalation_hint(
+            response.answered, query, expert_enabled=get_settings().agents.expert_mode_enabled
+        )
+        if hint:
+            # markup=False so bracket-sequences in the user's question aren't parsed as
+            # rich markup (and stripped); style applies the dim treatment to the whole line.
+            err.print(hint, style="dim", markup=False)
 
     @app.command()
     def chat(

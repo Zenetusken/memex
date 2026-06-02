@@ -61,6 +61,22 @@
     </ul>
   </details>
   {% endif %}
+  {# Consented A→B escalation (§11): refusal-only + gated on expert_enabled. The user must
+     CLICK to leave the grounded contract; this re-runs the SAME question through the bridge
+     (POST /bridge), whose result swaps into #answer carrying its own ungrounded banner —
+     never automatic, never mistaken-for-grounded. #}
+  {% if expert_enabled and question %}
+  <form class="ans-escalate"
+        hx-post="/bridge"
+        hx-target="#answer"
+        hx-swap="innerHTML"
+        hx-disabled-elt="button[type='submit']">
+    <input type="hidden" name="question" value="{{ question }}">
+    {% for sid in escalate_scope_ids or [] %}<input type="hidden" name="scope_doc_ids" value="{{ sid }}">{% endfor %}
+    <p class="ans-escalate-note">Nothing in your vault grounded this. You can reason over it from the model's own knowledge instead — an <strong>ungrounded</strong> analysis, separately labelled and verified claim-by-claim.</p>
+    <button type="submit" class="ans-escalate-btn">Reason over this instead →</button>
+  </form>
+  {% endif %}
 </div>
 {% endif %}
 

@@ -2352,3 +2352,51 @@ async def test_bridge_zero_grounded_shows_note_not_refusal(
     assert "OSPF converges quickly" in text  # the analysis is still returned
     assert "could be verified against your vault" in text  # the empty-grounded note
     assert 'class="ans-flash-error"' not in text  # NOT a refusal/error
+
+
+# ── Consented A→B escalation from a Surface-A refusal (§11) ──
+
+
+@pytest.mark.asyncio
+async def test_ask_refusal_offers_escalation_when_expert_enabled(
+    expert_client: TestClient, fake_refused: None
+) -> None:
+    text = await _ask_to_completion(expert_client.app, "an unanswerable question?")
+    assert "Refused" in text
+    assert 'hx-post="/bridge"' in text  # the consented escalation form targets the bridge
+    assert "Reason over this instead" in text
+    assert "an unanswerable question?" in text  # the original question carried into the hidden input
+
+
+@pytest.mark.asyncio
+async def test_ask_refusal_no_escalation_when_expert_disabled(
+    client: TestClient, fake_refused: None
+) -> None:
+    text = await _ask_to_completion(client.app, "an unanswerable question?")
+    assert "Refused" in text  # the refusal still renders
+    assert 'hx-post="/bridge"' not in text  # gated off → no escalation affordance
+    assert "Reason over this instead" not in text
+
+
+@pytest.mark.asyncio
+async def test_ask_answered_has_no_escalation(
+    expert_client: TestClient, fake_answered: None
+) -> None:
+    text = await _ask_to_completion(expert_client.app, "What does Smith argue?")
+    # Refusal-only by construction: an answered response never offers the escalation,
+    # even with expert mode enabled.
+    assert "Reason over this instead" not in text
+
+
+@pytest.mark.asyncio
+async def test_ask_scoped_refusal_escalation_carries_scope(
+    expert_client: TestClient, fake_refused: None
+) -> None:
+    text = await _ask_to_completion(
+        expert_client.app, "an unanswerable question?", scope_doc_ids=["d1", "d2"]
+    )
+    assert "Reason over this instead" in text
+    # The escalation re-POSTs the ORIGINAL scope so the bridge respects the user's constraint
+    # (not silently widened to the whole vault).
+    assert 'name="scope_doc_ids" value="d1"' in text
+    assert 'name="scope_doc_ids" value="d2"' in text

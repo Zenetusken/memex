@@ -645,7 +645,9 @@ def create_app() -> FastAPI:
             )
         cid = str(ulid.ULID())
         scope_source = "selected" if scope_doc_ids else "named"
-        progress.new(cid, scope_doc_ids=scope_doc_ids, scope_source=scope_source)
+        progress.new(
+            cid, scope_doc_ids=scope_doc_ids, scope_source=scope_source, question=question
+        )
         task = asyncio.create_task(_run_ask(cid, question, scope_doc_ids))
         progress.attach_task(cid, task)  # strong ref → the loop won't GC the task mid-run
         return templates.TemplateResponse(
@@ -692,6 +694,11 @@ def create_app() -> FastAPI:
             )
         settings = get_settings()
         ctx = await _answer_context(settings.vault_path, entry.response, entry.scope_source)
+        # Carry the original question + scope so a REFUSAL panel can offer the consented A→B
+        # escalation (§11) — a user-chosen "reason over this instead" into the bridge over the
+        # SAME scope. Refusal-only + gated on expert_enabled in the template; answered path ignores.
+        ctx["question"] = entry.question
+        ctx["escalate_scope_ids"] = entry.scope_doc_ids
         return templates.TemplateResponse(request, "_answer.html", ctx)
 
     # ----- Resource mode (ADR-0007) -----
@@ -1301,9 +1308,18 @@ def create_app() -> FastAPI:
         )
 
     @app.post("/bridge", response_class=HTMLResponse)
-    async def bridge_run(request: Request, question: str = Form("")) -> HTMLResponse:
+    async def bridge_run(
+        request: Request,
+        question: str = Form(""),
+        scope_doc_ids: list[str] = Form([]),  # noqa: B008  # FastAPI Form default sentinel
+    ) -> HTMLResponse:
         """Start the reason-then-ground pass in a background task and IMMEDIATELY return the
-        `_progress.html` fragment, which long-polls `/bridge/status` until the answer swaps in."""
+        `_progress.html` fragment, which long-polls `/bridge/status` until the answer swaps in.
+
+        `scope_doc_ids` is carried by the A→B escalation form (§11) so a SCOPED /ask refusal
+        escalates into a reason-then-ground pass over the SAME scope (the user's explicit
+        constraint is preserved, not silently widened to the whole vault). The standalone
+        /bridge composer sends none → whole-vault, unchanged."""
         if not get_settings().agents.expert_mode_enabled:
             return templates.TemplateResponse(
                 request,
@@ -1321,9 +1337,10 @@ def create_app() -> FastAPI:
                 "_bridge.html",
                 {"answer": None, "sources": {}, "error": "Ask an analytical question first."},
             )
+        scope = [d.strip() for d in scope_doc_ids if d.strip()]
         cid = str(ulid.ULID())
-        progress.new(cid, scope_doc_ids=[], scope_source="named")
-        task = asyncio.create_task(_run_bridge(cid, q, []))
+        progress.new(cid, scope_doc_ids=scope, scope_source="selected" if scope else "named")
+        task = asyncio.create_task(_run_bridge(cid, q, scope))
         progress.attach_task(cid, task)
         return templates.TemplateResponse(
             request,

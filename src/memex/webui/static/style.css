@@ -489,6 +489,24 @@ html { scroll-behavior: smooth; }
 .ans-flash-error   .ans-eyebrow, .ans-flash-error   .ans-flash-msg { color: rgb(252 165 165); } /* red-300 */
 .ans-flash-refused .ans-eyebrow, .ans-flash-refused .ans-flash-msg { color: rgb(252 211 77); }  /* amber-300 */
 
+/* Consented A→B escalation (§11): the user-chosen "reason over this instead" affordance in a
+   refusal panel. Deliberately AMBER (the ungrounded/caution tier — same family as the bridge's
+   provenance banner), NEVER the action-blue (which signals a GROUNDED answer). */
+.ans-escalate { margin-top: 0.85rem; padding-top: 0.7rem; border-top: 1px solid rgb(146 64 14 / 0.5); }
+.ans-escalate-note { font-size: 0.8rem; line-height: 1.45; color: rgb(161 161 170); margin: 0 0 0.55rem; }  /* zinc-400 — AA */
+.ans-escalate-btn {
+  font-size: 0.82rem;
+  padding: 0.35rem 0.7rem;
+  color: rgb(252 211 77);                   /* amber-300 — caution, not the grounded blue */
+  background: transparent;
+  border: 1px solid rgb(146 64 14);         /* amber-800 */
+  border-radius: 0.3rem;
+  cursor: pointer;
+  transition: background 0.15s ease-in-out;
+}
+.ans-escalate-btn:hover { background: rgb(69 26 3 / 0.5); }
+.ans-escalate-btn:disabled { opacity: 0.5; cursor: default; }
+
 /* Refusal evidence disclosure (collapsible chunk evidence per the brand). */
 .ans-evidence { margin-top: 0.75rem; }
 .ans-evidence > summary {
