@@ -51,7 +51,7 @@ The full set of ADRs lives under [`adr/`](adr/0001-vllm-as-sole-inference-engine
 - **[ADR-0013](adr/0013-ungrounded-reasoning-expert-mode.md)** — *(Accepted, v1 shipped)* An ungrounded reasoning "expert" mode, separate from `/ask` (inverts the grounding contract)
 - **[ADR-0014](adr/0014-text-to-sql-robustness-safety.md)** — Text-to-SQL robustness + safety: keep the independent Python WHERE oracle, reject SQL-stack decomposition
 - **[ADR-0015](adr/0015-qwen35-4b-unified-orchestrator.md)** — Qwen3.5-4B as the unified orchestrator (a vLLM model swap; orchestrator role unified, doc-VLM-role unification attempted + reverted)
-- **[ADR-0016](adr/0016-reason-then-ground-bridge.md)** — The reason-then-ground bridge: reason ungrounded, then verify each reasoned claim through the *unchanged* grounding gate (joins the expert surface to the grounded gate; + the consented A→B escalation from a `/ask` refusal)
+- **[ADR-0016](adr/0016-reason-then-ground-bridge.md)** — The reason-then-ground bridge: reason ungrounded, then verify each reasoned claim through the *unchanged* grounding gate (joins the expert surface to the grounded gate; + the consented A→B escalation from a `/ask` refusal — which can now present a non-empty, responsive grounded subset AS a direct grounded answer, while the standalone bridge stays verify-only)
 
 Implementation **specs** (the build-level designs the ADRs decide) live under [`specs/`](specs/grounded-agentic-chat.md) — notably `grounded-agentic-chat.md` (Surfaces A/B + the bridge §11) and `expert-eval.md` (the Surface-B honesty eval).
 
