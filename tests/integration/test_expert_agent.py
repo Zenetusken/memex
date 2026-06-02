@@ -166,6 +166,61 @@ def test_split_think_truncated_trace_is_all_trace() -> None:
     assert split_think("<think>unfinished reasoning") == ("unfinished reasoning", "")
 
 
+@pytest.mark.asyncio
+async def test_expert_uses_reasoner_id_when_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#395 (reserved-hook contract): when `models.reasoner` is set, expert RESOLVES + STAMPS
+    that id onto `ExpertAnswer.model` with NO serve subprocess. (The actual daemon-send is
+    `complete_reasoning`'s pre-existing `reasoner or orchestrator` routing — faked here; this
+    pins that expert prefers the reasoner id, the observable half of the de-promised semantics.)"""
+    monkeypatch.setenv("MEMEX_VAULT_PATH", str(tmp_path))
+    monkeypatch.setenv("MEMEX_OBSERVABILITY__LANGFUSE_ENABLED", "false")
+    monkeypatch.setenv("MEMEX_MODELS__REASONER", "sentinel-reasoner-id")
+    s = MemexSettings()
+    set_settings(s)
+    try:
+        _patch_retrieval(monkeypatch, [_chunk("d1#a", "Doc", "text")])
+        monkeypatch.setattr("memex.agents.expert.complete_reasoning", _FakeReason("answer"))
+        ans = await expert_answer("Why?")
+        assert ans.model == "sentinel-reasoner-id"
+    finally:
+        set_settings(None)
+
+
+def test_expert_module_has_no_swap_in_imports() -> None:
+    """#395 canary: the reasoner swap-in lifecycle is deliberately UNWIRED in v1 (ADR-0013).
+    If a future change WIRES it (clones `serve_summarizer_vllm`), update this test on purpose."""
+    import memex.agents.expert as expert_mod
+
+    src = Path(expert_mod.__file__).read_text()
+    assert "serve_summarizer_vllm" not in src
+    assert "serve_reasoner" not in src
+    assert "pause_vllm_for_gpu" not in src
+    assert "AsyncExitStack" not in src
+
+
+@pytest.mark.asyncio
+async def test_expert_clears_run_context_on_pre_try_failure(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#396(c): a failure in the PRE-TRY setup window must not leak a bound correlation_id.
+    The bind now lives INSIDE the try (covered by `finally: clear_run_context()`); pre-fix it
+    bound BEFORE the try, so a raise in the setup leaked context. The discriminating injection
+    is therefore in the pre-try window (`get_settings()`) — a raise INSIDE the try clears in
+    BOTH orderings and would NOT catch a revert of the reorder."""
+    import structlog
+
+    def _boom_settings() -> MemexSettings:
+        raise RuntimeError("settings down")
+
+    monkeypatch.setattr("memex.agents.expert.get_settings", _boom_settings)
+    with pytest.raises(RuntimeError):
+        await expert_answer("Why?")
+    # Pre-fix (bind before try) this raise left correlation_id bound; the reorder makes it empty.
+    assert structlog.contextvars.get_contextvars() == {}
+
+
 def test_cli_render_expert_answer() -> None:
     from memex.agents.expert import ExpertAnswer, ExpertEvidence
     from memex.cli.commands import _render_expert_answer

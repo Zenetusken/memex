@@ -130,8 +130,10 @@ async def expert_answer(
     that emits a separable trace.
     """
     correlation_id = correlation_id or str(ulid.ULID())
+    # Defensively reset any leaked prior context BEFORE the try; the bind itself lives INSIDE
+    # the try so the `finally: clear_run_context()` always unbinds it — a raise in the pre-try
+    # setup (e.g. get_settings()) then can't leak this call's correlation_id into the next.
     clear_run_context()
-    bind_run_context(correlation_id, query_preview=f"expert {question[:60]}")
     log = logger.bind(node="expert")
 
     def _emit(phase: str) -> None:
@@ -143,11 +145,15 @@ async def expert_answer(
             log.warning("expert.on_phase_failed", phase=phase)
 
     settings = get_settings()
+    # `models.reasoner` is a RESERVED hook (ADR-0013, UNUSED in v1): when set it retargets the
+    # reasoning call to that id, but v1 does NOT serve it — it must already be the live daemon's
+    # served model (no auto swap-in; a mis-set id 404s). Default None → the orchestrator answers.
     model = settings.models.reasoner or settings.models.orchestrator
     # Blank-strip + dedup (order-preserving), mirroring the grounded scope path.
     scope = list(dict.fromkeys(d.strip() for d in (scope_doc_ids or []) if d.strip()))
 
     try:
+        bind_run_context(correlation_id, query_preview=f"expert {question[:60]}")
         _emit("Retrieving evidence")
         if scope:
             candidates = await hybrid_search_in_docs(question, scope, k=_CANDIDATE_K)

@@ -1313,7 +1313,10 @@ async def _doctor_report() -> dict[str, object]:
         docs += 1
         manifest = await read_manifest(settings.vault_path, ref.doc_id)
         if manifest is None:
-            issues.append(f"{ref.doc_id}: no manifest")
+            issues.append(
+                f"{ref.doc_id}: no manifest sidecar — chart-extracted blocks (if any) will "
+                "NOT re-attach at index; re-parse to restore"
+            )
             continue
         actual = hash_bytes(ref.markdown_path.read_bytes())
         if manifest.content_sha256 != actual:

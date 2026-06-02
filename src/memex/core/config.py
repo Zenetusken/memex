@@ -137,9 +137,12 @@ class ModelSettings(BaseModel):
     # (default) = the live orchestrator daemon answers in its thinking mode — NO subprocess,
     # since the 4B IS a hybrid-reasoning model (verified 2026-06-01: a free-text call with
     # `enable_thinking=true` reasons inline, no `<think>` tag on this checkpoint via vLLM).
-    # Set to a distinct specialist (e.g. a Foundation-Sec reasoning build) to route expert
-    # calls through the summarizer-style swap-in lifecycle instead. This NEVER touches the
-    # grounded /ask or chat path. `MEMEX_MODELS__REASONER=...`.
+    # RESERVED hook (ADR-0013 — UNUSED in v1): set to a distinct served model id to RETARGET
+    # expert calls to it. v1 does NOT auto-serve it — the model must ALREADY be the served model
+    # reachable on the orchestrator base_url (a mis-set id 404s LOUDLY, not silently). The
+    # summarizer-style serve→`_inference_override` swap-in lifecycle is documented but UNWIRED
+    # for the reasoner; wire it (clone `serve_summarizer_vllm`) when a 12 GB-fitting specialist
+    # lands. This NEVER touches the grounded /ask or chat path. `MEMEX_MODELS__REASONER=...`.
     reasoner: str | None = None
     embedder: str = "google/embeddinggemma-300m"
     reranker: str = "BAAI/bge-reranker-v2-m3"

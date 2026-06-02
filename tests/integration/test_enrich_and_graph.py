@@ -200,6 +200,56 @@ async def test_enrich_extracts_entities_and_writes_graph(
     assert "extract_citations" in manifest.enrich.prompt_versions
 
 
+@pytest.mark.asyncio
+async def test_enrich_chunks_reattached_body_for_chart_docs(
+    settings: MemexSettings,
+    fake_graph: _FakeGraphStore,
+    fake_llm: dict[str, Any],
+) -> None:
+    """#394: enrich must chunk the SAME body `index_document` chunks (chart blocks re-attached
+    from the manifest sidecar, then tables linearized). Otherwise a chart-bearing chunk's
+    content-addressed chunk_id diverges and the MENTIONS attested chunk_id never resolves in FTS.
+    Pre-fix (enrich chunked the clean `.md`) this test fails: the attested ids would be the
+    clean-body ids, disjoint from index's re-attached ids."""
+    from memex.core.manifest import ChartExtraction, ParseStage, now_utc, update_manifest
+    from memex.core.table_linearize import linearize_gfm_tables
+    from memex.core.text import reattach_chart_extractions
+    from memex.index.chunker import chunk_document
+    from memex.vault.store import read_document
+
+    # A small (single-chunk) doc with a chart placeholder; the chart-OCR text lives ONLY in the
+    # manifest sidecar (NON-re-derivable from the clean .md), exactly like a migrated chart doc.
+    body = "# Chart doc\n\nIntro about Reflexivity.\n\n<!-- image -->\n\nMore on Smith.\n"
+    ref = await ingest_markdown_passthrough(body, source_stem="chart-enrich")
+    blocks = [ChartExtraction(placeholder_index=0, markdown="Chart: Reflexivity = 42%.")]
+    await update_manifest(
+        settings.vault_path,
+        ref.doc_id,
+        parse=ParseStage(
+            correlation_id="t",
+            parsed_at=now_utc(),
+            parser_version="test",
+            chart_extractions=blocks,
+        ),
+    )
+
+    await enrich_document(ref.doc_id)
+
+    # The chunk_ids `index_document` produces (re-attach THEN linearize — its exact transform):
+    doc = await read_document(settings.vault_path, ref.doc_id)
+    reattached = doc.model_copy(
+        update={"body": linearize_gfm_tables(reattach_chart_extractions(doc.body, blocks))}
+    )
+    index_ids = {c.chunk_id for c in chunk_document(reattached)}
+    clean_ids = {c.chunk_id for c in chunk_document(doc)}  # what the buggy pre-fix enrich saw
+    assert index_ids != clean_ids  # sanity: the sidecar chart block actually changed the chunking
+
+    attested = {cid for cid in fake_graph.mention_chunk_ids if cid is not None}
+    assert attested, "expected at least one attested MENTIONS chunk_id"
+    assert attested <= index_ids  # every attestation resolves against index's chunk_ids (parity)
+    assert attested.isdisjoint(clean_ids)  # and none is a stale clean-body id (the pre-fix bug)
+
+
 def test_entity_dedupe_merges_by_lowered_name_and_kind() -> None:
     raw = [
         entities_mod.Entity(

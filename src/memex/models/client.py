@@ -421,9 +421,12 @@ async def complete_reasoning(
 
     Sampling defaults to a reasoning-appropriate posture — a temperature floor of 0.6 and NO
     grounded seed pin — rather than the determinism floor the grounded path uses; pass explicit
-    kwargs to override. Routing mirrors `complete_structured` (the summarizer-style
-    `_inference_override` swap-in, else the live daemon — defaulting to `models.reasoner` when
-    set, else the orchestrator, since the 4B is itself a reasoning model)."""
+    kwargs to override. Routing reads `_inference_override` symmetrically with
+    `complete_structured` (so a future summarizer-style swap-in works for free), but the expert
+    surface does NOT set the override in v1 — so the model resolves to `models.reasoner` when set,
+    else the orchestrator (the 4B is itself a reasoning model). A set `models.reasoner` is sent to
+    the LIVE daemon and must ALREADY be the served model — there is no auto serve-and-swap in v1
+    (a mis-set id 404s; ADR-0013, the reserved reasoner hook)."""
     from memex.core.config import get_settings
 
     settings = get_settings()

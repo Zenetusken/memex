@@ -8,7 +8,7 @@ text), and an opaque `FinalResponse.model_dump_json()` for re-render.
 **User data, not regenerable derived state** — this store is deliberately NOT in
 the `reindex_vault(force=True)` teardown allow-list (the `scope_sets.json`
 precedent): a full rebuild must preserve a user's conversations. Lives in `core/`
-(no Memex deps): `core/sqlite_tuning` + `core/types` + stdlib only — so the surfaces
+(no Memex deps): `core/errors` + `core/sqlite_tuning` + `core/types` + stdlib only — so the surfaces
 (`webui/`, `cli/`) import it without inverting an edge, and `response_json` stays
 opaque (core/ never imports `agents/FinalResponse`).
 
@@ -28,6 +28,7 @@ from pathlib import Path
 import structlog
 import ulid
 
+from memex.core.errors import VaultIntegrityError
 from memex.core.sqlite_tuning import apply_sqlite_pragmas
 from memex.core.types import Conversation, ConversationTurn
 
@@ -203,7 +204,13 @@ class ConversationStore:
                 (conversation_id,),
             ).fetchone()
             if row is None:
-                raise KeyError(conversation_id)
+                # TOCTOU: the caller loaded this conversation, then a concurrent
+                # `delete_conversation` removed it before this locked append. Typed +
+                # context-carrying per the Errors rule (a bare KeyError can't be matched).
+                raise VaultIntegrityError(
+                    "conversation not found (deleted concurrently?)",
+                    context={"conversation_id": conversation_id},
+                )
             turn_index = int(row["turn_count"])
             self._db.execute(
                 "INSERT INTO turns "

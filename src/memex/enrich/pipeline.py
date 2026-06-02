@@ -27,7 +27,15 @@ from pydantic import BaseModel, Field
 
 from memex.core.config import get_settings
 from memex.core.errors import ModelCallError
-from memex.core.manifest import EnrichStage, now_utc, update_manifest
+from memex.core.manifest import (
+    ChartExtraction,
+    EnrichStage,
+    now_utc,
+    read_manifest,
+    update_manifest,
+)
+from memex.core.table_linearize import linearize_gfm_tables
+from memex.core.text import reattach_chart_extractions
 from memex.core.types import Chunk
 from memex.enrich.citations import (
     CitationCandidate,
@@ -210,7 +218,24 @@ async def enrich_document(doc_id: str) -> EnrichResult:
     start = time.monotonic()
 
     doc = await read_document(settings.vault_path, doc_id)
-    chunks = chunk_document(doc)
+    # Chunk the SAME bytes `index_document` chunks (#394): re-attach the chart-OCR
+    # `[chart-extracted]` blocks from the parse manifest sidecar (NON-re-derivable from the
+    # content-only `.md`) then re-derive the `[table-rows]` linearization, in parse order
+    # (chart re-attach THEN table linearize). `chunk_id` is content-addressed (sha1 of chunk
+    # text), so WITHOUT this a chart-bearing chunk's enrich chunk_id != index's re-attached
+    # chunk_id and the MENTIONS attested chunk_id never resolves in FTS. `reattach(body, [])`
+    # is identity → a no-op for the non-chart docs (back-compat). Only the chunking copy is
+    # transformed: `doc.body` stays CLEAN for the course-ref + wikilink writes below, which
+    # operate on / rewrite the canonical content-only `.md`. We do NOT thread the manifest's
+    # page_char_counts (unlike index_document) — `chunk_id` is content-addressed on text only,
+    # page-independent, so it's irrelevant to the attestation parity this fixes.
+    prior_manifest = await read_manifest(settings.vault_path, doc_id)
+    chart_extractions: list[ChartExtraction] = []
+    if prior_manifest is not None and prior_manifest.parse is not None:
+        chart_extractions = prior_manifest.parse.chart_extractions
+    reattached_body = reattach_chart_extractions(doc.body, chart_extractions)
+    chunking_doc = doc.model_copy(update={"body": linearize_gfm_tables(reattached_body)})
+    chunks = chunk_document(chunking_doc)
     title = doc.frontmatter.title or doc_id
 
     # Citation index excludes the current doc (we don't link to ourself).
