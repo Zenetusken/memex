@@ -373,3 +373,110 @@ async def complete_structured(
     tokens = response.usage.total_tokens if response.usage else 0
     log.info("model_call.done", tokens=tokens)
     return parsed, tokens
+
+
+def split_think(text: str) -> tuple[str | None, str]:
+    """Split a ``<think>…</think>`` reasoning trace from the answer body, if present.
+
+    DEFENSIVE / forward-compat: on the live 4B checkpoint via vLLM (verified 2026-06-01)
+    ``enable_thinking=true`` emits the chain-of-thought INLINE as prose — there is no
+    ``<think>`` tag — so this is normally a no-op returning ``(None, text)``. It handles a
+    genuinely tagged trace (a future model, or a vLLM ``--reasoning-parser`` config) so the
+    expert surface can show the answer prominently and tuck the trace away. A trace truncated
+    at ``max_tokens`` (open ``<think>`` with no close) is treated as all-trace. Fail-open:
+    any unexpected shape returns ``(None, text)`` so the caller always has a body to show.
+    """
+    start = text.find("<think>")
+    if start == -1:
+        return None, text
+    end = text.find("</think>", start)
+    if end == -1:
+        # The close tag never arrived (cut mid-thought) — the whole tail is the trace.
+        return text[start + len("<think>") :].strip() or None, ""
+    trace = text[start + len("<think>") : end].strip()
+    body = (text[:start] + text[end + len("</think>") :]).strip()
+    return (trace or None), body
+
+
+async def complete_reasoning(
+    prompt: str | list[dict[str, str]],
+    *,
+    model: str | None = None,
+    enable_thinking: bool = True,
+    temperature: float | None = None,
+    top_p: float | None = None,
+    max_tokens: int | None = None,
+    prompt_tag: str | None = None,
+) -> tuple[str, int]:
+    """FREE-TEXT completion in the hybrid-reasoning model's THINKING mode — the engine of the
+    UNGROUNDED expert surface (Surface B, ADR-0013).
+
+    Deliberately SEPARATE from `complete_structured`: this call passes NO `response_format`
+    (no grammar) and sets `enable_thinking` via `chat_template_kwargs`, so the model reasons
+    freely. `complete_structured` stays the SOLE emitter of `response_format` and NEVER sets
+    `chat_template_kwargs` — so "is this call grounded?" is answerable by WHICH function it is.
+    The grounded /ask + chat graph must never import this; its grammar suppresses reasoning by
+    construction, this has no grammar. Returns ``(raw text, total_tokens)`` — the caller splits
+    any `<think>` trace via `split_think` (a no-op on this checkpoint; the CoT is inline prose).
+
+    Sampling defaults to a reasoning-appropriate posture — a temperature floor of 0.6 and NO
+    grounded seed pin — rather than the determinism floor the grounded path uses; pass explicit
+    kwargs to override. Routing mirrors `complete_structured` (the summarizer-style
+    `_inference_override` swap-in, else the live daemon — defaulting to `models.reasoner` when
+    set, else the orchestrator, since the 4B is itself a reasoning model)."""
+    from memex.core.config import get_settings
+
+    settings = get_settings()
+    sampling = settings.inference.sampling
+    temperature = temperature if temperature is not None else max(sampling.temperature, 0.6)
+    top_p = top_p if top_p is not None else sampling.top_p
+    max_tokens = max_tokens if max_tokens is not None else 1024
+
+    override = _inference_override.get()
+    if override is not None:
+        ov_base_url, model = override
+        client = _override_client(ov_base_url)
+    else:
+        client = get_client()
+        if model is None:
+            model = settings.models.reasoner or settings.models.orchestrator
+
+    messages: list[dict[str, str]] = (
+        [{"role": "user", "content": prompt}] if isinstance(prompt, str) else prompt
+    )
+    span_name = prompt_tag or "complete_reasoning"
+    log = logger.bind(prompt_tag=span_name)
+    log.info(
+        "reasoning_call.start",
+        model=model,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        enable_thinking=enable_thinking,
+        message_count=len(messages),
+    )
+    try:
+        raw_response = await client.chat.completions.create(  # type: ignore[call-overload]  # langfuse `name=` kwarg + chat_template_kwargs extra_body
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,
+            extra_body={"chat_template_kwargs": {"enable_thinking": enable_thinking}},
+            name=span_name,
+        )
+        response = cast("ChatCompletion", raw_response)
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        mod = type(e).__module__
+        if mod.startswith(("openai", "httpx")) or isinstance(e, TimeoutError):
+            raise ModelCallError(
+                f"vLLM reasoning call failed: {e}",
+                context={"prompt_tag": span_name, "error_type": type(e).__name__},
+            ) from e
+        raise
+
+    text = response.choices[0].message.content or ""
+    tokens = response.usage.total_tokens if response.usage else 0
+    log.info("reasoning_call.done", tokens=tokens, chars=len(text))
+    return text, tokens

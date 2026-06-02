@@ -19,13 +19,22 @@ from memex.agents.answering import (
     build_answering_graph,
 )
 from memex.agents.chat import ChatTurnResult, answer_turn
+from memex.agents.expert import (
+    EXPERT_PROVENANCE_NOTE,
+    ExpertAnswer,
+    ExpertEvidence,
+    expert_answer,
+)
 from memex.agents.table_sql import coerce_number, query_doc_tables
 
 __all__ = [
+    "EXPERT_PROVENANCE_NOTE",
     "AnswerState",
     "ChatTurnResult",
     "CitedClaim",
     "DraftAnswer",
+    "ExpertAnswer",
+    "ExpertEvidence",
     "FinalResponse",
     "SufficiencyAssessment",
     "VerificationResult",
@@ -33,5 +42,6 @@ __all__ = [
     "answer_turn",
     "build_answering_graph",
     "coerce_number",
+    "expert_answer",
     "query_doc_tables",
 ]

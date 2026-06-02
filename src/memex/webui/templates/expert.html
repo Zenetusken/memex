@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Memex — Expert{% endblock %}
+{% block content %}
+<div class="expert-layout">
+  <div class="expert-head">
+    <h1 class="text-2xl font-semibold">Expert analysis</h1>
+    <p class="text-zinc-400 text-sm">Reasoning from the model's own knowledge, over evidence from your vault — <strong>not</strong> a verified, grounded lookup.</p>
+  </div>
+
+  {% if not enabled %}
+  <div class="expert-disabled" role="status">
+    <p class="ans-eyebrow">Disabled</p>
+    <p>The expert surface is an <strong>ungrounded</strong> reasoning mode (ADR-0013): unlike Ask and Chat, it may go beyond your documents, and its answers are <strong>not grounded or verified</strong>. It is off by default.</p>
+    <p>Enable it by setting <code>MEMEX_AGENTS__EXPERT_MODE_ENABLED=true</code> (or <code>agents.expert_mode_enabled = true</code> in <code>config.toml</code>) and restarting the web server.</p>
+  </div>
+  {% else %}
+  <div class="expert-banner" role="note">
+    <span class="expert-banner-tag">ungrounded</span>
+    <span>Answers reflect the model's own knowledge reasoned over retrieved evidence — treat specific facts as claims to verify. For grounded, cited answers use <a href="/">Ask</a> or <a href="/chat">Chat</a>.</span>
+  </div>
+
+  <form class="expert-composer"
+        hx-post="/expert"
+        hx-target="#expert-result"
+        hx-swap="innerHTML"
+        hx-disabled-elt="button[type='submit']">
+    <textarea name="question" rows="3" required autofocus
+              placeholder="Ask an analytical, advisory, or synthesis question…"
+              class="expert-input">{{ question }}</textarea>
+    <div class="expert-actions">
+      <button type="submit" class="expert-send">Reason</button>
+    </div>
+  </form>
+
+  <div id="expert-result" class="expert-result"></div>
+  {% endif %}
+</div>
+{% endblock %}

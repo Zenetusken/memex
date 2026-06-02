@@ -1,0 +1,49 @@
+{# Ungrounded expert answer (Surface B, ADR-0013). HTMX swap target of the /expert
+   form and the /expert/status long-poll. Reuses the answer panel's .ans-* zones for
+   cohesion; leads with the reasoned prose, then the evidence consulted, then the
+   standing provenance caveat (model knowledge, unverified). #}
+{% if error %}
+<div class="ans-flash ans-flash-error" role="alert">
+  <p class="ans-eyebrow">Error</p>
+  <p class="ans-flash-msg">{{ error }}</p>
+</div>
+{% elif answer %}
+<article class="ans">
+  <section>
+    <p class="ans-eyebrow">Analysis</p>
+    <div class="ans-answer">
+      {% for para in answer.answer.split("\n\n") %}
+      {% if para.strip() %}<p>{{ para }}</p>{% endif %}
+      {% endfor %}
+    </div>
+  </section>
+
+  {% if answer.reasoning %}
+  <details class="expert-reasoning">
+    <summary class="expert-reasoning-toggle">Reasoning trace</summary>
+    <pre class="expert-reasoning-body">{{ answer.reasoning }}</pre>
+  </details>
+  {% endif %}
+
+  {% if answer.evidence %}
+  <section>
+    <p class="ans-eyebrow">Evidence consulted <span class="count">· {{ answer.evidence|length }}</span></p>
+    <ul class="expert-evidence-list">
+      {% for e in answer.evidence %}
+      <li class="expert-evidence">
+        <a class="expert-evidence-doc" href="/documents/{{ e.document_id }}{% if e.page %}?page={{ e.page }}{% endif %}" title="{{ e.chunk_id }}">{{ e.title }}{% if e.section %} › {{ e.section }}{% endif %}</a>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  <p class="expert-provenance" role="note">⚠ {{ answer.provenance_note }}</p>
+
+  <p class="ans-footer">
+    <span>correlation_id <code>{{ answer.correlation_id }}</code></span>
+    <span class="tabular">tokens {{ answer.tokens }}</span>
+    <span class="tabular">model <code>{{ answer.model }}</code></span>
+  </p>
+</article>
+{% endif %}

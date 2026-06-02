@@ -20,6 +20,7 @@ import time
 from dataclasses import dataclass, field
 
 from memex.agents.answering import FinalResponse
+from memex.agents.expert import ExpertAnswer
 
 # The ordered user-facing phases — the step list the UI renders. Every agent
 # node maps to exactly one of these via `_NODE_PHASES`.
@@ -83,6 +84,19 @@ def summary_phase_view(label: str) -> tuple[int, str]:
         return 0, detail
 
 
+# The expert surface's phases (Surface B, ADR-0013 — linear, like the summarizer:
+# `expert_answer` calls its `on_phase` sink directly with these exact labels).
+EXPERT_PHASES: tuple[str, ...] = ("Retrieving evidence", "Reasoning")
+
+
+def expert_phase_index(label: str) -> int:
+    """Map an expert phase label → its index in ``EXPERT_PHASES`` (unknown → 0)."""
+    try:
+        return EXPERT_PHASES.index(label)
+    except ValueError:
+        return 0
+
+
 @dataclass
 class ProgressEntry:
     """The live state of one in-flight ``/ask``, keyed by ``correlation_id``."""
@@ -94,7 +108,9 @@ class ProgressEntry:
     started_at: float = field(default_factory=time.monotonic)
     phase_started_at: float = field(default_factory=time.monotonic)
     done: bool = False
-    response: FinalResponse | None = None
+    # FinalResponse for /ask, summarize, and chat; ExpertAnswer for the ungrounded
+    # expert surface (Surface B). The status route knows which it launched.
+    response: FinalResponse | ExpertAnswer | None = None
     error: str | None = None
     changed: asyncio.Event = field(default_factory=asyncio.Event)
     task: asyncio.Task[None] | None = None
@@ -137,7 +153,11 @@ class ProgressRegistry:
         self._bump(entry)
 
     def finish(
-        self, cid: str, *, response: FinalResponse | None = None, error: str | None = None
+        self,
+        cid: str,
+        *,
+        response: FinalResponse | ExpertAnswer | None = None,
+        error: str | None = None,
     ) -> None:
         entry = self._entries.get(cid)
         if entry is None:

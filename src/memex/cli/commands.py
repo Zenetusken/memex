@@ -29,6 +29,7 @@ from rich.table import Table
 
 from memex.agents.answering import FinalResponse, answer_query
 from memex.agents.chat import answer_turn
+from memex.agents.expert import ExpertAnswer
 from memex.cli.bootstrap import bootstrap
 from memex.core.conversation_store import ConversationStore
 from memex.enrich.pipeline import enrich_document
@@ -185,6 +186,17 @@ def _render_chat_response(response: FinalResponse) -> str:
     if response.wikilinks:
         lines.append(f"  sources: {', '.join(response.wikilinks)}")
     return "\n".join(line for line in lines if line)
+
+
+def _render_expert_answer(answer: ExpertAnswer) -> str:
+    """Console rendering of an ungrounded expert answer (Surface B): the reasoned prose,
+    the evidence it drew on, and the standing provenance caveat (model knowledge, unverified)."""
+    lines = [answer.answer.strip(), ""]
+    if answer.evidence:
+        titles = ", ".join(dict.fromkeys(e.title for e in answer.evidence))
+        lines.append(f"evidence consulted: {titles}")
+    lines.append(f"⚠ {answer.provenance_note}")
+    return "\n".join(lines)
 
 
 async def run_chat_repl(
@@ -597,6 +609,58 @@ def register(app: typer.Typer) -> None:
             )
 
         _print(asyncio.run(_run()))
+
+    @app.command()
+    def expert(
+        question: str = _Argument(..., help="An analytical / advisory question to reason about."),
+        doc: list[str] = _Option(  # noqa: B008  # typer Option default sentinel
+            [], "--doc", help="Limit the consulted evidence to this document id (repeatable)."
+        ),
+        scope_set: str = _Option(
+            "", "--scope-set", help="Limit the consulted evidence to a saved scope set by name."
+        ),
+    ) -> None:
+        """Ungrounded EXPERT analysis (Surface B, ADR-0013) — reasoning, NOT a vault lookup.
+
+        Answers an analytical / advisory / synthesis question from the model's own
+        knowledge, reasoned OVER evidence retrieved from your vault. This INVERTS the
+        grounding contract: unlike `ask`, it MAY go beyond your documents and is NOT
+        verified — every answer is labelled as model knowledge to check. Disabled unless
+        `MEMEX_AGENTS__EXPERT_MODE_ENABLED=true` (or `agents.expert_mode_enabled` in config).
+        """
+
+        async def _run() -> str:
+            bootstrap()
+            from memex.agents.expert import expert_answer
+            from memex.core.config import get_settings
+
+            if not get_settings().agents.expert_mode_enabled:
+                err.print(
+                    "[yellow]Expert mode is disabled.[/yellow] It is an UNGROUNDED reasoning "
+                    "surface (ADR-0013) that can go beyond your vault. Enable it with "
+                    "MEMEX_AGENTS__EXPERT_MODE_ENABLED=true (or agents.expert_mode_enabled in "
+                    "config.toml)."
+                )
+                raise typer.Exit(code=2)
+
+            scope_ids = list(doc)
+            if scope_set.strip():
+                from memex.core.scope_sets import get_scope_set, list_scope_sets
+
+                vault_path = get_settings().vault_path
+                found = await get_scope_set(vault_path, scope_set)
+                if found is None:
+                    available = [s.name for s in await list_scope_sets(vault_path)]
+                    hint = ", ".join(available) if available else "(none saved yet)"
+                    err.print(f"[red]No scope set named {scope_set!r}.[/red] Available: {hint}")
+                    raise typer.Exit(code=2)
+                scope_ids.extend(found.doc_ids)
+            merged = list(dict.fromkeys(scope_ids))
+
+            answer = await expert_answer(question, scope_doc_ids=merged or None)
+            return _render_expert_answer(answer)
+
+        console.print(asyncio.run(_run()))
 
     @app.command(name="enrich")
     def enrich_cmd(doc_id: str) -> None:

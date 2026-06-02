@@ -1,10 +1,10 @@
 # ADR-0013: An Ungrounded Reasoning "Expert" Mode (Inverts the Grounding Contract)
 
-- **Status**: Proposed
-- **Date**: 2026-05-29
+- **Status**: Accepted (v1 shipped 2026-06-01)
+- **Date**: 2026-05-29 (proposed) · 2026-06-01 (accepted, v1 shipped)
 - **Deciders**: Memex core team
 
-> **Proposed, not built.** This ADR records a decision boundary *before* implementation so the contract inversion can be reviewed up front. The surface does not exist yet; the ROADMAP carries it as the headline next item.
+> **Shipped 2026-06-01.** v1 is live behind `AgentsSettings.expert_mode_enabled` (default OFF) on CLI (`memex expert`) + webui (`/expert`). The realized contract boundary + the load-bearing implementation finding are recorded in [§Realized v1](#realized-v1-2026-06-01) below; the proposal text above it is preserved as the original decision record.
 
 - **Tags**: agents, models, reasoning, ux, architecture, contract-inversion
 
@@ -32,6 +32,19 @@ But a class of questions goes **beyond a vault lookup** — analytical, synthesi
 Add a **new ungrounded "expert / analysis" surface**, separate from `/ask` (its own CLI/MCP/webui entry, the way `summarize` is separate), where a **reasoning model answers from domain expertise + chain-of-thought**. It is labelled "model knowledge, not your vault" and kept **off** the gated `/ask` path — `/ask`'s grounded HARD gate is unchanged, and this surface is **not** judged by `refusal_cf`/no-hallucination (a different, non-refusal eval discipline applies).
 
 The defensible **v1 is reasoning OVER retrieved evidence**: relax literal-grounding to "supported-by-the-evidence-set" (not verbatim-cited), still anchored to retrieved context, so the inversion is bounded rather than free-form. It **reuses the summarizer swap-in seam** (the model is swapped in at call-time via `inference_override`) and inherits the reasoning-model 12 GB self-quantize prerequisite.
+
+## Realized v1 (2026-06-01)
+
+What shipped, and where it diverged from the proposal:
+
+- **Surfaces = CLI `memex expert` + webui `/expert` only — NOT MCP.** MCP is reserved for a separate upstream purpose (a flagship-model fallback *into* Memex), so the new local-reasoning surface stays off it (the same scoping as the grounded chat, Surface A). Off by default behind `AgentsSettings.expert_mode_enabled`; the webui nav link is hidden until enabled (no dead link).
+- **The engine is `models/client.py::complete_reasoning`** — a free-text call that passes **no `response_format`** (so there is no guided-JSON grammar to suppress reasoning) and sets `enable_thinking` via `chat_template_kwargs`. It is deliberately a *separate* function from `complete_structured`, which stays the SOLE emitter of `response_format` and never sets `chat_template_kwargs` — so "is this call grounded?" is answerable by *which function* a call uses. The grounded `/ask` + chat graph never imports it.
+- **No swap-in subprocess in v1.** Because the default orchestrator (ADR-0015) is *itself* a hybrid-reasoning model, the expert call hits the **live daemon** directly (`models.reasoner = None` → the orchestrator id). The summarizer-style swap-in seam remains the documented hook for a *distinct* specialist (e.g. Foundation-Sec, gated on its self-quantize) via `MEMEX_MODELS__REASONER`, unused in v1.
+- **The pipeline is retrieve (hybrid) → rerank → reason** (`agents/expert.py::expert_answer`). The reranked chunks are shown as **Evidence** (context, not grounding cites); the prompt (`prompts/expert_answer/v1`) instructs the model to prefer the evidence for facts about the user's documents and to **say so when it reasons beyond it**. It **never calls `verify` / `assess_relevance`** — there is no grounding gate here, by construction.
+- **Load-bearing finding — `enable_thinking` defaults to FALSE.** Verified live on the 4B via vLLM: `enable_thinking=true` emits a **verbose, UNTAGGED "Thinking Process" scratchpad** (no `<think>` tag on this checkpoint) that *consumes the entire token budget before reaching the answer* and can't be cleanly split from it — poor for a reader-facing surface. v1 therefore reasons with `enable_thinking=false` + the reasoning-eliciting prompt, which yields clean analytical prose that is honest about evidence limits. The dual-decode kwarg **and** a defensive `split_think` (strips a `<think>…</think>` trace if one ever appears) are plumbed through as an opt-in for a future model / a vLLM `--reasoning-parser` that emits a *separable* trace.
+- **Provenance is stamped on every answer** (`EXPERT_PROVENANCE_NOTE`, a deterministic constant — never model-generated): CLI prints it as a `⚠` caveat; the webui renders an amber "ungrounded" banner above the form *and* the caveat below the answer (colour **and** the explicit label, WCAG 1.4.1; the amber reuses the established `.ans-flash-refused` caution tone).
+- **The grounded surfaces are byte-untouched** — the change is purely additive (a new module, a new prompt, two off-by-default config flags, two surfaces); `/ask`, chat, summarize, MCP, and their HARD gates are unchanged.
+- **Eval discipline.** The *structural* contract invariants — provenance always present, evidence surfaced, no fabricated evidence ids, non-empty answer, never invoking the grounding gate — are pinned by `tests/integration/test_expert_agent.py` (+ the webui/CLI tests). A *qualitative* analytical-quality eval (an LLM-judge or human-rated corpus) is a deliberate **follow-up**, not a v1 gate: the surface makes **no** `refusal_cf`/no-hallucination promise by design, so the grounded HARD-gate eval is inapplicable, and judging "good analysis" needs its own rubric.
 
 ## Consequences
 
@@ -63,7 +76,8 @@ Underweights a contract inversion of the project's load-bearing invariant. Recor
 
 ## Revisit When
 
-- Implementation lands → move Status to **Accepted**, record the realized contract boundary + the eval discipline, and add the VISION carve-out.
+- ~~Implementation lands → move Status to **Accepted**, record the realized contract boundary + the eval discipline, and add the VISION carve-out.~~ **DONE 2026-06-01** — see [§Realized v1](#realized-v1-2026-06-01). The VISION carve-out (the grounding/no-hallucination principle now has an explicit *off-the-gated-path, labelled-ungrounded* exception) is noted on the surface; the qualitative eval discipline remains a documented follow-up.
+- A **qualitative analytical-quality eval** is designed (LLM-judge or human-rated rubric) → wire it as `eval-expert` (the structural invariants are already test-pinned).
 - A reasoning model with a clean 12 GB-fitting build appears (unblocks the security variant). **(Partially fired 2026-06-01 — the now-default Qwen3.5-4B is a 12 GB-fitting hybrid-reasoning model usable as the general-purpose expert model with `enable_thinking` ON; the security-specialised variant is still gated on a self-quantize. See ADR-0015.)**
 - The relaxed-grounding boundary proves too loose (a user mistakes expert output for grounded) → tighten the labelling / separation.
 

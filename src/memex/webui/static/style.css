@@ -1179,3 +1179,96 @@ html { scroll-behavior: smooth; }
 .chat-rail-item:hover { background: rgb(39 39 42); color: rgb(244 244 245); }
 .chat-rail-active { background: rgb(39 39 42); color: rgb(244 244 245); }
 .chat-rail-empty { font-size: 0.8rem; color: rgb(161 161 170); }
+
+/* Ungrounded expert mode (Surface B, ADR-0013). Reuses .ans-* for the answer
+   zones; the caution amber matches .ans-flash-refused so "ungrounded" reads as a
+   deliberate, consistent signal (colour + the explicit label, WCAG 1.4.1). */
+.expert-layout { max-width: 48rem; margin: 0 auto; }
+.expert-head { margin-bottom: 1rem; }
+.expert-head h1 { margin-bottom: 0.25rem; }
+.expert-banner {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 1rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: rgb(252 211 77);                   /* amber-300 — caution, readable on the dark panel */
+  background: rgb(69 26 3 / 0.30);          /* amber-950/30, as .ans-flash-refused */
+  border: 1px solid rgb(146 64 14);         /* amber-800 */
+  border-radius: 0.375rem;
+}
+.expert-banner a { color: rgb(96 165 250); }   /* blue-400 — the action accent for the cross-links */
+.expert-banner-tag {
+  flex: none;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.625rem;
+  font-weight: 600;
+  padding: 0.1rem 0.4rem;
+  color: rgb(253 230 138);                  /* amber-200 */
+  border: 1px solid rgb(180 83 9);          /* amber-700 */
+  border-radius: 0.25rem;
+}
+.expert-disabled {
+  padding: 1rem 1.1rem;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: rgb(212 212 216);                  /* zinc-300 */
+  background: rgb(24 24 27);                /* zinc-900 */
+  border: 1px solid rgb(63 63 70);          /* zinc-700 */
+  border-radius: 0.5rem;
+}
+.expert-disabled p + p { margin-top: 0.6rem; }
+.expert-disabled code { color: rgb(244 244 245); }
+.expert-composer { display: flex; flex-direction: column; gap: 0.6rem; }
+.expert-input {
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  background: rgb(24 24 27);                /* zinc-900 */
+  border: 1px solid rgb(63 63 70);          /* zinc-700 */
+  border-radius: 0.375rem;
+  color: rgb(244 244 245);
+  resize: vertical;
+}
+.expert-input:focus { outline: none; border-color: rgb(37 99 235); }   /* blue-600 */
+.expert-input::placeholder { color: rgb(113 113 122); }
+.expert-actions { display: flex; align-items: center; gap: 1rem; }
+.expert-send {
+  padding: 0.45rem 1rem;
+  background: rgb(37 99 235);               /* blue-600 — the single action accent */
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: rgb(244 244 245);
+}
+.expert-send:hover { background: rgb(59 130 246); }   /* blue-500 */
+.expert-result { margin-top: 1.25rem; }
+.expert-reasoning { margin: 0.75rem 0; }
+.expert-reasoning-toggle { cursor: pointer; font-size: 0.8rem; color: rgb(161 161 170); }   /* zinc-400 */
+.expert-reasoning-toggle:hover { color: rgb(212 212 216); }
+.expert-reasoning-body {
+  margin-top: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  color: rgb(161 161 170);                  /* zinc-400 — secondary, AA */
+  background: rgb(24 24 27);
+  border-radius: 0.375rem;
+}
+.expert-evidence-list { list-style: none; padding: 0; margin: 0.25rem 0 0; }
+.expert-evidence { padding: 0.15rem 0; font-size: 0.85rem; }
+.expert-evidence-doc { color: rgb(212 212 216); }   /* zinc-300 */
+.expert-evidence-doc:hover { color: rgb(96 165 250); }   /* blue-400 */
+.expert-provenance {
+  margin-top: 1rem;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: rgb(252 211 77);                   /* amber-300 — the standing caveat */
+  background: rgb(69 26 3 / 0.30);
+  border-left: 2px solid rgb(146 64 14);    /* amber-800 */
+  border-radius: 0.25rem;
+}

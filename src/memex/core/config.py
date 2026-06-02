@@ -133,6 +133,14 @@ class ModelSettings(BaseModel):
     # `gaunernst/gemma-3-12b-it-int4-awq`. `MEMEX_MODELS__SUMMARIZER=...`.
     summarizer: str | None = None
     summarizer_serve: SummarizerServeSettings = Field(default_factory=SummarizerServeSettings)
+    # OPTIONAL reasoner for the UNGROUNDED expert surface (Surface B, ADR-0013). None
+    # (default) = the live orchestrator daemon answers in its thinking mode — NO subprocess,
+    # since the 4B IS a hybrid-reasoning model (verified 2026-06-01: a free-text call with
+    # `enable_thinking=true` reasons inline, no `<think>` tag on this checkpoint via vLLM).
+    # Set to a distinct specialist (e.g. a Foundation-Sec reasoning build) to route expert
+    # calls through the summarizer-style swap-in lifecycle instead. This NEVER touches the
+    # grounded /ask or chat path. `MEMEX_MODELS__REASONER=...`.
+    reasoner: str | None = None
     embedder: str = "google/embeddinggemma-300m"
     reranker: str = "BAAI/bge-reranker-v2-m3"
     # P3.3 chart-OCR model — default `google/deplot` per Session 1
@@ -638,6 +646,14 @@ class AgentsSettings(BaseModel):
     enrich_ner_threshold: float = Field(default=0.05, ge=0.0, le=1.0)
     enrich_ner_labels: Literal["generic", "domain", "union"] = "union"
     enrich_ner_max_seq_length: int = Field(default=512, ge=64)
+
+    # UNGROUNDED reasoning EXPERT mode (Surface B, ADR-0013) — DEFAULT OFF. When true, the
+    # CLI `memex expert` + webui `/expert` surfaces are live: a reasoning pass that answers
+    # analytical/advisory questions from MODEL KNOWLEDGE reasoned OVER retrieved evidence,
+    # INVERTING the grounded no-hallucination contract (so it is fenced behind this flag and
+    # OFF the /ask + chat gated path by construction). It NEVER alters the grounded surfaces.
+    # `MEMEX_AGENTS__EXPERT_MODE_ENABLED=true`. See [[reasoning-expert-mode-scope-2026-05-29]].
+    expert_mode_enabled: bool = False
 
 
 class MemexSettings(BaseSettings):

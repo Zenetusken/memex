@@ -2110,3 +2110,121 @@ async def test_chat_turn_zero_persists_scope_pin(
     await store.close()
     assert c is not None
     assert c.scope_doc_ids == ["d1", "d2"]  # the turn-0 selection persisted as the pin
+
+
+# ----- Ungrounded expert surface (Surface B, ADR-0013) -----
+
+
+@pytest.fixture
+def expert_settings(tmp_vault: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[MemexSettings]:
+    monkeypatch.setenv("MEMEX_VAULT_PATH", str(tmp_vault))
+    monkeypatch.setenv("MEMEX_OBSERVABILITY__LANGFUSE_ENABLED", "false")
+    monkeypatch.setenv("MEMEX_AGENTS__EXPERT_MODE_ENABLED", "true")
+    s = MemexSettings()  # type: ignore[call-arg]
+    set_settings(s)
+    yield s
+    set_settings(None)
+
+
+@pytest.fixture
+def expert_client(expert_settings: MemexSettings) -> TestClient:
+    return TestClient(create_app())
+
+
+@pytest.fixture
+def fake_expert(monkeypatch: pytest.MonkeyPatch) -> None:
+    from memex.agents.expert import EXPERT_PROVENANCE_NOTE, ExpertAnswer, ExpertEvidence
+
+    async def _fake(question: str, **kw: Any) -> ExpertAnswer:
+        on_phase = kw.get("on_phase")
+        if callable(on_phase):
+            on_phase("Retrieving evidence")
+            on_phase("Reasoning")
+        return ExpertAnswer(
+            question=question,
+            answer="RSTP converges faster than STP because of its handshake.",
+            evidence=[
+                ExpertEvidence(
+                    chunk_id="d1#a", document_id="d1", title="RSTP Guide",
+                    section="Convergence", snippet="…",
+                )
+            ],
+            provenance_note=EXPERT_PROVENANCE_NOTE,
+            model="m",
+            tokens=99,
+            correlation_id=kw.get("correlation_id") or "cid",
+        )
+
+    monkeypatch.setattr("memex.webui.app.expert_answer", _fake)
+
+
+async def _expert_to_completion(app: Any, question: str) -> str:
+    """POST /expert, then long-poll /expert/status until the answer fragment swaps in."""
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.post("/expert", data={"question": question})
+        assert r.status_code == 200, r.text
+        text = r.text
+        m = re.search(r"/expert/status\?cid=([^&\"]+)&(?:amp;)?v=(\d+)", text)
+        assert m is not None, f"POST /expert did not return a progress fragment: {text[:300]}"
+        cid, v = m.group(1), int(m.group(2))
+        for _ in range(100):
+            await asyncio.sleep(0.01)
+            r = await ac.get(f"/expert/status?cid={cid}&v={v}")
+            assert r.status_code == 200
+            text = r.text
+            if 'class="progress"' not in text:
+                return text
+            mv = re.search(r"&(?:amp;)?v=(\d+)", text)
+            if mv is not None:
+                v = int(mv.group(1))
+        raise AssertionError(f"expert did not complete after polling: {text[:300]}")
+
+
+def test_nav_hides_expert_when_disabled(client: TestClient) -> None:
+    r = client.get("/")
+    assert r.status_code == 200
+    assert 'href="/expert"' not in r.text  # default off → no dead nav link
+
+
+def test_nav_shows_expert_when_enabled(expert_client: TestClient) -> None:
+    r = expert_client.get("/")
+    assert r.status_code == 200
+    assert 'href="/expert"' in r.text
+
+
+def test_expert_home_disabled_explains_how_to_enable(client: TestClient) -> None:
+    r = client.get("/expert")
+    assert r.status_code == 200
+    assert "Disabled" in r.text
+    assert "MEMEX_AGENTS__EXPERT_MODE_ENABLED" in r.text
+    assert 'name="question"' not in r.text  # no form while disabled
+
+
+def test_expert_home_renders_form_and_banner(expert_client: TestClient) -> None:
+    r = expert_client.get("/expert")
+    assert r.status_code == 200
+    assert 'name="question"' in r.text
+    assert 'hx-post="/expert"' in r.text
+    assert "ungrounded" in r.text  # the contract-inversion banner
+
+
+def test_expert_disabled_post_refuses(client: TestClient) -> None:
+    r = client.post("/expert", data={"question": "anything"})
+    assert r.status_code == 200
+    assert "disabled" in r.text.lower()
+
+
+def test_expert_post_empty_question_flashes(expert_client: TestClient) -> None:
+    r = expert_client.post("/expert", data={"question": "   "})
+    assert r.status_code == 200
+    assert "analytical question" in r.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_expert_post_then_answer(expert_client: TestClient, fake_expert: None) -> None:
+    text = await _expert_to_completion(expert_client.app, "Compare STP and RSTP.")
+    assert "RSTP converges faster than STP" in text
+    assert "Evidence consulted" in text
+    assert "RSTP Guide" in text
+    assert "ungrounded" in text.lower()  # the standing provenance caveat
+    assert "correlation_id" in text

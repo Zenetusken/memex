@@ -57,6 +57,7 @@ from jinja2 import Environment, FileSystemLoader
 from memex.agents.answering import FinalResponse, answer_query
 from memex.agents.chat import answer_turn
 from memex.agents.document_summarizer import SummaryDetail, summarize_document
+from memex.agents.expert import ExpertAnswer, expert_answer
 from memex.core.config import get_settings
 from memex.core.conversation_store import ConversationStore
 from memex.core.errors import (
@@ -110,9 +111,11 @@ from memex.vault.store import (
     write_document,
 )
 from memex.webui.progress import (
+    EXPERT_PHASES,
     PHASES,
     SUMMARY_PHASES,
     ProgressRegistry,
+    expert_phase_index,
     phase_for,
     summary_phase_view,
 )
@@ -457,6 +460,9 @@ def create_app() -> FastAPI:
     # template global for the header chip — every page can show it without each
     # route threading it through its context.
     env.globals["active_mode_label"] = _active_profile().label  # type: ignore[reportUnknownMemberType]  # reason: jinja2 leaves Environment.globals unannotated
+    # The ungrounded expert surface (Surface B, ADR-0013) is off by default; only
+    # surface its nav link when it's enabled, so a disabled deployment shows no dead link.
+    env.globals["expert_enabled"] = get_settings().agents.expert_mode_enabled  # type: ignore[reportUnknownMemberType]  # reason: jinja2 leaves Environment.globals unannotated
     templates = Jinja2Templates(env=env)
     app = FastAPI(title="Memex", docs_url=None, redoc_url=None)
 
@@ -675,7 +681,7 @@ def create_app() -> FastAPI:
             )
         # Done → render the final answer exactly like the old synchronous route.
         progress.evict(cid)
-        if entry.error is not None or entry.response is None:
+        if entry.error is not None or not isinstance(entry.response, FinalResponse):
             return templates.TemplateResponse(
                 request,
                 "_answer.html",
@@ -955,7 +961,7 @@ def create_app() -> FastAPI:
                 },
             )
         progress.evict(cid)
-        if entry.error is not None or entry.response is None:
+        if entry.error is not None or not isinstance(entry.response, FinalResponse):
             return templates.TemplateResponse(
                 request,
                 "_summary.html",
@@ -1143,7 +1149,7 @@ def create_app() -> FastAPI:
                 },
             )
         progress.evict(cid)
-        if entry.error is not None or entry.response is None:
+        if entry.error is not None or not isinstance(entry.response, FinalResponse):
             return templates.TemplateResponse(
                 request,
                 "_chat_assistant.html",
@@ -1161,6 +1167,105 @@ def create_app() -> FastAPI:
         finally:
             await store.close()
         return RedirectResponse("/chat", status_code=303)
+
+    # ----- Ungrounded reasoning EXPERT mode (Surface B, ADR-0013) -----
+
+    async def _run_expert(cid: str, question: str, scope_doc_ids: list[str]) -> None:
+        """Background runner: drive the ungrounded expert reasoning pass, streaming phase
+        updates into the registry. Top of a fire-and-forget task — never crash silently."""
+        from memex.core.errors import MemexError
+
+        try:
+            answer = await expert_answer(
+                question,
+                scope_doc_ids=scope_doc_ids or None,
+                correlation_id=cid,
+                on_phase=lambda p: progress.set_phase(cid, p),
+            )
+            progress.finish(cid, response=answer)
+        except MemexError as e:
+            logger.warning("expert.failed", error_type=type(e).__name__, error=str(e)[:200])
+            progress.finish(cid, error=f"Couldn't reason: {type(e).__name__}. {str(e)[:160]}")
+        except Exception as e:
+            logger.error("expert.crashed", error_type=type(e).__name__, error=str(e)[:200])
+            progress.finish(cid, error="An unexpected error occurred while reasoning.")
+
+    @app.get("/expert", response_class=HTMLResponse)
+    async def expert_home(request: Request) -> HTMLResponse:
+        """The expert surface: a question form + the ungrounded-mode banner. When the
+        feature is disabled, the template explains how to enable it instead of a form."""
+        return templates.TemplateResponse(
+            request,
+            "expert.html",
+            {"enabled": get_settings().agents.expert_mode_enabled, "question": ""},
+        )
+
+    @app.post("/expert", response_class=HTMLResponse)
+    async def expert_run(request: Request, question: str = Form("")) -> HTMLResponse:
+        """Start the ungrounded reasoning pass in a background task and IMMEDIATELY return
+        the `_progress.html` fragment, which long-polls `/expert/status` until the answer
+        swaps in. Refuses (a flash) when the feature is disabled or the question is empty."""
+        if not get_settings().agents.expert_mode_enabled:
+            return templates.TemplateResponse(
+                request,
+                "_expert.html",
+                {
+                    "answer": None,
+                    "error": "Expert mode is disabled (set MEMEX_AGENTS__EXPERT_MODE_ENABLED=true).",
+                },
+            )
+        q = question.strip()
+        if not q:
+            return templates.TemplateResponse(
+                request,
+                "_expert.html",
+                {"answer": None, "error": "Ask an analytical question first."},
+            )
+        cid = str(ulid.ULID())
+        progress.new(cid, scope_doc_ids=[], scope_source="named")
+        task = asyncio.create_task(_run_expert(cid, q, []))
+        progress.attach_task(cid, task)
+        return templates.TemplateResponse(
+            request,
+            "_progress.html",
+            {
+                "poll_url": f"/expert/status?cid={cid}&v=0",
+                "phases": EXPERT_PHASES,
+                "active_index": 0,
+                "elapsed": 0,
+                "detail": "",
+            },
+        )
+
+    @app.get("/expert/status", response_class=HTMLResponse)
+    async def expert_status(request: Request, cid: str = "", v: int = 0) -> HTMLResponse:
+        """Long-poll the in-flight reasoning pass: render `_progress.html` until the run
+        finishes (or a keepalive), then `_expert.html` (the reasoned answer + provenance).
+        Always HTTP 200; done/expired carry no poll trigger so the chain stops itself."""
+        entry = await progress.wait_for_change(cid, v)
+        if entry is None:
+            return templates.TemplateResponse(request, "_progress_expired.html", {})
+        if not entry.done:
+            return templates.TemplateResponse(
+                request,
+                "_progress.html",
+                {
+                    "poll_url": f"/expert/status?cid={cid}&v={entry.version}",
+                    "phases": EXPERT_PHASES,
+                    "active_index": expert_phase_index(entry.phase),
+                    "elapsed": entry.phase_elapsed_s(),
+                    "detail": "",
+                },
+            )
+        progress.evict(cid)
+        answer = entry.response
+        if entry.error is not None or not isinstance(answer, ExpertAnswer):
+            return templates.TemplateResponse(
+                request,
+                "_expert.html",
+                {"answer": None, "error": entry.error or "Reasoning produced no result."},
+            )
+        return templates.TemplateResponse(request, "_expert.html", {"answer": answer, "error": None})
 
     @app.get("/documents/{doc_id}/source")
     async def document_source(doc_id: str) -> FileResponse:
