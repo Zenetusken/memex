@@ -60,3 +60,6 @@ tests/eval-results/
 
 # Defensive — not currently used but cheap to ignore
 node_modules/
+
+# Claude Code transient runtime lock (the workflows/ scripts stay tracked)
+.claude/scheduled_tasks.lock
