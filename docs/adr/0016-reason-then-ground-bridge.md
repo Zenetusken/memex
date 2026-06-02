@@ -1,0 +1,99 @@
+# ADR-0016: The Reason-Then-Ground Bridge (Joins the Ungrounded Expert Surface to the Grounded Gate)
+
+- **Status**: Accepted (v1 shipped 2026-06-02)
+- **Date**: 2026-06-02
+- **Deciders**: Memex core team
+- **Tags**: agents, reasoning, grounding, ux, architecture, contract
+
+## Context
+
+ADR-0013 gave Memex two answer contracts at opposite ends of a **trust ↔ reach** trade-off. **Surface A** (grounded `/ask` + chat) verifies every shipped claim against a retrieved chunk and **refuses** what the vault can't support (`refusal_cf=1.0`, 0 hallucinations) — maximal trust, bounded reach. **Surface B** (ungrounded expert mode) reasons from the model's own knowledge over retrieved evidence, labelled "model knowledge, not your vault," and **never refuses** — maximal reach, no trust floor.
+
+A large class of questions wants **both**: the *reach* of reasoning **and** the *trust* of grounding, on the same question. Expert mode produces a fluent analysis, but the small default 4B (ADR-0015) is confidently wrong on specifics often enough that "treat facts as claims to verify" is a real caveat (live-demonstrated on a Kerberoasting answer that confidently conflated two attacks). `/ask` refuses rather than reason. Neither surface serves *"reason about this, but tell me which parts are actually backed by my vault."*
+
+The question this ADR settles: **how do we combine reasoning with grounding WITHOUT relaxing the grounded gate that makes Memex trustworthy?**
+
+## Decision Drivers
+
+- **Do NOT weaken the grounded gate.** Anything presented as *cited* must pass the IDENTICAL `verify_grounding/v2` check `/ask` uses — same prompt, same schema, same evidence pool.
+- **Honesty of provenance.** The reasoned analysis stays labelled ungrounded; only the verified subset is shown as cited; the two must be unmistakable (ADR-0013 R3).
+- **Reuse the UNCHANGED machinery.** Table-RAG (a synthetic chunk fed through the existing cite path, ADR-0014) and the summarizer (free MAP → per-point `verify_grounding`, ADR-0008) are the precedents; no new grounding path.
+- **HARD-gate neutrality.** The `/ask` `answer_query` graph must be byte-untouched — the bridge is a sibling, never a branch in it.
+- **Consent + separation.** Combining the surfaces must never let a user mistake a reasoned analysis for a grounded answer, and must never silently leave the grounded contract on their behalf.
+
+## Considered Options
+
+1. **Relax `/ask` to "reason, then present"** — rejected: contaminates the trusted path (the exact thing ADR-0013 forbids).
+2. **A flag on expert mode (`--ground`)** — viable; reuses all expert plumbing but is a less visually-distinct surface.
+3. **A DEDICATED surface that reasons, then grounds each reasoned claim through the UNCHANGED gate** (chosen).
+
+## Decision
+
+We chose **Option 3**: a dedicated **reason-then-ground bridge** — `memex bridge` + the `/bridge` "Analysis" tab (CLI + WebUI, **NOT MCP**; gated behind `agents.expert_mode_enabled`, the same fence as expert mode). The pipeline:
+
+1. **Stage 1 — reason (ungrounded):** retrieve → rerank → one free-text reasoning pass over the evidence (reuses the shared `agents/expert.py::reason_over_evidence` core, extracted from `expert_answer`).
+2. **Stage 1.5 — extract:** a structured `complete_structured` call decomposes the free-text analysis into discrete `CitedClaim`s (`prompt_tag="extract_claims@v1"`).
+3. **Stage 2 — ground (deterministic):** `repair_claim_chunk_ids` → a deterministic drop of any claim whose id doesn't resolve to a reranked chunk → the **UNCHANGED** `verify_grounding/v2` gate, via a NEW shared `agents/grounding.py::ground_claims` (hoisted verbatim from the summarizer's per-point grounding, so the summarizer + bridge share ONE primitive and the `/ask` `verify` node is not touched).
+
+Only the survivors are presented as **cited** (`/ask`-grade by construction); everything else stays inside the labelled ungrounded analysis. Output is a `BridgeAnswer` (analysis + grounded-claims subset + sources + an ungrounded provenance banner).
+
+We also add the **consented A→B escalation**: from a Surface-A `/ask` **refusal**, the user is offered an **explicit, never-automatic** path to re-run the same question through the bridge over the **same scope** (a webui "Reason over this instead →" affordance / a CLI stderr hint naming `memex bridge`).
+
+Three load-bearing v1 contract decisions:
+
+- **Verify-only, NOT `assess_relevance`.** `assess_relevance` judges whole-answer *responsiveness*; the bridge's grounded subset is "which reasoned claims are vault-supported," not "a direct answer," so running it would over-refuse a legitimately-grounded set of supporting claims. (Reserved for a future variant where the bridge output IS presented as the direct answer to a Surface-A question.)
+- **A two-layer faithfulness guard.** `verify_grounding/v2` is structurally blind to "the analysis never actually made this claim" — a fabricated-but-coincidentally-grounded claim could pass. So the extractor prompt is an *extractor, not a generator* ("emit a claim only if the analysis explicitly asserts it AND it cites a listed chunk"), backed by a **deterministic** drop of any claim whose `source_chunk_id` doesn't resolve to a reranked chunk.
+- **Zero-grounded ≠ refuse.** The analysis is useful on its own; a zero-grounded run returns the labelled analysis with an empty grounded subset (no citation chrome) — the bridge has no refuse state.
+
+## Consequences
+
+### Positive
+
+- Delivers reasoning *reach* with a real *trust floor* without touching `/ask`: the grounded subset passed the same gate as a normal answer.
+- No new grounding path — `verify_grounding/v2` is reused verbatim; the summarizer + bridge now share one `ground_claims` primitive; the `/ask` graph is byte-identical (pinned by a structural isolation test).
+- The risky half (a small model's imprecise synthesis) is precisely the half the gate refuses to vouch for — live-demonstrated: an OSPF analysis grounded 8/8 verifiable claims whole-vault, 0/0 when scoped to a doc that excludes OSPF.
+
+### Negative / Trade-offs
+
+- A **third** answer surface to keep visually + structurally distinct (mitigated: it reuses expert's ungrounded banner + the `/ask` claim chrome; amber, never the grounded-blue).
+- The grounded output is **capped at 8 claims** (it reuses `/ask`'s `DraftAnswer` schema, whose bounds are xgrammar-JSON-close-calibrated) — a richer analysis can surface at most 8 grounded claims in v1.
+- **No numeric-aggregate backstop in `ground_claims`** (that deterministic demotion lives in the `/ask` `verify` *node*, not the shared helper) → bare computed-table-figure claims are out of v1 scope; the extractor is told to avoid them (the summarizer carries the same gap).
+- The ungrounded *analysis* half still inherits the small-model imprecision risk — bounded only by the labelling, not the gate.
+
+### Neutral
+
+- `/ask`, chat, summarize, expert, and their HARD gates are untouched; the change is additive (`agents/grounding.py`, `agents/bridge.py`, one prompt, two surfaces, a `question` field carried on the webui progress entry).
+- MCP is deliberately not a surface (reserved for the upstream flagship-fallback layer, as with chat + expert).
+
+## Alternatives in Detail
+
+### A flag on expert mode (`--ground`)
+
+Reuses all expert plumbing with the least new surface area, and the output is identical. Rejected for v1 because the user chose a dedicated surface: a separate command + tab keeps "reason-then-ground" conceptually distinct from plain ungrounded reasoning, and the dedicated nav makes the trust contract legible. The flag remains a trivial future addition if wanted.
+
+### Include `assess_relevance` (as spec §11 originally drafted)
+
+§11 was written for the *future* escalation variant where the bridge output IS the answer to a Surface-A question — there a whole-answer responsiveness gate is appropriate. For the v1 standalone bridge, the grounded subset is a set of *supporting* claims, not "the answer," so `assess_relevance` frequently returns non-responsive and would refuse a perfectly-grounded subset. Deferred to the escalation-as-presented-answer variant, behind its own flag.
+
+### Automatic A→B escalation on a refusal
+
+Rejected — it violates ADR-0013 R3 (the user must *choose* B; a silent hand-off from a grounded question to ungrounded reasoning is exactly the mistaken-for-grounded failure). The escalation is consented (an explicit click / a typed command), never automatic.
+
+### Widen the extraction schema beyond 8 claims
+
+Rejected — re-opens the xgrammar force-close-mid-emission trap the bounded schemas exist to prevent. The correct way to lift the cap is a MAP loop over the analysis (the summarizer's per-section idiom), not a wider single schema.
+
+## Revisit When
+
+- A genuinely rich analysis regularly **saturates the 8-claim cap** → add MAP-loop extraction (accumulate claims across windowed passes).
+- The **consented-escalation-as-presented-answer** variant is built (bridge output offered as the direct answer to a Surface-A question) → add `assess_relevance` there, behind its own flag + governance.
+- A **numeric-heavy** bridge use emerges (computed-aggregate claims) → wire the `/ask` numeric-grounding backstop into `ground_claims` (it would then also harden the summarizer).
+- The labelling proves too subtle (a user reads the analysis half as grounded) → tighten the separation (mirrors ADR-0013's R3 trigger).
+
+## References
+
+- **Spec:** [`grounded-agentic-chat.md`](../specs/grounded-agentic-chat.md) §11 — the implementation design (the bridge + the consented escalation).
+- [ADR-0013](0013-ungrounded-reasoning-expert-mode.md) — the ungrounded expert surface (Surface B) this bridges to the grounded gate; its R3 (mistaken-for-grounded) guard rail governs the escalation's consent + separation.
+- [ADR-0008](0008-document-summarization.md) — the grounded summarizer whose per-point `verify_grounding` (`_ground_points`) was hoisted into the shared `ground_claims` primitive.
+- [ADR-0014](0014-text-to-sql-robustness-safety.md) / Table-RAG — the synthetic-chunk → unchanged-cite-machinery precedent (the same "no new grounding path" discipline).
+- [ADR-0015](0015-qwen35-4b-unified-orchestrator.md) — the unified 4B whose imprecision-on-specifics motivates a trust floor over its reasoning.

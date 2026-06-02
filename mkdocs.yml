@@ -43,6 +43,16 @@ nav:
       - adr/0004-observability-structlog-langfuse.md
       - adr/0005-ryugraph-replaces-kuzu.md
       - adr/0006-cuda-dispatch-and-dtype.md
+      - adr/0007-co-residence-resource-modes.md
+      - adr/0008-document-summarization.md
+      - adr/0009-remove-free-form-synthesis-baseline.md
+      - adr/0010-batched-reduce-report-mode.md
+      - adr/0011-entity-graph-from-expansion-to-discovery.md
+      - adr/0012-otter-bert-ner-enrich-backend.md
+      - adr/0013-ungrounded-reasoning-expert-mode.md
+      - adr/0014-text-to-sql-robustness-safety.md
+      - adr/0015-qwen35-4b-unified-orchestrator.md
+      - adr/0016-reason-then-ground-bridge.md
 
 markdown_extensions:
   - admonition

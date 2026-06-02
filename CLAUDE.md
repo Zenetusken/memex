@@ -10,7 +10,7 @@ Memex is a local-first, fully agentic document-understanding system. Runs entire
 | Engineering practices (full) | [`docs/GUIDELINES.md`](docs/GUIDELINES.md) |
 | Operational status | [`docs/ROADMAP.md`](docs/ROADMAP.md) |
 | Architectural blueprint | [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) |
-| ADRs (`0001`–`0015`) | [`docs/adr/`](docs/adr/) |
+| ADRs (`0001`–`0016`) | [`docs/adr/`](docs/adr/) |
 | Eval corpus design | [`docs/eval-corpus-plan.md`](docs/eval-corpus-plan.md) |
 | Python source | [`src/memex/`](src/memex/) — see [`src/memex/CLAUDE.md`](src/memex/CLAUDE.md) for backend rules |
 | Web UI | [`src/memex/webui/`](src/memex/webui/) — see [`src/memex/webui/CLAUDE.md`](src/memex/webui/CLAUDE.md) for frontend rules |
@@ -18,7 +18,7 @@ Memex is a local-first, fully agentic document-understanding system. Runs entire
 ## Five principles (from `docs/VISION.md`)
 
 1. **Local-first, by construction** — no remote endpoints; the air-gap test passes.
-2. **Markdown as source of truth** — `vault/.memex/` is regenerable derived state (ADR-0003).
+2. **Markdown as source of truth** — `vault/.memex/` is regenerable derived state (ADR-0003). The canonical `.md` is CONTENT-ONLY: non-re-derivable chart-OCR `[chart-extracted]` blocks live in a manifest sidecar (`ParseStage.chart_extractions`) and re-attach byte-identically at index time (#362).
 3. **Small models, used well** — single 12 GB GPU is the target; discipline beats parameter count.
 4. **Observable at every layer** — one ULID `correlation_id` threads structlog + Langfuse (ADR-0004).
 5. **Composable, not captive** — MCP server + plain Markdown are the public surfaces.
@@ -31,6 +31,7 @@ Memex is a local-first, fully agentic document-understanding system. Runs entire
 - **Configuration is centralized.** `MemexSettings` (`core/config.py`) is the single source. Loaded once at startup from `~/.config/memex/config.toml` + `MEMEX_*` env vars. Validated immediately.
 - **Logs use structlog with bound context.** `logger.bind(node="...").info("event", k=v)`. No `extra={...}`, no f-strings in event names (ADR-0004).
 - **vLLM is the sole inference engine for v1** (ADR-0001). No CPU fallback. The CUDA toolkit and dtype dispatch are settled in ADR-0006. The default 12 GB-tier orchestrator is `cyankiwi/Qwen3.5-4B-AWQ-4bit` (a vLLM *model* swap, ADR-0015; `Qwen/Qwen3-8B-AWQ` is the one-flip kill-switch). A config-only orchestrator swap only reaches vLLM through the `daemon/supervisor.orchestrator_serve_env` bridge — don't hardcode model ids in `serve-vllm.sh`.
+- **The ungrounded surfaces are FENCED and CLI+WebUI-only.** Behind `agents.expert_mode_enabled` (default OFF) live two surfaces that reason from MODEL KNOWLEDGE, OFF the gated `/ask` path: `memex expert` / `/expert` (ungrounded analysis, ADR-0013) and `memex bridge` / `/bridge` "Analysis" (the reason-then-ground bridge, ADR-0016 + spec `docs/specs/grounded-agentic-chat.md` §11 — reason over evidence, then run each extracted claim through the **unchanged** `verify_grounding/v2` gate and present only survivors as cited). A user-CHOSEN (never automatic) A→B escalation lets a `/ask` refusal re-run over the same scope through the bridge. Both are NOT MCP (reserved for a separate flagship-fallback layer); the `/ask` graph + the HARD gates are untouched.
 
 ## When in doubt
 

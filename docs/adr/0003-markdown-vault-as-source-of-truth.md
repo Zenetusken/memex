@@ -34,6 +34,8 @@ The question this ADR settles: **when the Markdown file disagrees with the index
 
 When Markdown and index disagree, the Markdown wins. The index is wrong and gets rebuilt.
 
+> **Refinement (2026-06-02, #362):** "fully regenerable from the Markdown" is precise for everything except one derived-block type — the chart-OCR `[chart-extracted]` blocks are stripped off the now-**content-only** `.md` and cached on the manifest sidecar (`ParseStage.chart_extractions`), re-attached byte-identically at index time. They are NOT re-derivable from the `.md` alone (the source figure is consumed at parse + the OCR is non-deterministic) — they're re-derivable by re-parsing the retained **source**. The "Markdown wins" rule is unchanged: the `.md` is still authoritative for the content a user reads + edits. See "Content-only Markdown" below.
+
 ## Consequences
 
 ### Positive
@@ -83,7 +85,7 @@ Performance optimization at the cost of every other goal. Not seriously consider
 - `vault/.memex/search.sqlite` — FTS5 + relational metadata
 - `vault/.memex/graph.ryu` — entity and citation graph (RyuGraph — see ADR-0005, which superseded Kuzu after upstream archival)
 - `vault/.memex/tables.sqlite` — per-document structured table store for text-to-SQL (Table-RAG Phase 2); rebuilt from each document's GFM tables on index, dropped on `reindex --force`
-- `vault/.memex/manifests/{doc_id}.json` — per-document processing provenance
+- `vault/.memex/manifests/{doc_id}.json` — per-document processing provenance, **including `parse.chart_extractions`** — the chart-OCR `[chart-extracted]` blocks lifted off the content-only `.md` and re-attached at index (the one piece of derived state that is NOT re-derivable from the `.md`; see "Content-only Markdown" below)
 - `vault/.memex/traces/` — Langfuse-compatible trace exports (optional)
 - `vault/.memex/cache/` — content-addressed derived artifacts
 
@@ -99,6 +101,15 @@ Performance optimization at the cost of every other goal. Not seriously consider
 - Wikilinks: `[[document-id]]` and `[[document-id#section]]`
 - Math: `$inline$` and `$$display$$` LaTeX
 - Anything beyond this spec is undefined behavior and not preserved across re-processing
+
+### Content-only Markdown + index-time derived blocks (audit-10 #362, 2026-06-02)
+
+The canonical `vault/documents/{doc_id}.md` is **content-only**: where the parser found a figure/chart it leaves a `<!-- image -->` placeholder, not the chart's transcription. Two kinds of derived block are re-attached to the body **at index time** (so they reach retrieval / embedding / grounding) without polluting the file the user reads:
+
+- **`[table-rows]`** — the GFM-table linearization (ADR-0014 / Table-RAG Phase 1). Fully **re-derivable** from the `.md`'s own GFM tables; recomputed each index, never stored.
+- **`[chart-extracted]`** — chart-OCR markdown. **NOT re-derivable from the `.md`** (the source figure is consumed at parse and the OCR is non-deterministic + cached), so it is persisted on `parse.chart_extractions` in the manifest sidecar and re-attached by `core/text.reattach_chart_extractions` — byte-identical to the historical inline-stitched body, so content-addressed `chunk_id`s stay stable.
+
+This **refines, does not break,** the "derived state regenerable from the vault" promise: the `.md` stays authoritative for the content a user reads + edits; the chart-OCR sidecar is regenerable from the retained **source** (a `--force` re-parse), not from the `.md` alone — the manifest caches it precisely *because* re-deriving it is non-deterministic. The index-time re-attach (and the matching enrich-side re-attach, #394) is the one seam that keeps the chunked/embedded body identical to what the old inline-stitched `.md` produced. (Migrating an existing vault to the content-only form is a GPU-free direct-split — extract the on-disk blocks into the sidecar + write the clean `.md` — never a VLM re-parse, which is non-deterministic.)
 
 ## Revisit When
 

@@ -48,9 +48,12 @@ The full set of ADRs lives under [`adr/`](adr/0001-vllm-as-sole-inference-engine
 - **[ADR-0010](adr/0010-batched-reduce-report-mode.md)** — Multi-paragraph `report` summary mode via a hierarchical reduce (+ granularity tuning, the budget-undercount overflow fix, the cross-paragraph dedup gate)
 - **[ADR-0011](adr/0011-entity-graph-from-expansion-to-discovery.md)** — The entity graph serves discovery (`related_documents` + entity-centric retrieval), not retrieval augmentation (`expand_graph` retired, default-off)
 - **[ADR-0012](adr/0012-otter-bert-ner-enrich-backend.md)** — A BERT span-NER (OTTER) extracts entities at enrich, not the LLM (discovery-graph-only; HARD-gate-neutral)
-- **[ADR-0013](adr/0013-ungrounded-reasoning-expert-mode.md)** — *(Proposed)* An ungrounded reasoning "expert" mode, separate from `/ask` (inverts the grounding contract)
+- **[ADR-0013](adr/0013-ungrounded-reasoning-expert-mode.md)** — *(Accepted, v1 shipped)* An ungrounded reasoning "expert" mode, separate from `/ask` (inverts the grounding contract)
 - **[ADR-0014](adr/0014-text-to-sql-robustness-safety.md)** — Text-to-SQL robustness + safety: keep the independent Python WHERE oracle, reject SQL-stack decomposition
 - **[ADR-0015](adr/0015-qwen35-4b-unified-orchestrator.md)** — Qwen3.5-4B as the unified orchestrator (a vLLM model swap; orchestrator role unified, doc-VLM-role unification attempted + reverted)
+- **[ADR-0016](adr/0016-reason-then-ground-bridge.md)** — The reason-then-ground bridge: reason ungrounded, then verify each reasoned claim through the *unchanged* grounding gate (joins the expert surface to the grounded gate; + the consented A→B escalation from a `/ask` refusal)
+
+Implementation **specs** (the build-level designs the ADRs decide) live under [`specs/`](specs/grounded-agentic-chat.md) — notably `grounded-agentic-chat.md` (Surfaces A/B + the bridge §11) and `expert-eval.md` (the Surface-B honesty eval).
 
 ## Building this site locally
 

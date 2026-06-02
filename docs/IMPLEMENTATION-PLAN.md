@@ -719,6 +719,8 @@ Phases 0–3 are the critical path. Phase 4 runs in parallel with Phase 2/3 beca
 
 The three interfaces (CLI, MCP, web UI) all call the same backend functions: `ingest_file`, `parse_document`, `enrich_document`, `index_document`, `answer_query`, `hybrid_search`. Nothing the UIs do is unique to a UI; they differ in rendering, not in capability.
 
+> **Note (this is a historical blueprint, not a per-feature log).** The answer-path landscape has since grown three surfaces beyond the single grounded `answer_query` shown above — grounded multi-turn chat (Surface A), the fenced ungrounded expert mode (Surface B, [ADR-0013](adr/0013-ungrounded-reasoning-expert-mode.md)), and the **reason-then-ground bridge** that joins them (`memex bridge` + the webui `/bridge` "Analysis" tab, gated on `agents.expert_mode_enabled`; [ADR-0016](adr/0016-reason-then-ground-bridge.md)) — all specified in [`docs/specs/grounded-agentic-chat.md`](specs/grounded-agentic-chat.md). The diagram depicts only the original grounded query path.
+
 ---
 
 ## 5. Open Architectural Questions

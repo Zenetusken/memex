@@ -65,7 +65,7 @@ vault/
     manifest.json                        # processing provenance per file
 ```
 
-The `documents/` tree is the **source of truth**. The `.memex/` sidecar is **derived state** — it can be deleted and rebuilt from the Markdown at any time, on any machine, with no loss. This is the inversion of every cloud knowledge product: the data is yours, the indexes are disposable.
+The `documents/` tree is the **source of truth**. The `.memex/` sidecar is **derived state** — it can be deleted and rebuilt from the vault at any time, on any machine, with no loss (the indexes regenerate from the Markdown; the one class of derived block the content-only `.md` can't reconstruct alone — non-deterministic chart-OCR — is cached in the manifest sidecar and re-derivable by re-parsing the retained source, ADR-0003 #362). This is the inversion of every cloud knowledge product: the data is yours, the indexes are disposable.
 
 ---
 

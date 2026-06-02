@@ -37,6 +37,8 @@ orchestrator's KV cache / context window OR to keeping the reranker on the GPU.
 You cannot max both. The reranker is the load-time-OOM culprit when the
 orchestrator runs at full util.
 
+> **Update (2026-06-02, ADR-0015 follow-on).** The 4B orchestrator swap materially loosened this trade-off for the single-process answering path. A live-rig A/B found co-resident **GPU reranking now FITS** with ~3–4 GB slack and is **~70–90× faster** than CPU (CPU rerank 29.7 s vs GPU 0.3–0.4 s; end-to-end `/ask` 32.6 s → 6.0 s, ~5.4×), **quality-neutral** (byte-identical top-3). So the long-standing "always `RERANKER_DEVICE=cpu`" folklore is now the **fallback, not the default**: for a single-process `ask` / `chat` / `expert` / `bridge` call the **cuda** reranker default is correct; keep cpu (or `full` mode) only for a concurrent 2nd GPU process, heavy desktop graphics, or a long unattended eval sweep. `_verify_vram_fit` only WARNS — it does not force cpu.
+
 Commit `717054e` exposed the two halves of the lever as raw knobs:
 `ModelSettings.{embedder,reranker}_device` (cuda/cpu, app-side) and the
 orchestrator's `MEMEX_VLLM_GPU_FRACTION` / `MEMEX_VLLM_MAX_MODEL_LEN`
@@ -206,7 +208,7 @@ context. A mode may make answering slower or narrower, never unsafe.
   precondition, not transparent.
 - Curated constants are 12 GB-calibrated; other tiers are conservative until the
   vertical VRAM-aware computation lands.
-- `full`'s CPU reranking adds ~20 s/query (a per-query, not per-token, cost).
+- `full`'s CPU reranking adds ~20–30 s/query (a per-query, not per-token, cost). NB this is a property of CHOOSING `full` (which pins the reranker to CPU to free the KV cache for the wide window), NOT of the 4B answering path in general — under the default single-process posture the reranker runs co-resident on the GPU at ~0.3–0.4 s/query (the ADR-0015 follow-on; see the Context update above).
 
 ### Neutral
 

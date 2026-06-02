@@ -204,10 +204,10 @@ On a 12 GB card the orchestrator's context window and the GPU-resident reranker 
 ```sh
 uv run memex mode show              # the active profile + VRAM estimate
 uv run memex mode set fast          # GPU reranker, 6 K context, ~14 s/ask
-uv run memex mode set full          # reranker→CPU, 24 K context, slower rerank
+uv run memex mode set full          # reranker→CPU (fallback for concurrent-GPU / long eval), 24 K context
 ```
 
-`fast` is low-latency top-k RAG; `full` frees the GPU into a ~24 K orchestrator window (the reranker moves to CPU, ~20 s/query). `memex mode set` restarts the daemon-managed orchestrator; set `MEMEX_MODELS__CO_RESIDENCE_MODE` + restart `memex serve web` to also move the retrieval models. The full matrix + the eval numbers are in [`docs/deploy/hardware-tiers.md`](docs/deploy/hardware-tiers.md); the design is [ADR-0007](docs/adr/0007-co-residence-resource-modes.md).
+`fast` is low-latency top-k RAG; `full` frees the GPU into a ~24 K orchestrator window (the reranker moves to CPU, ~20–30 s/query). On the 4B orchestrator the reranker now **co-resides on the GPU by default** for single-process `ask`/`chat`/`expert`/`bridge` (~70–90× faster than CPU, quality-identical, fits with ~3 GB headroom — see [ADR-0007](docs/adr/0007-co-residence-resource-modes.md)); `full` moves it to CPU only when you need the wide window or are sharing the GPU with another process. `memex mode set` restarts the daemon-managed orchestrator; set `MEMEX_MODELS__CO_RESIDENCE_MODE` + restart `memex serve web` to also move the retrieval models. The full matrix + the eval numbers are in [`docs/deploy/hardware-tiers.md`](docs/deploy/hardware-tiers.md); the design is [ADR-0007](docs/adr/0007-co-residence-resource-modes.md).
 
 ### Browse the vault
 
@@ -219,7 +219,7 @@ uv run memex list documents
 open http://127.0.0.1:7423
 ```
 
-The web UI gives you a documents list, **side-by-side preview of the source PDF** (server-rendered page images, lazy-loaded — works in every browser regardless of the "download PDFs" setting), a Cytoscape graph view of entity neighbors, and an inline edit-then-save flow (with conflict detection if someone else changed the doc since you started editing — see [`docs/deploy/mcp-http.md`](docs/deploy/mcp-http.md) for the 409 conflict surface). Long agent/summarizer runs surface **live progress** via an HTMX long-poll widget (no SSE / no new JS) — the per-section counter ticks on Summarize, the agent's node-by-node phase advances on Ask; the answer + summary panels label sources by **document title › section** (the raw `docid#hash` is kept as a tooltip), so a long deck's claims read as English rather than hashes.
+The web UI gives you a documents list, **side-by-side preview of the source PDF** (server-rendered page images, lazy-loaded — works in every browser regardless of the "download PDFs" setting), a server-rendered "connections" view (related documents ranked by shared-entity specificity, grouped under the bridging concepts — no client-side graph library), and an inline edit-then-save flow (with conflict detection if someone else changed the doc since you started editing — see [`docs/deploy/mcp-http.md`](docs/deploy/mcp-http.md) for the 409 conflict surface). Long agent/summarizer runs surface **live progress** via an HTMX long-poll widget (no SSE / no new JS) — the per-section counter ticks on Summarize, the agent's node-by-node phase advances on Ask; the answer + summary panels label sources by **document title › section** (the raw `docid#hash` is kept as a tooltip), so a long deck's claims read as English rather than hashes.
 
 ### Edit a Markdown document
 
@@ -268,6 +268,17 @@ uv run memex entity "DNS"                          # everything across the corpu
 `memex entity <name>` is the entity-centric view: given an entity name it returns its graph **profile** — canonical kind(s), how many documents mention it, the documents themselves, and the **co-occurring concepts** (ranked by the same specificity filter) — plus representative **passages** from full-text search of those documents. It also bridges **acronym ↔ expansion**: looking up `DNS` surfaces an "Also see → Domain Name System" link (and vice versa) when both forms exist as separate entities — a deterministic initialism match, suggested as a link, never a silent identity merge. An unknown name falls back honestly to a whole-corpus text search (with a "Did you mean?" if a bridge exists). Also the web UI `/entity` page (co-occurring concepts and bridges are links, so you can walk the graph) and the MCP `entity_overview` tool. *Documents and co-occurring concepts come from the entity graph; quoted passages come from full-text search.*
 
 Both are discovery surfaces over the graph (ADR-0011), *not* in the `/ask` retrieval path — a measured audit showed 1-hop graph expansion adds nothing to answering at this corpus scale, so they're deliberate discovery features, not passive recall-boosting.
+
+### Reason over the vault (ungrounded analysis)
+
+The everyday answer path **refuses** when your vault doesn't ground an answer — by design. For genuinely analytical questions (synthesis, advisory, "what would you expect…"), Memex has two **opt-in, off-by-default** surfaces that reason from the model's own knowledge (enable with `MEMEX_AGENTS__EXPERT_MODE_ENABLED=true`):
+
+```sh
+uv run memex expert "How would these two designs trade off under load?"   # ungrounded analysis (ADR-0013)
+uv run memex bridge "Compare the security postures across my NIST docs"    # reason, THEN ground each claim
+```
+
+`memex bridge` is the **reason-then-ground** path (ADR-0016): it reasons over the retrieved evidence, extracts the discrete claims that reasoning made, and runs each one through the *same* vault-grounding check a normal `ask` uses — presenting only the survivors as cited, with the rest left inside a clearly-labelled "ungrounded analysis" block. From a refused `ask` in the web UI you get a one-click **"Reason over this instead →"** button that re-runs the question through the bridge over the same documents (you choose it; it never happens automatically). Both surfaces reason from model knowledge, not a verified vault lookup, and are labelled as such. In the web UI they're the **Expert** and **Analysis** tabs (visible only when the feature is enabled). They are deliberately **not** exposed over MCP. See [`docs/specs/grounded-agentic-chat.md`](docs/specs/grounded-agentic-chat.md) §11 + [ADR-0013](docs/adr/0013-ungrounded-reasoning-expert-mode.md) / [ADR-0016](docs/adr/0016-reason-then-ground-bridge.md).
 
 ### Update to a newer Memex
 
@@ -470,7 +481,7 @@ Integration tests fake the heavy I/O (vLLM, Docling, PyMuPDF worker, LanceDB, se
 | 🔧 The how (engineering rules + stack) | [`docs/GUIDELINES.md`](docs/GUIDELINES.md) |
 | 🗺️ What's done & what's queued | [`docs/ROADMAP.md`](docs/ROADMAP.md) |
 | 🏗️ The architecture blueprint | [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) |
-| 📐 Why we picked what we picked | [`docs/adr/`](docs/adr/) (ADRs 0001–0014) |
+| 📐 Why we picked what we picked | [`docs/adr/`](docs/adr/) (ADRs 0001–0016) |
 | 🚀 Network-facing MCP setup | [`docs/deploy/mcp-http.md`](docs/deploy/mcp-http.md) |
 | 🖥️ systemd deployment (Linux) | [`docs/deploy/systemd.md`](docs/deploy/systemd.md) |
 | 🍎 launchd deployment (macOS dev) | [`docs/deploy/launchd.md`](docs/deploy/launchd.md) |
