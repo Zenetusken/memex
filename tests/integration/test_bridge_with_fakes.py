@@ -20,7 +20,7 @@ from typing import Any
 import pytest
 
 from memex.agents import bridge, grounding
-from memex.agents.answering import CitedClaim, DraftAnswer, VerificationResult
+from memex.agents.answering import CitedClaim, DraftAnswer, RelevanceAssessment, VerificationResult
 from memex.agents.bridge import reason_then_ground
 from memex.core.config import MemexSettings, set_settings
 from memex.core.errors import ModelCallError
@@ -75,13 +75,28 @@ def _patch_ground(
     grounded: list[int],
     ungrounded: list[int] | None = None,
     fail: bool = False,
-) -> None:
+    responsive: bool = True,
+    relevance_reason: str = "addresses the question",
+    relevance_fail: bool = False,
+) -> list[str]:
+    """Fake `grounding.complete_structured` — serves BOTH the per-claim verify (VerificationResult)
+    AND the present-as-answer responsiveness gate (RelevanceAssessment), discriminated by schema.
+    Returns a list that records each schema seen, so a test can assert the gate did/didn't fire."""
+    seen: list[str] = []
+
     async def _verify(*, schema: type, **_kw: Any) -> tuple[Any, int]:
+        if schema is RelevanceAssessment:
+            seen.append("RelevanceAssessment")
+            if relevance_fail:
+                raise ModelCallError("relevance boom")
+            return RelevanceAssessment(responsive=responsive, reason=relevance_reason), 4
+        seen.append("VerificationResult")
         if fail:
             raise ModelCallError("verify boom")
         return VerificationResult(grounded=grounded, ungrounded=ungrounded or []), 8
 
     monkeypatch.setattr(grounding, "complete_structured", _verify)
+    return seen
 
 
 @pytest.mark.asyncio
@@ -196,10 +211,116 @@ async def test_extraction_failure_fails_open(
     assert ans.analysis == "Analysis."
 
 
+# --- Present-as-answer (ADR-0016): the consented escalation presents the grounded subset AS an
+# answer ONLY when it is non-empty AND responsive. The gate (assess_relevance) is added here, and
+# ONLY here — the standalone path (default present_as_answer=False) never runs it. ---
+
+
+@pytest.mark.asyncio
+async def test_present_as_answer_responsive_is_presented(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reranked = [_chunk("d#a"), _chunk("d#b")]
+    _patch_stage1(monkeypatch, "Deep reasoning prose that is ungrounded.", reranked)
+    _patch_extract(monkeypatch, [_claim("claim A", "d#a"), _claim("claim B", "d#b")])
+    seen = _patch_ground(monkeypatch, grounded=[0, 1], responsive=True)
+
+    ans = await reason_then_ground("Q?", present_as_answer=True)
+
+    assert ans.presented is True
+    assert ans.responsive is True
+    # The headline is the DETERMINISTIC join of the grounded claims — never the analysis.
+    assert ans.answer_headline == "claim A claim B"
+    assert "reasoning prose" not in ans.answer_headline
+    assert "RelevanceAssessment" in seen  # the responsiveness gate ran
+
+
+@pytest.mark.asyncio
+async def test_present_as_answer_non_responsive_falls_back(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reranked = [_chunk("d#a")]
+    _patch_stage1(monkeypatch, "Analysis.", reranked)
+    _patch_extract(monkeypatch, [_claim("claim A", "d#a")])
+    _patch_ground(
+        monkeypatch, grounded=[0], responsive=False, relevance_reason="answers a related topic"
+    )
+
+    ans = await reason_then_ground("Q?", present_as_answer=True)
+
+    assert ans.presented is False  # grounded, but not responsive → NOT presented as an answer
+    assert ans.responsive is False
+    assert ans.relevance_reason == "answers a related topic"
+    # The grounded claim + analysis are still returned (the labelled-analysis fallback).
+    assert [c.claim for c in ans.grounded_claims] == ["claim A"]
+    assert ans.analysis == "Analysis."
+
+
+@pytest.mark.asyncio
+async def test_present_as_answer_zero_grounded_skips_gate(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Zero grounded → the responsiveness gate is NEVER called (nothing to present), and there is
+    no refuse state — the labelled analysis is returned."""
+    reranked = [_chunk("d#a")]
+    _patch_stage1(monkeypatch, "Analysis.", reranked)
+    _patch_extract(monkeypatch, [_claim("claim A", "d#a")])
+    seen = _patch_ground(monkeypatch, grounded=[])
+
+    ans = await reason_then_ground("Q?", present_as_answer=True)
+
+    assert ans.presented is False
+    assert ans.responsive is None  # gate not run
+    assert "RelevanceAssessment" not in seen
+    assert ans.analysis == "Analysis."
+
+
+@pytest.mark.asyncio
+async def test_present_as_answer_relevance_failure_fails_closed(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A responsiveness-gate ModelCallError fails CLOSED → not presented (falls back to the
+    labelled analysis), never promoting an un-gated answer."""
+    reranked = [_chunk("d#a")]
+    _patch_stage1(monkeypatch, "Analysis.", reranked)
+    _patch_extract(monkeypatch, [_claim("claim A", "d#a")])
+    _patch_ground(monkeypatch, grounded=[0], relevance_fail=True)
+
+    ans = await reason_then_ground("Q?", present_as_answer=True)
+
+    assert ans.presented is False
+    assert ans.responsive is False  # fail-closed sentinel
+    assert [c.claim for c in ans.grounded_claims] == ["claim A"]  # subset still surfaced, labelled
+    assert ans.analysis == "Analysis."
+
+
+@pytest.mark.asyncio
+async def test_standalone_default_never_runs_gate(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The default path (present_as_answer=False) is byte-identical to before: the gate is never
+    called, `responsive` stays None, and nothing is presented-as-answer."""
+    reranked = [_chunk("d#a")]
+    _patch_stage1(monkeypatch, "Analysis.", reranked)
+    _patch_extract(monkeypatch, [_claim("claim A", "d#a")])
+    seen = _patch_ground(monkeypatch, grounded=[0])
+
+    ans = await reason_then_ground("Q?")
+
+    assert ans.present_as_answer is False
+    assert ans.presented is False
+    assert ans.responsive is None
+    assert ans.answer_headline == ""
+    assert "RelevanceAssessment" not in seen  # standalone never runs the responsiveness gate
+
+
 def test_bridge_isolated_from_ask_graph() -> None:
     """HARD-gate isolation: the `/ask` graph + the eval runner must NEVER import or construct the
-    bridge — it is a fenced sibling, unreachable from `answer_query`/`run_eval`. If a future change
-    wires the bridge into either, update this test on purpose (and re-examine the contract)."""
+    bridge — it is a fenced sibling, unreachable from `answer_query`/`run_eval`. Holds even with
+    the present-as-answer escalation (ADR-0016): that reuses `assess_relevance`'s PROMPT + SCHEMA
+    via `grounding.assess_responsiveness`, never the `/ask` graph node, so `answering` references
+    neither the bridge nor a grounding import. If a future change wires the bridge into either,
+    update this test on purpose (and re-examine the contract)."""
     import memex.agents.answering as answering_mod
     import memex.eval.runner as runner_mod
 

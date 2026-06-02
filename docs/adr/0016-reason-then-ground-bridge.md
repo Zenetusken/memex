@@ -41,7 +41,7 @@ We also add the **consented A→B escalation**: from a Surface-A `/ask` **refusa
 
 Three load-bearing v1 contract decisions:
 
-- **Verify-only, NOT `assess_relevance`.** `assess_relevance` judges whole-answer *responsiveness*; the bridge's grounded subset is "which reasoned claims are vault-supported," not "a direct answer," so running it would over-refuse a legitimately-grounded set of supporting claims. (Reserved for a future variant where the bridge output IS presented as the direct answer to a Surface-A question.)
+- **The STANDALONE bridge is verify-only, NOT `assess_relevance`.** `assess_relevance` judges whole-answer *responsiveness*; the standalone bridge's grounded subset is "which reasoned claims are vault-supported," not "a direct answer," so running it would over-refuse a legitimately-grounded set of supporting claims. (Reserved for the variant where the bridge output IS presented as the direct answer — now realized in the present-as-answer escalation; see the Amendment below.)
 - **A two-layer faithfulness guard.** `verify_grounding/v2` is structurally blind to "the analysis never actually made this claim" — a fabricated-but-coincidentally-grounded claim could pass. So the extractor prompt is an *extractor, not a generator* ("emit a claim only if the analysis explicitly asserts it AND it cites a listed chunk"), backed by a **deterministic** drop of any claim whose `source_chunk_id` doesn't resolve to a reranked chunk.
 - **Zero-grounded ≠ refuse.** The analysis is useful on its own; a zero-grounded run returns the labelled analysis with an empty grounded subset (no citation chrome) — the bridge has no refuse state.
 
@@ -73,7 +73,7 @@ Reuses all expert plumbing with the least new surface area, and the output is id
 
 ### Include `assess_relevance` (as spec §11 originally drafted)
 
-§11 was written for the *future* escalation variant where the bridge output IS the answer to a Surface-A question — there a whole-answer responsiveness gate is appropriate. For the v1 standalone bridge, the grounded subset is a set of *supporting* claims, not "the answer," so `assess_relevance` frequently returns non-responsive and would refuse a perfectly-grounded subset. Deferred to the escalation-as-presented-answer variant, behind its own flag.
+§11 was written for the escalation variant where the bridge output IS the answer to a Surface-A question — there a whole-answer responsiveness gate is appropriate. For the standalone bridge, the grounded subset is a set of *supporting* claims, not "the answer," so `assess_relevance` frequently returns non-responsive and would refuse a perfectly-grounded subset. So `assess_relevance` is **off the standalone path** but **on the present-as-answer escalation** (the Amendment below) — exactly the split this alternative anticipated.
 
 ### Automatic A→B escalation on a refusal
 
@@ -86,13 +86,26 @@ Rejected — re-opens the xgrammar force-close-mid-emission trap the bounded sch
 ## Revisit When
 
 - A genuinely rich analysis regularly **saturates the 8-claim cap** → add MAP-loop extraction (accumulate claims across windowed passes).
-- The **consented-escalation-as-presented-answer** variant is built (bridge output offered as the direct answer to a Surface-A question) → add `assess_relevance` there, behind its own flag + governance.
+- ~~The **consented-escalation-as-presented-answer** variant is built (bridge output offered as the direct answer to a Surface-A question) → add `assess_relevance` there, behind its own flag + governance.~~ **DONE 2026-06-02 — see the Amendment below.**
 - A **numeric-heavy** bridge use emerges (computed-aggregate claims) → wire the `/ask` numeric-grounding backstop into `ground_claims` (it would then also harden the summarizer).
 - The labelling proves too subtle (a user reads the analysis half as grounded) → tighten the separation (mirrors ADR-0013's R3 trigger).
 
+## Amendment (2026-06-02): the present-as-answer escalation
+
+The consented A→B escalation, which originally re-ran the question through the **standalone** bridge verbatim (verify-only, the labelled-analysis surface), now **advances to "the bridge output IS the answer"** — the variant this ADR's Decision and Revisit-When deferred. This is an evolution of the consent contract, recorded here rather than as a new ADR because it changes no architecture (no new grounding path, no graph change, `answer_query` still never imported).
+
+**What changed.** `reason_then_ground` gains `present_as_answer: bool = False`. When the consented escalation sets it (a hidden `present_as_answer=true` form field — the ONLY discriminator between the two `POST /bridge` callers; the standalone composer omits it) AND the grounded subset is non-empty, the bridge ALSO runs the responsiveness gate `agents/grounding.py::assess_responsiveness`. When the subset is non-empty **AND responsive** (`BridgeAnswer.presented`), the grounded claims are **presented AS a direct grounded answer** (a distinct "Reasoned, then grounded" surface — the claims are the answer, cited, with the ungrounded reasoning fenced in a collapsed `<details>`), meeting the SAME verify + `assess_relevance` bar as a grounded `/ask` answer. Otherwise it falls back to the labelled-analysis surface (no-refuse-state preserved; a non-responsive subset gets a quiet "related question" note). CLI parity: `memex bridge --answer` + the refusal hint names it.
+
+**Why it still honors the decision drivers.**
+
+- **Gate not weakened.** Every presented claim already passed the UNCHANGED `verify_grounding/v2` + the deterministic id-resolution drop; the responsiveness gate is the UNCHANGED `assess_relevance@v1` prompt + `RelevanceAssessment` schema. A presented answer clears a *strictly higher* bar than the standalone bridge (verify + responsiveness vs verify alone).
+- **No ungrounded text in the answer.** The presented body is the grounded `CitedClaim`s only; the `assess_responsiveness` input is a **deterministic join** of the grounded claim texts — never the ungrounded `analysis`, never the extractor's free `summary`. The analysis appears only inside the fenced `<details>`.
+- **HARD-gate neutrality unchanged.** The `/ask` graph is still byte-untouched; we do **not** refactor the `/ask` `assess_relevance` node to share the helper (that would create an `answering↔grounding` import cycle AND edit a HARD-gate node) — the single source of truth is the prompt + schema, with a small call wrapper in `grounding.py` (the same accepted pattern as `bounded_verification`). `present_as_answer` defaults False, so the standalone path + the existing bridge tests are byte-identical. Fail-CLOSED: a gate `ModelCallError` → not presented (falls back), never an un-gated answer.
+- **R3 (consent + separation) holds.** Still consented (an explicit click / a typed command), never automatic. The presented surface is a distinct third label — neither the plain `/ask` "Answer" eyebrow nor the bare "ungrounded" banner — so it is read as exactly what it is: a grounded answer reached via reasoning.
+
 ## References
 
-- **Spec:** [`grounded-agentic-chat.md`](../specs/grounded-agentic-chat.md) §11 — the implementation design (the bridge + the consented escalation).
+- **Spec:** [`grounded-agentic-chat.md`](../specs/grounded-agentic-chat.md) §11 — the implementation design (the bridge + the consented + present-as-answer escalation).
 - [ADR-0013](0013-ungrounded-reasoning-expert-mode.md) — the ungrounded expert surface (Surface B) this bridges to the grounded gate; its R3 (mistaken-for-grounded) guard rail governs the escalation's consent + separation.
 - [ADR-0008](0008-document-summarization.md) — the grounded summarizer whose per-point `verify_grounding` (`_ground_points`) was hoisted into the shared `ground_claims` primitive.
 - [ADR-0014](0014-text-to-sql-robustness-safety.md) / Table-RAG — the synthetic-chunk → unchanged-cite-machinery precedent (the same "no new grounding path" discipline).

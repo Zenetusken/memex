@@ -1312,3 +1312,61 @@ html { scroll-behavior: smooth; }
   border-left: 2px solid rgb(82 82 91);     /* zinc-600 — decorative divider, exempt */
   border-radius: 0.25rem;
 }
+
+/* Present-as-answer (ADR-0016): the consented escalation grounded a RESPONSIVE subset, so the
+   grounded claims are presented AS the answer. A distinct third surface — neither the plain Ask
+   "Answer" eyebrow nor the bare "ungrounded" banner: an emerald "verified" tag (the grounded
+   signal, as .conf-high) marks that every claim passed the same checks as Ask, and the ungrounded
+   reasoning is fenced in a collapsed <details>. */
+.ans-reasoned { display: flex; align-items: center; gap: 0.5rem; }
+.ans-reasoned-tag {
+  flex: none;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.625rem;
+  font-weight: 600;
+  padding: 0.1rem 0.4rem;
+  color: rgb(110 231 183);                  /* emerald-300 — the grounded/verified signal */
+  border: 1px solid rgb(6 95 70);           /* emerald-800 */
+  border-radius: 0.25rem;
+}
+.ans-reasoned-note {
+  margin: 0 0 0.6rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: rgb(161 161 170);                  /* zinc-400 — AA secondary */
+}
+.bridge-reasoning { margin-top: 1rem; }
+.bridge-reasoning-summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: rgb(161 161 170);                  /* zinc-400 */
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.bridge-reasoning-summary:hover { color: rgb(212 212 216); }   /* zinc-300 */
+.bridge-reasoning-body {
+  margin-top: 0.55rem;
+  padding: 0.6rem 0.85rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: rgb(161 161 170);                  /* zinc-400 — de-emphasized, ungrounded */
+  background: rgb(24 24 27 / 0.6);          /* zinc-900 tint */
+  border-radius: 0.375rem;
+}
+.bridge-reasoning-body p { margin: 0; }
+.bridge-reasoning-body p + p { margin-top: 0.55rem; }
+
+/* Escalation grounded a subset, but it answers a related question (assess_relevance non-responsive)
+   — surfaced quietly above the grounded claims, NOT presented as the answer. */
+.bridge-nonresponsive {
+  margin: 0 0 0.7rem;
+  padding: 0.5rem 0.7rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: rgb(252 211 77);                   /* amber-300 — caution tier */
+  background: rgb(69 26 3 / 0.30);
+  border-left: 2px solid rgb(146 64 14);    /* amber-800 */
+  border-radius: 0.25rem;
+}

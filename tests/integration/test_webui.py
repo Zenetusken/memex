@@ -2234,7 +2234,7 @@ async def test_expert_post_then_answer(expert_client: TestClient, fake_expert: N
 
 
 def _install_fake_bridge(
-    monkeypatch: pytest.MonkeyPatch, *, grounded: bool
+    monkeypatch: pytest.MonkeyPatch, *, grounded: bool, responsive: bool = True
 ) -> None:
     from memex.agents.answering import CitedClaim
     from memex.agents.bridge import BRIDGE_PROVENANCE_NOTE, BridgeAnswer
@@ -2258,6 +2258,10 @@ def _install_fake_bridge(
             if grounded
             else []
         )
+        # Mirror the bridge's present-as-answer contract: the gate runs only when the caller asked
+        # AND something grounded; `presented` follows from responsive (ADR-0016).
+        present = bool(kw.get("present_as_answer"))
+        gate_runs = present and bool(claims)
         return BridgeAnswer(
             question=question,
             analysis="OSPF converges quickly; BGP is policy-driven.",
@@ -2271,6 +2275,10 @@ def _install_fake_bridge(
             model="m",
             tokens=99,
             correlation_id=kw.get("correlation_id") or "cid",
+            present_as_answer=present,
+            responsive=(responsive if gate_runs else None),
+            relevance_reason=("" if responsive else "answers a related question") if gate_runs else "",
+            answer_headline=(" ".join(c.claim for c in claims) if gate_runs else ""),
         )
 
     monkeypatch.setattr("memex.webui.app.reason_then_ground", _fake)
@@ -2364,7 +2372,7 @@ async def test_ask_refusal_offers_escalation_when_expert_enabled(
     text = await _ask_to_completion(expert_client.app, "an unanswerable question?")
     assert "Refused" in text
     assert 'hx-post="/bridge"' in text  # the consented escalation form targets the bridge
-    assert "Reason over this instead" in text
+    assert "verify this" in text  # the "Reason & verify this →" affordance
     assert "an unanswerable question?" in text  # the original question carried into the hidden input
 
 
@@ -2376,6 +2384,67 @@ async def test_ask_refusal_no_escalation_when_expert_disabled(
     assert "Refused" in text  # the refusal still renders
     assert 'hx-post="/bridge"' not in text  # gated off → no escalation affordance
     assert "Reason over this instead" not in text
+
+
+@pytest.mark.asyncio
+async def test_ask_refusal_escalation_form_carries_present_as_answer(
+    expert_client: TestClient, fake_refused: None
+) -> None:
+    """The consented escalation form sets present_as_answer=true (ADR-0016) so the bridge presents
+    the grounded subset AS an answer when responsive."""
+    text = await _ask_to_completion(expert_client.app, "an unanswerable question?")
+    assert 'name="present_as_answer"' in text
+    assert 'value="true"' in text
+
+
+# ── Present-as-answer escalation (ADR-0016): the bridge result IS the answer ──
+
+
+@pytest.mark.asyncio
+async def test_bridge_present_as_answer_renders_grounded_answer(
+    expert_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """present_as_answer=true + grounded + responsive → the grounded claims are presented AS the
+    answer (the distinct 'Reasoned, then grounded' surface), with the reasoning fenced in a
+    <details> — NOT the leading 'Analysis ungrounded' labelled surface."""
+    _install_fake_bridge(monkeypatch, grounded=True, responsive=True)
+    text = await _bridge_to_completion(
+        expert_client.app, "Compare OSPF and BGP.", present_as_answer="true"
+    )
+    assert "Reasoned, then grounded" in text  # the distinct presented eyebrow
+    assert "OSPF is a link-state protocol." in text  # the grounded claim, as the answer
+    assert "Show the model's reasoning" in text  # the reasoning is fenced in <details>
+    assert "OSPF converges quickly" in text  # the ungrounded analysis lives inside the <details>
+    assert ">Analysis " not in text  # NOT the labelled-analysis lead
+    assert ">Grounded claims" not in text  # not the labelled-subset header either
+
+
+@pytest.mark.asyncio
+async def test_bridge_present_as_answer_non_responsive_falls_back(
+    expert_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """present_as_answer=true but the grounded subset is non-responsive → fall back to the labelled
+    analysis surface with a quiet 'related question' note; NOT presented as an answer."""
+    _install_fake_bridge(monkeypatch, grounded=True, responsive=False)
+    text = await _bridge_to_completion(
+        expert_client.app, "Compare OSPF and BGP.", present_as_answer="true"
+    )
+    assert "Reasoned, then grounded" not in text  # NOT presented
+    assert ">Analysis " in text  # the labelled-analysis surface
+    assert "bridge-nonresponsive" in text  # the related-question note
+    assert "related question" in text
+
+
+@pytest.mark.asyncio
+async def test_bridge_standalone_post_is_not_presented(
+    expert_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The standalone composer (no present_as_answer marker) never presents-as-answer — the
+    labelled-analysis surface, byte-identical to before."""
+    _install_fake_bridge(monkeypatch, grounded=True, responsive=True)
+    text = await _bridge_to_completion(expert_client.app, "Compare OSPF and BGP.")
+    assert "Reasoned, then grounded" not in text
+    assert "Grounded claims" in text  # the labelled-subset surface
 
 
 @pytest.mark.asyncio
@@ -2395,7 +2464,7 @@ async def test_ask_scoped_refusal_escalation_carries_scope(
     text = await _ask_to_completion(
         expert_client.app, "an unanswerable question?", scope_doc_ids=["d1", "d2"]
     )
-    assert "Reason over this instead" in text
+    assert "verify this" in text  # the "Reason & verify this →" affordance
     # The escalation re-POSTs the ORIGINAL scope so the bridge respects the user's constraint
     # (not silently widened to the whole vault).
     assert 'name="scope_doc_ids" value="d1"' in text

@@ -206,22 +206,43 @@ def _render_expert_answer(answer: ExpertAnswer) -> str:
     return "\n".join(lines)
 
 
+def _render_claim_lines(answer: BridgeAnswer) -> list[str]:
+    """The cited grounded-claim bullets, shared by both renderings."""
+    lines: list[str] = []
+    src_by_id = {c.chunk_id: c for c in answer.grounded_sources}
+    for c in answer.grounded_claims:
+        src = src_by_id.get(c.source_chunk_id)
+        cite = ""
+        if src is not None:
+            section = src.heading_path[-1] if src.heading_path else None
+            title = src.document_title or src.document_id
+            cite = f"  ▸ {title}" + (f" › {section}" if section else "")
+        lines.append(f"  • {c.claim}{cite}")
+    return lines
+
+
 def _render_bridge_answer(answer: BridgeAnswer) -> str:
-    """Console rendering of a reason-then-ground result (Surface §11): the ungrounded analysis,
-    then the subset of its claims that passed the SAME grounding gate as `ask` (cited), then the
-    provenance caveat clarifying which half is verified."""
+    """Console rendering of a reason-then-ground result (Surface §11, ADR-0016).
+
+    When the consented escalation presented the grounded subset AS an answer (`presented` —
+    `--answer` + grounded + responsive), the grounded claims lead as the ANSWER and the ungrounded
+    reasoning follows, fenced. Otherwise the ungrounded analysis leads, then the grounded-claims
+    subset that passed the SAME grounding gate as `ask`, then the provenance caveat."""
+    if answer.presented:
+        lines = ["ANSWER (grounded — reasoned from your vault, then verified)", ""]
+        lines.extend(_render_claim_lines(answer))
+        lines += ["", "REASONING (ungrounded — model reasoning):", "", answer.analysis.strip(), ""]
+        lines.append(f"⚠ {answer.provenance_note}")
+        return "\n".join(lines)
+
     lines = ["ANALYSIS (ungrounded — model reasoning)", "", answer.analysis.strip(), ""]
     if answer.grounded_claims:
-        lines.append(f"GROUNDED CLAIMS · {answer.n_grounded}  (verified against your vault)")
-        src_by_id = {c.chunk_id: c for c in answer.grounded_sources}
-        for c in answer.grounded_claims:
-            src = src_by_id.get(c.source_chunk_id)
-            cite = ""
-            if src is not None:
-                section = src.heading_path[-1] if src.heading_path else None
-                title = src.document_title or src.document_id
-                cite = f"  ▸ {title}" + (f" › {section}" if section else "")
-            lines.append(f"  • {c.claim}{cite}")
+        note = ""
+        if answer.present_as_answer and answer.responsive is False:
+            why = f" — {answer.relevance_reason}" if answer.relevance_reason else ""
+            note = f"  (related, not a direct answer{why})"
+        lines.append(f"GROUNDED CLAIMS · {answer.n_grounded}  (verified against your vault){note}")
+        lines.extend(_render_claim_lines(answer))
     else:
         lines.append(
             f"GROUNDED CLAIMS · 0 — none of the {answer.n_extracted} extracted claim(s) could be "
@@ -233,17 +254,21 @@ def _render_bridge_answer(answer: BridgeAnswer) -> str:
 
 
 def _bridge_escalation_hint(answered: bool, query: str, *, expert_enabled: bool) -> str | None:
-    """The consented A→B escalation hint (§11) for a CLI `ask` REFUSAL — `None` unless the
-    answer refused AND the ungrounded expert surface is enabled. A HINT only: it names the
-    `memex bridge` command (the user CHOOSES to run it = explicit consent); it never
-    auto-executes the bridge. Refusal-only so a grounded answer prints nothing extra."""
+    """The consented A→B escalation hint (§11, ADR-0016) for a CLI `ask` REFUSAL — `None` unless
+    the answer refused AND the ungrounded expert surface is enabled. A HINT only: it names the
+    `memex bridge --answer` command (the user CHOOSES to run it = explicit consent); it never
+    auto-executes the bridge. `--answer` presents the grounded subset AS the answer when it grounds
+    responsively, else the labelled analysis. Refusal-only so a grounded answer prints nothing."""
     if answered or not expert_enabled:
         return None
     import shlex
 
     # shlex.quote → the suggested command is copy-paste-correct even if the question
-    # contains quotes/specials (e.g. `say "hi"` → `memex bridge 'say "hi"'`).
-    return f"↳ No grounded answer. To reason over it (ungrounded analysis): memex bridge {shlex.quote(query)}"
+    # contains quotes/specials (e.g. `say "hi"` → `memex bridge --answer 'say "hi"'`).
+    return (
+        "↳ No grounded answer. To reason over it, then verify each conclusion: "
+        f"memex bridge --answer {shlex.quote(query)}"
+    )
 
 
 async def run_chat_repl(
@@ -730,14 +755,21 @@ def register(app: typer.Typer) -> None:
         scope_set: str = _Option(
             "", "--scope-set", help="Limit the consulted evidence to a saved scope set by name."
         ),
+        as_answer: bool = _Option(
+            False,
+            "--answer",
+            help="Present the grounded subset AS a direct answer when it is responsive "
+            "(ADR-0016, the consented escalation form); else fall back to the labelled analysis.",
+        ),
     ) -> None:
         """Reason-then-ground ANALYSIS (Surface §11) — reason, THEN verify each claim.
 
         Reasons over retrieved evidence like `expert`, then runs each reasoned claim back through
         the SAME grounding gate as `ask`: the analysis is ungrounded model reasoning, but the
-        GROUNDED CLAIMS it surfaces are vault-verified and cited. Fenced behind the same flag as
-        expert mode — disabled unless `MEMEX_AGENTS__EXPERT_MODE_ENABLED=true` (or
-        `agents.expert_mode_enabled` in config).
+        GROUNDED CLAIMS it surfaces are vault-verified and cited. With `--answer` (ADR-0016) it
+        additionally runs the responsiveness gate, presenting the grounded claims AS the answer
+        when they answer the question. Fenced behind the same flag as expert mode — disabled
+        unless `MEMEX_AGENTS__EXPERT_MODE_ENABLED=true` (or `agents.expert_mode_enabled` in config).
         """
 
         async def _run() -> str:
@@ -768,7 +800,9 @@ def register(app: typer.Typer) -> None:
                 scope_ids.extend(found.doc_ids)
             merged = list(dict.fromkeys(scope_ids))
 
-            answer = await reason_then_ground(question, scope_doc_ids=merged or None)
+            answer = await reason_then_ground(
+                question, scope_doc_ids=merged or None, present_as_answer=as_answer
+            )
             return _render_bridge_answer(answer)
 
         console.print(asyncio.run(_run()))

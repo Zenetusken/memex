@@ -1277,15 +1277,21 @@ def create_app() -> FastAPI:
             )
         return templates.TemplateResponse(request, "_expert.html", {"answer": answer, "error": None})
 
-    async def _run_bridge(cid: str, question: str, scope_doc_ids: list[str]) -> None:
+    async def _run_bridge(
+        cid: str, question: str, scope_doc_ids: list[str], present_as_answer: bool = False
+    ) -> None:
         """Background runner: reason-then-ground, streaming phase updates into the registry.
-        Top of a fire-and-forget task — never crash silently."""
+        Top of a fire-and-forget task — never crash silently.
+
+        `present_as_answer` (ADR-0016): the consented A→B escalation sets it so the grounded subset
+        is presented AS an answer when responsive; the standalone composer leaves it False."""
         from memex.core.errors import MemexError
 
         try:
             answer = await reason_then_ground(
                 question,
                 scope_doc_ids=scope_doc_ids or None,
+                present_as_answer=present_as_answer,
                 correlation_id=cid,
                 on_phase=lambda p: progress.set_phase(cid, p),
             )
@@ -1313,6 +1319,7 @@ def create_app() -> FastAPI:
         request: Request,
         question: str = Form(""),
         scope_doc_ids: list[str] = Form([]),  # noqa: B008  # FastAPI Form default sentinel
+        present_as_answer: bool = Form(False),
     ) -> HTMLResponse:
         """Start the reason-then-ground pass in a background task and IMMEDIATELY return the
         `_progress.html` fragment, which long-polls `/bridge/status` until the answer swaps in.
@@ -1320,7 +1327,13 @@ def create_app() -> FastAPI:
         `scope_doc_ids` is carried by the A→B escalation form (§11) so a SCOPED /ask refusal
         escalates into a reason-then-ground pass over the SAME scope (the user's explicit
         constraint is preserved, not silently widened to the whole vault). The standalone
-        /bridge composer sends none → whole-vault, unchanged."""
+        /bridge composer sends none → whole-vault, unchanged.
+
+        `present_as_answer` (ADR-0016) is the ONLY discriminator between the two POST callers:
+        the consented escalation form sets it (`_answer.html`) so the grounded subset is presented
+        AS an answer when responsive; the standalone composer omits it → the labelled-analysis
+        surface, unchanged. It rides the result (`BridgeAnswer.present_as_answer`), so the status
+        handler needs no extra plumbing."""
         if not get_settings().agents.expert_mode_enabled:
             return templates.TemplateResponse(
                 request,
@@ -1341,7 +1354,7 @@ def create_app() -> FastAPI:
         scope = [d.strip() for d in scope_doc_ids if d.strip()]
         cid = str(ulid.ULID())
         progress.new(cid, scope_doc_ids=scope, scope_source="selected" if scope else "named")
-        task = asyncio.create_task(_run_bridge(cid, q, scope))
+        task = asyncio.create_task(_run_bridge(cid, q, scope, present_as_answer))
         progress.attach_task(cid, task)
         return templates.TemplateResponse(
             request,

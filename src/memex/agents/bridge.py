@@ -6,10 +6,17 @@ gate (Stage 2) so only vault-supported claims are presented as CITED — the res
 labelled ungrounded analysis. Gives expert-mode reach a trust floor WITHOUT touching the `/ask`
 `answer_query` graph (which is never imported here).
 
-Deliberate v1 contract decisions (see the §11 plan):
-- **verify-only, NO `assess_relevance`.** That gate judges whole-answer responsiveness; the
-  bridge's grounded subset is "which reasoned claims are vault-supported," not "a direct answer,"
-  so `assess_relevance` would over-refuse. It is reserved for the future consented A→B escalation.
+Deliberate contract decisions (see the §11 plan + ADR-0016):
+- **Standalone: verify-only, NO `assess_relevance`.** That gate judges whole-answer
+  responsiveness; the standalone bridge's grounded subset is "which reasoned claims are
+  vault-supported," not "a direct answer," so `assess_relevance` would over-refuse.
+- **Consented escalation, present-as-answer (`present_as_answer=True`, ADR-0016): verify +
+  `assess_relevance`.** When the consented A→B escalation presents the grounded subset AS the
+  answer (the spec-reserved "the bridge output IS the answer"), it DOES add the responsiveness
+  gate — the grounded claims are promoted to a presented grounded answer ONLY when they are
+  non-empty AND responsive (`BridgeAnswer.presented`). Otherwise it falls back to the labelled
+  analysis. The presented body is the grounded `CitedClaim`s; the ungrounded analysis is never
+  promoted (the surface fences it). The `/ask` `answer_query` graph is still never imported.
 - **Zero grounded ≠ refuse.** The analysis is still useful; return it labelled with an empty
   grounded subset (no citation chrome). The bridge has no refuse state.
 - **Faithfulness guard (two layers):** an extractor-not-generator prompt PLUS a deterministic
@@ -34,7 +41,7 @@ from memex.agents.expert import (
     reason_over_evidence,
     to_evidence,
 )
-from memex.agents.grounding import ground_claims
+from memex.agents.grounding import assess_responsiveness, ground_claims
 from memex.core.config import get_settings
 from memex.core.errors import ModelCallError
 from memex.core.types import Chunk
@@ -75,16 +82,41 @@ class BridgeAnswer(BaseModel):
     scope_doc_ids: list[str] = []
     correlation_id: str = ""
 
+    # Present-as-answer (ADR-0016, the consented A→B escalation): when the caller asked to present
+    # the grounded subset AS a direct answer, these carry the responsiveness verdict. On the
+    # standalone path they stay at their defaults (the gate is never run) — the surface then renders
+    # the labelled-analysis view, byte-identical to before.
+    present_as_answer: bool = False
+    responsive: bool | None = None  # None = the gate was not run (standalone / zero-grounded)
+    relevance_reason: str = ""
+    # Deterministic synthesis of the grounded claims — the `assess_responsiveness` input. NEVER
+    # the ungrounded analysis or the extractor's free summary (no ungrounded text reaches the answer).
+    answer_headline: str = ""
+
+    @property
+    def presented(self) -> bool:
+        """True only when the consented escalation asked to present-as-answer AND the grounded
+        subset is non-empty AND responsive — the single switch the surfaces branch on."""
+        return self.present_as_answer and bool(self.grounded_claims) and self.responsive is True
+
 
 async def reason_then_ground(
     question: str,
     *,
     scope_doc_ids: list[str] | None = None,
     evidence_k: int = _EVIDENCE_K,
+    present_as_answer: bool = False,
     correlation_id: str | None = None,
     on_phase: Callable[[str], None] | None = None,
 ) -> BridgeAnswer:
-    """Reason over the vault's evidence, then ground the reasoned claims (Surface §11)."""
+    """Reason over the vault's evidence, then ground the reasoned claims (Surface §11).
+
+    `present_as_answer` (ADR-0016, the consented A→B escalation): when True AND the grounded
+    subset is non-empty, additionally run the `assess_relevance` responsiveness gate so the
+    surface can present the grounded claims AS a direct answer (`BridgeAnswer.presented`). The
+    standalone surface leaves it False → the gate is never run, the labelled-analysis view is
+    byte-identical to before.
+    """
     correlation_id = correlation_id or str(ulid.ULID())
     # Defensive reset BEFORE the try; the bind lives inside so `finally` always unbinds it.
     clear_run_context()
@@ -152,11 +184,29 @@ async def reason_then_ground(
         grounded_ids = {gc.source_chunk_id for gc in grounded}
         grounded_sources = [c for c in reranked if c.chunk_id in grounded_ids]
 
+        # Present-as-answer (ADR-0016): ONLY the consented escalation, and ONLY when something
+        # grounded — promote the grounded subset to a presented answer IFF it is also responsive.
+        # The headline is a DETERMINISTIC join of the grounded claims (the gate input + an optional
+        # lede) — never the ungrounded analysis, never the extractor's free summary.
+        responsive: bool | None = None
+        relevance_reason = ""
+        answer_headline = ""
+        t_relevance = 0
+        if present_as_answer and grounded:
+            answer_headline = " ".join(c.claim for c in grounded)
+            verdict, t_relevance = await assess_responsiveness(
+                question, answer_headline, [c.claim for c in grounded]
+            )
+            responsive = verdict.responsive
+            relevance_reason = verdict.reason
+
         logger.info(
             "bridge.done",
             extracted=len(candidates),
             groundable=len(groundable),
             grounded=len(grounded),
+            present_as_answer=present_as_answer,
+            responsive=responsive,
         )
         return BridgeAnswer(
             question=question,
@@ -167,9 +217,13 @@ async def reason_then_ground(
             n_extracted=len(candidates),
             n_grounded=len(grounded),
             model=model,
-            tokens=t_reason + t_extract + t_ground,
+            tokens=t_reason + t_extract + t_ground + t_relevance,
             scope_doc_ids=scope,
             correlation_id=correlation_id,
+            present_as_answer=present_as_answer,
+            responsive=responsive,
+            relevance_reason=relevance_reason,
+            answer_headline=answer_headline,
         )
     finally:
         clear_run_context()

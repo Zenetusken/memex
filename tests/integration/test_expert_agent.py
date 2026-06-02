@@ -257,6 +257,58 @@ def test_bridge_escalation_hint_none_when_expert_disabled() -> None:
     assert _bridge_escalation_hint(False, "q", expert_enabled=False) is None
 
 
+def test_bridge_escalation_hint_uses_answer_flag() -> None:
+    """ADR-0016: the hint points at `memex bridge --answer` so the CLI escalation also presents
+    the grounded subset AS the answer when responsive."""
+    from memex.cli.commands import _bridge_escalation_hint
+
+    hint = _bridge_escalation_hint(False, "why is the sky blue?", expert_enabled=True)
+    assert hint is not None
+    assert "memex bridge --answer" in hint
+
+
+def _bridge_answer(*, presented: bool):
+    from memex.agents.answering import CitedClaim
+    from memex.agents.bridge import BRIDGE_PROVENANCE_NOTE, BridgeAnswer
+    from memex.core.types import Chunk
+
+    claim = CitedClaim(claim="OSPF is link-state.", source_chunk_id="d#a", confidence="high")
+    return BridgeAnswer(
+        question="Q?",
+        analysis="Some ungrounded reasoning.",
+        grounded_claims=[claim],
+        grounded_sources=[Chunk(chunk_id="d#a", document_id="d", document_title="OSPF Guide",
+                                text="…", heading_path=["Intro"])],
+        provenance_note=BRIDGE_PROVENANCE_NOTE,
+        n_extracted=1,
+        n_grounded=1,
+        present_as_answer=presented,
+        responsive=(True if presented else None),
+        answer_headline=("OSPF is link-state." if presented else ""),
+    )
+
+
+def test_cli_render_bridge_presented_leads_with_answer() -> None:
+    """A presented bridge result leads with the grounded ANSWER; the ungrounded reasoning follows,
+    fenced and labelled (no ungrounded text in the answer block)."""
+    from memex.cli.commands import _render_bridge_answer
+
+    out = _render_bridge_answer(_bridge_answer(presented=True))
+    assert out.index("ANSWER (grounded") < out.index("OSPF is link-state.")
+    assert "REASONING (ungrounded" in out
+    assert out.index("OSPF is link-state.") < out.index("Some ungrounded reasoning.")
+
+
+def test_cli_render_bridge_labelled_leads_with_analysis() -> None:
+    """The standalone / non-presented result keeps the analysis-first labelled rendering."""
+    from memex.cli.commands import _render_bridge_answer
+
+    out = _render_bridge_answer(_bridge_answer(presented=False))
+    assert out.startswith("ANALYSIS (ungrounded")
+    assert "GROUNDED CLAIMS" in out
+    assert "ANSWER (grounded" not in out
+
+
 def test_cli_render_expert_answer() -> None:
     from memex.agents.expert import ExpertAnswer, ExpertEvidence
     from memex.cli.commands import _render_expert_answer

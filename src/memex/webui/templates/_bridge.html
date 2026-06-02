@@ -1,6 +1,10 @@
-{# Reason-then-ground result (Surface §11). HTMX swap target of the /bridge form and the
-   /bridge/status long-poll. Two zones: the ungrounded ANALYSIS (.ans-* like Expert), then
-   the GROUNDED CLAIMS subset that passed the same gate as Ask (.claim-* like _answer.html). #}
+{# Reason-then-ground result (Surface §11, ADR-0016). HTMX swap target of the /bridge form and
+   the /bridge/status long-poll. Two surfaces:
+   - PRESENTED (answer.presented): the consented escalation grounded a RESPONSIVE subset — present
+     the grounded claims AS the answer (same verify + responsiveness bar as Ask), with the
+     ungrounded reasoning fenced inside a collapsed <details>. No ungrounded text in the answer.
+   - LABELLED ANALYSIS (else): the standalone composer, OR an escalation that couldn't ground a
+     responsive answer — the ungrounded ANALYSIS first, then the grounded-claims subset (if any). #}
 {% if error %}
 <div class="ans-flash ans-flash-error" role="alert">
   <p class="ans-eyebrow">Error</p>
@@ -8,6 +12,39 @@
 </div>
 {% elif answer %}
 <article class="ans">
+  {% if answer.presented %}
+  {# --- PRESENTED: grounded claims ARE the answer; reasoning fenced below. --- #}
+  <section>
+    <p class="ans-eyebrow ans-reasoned">Reasoned, then grounded <span class="ans-reasoned-tag">verified</span></p>
+    <p class="ans-reasoned-note">Reasoned from your vault, then verified — every claim below passed the same vault-grounding and responsiveness checks as Ask.</p>
+    <ul class="claim-list">
+      {% for claim in answer.grounded_claims %}
+      <li class="claim">
+        <p class="claim-text">{{ claim.claim }}</p>
+        <p class="claim-meta">
+          <span class="conf conf-{{ claim.confidence }}">{{ claim.confidence }} confidence</span>
+          <span class="claim-src">source</span>
+          {% set ref = (sources or {}).get(claim.source_chunk_id) -%}
+          {%- if ref %}<a class="claim-source-link" href="{{ ref.href }}" title="{{ claim.source_chunk_id }}"{% if ref.page %} data-page="{{ ref.page }}"{% endif %}>{{ ref.title }}{% if ref.section %} › {{ ref.section }}{% endif %}{% if ref.page %} · p. {{ ref.page }}{% endif %}</a>
+          {%- else %}<code class="chunk-id" title="chunk id">{{ claim.source_chunk_id }}</code>{% endif %}
+        </p>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <details class="bridge-reasoning">
+    <summary class="bridge-reasoning-summary">Show the model's reasoning <span class="expert-banner-tag">ungrounded</span></summary>
+    <div class="bridge-reasoning-body">
+      {% for para in answer.analysis.split("\n\n") %}
+      {% if para.strip() %}<p>{{ para }}</p>{% endif %}
+      {% endfor %}
+    </div>
+    <p class="expert-provenance" role="note">⚠ {{ answer.provenance_note }}</p>
+  </details>
+
+  {% else %}
+  {# --- LABELLED ANALYSIS: ungrounded analysis first, then the grounded subset (if any). --- #}
   <section>
     <p class="ans-eyebrow">Analysis <span class="expert-banner-tag">ungrounded</span></p>
     <div class="ans-answer">
@@ -20,6 +57,9 @@
   {% if answer.grounded_claims %}
   <section>
     <p class="ans-eyebrow">Grounded claims <span class="count">· {{ answer.n_grounded }}</span> <span class="bridge-grounded-note">verified against your vault</span></p>
+    {% if answer.present_as_answer and answer.responsive == false %}
+    <p class="bridge-nonresponsive" role="note">These claims are grounded, but they answer a related question, not the one you asked{% if answer.relevance_reason %} — {{ answer.relevance_reason }}{% endif %}. Treat them as related findings, not a direct answer.</p>
+    {% endif %}
     <ul class="claim-list">
       {% for claim in answer.grounded_claims %}
       <li class="claim">
@@ -40,7 +80,9 @@
   {% endif %}
 
   <p class="expert-provenance" role="note">⚠ {{ answer.provenance_note }}</p>
+  {% endif %}
 
+  {# --- shared tail: scope note + audit footer (both surfaces) --- #}
   {% if scope_docs %}
   <p class="ans-scope" role="note">
     <span class="ans-scope-label">{% if scope_source == "selected" %}Scoped to your selected document{{ "s" if scope_docs|length > 1 else "" }}:{% else %}Scoped to the document{{ "s" if scope_docs|length > 1 else "" }} you named:{% endif %}</span>
