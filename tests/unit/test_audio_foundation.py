@@ -38,9 +38,17 @@ def test_parse_stage_segments_roundtrip() -> None:
         parsed_at=now_utc(),
         parser_version="audio-v1",
         segments=[
-            TranscriptSegment(index=0, char_start=0, char_end=12, start_s=0.0, end_s=3.0, language="fr"),
             TranscriptSegment(
-                index=1, char_start=14, char_end=20, start_s=3.0, end_s=5.5, confidence=0.0, rationale="VLM-free ASR failed"
+                index=0, char_start=0, char_end=12, start_s=0.0, end_s=3.0, language="fr"
+            ),
+            TranscriptSegment(
+                index=1,
+                char_start=14,
+                char_end=20,
+                start_s=3.0,
+                end_s=5.5,
+                confidence=0.0,
+                rationale="VLM-free ASR failed",
             ),
         ],
     )
@@ -51,7 +59,9 @@ def test_parse_stage_segments_roundtrip() -> None:
 
 def test_parse_stage_legacy_manifest_has_empty_segments() -> None:
     # A manifest written before the audio route (no `segments` key) must load unchanged.
-    legacy = '{"correlation_id": "cid", "parsed_at": "2026-01-01T00:00:00Z", "parser_version": "v1"}'
+    legacy = (
+        '{"correlation_id": "cid", "parsed_at": "2026-01-01T00:00:00Z", "parser_version": "v1"}'
+    )
     stage = ParseStage.model_validate_json(legacy)
     assert stage.segments == []
     assert stage.pages == []
@@ -62,7 +72,11 @@ def test_chunk_time_range_default_and_roundtrip() -> None:
     assert plain.time_range is None  # doc/PDF paths leave it None
 
     timed = Chunk(
-        chunk_id="b#1", document_id="b", document_title="lecture", text="bonjour", time_range=(12.0, 18.5)
+        chunk_id="b#1",
+        document_id="b",
+        document_title="lecture",
+        text="bonjour",
+        time_range=(12.0, 18.5),
     )
     reloaded = Chunk.model_validate_json(timed.model_dump_json())
     assert reloaded.time_range == (12.0, 18.5)

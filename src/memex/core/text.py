@@ -760,3 +760,55 @@ def is_canonical_number_cell(cell: str) -> bool:
     s = re.sub(r"^[\s$€£+\-]*", "", s)  # leading currency + sign, either order
     s = _CANONICAL_SCALE_SUFFIX_RE.sub("", s).strip()
     return bool(s) and _CANONICAL_NUMERIC_CORE_RE.match(s) is not None
+
+
+# --- ASR transcript normalization (ADR-0017; spec docs/specs/audio-asr-route.md) ---------
+#
+# Non-lexical FILLER interjections stripped from an ASR transcript. DELIBERATELY
+# CONSERVATIVE: only unambiguous hesitation / non-lexical interjections that carry ZERO
+# semantic content, so removal is MEANING-PRESERVING ("100% faithful" — no content word is
+# ever altered). Ambiguous discourse markers (EN "like"/"you know"/"so"/"right"; FR
+# "ben"/"bah"/"quoi"/"voilà"/"hein") and backchannels ("mhm"/"uh-huh") are EXCLUDED — they
+# can be lexical/meaningful, and dropping them risks changing meaning. The verbatim raw
+# transcript is preserved in the ASR cache, so nothing is lost.
+_TRANSCRIPT_FILLERS: Final[frozenset[str]] = frozenset(
+    {
+        "um", "umm", "ummm", "uh", "uhh", "uhhh", "uhm", "erm", "ahem",  # EN
+        "euh", "euhh", "heu", "heuh",  # FR
+    }
+)
+# Bounded by NON-(word-char-or-hyphen) on both sides, so a filler inside a word
+# ("umbrella") or a hyphenated backchannel ("uh-huh") is left untouched; `\w` is unicode
+# (matches accented FR letters) so "euh" never clips a real word.
+_FILLER_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?<![\w-])(?:" + "|".join(sorted(_TRANSCRIPT_FILLERS, key=len, reverse=True)) + r")(?![\w-])",
+    re.IGNORECASE,
+)
+# Cleanup of the punctuation/space artifacts a removed comma-set-off filler leaves behind
+# ("I, um, think" -> "I, , think" -> "I, think").
+_DOUBLED_PUNCT_RE: Final[re.Pattern[str]] = re.compile(r"([,;:])(?:\s*[,;:])+")
+_SPACE_BEFORE_PUNCT_RE: Final[re.Pattern[str]] = re.compile(r"\s+([,.;:!?])")
+_LEADING_PUNCT_RE: Final[re.Pattern[str]] = re.compile(r"^[\s,;:]+")
+_MULTISPACE_RE: Final[re.Pattern[str]] = re.compile(r"[ \t]{2,}")
+
+
+def normalize_transcript_text(text: str) -> str:
+    """Deterministically clean ASR transcript noise WITHOUT touching any lexical / content
+    word (ADR-0017; spec docs/specs/audio-asr-route.md §"Transcript normalization").
+
+    By construction it removes ONLY non-lexical noise — unambiguous filler interjections
+    (`um`/`uh`/`euh`/…, EN+FR) and whitespace/punctuation artifacts — so it is
+    MEANING-PRESERVING ("100% faithful": no content word is ever altered, nothing is added)
+    and REPRODUCIBLE (a pure function → byte-identical output for byte-identical input →
+    stable content-addressed chunk_ids). The verbatim raw transcript stays in the ASR cache.
+
+    It deliberately does NOT collapse content-word repetitions ("the the cat"), split
+    run-on sentences, or restructure paragraphs — those need semantics and are the deferred,
+    faithfulness-GATED LLM "structuring" pass (spec §Out-of-scope), NOT this pass."""
+    cleaned = _FILLER_RE.sub("", text)
+    cleaned = _DOUBLED_PUNCT_RE.sub(r"\1", cleaned)
+    cleaned = _SPACE_BEFORE_PUNCT_RE.sub(r"\1", cleaned)
+    cleaned = _MULTISPACE_RE.sub(" ", cleaned)
+    # Re-flow per line: drop a leading dangling delimiter + trim; drop emptied lines.
+    lines = [_LEADING_PUNCT_RE.sub("", ln).strip() for ln in cleaned.split("\n")]
+    return "\n".join(ln for ln in lines if ln)

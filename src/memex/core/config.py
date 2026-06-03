@@ -380,6 +380,13 @@ class ParseSettings(BaseModel):
     # confirmed Nemotron-Parse-v1.2 doesn't regress prose answering
     # (ANS == baseline on the CUDA deck).
     disable_chart_ocr: bool = False
+    # Audio route (ADR-0017): apply the deterministic, faithful transcript normalization
+    # (`core/text.normalize_transcript_text` — strips non-lexical fillers + whitespace
+    # artifacts, never a content word) when assembling the transcript `.md`. Default ON;
+    # set `MEMEX_PARSE__ASR_NORMALIZE=false` to write the raw ASR text instead. Applied
+    # AFTER the ASR cache (raw stays cached), so flipping it re-cleans without re-transcribe
+    # and it is NOT part of the cache key. Read by the route in a later increment.
+    asr_normalize: bool = True
     # Force Docling routing, bypassing the PyMuPDF pre-filter. The
     # classifier would normally win PyMuPDF on born-digital text-heavy
     # PDFs (Adobe InDesign / Acrobat output / etc.); this flag overrides

@@ -63,13 +63,39 @@ across every backend):
    Whisper-family backends.
 4. **Transcribe** each chunk independently (batched within VRAM).
 5. **Offset** every local timestamp by the chunk's absolute start: `global = chunk_start + local`.
-6. **Assemble** `## [mm:ss]\n<text>` blocks in time order → the transcript body.
+6. **Normalize** each segment's text — `core/text.normalize_transcript_text`, a deterministic,
+   faithful clean of non-lexical speech noise (gated by `ParseSettings.asr_normalize`, default on;
+   see §"Transcript normalization" below).
+7. **Assemble** `## [mm:ss]\n<text>` blocks in time order → the transcript body.
 
 Chunking is **mandatory, not an optimization** — no backend transcribes a 1–2 hr file in one pass
 (Whisper's window is 30 s; Qwen caps a single utterance at 20 min, its aligner at 300 s). Per-chunk
 independent anchoring also prevents Whisper's **cumulative timestamp drift** (the buffered window
 shifts by the *previously decoded* timestamp, so errors accumulate over hours). Peak VRAM is
 **file-length-independent** (≈ chunk × batch), so a 2-hour file fits the 4070 at batch 4–8.
+
+### Transcript normalization (faithful + deterministic)
+
+Raw ASR output is spontaneous, non-linear speech — disfluencies, fillers, restarts — so the chunks
+must be CLEANED before they reach the RAG pipeline, but **without losing context and 100%
+deterministically faithful** (the grounding gate reads this text). Two tiers resolve that tension:
+
+- **v1 — a DETERMINISTIC, content-preserving pass** (`core/text.normalize_transcript_text`, shipped
+  with this route): a pure function that removes ONLY non-lexical noise — unambiguous filler
+  interjections (`um`/`uh`/`euh`/…, EN+FR; backchannels like `uh-huh` and ambiguous markers like
+  `like`/`so`/`ben` are EXCLUDED) plus whitespace/punctuation artifacts. **By construction it never
+  alters a content word and never adds text**, so it is meaning-preserving ("100% faithful") and
+  reproducible (byte-identical output → stable content-addressed `chunk_id`s). It runs at step 6,
+  **after** the ASR cache, so the **verbatim raw transcript stays cached** (the audit/faithfulness
+  anchor), toggling `ParseSettings.asr_normalize` re-cleans from cached raw (no re-transcribe), and it
+  is **NOT** part of the cache `cfg` key. It deliberately does NOT collapse content-word stutters
+  ("the the cat"), split run-on sentences, or restructure paragraphs.
+- **Follow-up — an OPTIONAL LLM "structuring" pass** (deferred, §15): better paragraphing / sentence
+  segmentation / light disfluency smoothing, which needs semantics. Because it would rewrite the
+  grounding source-of-truth, it is gated behind (a) a **deterministic faithfulness guard** — the
+  cleaned output's content tokens must be a subset of the raw's (no new content), falling back to the
+  raw on violation (the Table-RAG-verbatim philosophy) — (b) a content-addressed cache for
+  determinism, and (c) a transcript-fidelity eval. Its own arc.
 
 ## 4. Backend abstraction (`ModelSettings.asr` + `asr_backend`)
 
@@ -313,4 +339,9 @@ answer/summarize **REFUSES** (the scan-route precedent; never fabricates from an
   transcript↔deck link is a **document-level** `[[doc]]`/CITES edge established at merge time).
 - **Qwen3-ASR + ForcedAligner** (word/char timestamps) — revisit only if an independent French result
   makes Qwen's accuracy decisive (the 2-pass, 300 s-capped, off-HTTP cost is otherwise not worth it).
+- **An LLM "structuring" pass** over the deterministically-normalized transcript (the immediate
+  follow-up to v1's deterministic clean) — paragraphing / run-on splitting / light disfluency
+  smoothing that needs semantics — gated behind a **deterministic faithfulness guard** (cleaned
+  content tokens ⊆ raw; fall back to raw on violation), a content-addressed cache, and a
+  transcript-fidelity eval (§"Transcript normalization"). v1 ships only the deterministic pass.
 - **A synced audio player UI** and an **LLM-titled transcript pass**.
