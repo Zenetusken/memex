@@ -26,6 +26,7 @@ DetectedKind = Literal[
     "html",
     "markdown",
     "text",
+    "audio",
     "unknown",
 ]
 
@@ -50,6 +51,13 @@ _MAGIC: list[tuple[bytes, DetectedKind, str]] = [
     (b"<!doctype html", "html", "text/html"),
     (b"<!DOCTYPE html", "html", "text/html"),
     (b"<html", "html", "text/html"),
+    # Audio (ADR-0017) — OFFSET-0 magics only. The WAV `RIFF...WAVE` and ISO-BMFF `ftyp`
+    # containers are NOT offset-0, so they're handled by `_detect_audio_container` below.
+    (b"ID3", "audio", "audio/mpeg"),  # MP3 with an ID3v2 tag (the common case)
+    (b"\xff\xfb", "audio", "audio/mpeg"),  # MP3 frame sync (MPEG-1 Layer III, untagged)
+    (b"\xff\xf3", "audio", "audio/mpeg"),  # MP3 frame sync (MPEG-2 Layer III)
+    (b"fLaC", "audio", "audio/flac"),
+    (b"OggS", "audio", "audio/ogg"),
 ]
 
 
@@ -98,6 +106,19 @@ def _refine_office(path: Path) -> tuple[DetectedKind, str, bool]:
     return "unknown", "application/zip", has_macros
 
 
+def _detect_audio_container(head: bytes) -> tuple[DetectedKind, str, bool] | None:
+    """Audio containers whose magic is NOT at byte offset 0 — so they can't be plain
+    `_MAGIC` prefix rows. WAV is `RIFF`@0 + `WAVE`@8; the ISO-BMFF `ftyp` box (M4A / MP4
+    audio) is `ftyp`@4 (after the 4-byte box-size word). Mirrors the `docx → _refine_office`
+    special-case branch. Offset-0 audio magics (ID3 / MPEG sync / fLaC / OggS) are handled by
+    `_MAGIC` rows instead. Returns `(kind, mime, has_macros=False)`, or None if not audio."""
+    if head[:4] == b"RIFF" and head[8:12] == b"WAVE":
+        return "audio", "audio/wav", False
+    if head[4:8] == b"ftyp":
+        return "audio", "audio/mp4", False
+    return None
+
+
 def _detect(path: Path) -> tuple[DetectedKind, str, bool]:
     """Return (kind, mime, has_macros). Reads at most 4 KiB."""
     with open(path, "rb") as f:
@@ -108,6 +129,12 @@ def _detect(path: Path) -> tuple[DetectedKind, str, bool]:
             if kind == "docx":  # ZIP-shaped — refine
                 return _refine_office(path)
             return kind, mime, False
+
+    # Audio containers with a non-offset-0 magic (WAV / ftyp) — before the text fallback,
+    # since they're binary (a WAV/m4a would otherwise miss every branch → "unknown").
+    audio = _detect_audio_container(head)
+    if audio is not None:
+        return audio
 
     if path.suffix.lower() in {".md", ".markdown"} and _looks_like_text(head):
         return "markdown", "text/markdown", False
