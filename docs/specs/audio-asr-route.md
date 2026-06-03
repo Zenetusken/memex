@@ -1,11 +1,14 @@
 # Spec: audio → timestamped-Markdown ASR parse route
 
-**Status:** **Proposed** (design — NOT built). **ADR:** [ADR-0017](../adr/0017-audio-asr-ingestion-route.md).
+**Status:** **Implemented** (v1 — the `faster_whisper` backend + route + cache + chunk time
+attribution; branch `audio-asr-ingestion`). The `vllm`/`transformers` backends, the French-audio A/B,
+and the Phase-2 companion-merge are **deferred** (§13, §15). **ADR:**
+[ADR-0017](../adr/0017-audio-asr-ingestion-route.md).
 **Analogue:** `scan-vlm-parse.md` (whole-source transcription that bypasses the page pipeline).
 **Research basis:** [[asr-audio-scope-2026-06-03]] (the timestamp gate + the French A/B).
 
-> This spec designs the route so the **ASR backend is pluggable** and the **companion-document
-> merge** (ADR-0017 §Phase-2) is enabled but not built. The recommended v1 default backend is
+> This spec built the route so the **ASR backend is pluggable** and the **companion-document
+> merge** (ADR-0017 §Phase-2) is enabled but not built. The shipped v1 default backend is
 > `faster_whisper`; the **final default is gated on a hands-on French-audio A/B** (see §13).
 
 ## 1. Problem
@@ -46,11 +49,18 @@ parse_document(suffix in AUDIO_SUFFIXES)
   → _parse_audio(vault, doc_id, source):
         async with pause_vllm_for_gpu():           # orchestrator down → GPU free (nestable)
             segments = await transcribe_audio(source=source, cache=asr_cache, refresh=refresh_asr)
-        body = assemble_transcript_markdown(segments)   # ## [mm:ss] headers + text
-        _finalize_body(body) → write_document → update_manifest(parse=ParseStage(
+        body, segments = _assemble_transcript(segments)   # ## [mm:ss] headers + text (PURE)
+        write_document(body) → update_manifest(parse=ParseStage(   # NB: SKIPS _finalize_body (see below)
               pages=[], segments=[TranscriptSegment...], ...))   # engine tag is on ParseResult, NOT ParseStage
         return ParseResult(doc_id, correlation_id, engine="asr", pages=[], markdown_bytes=…)
 ```
+
+The route deliberately **does NOT run `_finalize_body`** (unlike the PDF/scan routes). The transcript
+is already normalized per-segment (`normalize_transcript_text`) and structured (`## [mm:ss]` blocks);
+it carries none of the PDF artifacts `_finalize_body` targets, and that pass's duplicate-line collapse
++ table linearization would corrupt distinct timestamped segments and **drift the char-spans** that
+`_assemble_transcript` computed against the verbatim body (which drive `Chunk.time_range`). The body
+is written exactly as assembled, so the spans stay byte-exact.
 
 The **backend-agnostic transcription pipeline** inside `transcribe_audio` (the part that is identical
 across every backend):
@@ -199,16 +209,16 @@ New `parse/asr_backend.py` (the audio sibling of `vlm_backend.py`):
 - `ASRUnavailable(MemexError)`, `ASRTranscriptionError(MemexError)` — typed, `context`-carrying.
 
 `_parse_audio` (in `pipeline.py`, modelled on `_parse_scan_with_vlm`): open the ASR cache,
-transcribe under `pause_vllm_for_gpu()`, assemble the body, `_finalize_body` → `write_document` →
-`update_manifest(parse=ParseStage(pages=[], segments=…, figure_count=0, …))` — like the scan route,
-the `ParseStage` carries **no** `engine` field; the engine tag lives on `ParseResult` only — return
-`ParseResult(engine="asr", pages=[], markdown_bytes=…)`. No chart-OCR pass (no figures).
+transcribe under `pause_vllm_for_gpu()`, `_assemble_transcript` the body + segments (PURE),
+`write_document` → `update_manifest(parse=ParseStage(pages=[], segments=…, …))` — **skipping
+`_finalize_body`** (§3 rationale: it would drift the segment char-spans + collapse distinct
+timestamped blocks). Like the scan route, the `ParseStage` carries **no** `engine` field; the engine
+tag lives on `ParseResult` only — return `ParseResult(engine="asr", pages=[], markdown_bytes=…)`. No
+chart-OCR pass (no figures).
 
 ## 7. Transcript Markdown shape
 
 ```markdown
-# <lecture title>
-
 ## [00:00]
 <verbatim transcript text for this segment>
 
@@ -216,13 +226,16 @@ the `ParseStage` carries **no** `engine` field; the engine tag lives on `ParseRe
 <…>
 ```
 
-`## [mm:ss]` (or `[hh:mm:ss]` past an hour) headers are the **time anchors** — real Markdown
-headings, so they become `heading_path` entries and section boundaries in the existing chunker (a
-transcript chunk inherits its segment's timestamp via its heading). The body is content-only (ADR-0003);
-the machine-readable timestamps live in the sidecar (§8). The title comes from the source filename
-(a future LLM-titling pass could improve it; `index/pipeline.py::retitle_document` is the existing
-deterministic *writer* that propagates a new title across the denormalized stores once a title string
-exists — it does not itself generate one).
+The body is **`## [mm:ss]` blocks only — no `# <title>` H1**: `_assemble_transcript` emits exactly the
+timestamped blocks joined by blank lines (so the segment char-spans are byte-exact), and the document
+title lives in the **frontmatter** (`Frontmatter.title`, set by `derive_title(vault, doc_id)` from the
+source filename), not a body heading. `## [mm:ss]` (or `[hh:mm:ss]` past an hour) headers are the
+**time anchors** — real Markdown headings, so they become `heading_path` entries and section
+boundaries in the existing chunker (a transcript chunk inherits its segment's timestamp via its
+heading). The body is content-only (ADR-0003); the machine-readable timestamps live in the sidecar
+(§8). A future LLM-titling pass could improve the frontmatter title;
+`index/pipeline.py::retitle_document` is the existing deterministic *writer* that propagates a new
+title across the denormalized stores once a title string exists — it does not itself generate one.
 
 ## 8. Metadata contract — `TranscriptSegment` on `ParseStage`
 
@@ -273,20 +286,29 @@ Mirror `parse/vlm_cache.py::VLMTranscriptionCache` exactly — a new
 **Two key differences from the VLM cache.** The VLM cache keys on `sha256(pdf_bytes):page:model:prompt`,
 where `page` is INPUT-derived (known before the call). ASR differs twice:
 
-1. **The cache unit is the VAD CHUNK, not a "segment".** Segments are OUTPUT-derived (a VAD chunk
-   emits ≥1 sub-segments only *after* transcription), so a segment index can't key a lookup that runs
-   *before* the transcription it is meant to skip. But VAD is a **deterministic function of
-   `(audio_bytes, vad_params)`**, so the chunk boundaries — hence `chunk_index` — ARE known
-   pre-transcription (§3 steps 2–3). The cached value is that chunk's emitted segments (text +
-   **chunk-local** timestamps); a re-parse re-runs the deterministic VAD → same chunks → per-chunk
-   cache hits → reassemble (re-applying each chunk's absolute offset, itself fixed by the VAD).
+1. **The cache unit is the audio file (a `chunk_index`), not a "segment".** Segments are
+   OUTPUT-derived (transcription emits ≥1 sub-segments only *after* the call), so a segment index can't
+   key a lookup that runs *before* the transcription it is meant to skip. **The v1 `faster_whisper`
+   backend does VAD + long-form chunking internally**, so the whole file is ONE cache unit — a fixed
+   `chunk_index=0` (`_FULL_FILE_CHUNK_INDEX`), value = the full ordered segment list (text + GLOBAL
+   timestamps). The `chunk_index` slot is kept in the key for the **deferred manual-VAD backends**
+   (`vllm`/`transformers`): there VAD is a **deterministic function of `(audio_bytes, vad_params)`**, so
+   the chunk boundaries — hence `chunk_index` — are known pre-transcription (§3 steps 2–3), each chunk
+   caches its emitted segments with **chunk-local** timestamps, and a re-parse re-runs the deterministic
+   VAD → same chunks → per-chunk hits → reassemble (re-applying each chunk's absolute offset). The slot
+   makes that future extension a non-breaking key change.
 2. **The key carries a decoding-param `cfg`** (ASR has no prompt, but decoding params that change the
    output):
 
 ```
 sha256(audio_bytes) : chunk_index : model : cfg
-   where cfg = sha8(json{backend, beam_size, language|"auto", temperature, vad_params, chunk_window})
+   where cfg = sha8(json{backend, beam_size, language|"auto", vad_filter, device})
 ```
+
+(`device` is in the `cfg` because it changes the output — `cpu`→int8 vs `cuda`→float16 compute — so a
+device switch is a clean cache miss, not a stale replay. The v1 `faster_whisper` backend has no
+explicit `temperature`/`chunk_window` knob — greedy `beam_size=1` + the model's internal long-form
+window — so those are not in the key; a future manual-VAD backend that exposes them would extend `cfg`.)
 
 **Without `cfg` a decoding-param change would silently REPLAY stale output instead of a clean miss.**
 Greedy ASR (beam=1, temp=0) is reproducible for fixed input+hardware+library-version but **not
