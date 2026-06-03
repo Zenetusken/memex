@@ -84,6 +84,18 @@ a full answer-eval counterfactual re-baseline (a stricter gate risks over-refusi
 measure multi-run, the borderline-counterfactual discipline). The presentation
 guard makes the follow-up NON-urgent. Tracked in `next_priorities.md`.
 
+A **separate** audit follow-up surfaced alongside this one — the `extract_claims@v1`
+extractor *under-covering* the discrete groundable sub-claims (it pulls the
+un-groundable conclusion and mis-cites it; an instrumented trace grounded 0/1
+despite a verbatim-groundable NIST quote being present, while a control claim taken
+verbatim from the chunk grounded 1/1, proving the gate itself is sound). It was
+**mitigated, presentation-only,** by the evidence-consulted UI surface (`3d1a127`):
+a navigable "Retrieved from your vault" section that lists the reranked chunks the
+model was shown (`BridgeAnswer.evidence`) on both bridge surfaces — most valuably on
+the zero-grounded fallback — so the user can open the docs the model read regardless
+of grounding/extraction coverage. The root-cause extractor improvement is itself an
+LLM-prompt-layer follow-up tracked in `next_priorities.md`.
+
 ## Reproducibility
 
 Conversational live audit (no scripted harness): drive the present-as-answer
