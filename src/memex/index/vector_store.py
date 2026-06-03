@@ -87,6 +87,24 @@ def _chunk_from_row(row: _ChunkRow, *, score: float = 0.0) -> Chunk:
     )
 
 
+async def _migrate_time_columns(db: AsyncConnection) -> None:
+    """Add the audio `time_start`/`time_end` columns (ADR-0017) to a `chunks` table created
+    BEFORE they existed, so an append/upsert with the current `_ChunkRow` schema succeeds (LanceDB
+    `add()` requires the row schema to match the table). Without this, every vault indexed before
+    the time-range columns shipped would fail to index ANY new document (the live failure that
+    surfaced on the first real audio ingest). Idempotent — skips when the columns are already
+    present. The SQL default `CAST(-1.0 AS double)` fills existing rows with the sentinel (→
+    `time_range=None` on reconstruction, the non-audio convention) and matches `_ChunkRow`'s
+    float64 mapping. Best-effort: a migration failure logs + re-raises (a broken schema must not be
+    silently appended to)."""
+    table = await db.open_table(_TABLE)
+    existing = {field.name for field in await table.schema()}
+    missing = [c for c in ("time_start", "time_end") if c not in existing]
+    if missing:
+        await table.add_columns({c: "CAST(-1.0 AS double)" for c in missing})
+        logger.info("vector.migrate.time_columns", added=missing)
+
+
 class VectorStore:
     """Async wrapper over a LanceDB connection.
 
@@ -128,6 +146,8 @@ class VectorStore:
             names = list(cast(Any, response))
         if _TABLE not in names:
             await db.create_table(_TABLE, schema=_ChunkRow)
+        else:
+            await _migrate_time_columns(db)
         return cls(db)
 
     async def upsert(self, chunks: list[Chunk], embeddings: list[list[float]]) -> None:

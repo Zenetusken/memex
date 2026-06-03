@@ -244,3 +244,51 @@ async def test_concurrent_searches_across_multiple_stores_are_independent(
 
     await store_a.close()
     await store_b.close()
+
+
+@pytest.mark.asyncio
+async def test_open_migrates_legacy_table_missing_time_columns(tmp_path: Path) -> None:
+    """Back-compat (ADR-0017): a `chunks` table created BEFORE the audio `time_range` columns must
+    be migrated on `open` so an upsert with the CURRENT `_ChunkRow` schema doesn't fail with
+    'field time_start does not exist in table schema' — the live bug that broke indexing on the
+    first real audio ingest into the production (pre-time-column) vault."""
+    from lancedb.pydantic import LanceModel, Vector
+
+    from memex.index.vector_store import _TABLE, EMBEDDING_DIM
+
+    # An OLD 9-column table (no time_start/time_end), exactly the pre-ADR-0017 on-disk schema.
+    class _OldRow(LanceModel):
+        chunk_id: str
+        document_id: str
+        document_title: str
+        text: str
+        page: int = -1
+        char_start: int = 0
+        char_end: int = 0
+        heading_path: str = ""
+        embedding: Vector(EMBEDDING_DIM)  # type: ignore[valid-type]
+
+    vault = tmp_path / "vault"
+    (vault / ".memex").mkdir(parents=True)
+    db = await lancedb.connect_async(str(vault / ".memex" / "embeddings.lance"))
+    legacy = await db.create_table(_TABLE, schema=_OldRow)
+    await legacy.add(
+        [{
+            "chunk_id": "old#1", "document_id": "old", "document_title": "Old",
+            "text": "legacy chunk", "page": 3, "char_start": 0, "char_end": 12,
+            "heading_path": "", "embedding": [0.0] * EMBEDDING_DIM,
+        }]
+    )
+
+    # Open via the production path → the migration adds the time columns.
+    store = await VectorStore.open(vault)
+    timed = Chunk(
+        chunk_id="aud#1", document_id="aud", document_title="Lecture",
+        text="the router forwards packets", char_start=0, char_end=27, time_range=(62.0, 66.0),
+    )
+    # This upsert used to raise the schema error; now it succeeds.
+    await store.upsert([timed], [[1.0] + [0.0] * (EMBEDDING_DIM - 1)])
+    hits = {c.chunk_id: c for c in await store.search([1.0] + [0.0] * (EMBEDDING_DIM - 1), k=5)}
+    assert hits["aud#1"].time_range == (62.0, 66.0)  # the new audio chunk keeps its anchor
+    assert hits["old#1"].time_range is None  # the -1.0 backfill reconstructs to None
+    await store.close()
