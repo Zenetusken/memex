@@ -130,31 +130,44 @@ def _is_m4a_audio(head: bytes) -> bool:
     return any(head[off : off + 4] in _M4A_AUDIO_BRANDS for off in range(16, min(len(head), 40), 4))
 
 
+# MPEG-audio / AAC-ADTS frame-sync 2nd bytes (`0xFF` is the 1st). A PRECISE set, NOT the broad
+# `0xFF + 0xE0`-mask: that mask also passed a UTF-16-LE BOM (`0xFF 0xFE`, syntactically MPEG-1
+# Layer I — extinct) and reserved syncs (`0xFFE0/1`), misdetecting BOM text as audio. These cover
+# MP3 Layer III MPEG-1/2 (±CRC) and AAC-ADTS MPEG-4/2 (±CRC) — the realistic untagged-audio cases.
+_AAC_SYNC_BYTES: frozenset[int] = frozenset({0xF1, 0xF9, 0xF0, 0xF8})  # AAC-ADTS (layer bits 00)
+_MP3_SYNC_BYTES: frozenset[int] = frozenset({0xFB, 0xFA, 0xF3, 0xF2})  # MP3 Layer III ±CRC
+# Ogg is a SHARED container (audio: Vorbis/Opus/FLAC/Speex; video: Theora), so an `OggS` head is
+# accepted ONLY when an AUDIO codec signature is in its first page — Theora video stays rejected.
+_OGG_AUDIO_CODECS: tuple[bytes, ...] = (b"OpusHead", b"vorbis", b"FLAC", b"Speex")
+
+
 def _detect_audio(head: bytes) -> tuple[DetectedKind, str, bool] | None:
     """All audio-format detection (ADR-0017), kept OUT of the generic offset-0 `_MAGIC` loop
     because audio needs structural guards a plain prefix row can't express:
 
-    - the MPEG/AAC frame sync is BINARY (`0xFF` + the 3 top sync bits) — one mask covers MP3
-      (Layer III, ±CRC) and AAC-ADTS, and `0xFF` never starts a UTF-8 text file (JPEG's `0xFFD8`
-      fails the `0xE0` mask), so no text/image collision; the layer bits split AAC from MP3;
+    - the MPEG/AAC frame sync is BINARY (`0xFF` + a known sync 2nd byte) — `0xFF` never starts a
+      UTF-8 file and the PRECISE 2nd-byte set excludes the UTF-16-LE BOM (`0xFFFE`) + reserved
+      syncs, so no text/image collision; AAC vs MP3 is split by the 2nd byte for the MIME;
     - the ASCII container magics `ID3`/`fLaC`/`OggS` COLLIDE with prose ABOUT those formats (a
       note "ID3 tags …"), so they require the head to NOT look like text (a real audio file is
-      binary) — the same rigour the `ftyp` branch has;
+      binary) — the same rigour the `ftyp` branch has; `OggS` additionally requires an AUDIO
+      codec (Ogg also wraps Theora video);
     - WAV (`RIFF`@0 + `WAVE`@8) and the `ftyp` box (`ftyp`@4) are not offset-0; `ftyp` is shared
       with MP4/MOV video + HEIC/AVIF images, so it needs the `M4A ` audio brand (`_is_m4a_audio`).
 
     Returns `(kind, mime, has_macros=False)`, or None if not audio."""
-    if len(head) >= 2 and head[0] == 0xFF and (head[1] & 0xE0) == 0xE0:
-        # Layer bits == 00 (reserved for MPEG audio) ⇒ AAC-ADTS; otherwise an MP3 frame.
-        mime = "audio/aac" if (head[1] & 0x06) == 0 else "audio/mpeg"
-        return "audio", mime, False
+    if len(head) >= 2 and head[0] == 0xFF:
+        if head[1] in _AAC_SYNC_BYTES:
+            return "audio", "audio/aac", False
+        if head[1] in _MP3_SYNC_BYTES:
+            return "audio", "audio/mpeg", False
     if not _looks_like_text(head):  # the real files are binary; prose ABOUT them stays text
         if head.startswith(b"ID3"):
             return "audio", "audio/mpeg", False
         if head.startswith(b"fLaC"):
             return "audio", "audio/flac", False
-        if head.startswith(b"OggS"):
-            return "audio", "audio/ogg", False
+        if head.startswith(b"OggS") and any(c in head[:64] for c in _OGG_AUDIO_CODECS):
+            return "audio", "audio/ogg", False  # audio Ogg only; Theora video stays rejected
         if head[:4] == b"RIFF" and head[8:12] == b"WAVE":
             return "audio", "audio/wav", False
         if head[4:8] == b"ftyp" and _is_m4a_audio(head):

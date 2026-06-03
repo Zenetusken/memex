@@ -1,8 +1,10 @@
 """Unit tests for audio ingest acceptance (Increment 2, ADR-0017).
 
-Validates that `validate_file` accepts the common audio container formats by their
-magic bytes (offset-0 magics via `_MAGIC`, the non-offset-0 WAV/`ftyp` containers via the
-dedicated branch), rejects non-audio binaries, and does not regress PDF/text detection.
+Validates `_detect_audio`: the binary MPEG/AAC frame-sync (a precise 2nd-byte set), the
+text-gated ASCII magics (ID3/fLaC/OggS — the last requiring an audio codec, since Ogg also
+wraps Theora video), and the WAV/`ftyp` containers (M4A-brand-only) — all kept out of the
+generic `_MAGIC` loop. Confirms non-audio binaries / video / image / BOM-text are rejected and
+PDF/text detection is intact.
 """
 
 from __future__ import annotations
@@ -61,8 +63,10 @@ def test_flac_accepted(tmp_path: Path) -> None:
     assert r.mime == "audio/flac"
 
 
-def test_ogg_accepted(tmp_path: Path) -> None:
-    r = _validate(_write(tmp_path, "clip.ogg", b"OggS\x00\x02" + b"\x00" * 200))
+def test_ogg_opus_accepted(tmp_path: Path) -> None:
+    # Ogg requires an AUDIO codec signature (Opus/Vorbis/FLAC/Speex) in the first page.
+    data = b"OggS" + b"\x00" * 23 + b"OpusHead" + b"\x00" * 200
+    r = _validate(_write(tmp_path, "clip.ogg", data))
     assert r.accepted
     assert r.kind == "audio"
     assert r.mime == "audio/ogg"
@@ -151,7 +155,28 @@ def test_oggs_prefixed_text_is_not_audio(tmp_path: Path) -> None:
 
 
 def test_mp3_crc_protected_sync_accepted(tmp_path: Path) -> None:
-    # CRC-protected MP3 frame sync (0xFFFA) — covered by the frame-sync bitmask (AUDIO-BC-002).
+    # CRC-protected MP3 frame sync (0xFFFA) — in the precise sync-byte set (AUDIO-BC-002).
     r = _validate(_write(tmp_path, "crc.mp3", b"\xff\xfa\x90\x00" + b"\x00" * 200))
     assert r.accepted
     assert r.kind == "audio"
+
+
+def test_flac_prefixed_text_is_not_audio(tmp_path: Path) -> None:
+    r = _validate(_write(tmp_path, "notes.txt", b"fLaC is the Free Lossless Audio Codec magic.\n"))
+    assert r.accepted
+    assert r.kind == "text"
+
+
+def test_ogg_theora_video_rejected(tmp_path: Path) -> None:
+    # Ogg-Theora VIDEO carries no audio codec signature → rejected (shared-container tightening).
+    data = b"OggS" + b"\x00" * 23 + b"\x80theora" + b"\x00" * 200
+    r = _validate(_write(tmp_path, "clip.ogv", data))
+    assert not r.accepted
+    assert r.kind == "unknown"
+
+
+def test_utf16le_bom_text_not_audio(tmp_path: Path) -> None:
+    # A UTF-16-LE BOM (0xFF 0xFE) must NOT be misdetected as an MP3 frame (validator AUDIO-BC-003).
+    data = b"\xff\xfe" + "hello world".encode("utf-16-le")
+    r = _validate(_write(tmp_path, "utf16.txt", data))
+    assert r.kind != "audio"

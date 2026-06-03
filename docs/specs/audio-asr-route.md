@@ -138,12 +138,16 @@ assembly, cache, manifest) is shared.
 by a dedicated `_detect_audio(head)` (kept OUT of the generic offset-0 `_MAGIC` loop because audio
 needs structural guards a plain prefix row can't express), wired **before** the text fallback (a
 binary container would otherwise misread as `text`/`unknown`):
-- the **binary MPEG/AAC frame sync** is matched by a bitmask (`head[0]==0xFF and head[1]&0xE0==0xE0`)
-  — one check covering MP3 (Layer III, **±CRC**) and AAC-ADTS (the layer bits split the two for the
-  MIME); `0xFF` never starts a UTF-8 file (JPEG's `0xFFD8` fails the mask), so no text/image collision;
+- the **binary MPEG/AAC frame sync** is matched against a **precise set** of known sync 2nd-bytes
+  (`0xFF` then `{0xFB,0xFA,0xF3,0xF2}` MP3-Layer-III ±CRC → `audio/mpeg`, or `{0xF1,0xF9,0xF0,0xF8}`
+  AAC-ADTS → `audio/aac`) — NOT a broad `head[1]&0xE0` mask, which also passed the UTF-16-LE BOM
+  (`0xFFFE`) + reserved syncs; `0xFF` never starts a UTF-8 file and the precise set excludes the BOM,
+  so no text/image collision;
 - the **ASCII container magics** `ID3` (tagged MP3), `fLaC`, and `OggS` (also covers `.opus`) are
   accepted **only when the head does NOT look like text** — they otherwise COLLIDE with prose ABOUT
-  those formats (a note "`ID3` tags …"), which must stay `text`;
+  those formats (a note "`ID3` tags …"), which must stay `text`. `OggS` **additionally** requires an
+  audio codec signature (`OpusHead`/`vorbis`/`FLAC`/`Speex`) in its first page, since Ogg also wraps
+  Theora **video** (which stays rejected);
 - `RIFF….WAVE` (`WAVE` at byte 8) and the ISO-BMFF `ftyp` box (`ftyp` at byte 4) are not offset-0.
   **The `ftyp` box is SHARED by M4A audio, MP4/MOV video, and HEIC/AVIF images, so it is accepted ONLY
   when the `M4A ` audio brand is present (major or compatible brand; `_is_m4a_audio`)** — video and
