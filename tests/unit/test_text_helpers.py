@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from memex.core.text import (
     chart_extracted_spans,
+    claim_grounded_only_by_name,
     is_inside_any_span,
     is_name_only_chunk,
     strip_chart_extracted_for_index,
@@ -184,7 +185,9 @@ def test_name_only_keeps_plain_prose() -> None:
 
 def test_name_only_short_circuits_on_chart_block() -> None:
     """A `[chart-extracted]` block is structured data — substantive support, never name-only."""
-    text = "### Config\n[chart-extracted]\nR1(config)# ip domain-name example.com\n[/chart-extracted]"
+    text = (
+        "### Config\n[chart-extracted]\nR1(config)# ip domain-name example.com\n[/chart-extracted]"
+    )
     assert is_name_only_chunk(text) is False
 
 
@@ -214,7 +217,9 @@ def test_name_only_keeps_heading_only_chunk() -> None:
 
 def test_name_only_keeps_eight_word_bullet() -> None:
     """An ≥8-word bullet is a substantive sentence, not a bare name."""
-    text = "### Access\n- Role-Based Access Control assigns permissions to enterprise roles directly"
+    text = (
+        "### Access\n- Role-Based Access Control assigns permissions to enterprise roles directly"
+    )
     assert is_name_only_chunk(text) is False
 
 
@@ -226,3 +231,77 @@ def test_name_only_flags_two_short_bullets_with_heading() -> None:
 def test_name_only_empty_text_is_not_name_only() -> None:
     assert is_name_only_chunk("") is False
     assert is_name_only_chunk("\n\n   \n") is False
+
+
+# ----------------------------------------------------------------------
+# is_name_only_chunk — leading-enumerator harden (the numbered sub-heading gap)
+# ----------------------------------------------------------------------
+
+
+def test_name_only_flags_numbered_subheadings() -> None:
+    """The closed gap: a slide of numbered SUB-HEADINGS — each exactly 8 tokens ONLY because the
+    `N.` enumerator counts — is now name-only (the enumerator is stripped before the word count)."""
+    text = (
+        "### Sécurité du réseau\n"
+        "3. Protection du plan de contrôle (Control Plane)\n"
+        "4. Protection du plan de données (Data Plane)"
+    )
+    assert is_name_only_chunk(text) is True
+
+
+def test_name_only_enumerator_strip_keeps_long_numbered_prose() -> None:
+    """FP guard: a numbered line that is still ≥8 CONTENT words after the strip stays substantive."""
+    text = (
+        "### Plan\n"
+        "1. The control plane processes all administrative requests and stays fully isolated\n"
+        "2. Segmentation"
+    )
+    assert is_name_only_chunk(text) is False
+
+
+def test_name_only_flags_paren_enumerator_form() -> None:
+    """The `N)` enumerator form is stripped too (regex alternation `[.)]`)."""
+    text = "### Étapes\n1) Configuration du plan de contrôle local\n2) Vérification du plan"
+    assert is_name_only_chunk(text) is True
+
+
+def test_name_only_numbered_floor_keeps_single_short_line() -> None:
+    """The ≥2-short-line floor still holds: one numbered heading + a real heading is NOT name-only."""
+    text = "### Sécurité\n3. Protection du plan de contrôle (Control Plane)"
+    assert is_name_only_chunk(text) is False
+
+
+# ----------------------------------------------------------------------
+# claim_grounded_only_by_name — the shared bridge/verify demotion rule
+# ----------------------------------------------------------------------
+
+_NAME_LIST = "### Contrôle d'accès\n- Role-Based Access Control (RBAC)\n- Attribute-Based (ABAC)"
+_PROSE = (
+    "### OSPF\n- OSPF assigns a cost to each link and floods link-state advertisements to peers."
+)
+
+
+def test_grounded_only_by_name_behavioral_on_name_list_is_true() -> None:
+    assert claim_grounded_only_by_name("RBAC assigns permissions by job role.", _NAME_LIST) is True
+
+
+def test_grounded_only_by_name_membership_on_name_list_is_false() -> None:
+    """Membership-first KEEP: a name-list DOES ground a membership claim."""
+    assert (
+        claim_grounded_only_by_name("RBAC is one of the listed access-control models.", _NAME_LIST)
+        is False
+    )
+
+
+def test_grounded_only_by_name_behavioral_on_prose_is_false() -> None:
+    """A substantive prose chunk is not name-only → keep (short-circuits at the chunk test)."""
+    assert claim_grounded_only_by_name("OSPF assigns a cost to each link.", _PROSE) is False
+
+
+def test_grounded_only_by_name_fr_chunk_en_claim_trap() -> None:
+    """The common shape: a FR name-list chunk + an EN claim. Behavioral demotes, membership keeps."""
+    assert claim_grounded_only_by_name("ABAC evaluates attributes dynamically.", _NAME_LIST) is True
+    assert (
+        claim_grounded_only_by_name("ABAC is included in the access-control list.", _NAME_LIST)
+        is False
+    )

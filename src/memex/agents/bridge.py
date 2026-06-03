@@ -44,7 +44,7 @@ from memex.agents.expert import (
 from memex.agents.grounding import assess_responsiveness, ground_claims, ground_claims_isolated
 from memex.core.config import get_settings
 from memex.core.errors import ModelCallError
-from memex.core.text import is_name_only_chunk
+from memex.core.text import claim_grounded_only_by_name
 from memex.core.types import Chunk
 from memex.models.client import complete_structured, split_think
 from memex.observability import bind_run_context, clear_run_context
@@ -195,15 +195,43 @@ async def reason_then_ground(
         grounded, t_ground = await ground(
             analysis[:300], groundable, reranked, max_tokens=_GROUND_MAX_TOKENS
         )
+        # NAME-ONLY GROUNDING BACKSTOP (membership-aware): the `verify_grounding/v2` gate
+        # intermittently grounds a BEHAVIORAL claim against a chunk that merely NAMES the entity (a
+        # bare list/heading) — the residual the isolated re-verification doesn't catch (it still
+        # grounds 5 such claims at N=1). Demote any grounded claim grounded ONLY by name (the SAME
+        # deterministic rule the `/ask` verify node uses, `claim_grounded_only_by_name`):
+        # membership/existence + unrecognised predicates are KEPT (fail-open). DEMOTION-ONLY + the
+        # bridge has no refuse state ⇒ this only moves a claim into the labelled analysis. Shrinks
+        # `grounded` ITSELF (before the present/standalone split), so the footer counts, the
+        # labelled fallback, AND both bridge surfaces reflect it. `ground_claims` (summarizer +
+        # `/ask`) is untouched. Same kill-switch as the (now membership-aware) presentation guard.
+        if settings.agents.bridge_name_only_guard_enabled and grounded:
+            chunk_by_id = {c.chunk_id: c for c in reranked}
+            kept = [
+                c
+                for c in grounded
+                if not (
+                    (ch := chunk_by_id.get(c.source_chunk_id)) is not None
+                    and claim_grounded_only_by_name(c.claim, ch.text)
+                )
+            ]
+            if len(kept) != len(grounded):
+                logger.info(
+                    "bridge.name_only_grounding_demoted",
+                    demoted=len(grounded) - len(kept),
+                    grounded=len(grounded),
+                )
+                grounded = kept
         grounded_ids = {gc.source_chunk_id for gc in grounded}
         grounded_sources = [c for c in reranked if c.chunk_id in grounded_ids]
 
         # Present-as-answer (ADR-0016): ONLY the consented escalation, and ONLY when a non-empty
         # PRESENTABLE subset survives — promote it to a presented answer IFF it is also responsive.
-        # NAME-ONLY GUARD (audit rec 1): hold back any grounded claim whose cited chunk merely
-        # NAMES the entity (a bare list/heading, no substantive sentence) — its grounding is
-        # nominal, not substantive. PRESENTATION-ONLY: `grounded`/`grounded_claims` are unchanged.
-        # The headline is a DETERMINISTIC join of the PRESENTABLE claims — never the ungrounded
+        # NAME-ONLY GUARD (audit rec 1), now MEMBERSHIP-AWARE: hold back a grounded claim grounded
+        # only by name (the same `claim_grounded_only_by_name` rule). After the grounding backstop
+        # above this is an idempotent no-op for behavioural claims (already demoted) and correctly
+        # KEEPS membership claims a name-list genuinely grounds — kept as defense-in-depth. The
+        # headline is a DETERMINISTIC join of the PRESENTABLE claims — never the ungrounded
         # analysis, never the extractor's free summary.
         responsive: bool | None = None
         relevance_reason = ""
@@ -219,12 +247,14 @@ async def reason_then_ground(
                 if not (
                     guard_on
                     and c.source_chunk_id in src_by_id
-                    and is_name_only_chunk(src_by_id[c.source_chunk_id].text)
+                    and claim_grounded_only_by_name(c.claim, src_by_id[c.source_chunk_id].text)
                 )
             ]
             held_back = len(grounded) - len(presentable)
             if held_back:
-                logger.info("bridge.name_only_held_back", held_back=held_back, grounded=len(grounded))
+                logger.info(
+                    "bridge.name_only_held_back", held_back=held_back, grounded=len(grounded)
+                )
             # Guard the gate on `presentable` (not `grounded`): an all-filtered case skips the
             # responsiveness call entirely (no phantom `responsive=True` on a result that falls back).
             if presentable:

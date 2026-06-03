@@ -321,10 +321,18 @@ def extract_heading_texts(body: str, *, skip_chart_blocks: bool = True) -> list[
 # list of short name fragments (e.g. a slide that lists access-control type NAMES:
 # `### Contrôle d'accès` + `- Role-Based Access Control (RBAC)` + `- Attribute-Based …`). A claim
 # whose cited chunk is name-only is grounded only by the coincidental presence of the entity NAME,
-# not by any sentence that establishes the claim — so the reason-then-ground bridge keeps such
-# claims OUT of a PRESENT-AS-ANSWER surface (ADR-0016; presentation-only, never affects grounding).
+# not by any sentence that establishes the claim — so the `/ask` verify node's name-only backstop
+# AND the reason-then-ground bridge DEMOTE such a (behavioural) claim from grounding (ADR-0016,
+# via `claim_grounded_only_by_name` below; the bridge's separate present-as-answer guard is the
+# narrowed defense-in-depth layer).
 _NAME_ONLY_MIN_SENTENCE_WORDS: Final[int] = 8  # ≥ this many words on one line ⇒ a real sentence
 _NAME_ONLY_MIN_LIST_LINES: Final[int] = 2  # floor: need ≥ this many short non-heading lines
+# A leading list enumerator ("3.", "4)") is structural scaffolding, not a content word — strip it
+# before the per-line word count so a numbered SUB-HEADING ("3. Protection du plan de contrôle
+# (Control Plane)" = 8 tokens ONLY because "3." counts) reads as the short label it is. Numeric,
+# 1-3 digits, a mandatory `.`/`)`, a mandatory trailing space → decimals ("3.14 ") and dotted
+# versions ("3.2.1 ") never match.
+_LEADING_ENUMERATOR_RE: Final[re.Pattern[str]] = re.compile(r"^\d{1,3}[.)]\s+")
 
 
 def is_name_only_chunk(text: str) -> bool:
@@ -358,6 +366,7 @@ def is_name_only_chunk(text: str) -> bool:
             continue  # a heading is a label, not a sentence that supports a claim
         has_any_content_line = True
         stripped = line.lstrip("-*+>").strip().strip("|").strip()
+        stripped = _LEADING_ENUMERATOR_RE.sub("", stripped, count=1)
         if len(stripped.split()) >= _NAME_ONLY_MIN_SENTENCE_WORDS:
             return False  # a substantive sentence exists ⇒ NOT name-only
         list_like_short_lines += 1
@@ -371,13 +380,37 @@ def is_name_only_chunk(text: str) -> bool:
 # first; bilingual (EN+FR). Substrings matched against a space-padded lowercased claim.
 _MEMBERSHIP_MARKERS: frozenset[str] = frozenset(
     {
-        "is one of", "are one of", "is among", "are among", "is included", "are included",
-        "is listed", "are listed", "listed among", "is a type of", "is a kind of",
-        "is a model", "is a method", "is a mechanism", "is an access control",
-        "is an example of", "such as", "includes", "include ", "including",
+        "is one of",
+        "are one of",
+        "is among",
+        "are among",
+        "is included",
+        "are included",
+        "is listed",
+        "are listed",
+        "listed among",
+        "is a type of",
+        "is a kind of",
+        "is a model",
+        "is a method",
+        "is a mechanism",
+        "is an access control",
+        "is an example of",
+        "such as",
+        "includes",
+        "include ",
+        "including",
         # FR
-        "est un de", "est une de", "fait partie", "font partie", "figure parmi",
-        "est un type de", "est une sorte de", "inclut", "comprend", "parmi les",
+        "est un de",
+        "est une de",
+        "fait partie",
+        "font partie",
+        "figure parmi",
+        "est un type de",
+        "est une sorte de",
+        "inclut",
+        "comprend",
+        "parmi les",
     }
 )
 
@@ -388,26 +421,100 @@ _MEMBERSHIP_MARKERS: frozenset[str] = frozenset(
 _BEHAVIORAL_MARKERS: frozenset[str] = frozenset(
     {
         # behaviour / action verbs
-        " assigns ", " assign ", " evaluates ", " evaluate ", " allows ", " allow ",
-        " enables ", " enable ", " requires ", " require ", " provides ", " provide ",
-        " supports ", " support ", " grants ", " grant ", " denies ", " deny ",
-        " controls ", " control ", " enforces ", " enforce ", " processes ", " process ",
-        " operates ", " operate ", " functions ", " relies ", " rely ", " uses ", " use ",
-        " struggles ", " lacks ", " lack ", " introduces ", " validates ", " restricts ",
-        " prevents ", " mitigates ", " determines ", " adapts ", " reacts ", " considers ",
+        " assigns ",
+        " assign ",
+        " evaluates ",
+        " evaluate ",
+        " allows ",
+        " allow ",
+        " enables ",
+        " enable ",
+        " requires ",
+        " require ",
+        " provides ",
+        " provide ",
+        " supports ",
+        " support ",
+        " grants ",
+        " grant ",
+        " denies ",
+        " deny ",
+        " controls ",
+        " control ",
+        " enforces ",
+        " enforce ",
+        " processes ",
+        " process ",
+        " operates ",
+        " operate ",
+        " functions ",
+        " relies ",
+        " rely ",
+        " uses ",
+        " use ",
+        " struggles ",
+        " lacks ",
+        " lack ",
+        " introduces ",
+        " validates ",
+        " restricts ",
+        " prevents ",
+        " mitigates ",
+        " determines ",
+        " adapts ",
+        " reacts ",
+        " considers ",
         # property / behaviour phrases
-        " based on ", " works by ", " used for ", " acts as ", " responsible for ",
-        " capable of ", " is static", " is dynamic", " is rigid", " is scalable",
-        " is flexible", " not scalable", " in real-time", " real time",
+        " based on ",
+        " works by ",
+        " used for ",
+        " acts as ",
+        " responsible for ",
+        " capable of ",
+        " is static",
+        " is dynamic",
+        " is rigid",
+        " is scalable",
+        " is flexible",
+        " not scalable",
+        " in real-time",
+        " real time",
         # comparative
-        " superior", " better ", " worse ", " faster", " slower", " outperforms ",
-        " more granular", " less granular", " compared to", " than ",
+        " superior",
+        " better ",
+        " worse ",
+        " faster",
+        " slower",
+        " outperforms ",
+        " more granular",
+        " less granular",
+        " compared to",
+        " than ",
         # FR action / property / comparative
-        " assigne ", " assignent ", " évalue ", " évaluent ", " permet ", " permettent ",
-        " nécessite ", " nécessitent ", " fournit ", " contrôle ", " contrôlent ",
-        " repose sur ", " basé sur ", " basée sur ", " utilise ", " utilisent ",
-        " restreint ", " empêche ", " détermine ", " en fonction de ", " supérieur",
-        " meilleur", " plus rapide", " moins ",
+        " assigne ",
+        " assignent ",
+        " évalue ",
+        " évaluent ",
+        " permet ",
+        " permettent ",
+        " nécessite ",
+        " nécessitent ",
+        " fournit ",
+        " contrôle ",
+        " contrôlent ",
+        " repose sur ",
+        " basé sur ",
+        " basée sur ",
+        " utilise ",
+        " utilisent ",
+        " restreint ",
+        " empêche ",
+        " détermine ",
+        " en fonction de ",
+        " supérieur",
+        " meilleur",
+        " plus rapide",
+        " moins ",
     }
 )
 
@@ -435,6 +542,20 @@ def claim_asserts_behavior(claim_text: str) -> bool:
     if any(m in low for m in _MEMBERSHIP_MARKERS):
         return False  # membership / existence / definition → a name-list grounds it
     return any(m in low for m in _BEHAVIORAL_MARKERS)
+
+
+def claim_grounded_only_by_name(claim_text: str, chunk_text: str) -> bool:
+    """The deterministic name-only DEMOTION rule, shared by the `/ask` `verify` node and the
+    reason-then-ground bridge: True iff the cited chunk merely NAMES the subject
+    (`is_name_only_chunk` — a bare list/heading, no substantive sentence) AND the claim asserts a
+    behaviour/property/comparison a bare name-list cannot establish (`claim_asserts_behavior`).
+
+    Membership/existence/definition claims (a name-list DOES support them) and any unrecognised
+    predicate → False (KEEP). Pure + fail-open by construction (both operands fail-open), so a
+    demoter using it can only ever flag a claim it is CONFIDENT is behavioural-on-a-name-list —
+    never a membership claim, never an unknown one. Order matches the historical inline checks
+    (chunk shape first via `and` short-circuit, then predicate)."""
+    return is_name_only_chunk(chunk_text) and claim_asserts_behavior(claim_text)
 
 
 # Bilingual (FR+EN) stopwords + a diacritics-/hyphen-aware word tokenizer, used by the

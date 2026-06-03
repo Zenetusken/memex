@@ -65,7 +65,7 @@ from memex.agents.artifact_scope import (
 )
 from memex.agents.table_sql import coerce_number, describe_aggregate
 from memex.core.errors import AnswerStateInvariantError
-from memex.core.text import STOPWORDS, atomise, claim_asserts_behavior, is_name_only_chunk
+from memex.core.text import STOPWORDS, atomise, claim_grounded_only_by_name
 from memex.core.types import Chunk, RelatedDocument, StoredTable, TableQueryResult
 from memex.core.wikilinks import format_wikilink
 from memex.models.client import complete_structured
@@ -1876,15 +1876,16 @@ async def verify(state: AnswerState) -> AnswerStateUpdate:
     # unrecognised phrasing are KEPT, so the worst case is the status-quo over-grounding, never a
     # new refusal; a zero-grounded result routes to `refuse` as usual. `is_name_only_chunk` returns
     # False for any table/chart chunk, so the Table-RAG/chart literal-read rule is untouched.
-    # Kill-switch on AnswerState (default on, fail-open).
+    # The demotion RULE (`claim_grounded_only_by_name`) is shared verbatim with the bridge's
+    # name-only demotion (`core/text.py`) — one source of truth. Kill-switch on AnswerState.
     if state.name_only_grounding_backstop:
         name_only_demoted: list[int] = []
         for i in valid_grounded:
             claim = state.draft.claims[i]
             chunk = chunk_by_id.get(claim.source_chunk_id)
-            if chunk is None or not is_name_only_chunk(chunk.text):
-                continue  # substantive / table / chart / dangling chunk: not the loophole site
-            if claim_asserts_behavior(claim.claim):
+            if chunk is None:
+                continue  # dangling chunk: not the loophole site
+            if claim_grounded_only_by_name(claim.claim, chunk.text):
                 name_only_demoted.append(i)
         if name_only_demoted:
             log.info("verify.name_only_demoted", demoted=name_only_demoted)

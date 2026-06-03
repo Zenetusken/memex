@@ -144,12 +144,26 @@ summarizer + `/ask` keep batched `ground_claims`; `eval-summary` byte-stable; HA
 Default-on kill-switch `MEMEX_AGENTS__BRIDGE_ISOLATED_GROUNDING_ENABLED=false`. Pinned by the decisive
 batch-only-drop + kill-switch + sibling-context tests in `test_bridge_with_fakes.py` + `test_grounding_isolated.py`.
 
-**Still-open complementary levers (their own session):** (1) consolidate the deterministic name-only
-backstop into `ground_claims` (catches the name-list-cited residual the LLM still grounds at N=1 — the
-RBAC isolated run kept 5 such claims); (2) harden `is_name_only_chunk` to treat "N. Title" numbered
-lines as inert headings (the 8-word gap). Both need an /ask counterfactual eval re-baseline. The name-only
-PRESENTATION guard is kept as deterministic defense-in-depth (isolation makes it often a no-op, never
-conflicting). Full record: `next_priorities.md` + the `ui-audit-xling-batch-leniency-2026-06-03` memory.
+**Complementary levers — BOTH SHIPPED 2026-06-03 (the name-only grounding consolidation):**
+(1) the deterministic name-only demotion was extracted to the shared `core/text.claim_grounded_only_by_name`
+(= `is_name_only_chunk(chunk)` AND `claim_asserts_behavior(claim)`) and is now applied on the BRIDGE's
+`grounded` set right after Stage 2 — BEFORE the present/standalone split — so a behavioral name-list-cited
+claim is dropped from `grounded_claims` ITSELF on BOTH the standalone `/bridge` AND the present-as-answer
+escalation (the residual the isolated re-verification still grounds at N=1; the RBAC isolated run kept 5);
+membership claims a name-list genuinely grounds are KEPT (membership-first). `ground_claims` itself stays
+the bare gate (summarizer untouched ⇒ `eval-summary` byte-stable); the `/ask` verify node was refactored
+to call the SAME shared rule (behavior-identical). (2) `is_name_only_chunk` was hardened to strip a leading
+numbered enumerator (`3.`/`4)`, `_LEADING_ENUMERATOR_RE`) before its ≥8-word test, so a misdetected
+numbered sub-heading (`3. Protection du plan de contrôle (Control Plane)` = 8 tokens only because `3.`
+counts) reads as the short label it is — closing the gap on BOTH `/ask` and the bridge. The earlier
+PRESENTATION guard is narrowed to the same membership-aware rule and kept as defense-in-depth (idempotent
+after the grounding backstop). **Validation:** the /ask counterfactual re-baseline (cr350-multidoc /
+nist-zero-trust / annual-report, N=3, backstop ON) held `refusal_cf=1.0` with zero new over-refusal (and
+re-confirmed ar-14/15/12); `eval-summary` byte-stable; a live bridge A/B dropped the RBAC behavioral
+name-list claims from `grounded_claims` while Zero-Trust held. Kill-switches
+`MEMEX_AGENTS__BRIDGE_NAME_ONLY_GUARD_ENABLED=false` (bridge) /
+`MEMEX_AGENTS__NAME_ONLY_GROUNDING_BACKSTOP_ENABLED=false` (`/ask`). Full record: `next_priorities.md` +
+the `ui-audit-xling-batch-leniency-2026-06-03` memory.
 
 A **separate** audit follow-up surfaced alongside this one — the `extract_claims@v1`
 extractor *under-covering* the discrete groundable sub-claims (it pulls the

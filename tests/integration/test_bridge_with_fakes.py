@@ -443,54 +443,89 @@ async def test_standalone_default_never_runs_gate(
     assert "RelevanceAssessment" not in seen  # standalone never runs the responsiveness gate
 
 
-# --- Name-only presentation guard (ADR-0016 audit rec 1): hold back a presented claim whose cited
-# chunk merely NAMES the entity (a bare list/heading). PRESENTATION-ONLY — `grounded_claims` stays
-# the full gate output; only `presented_claims` is filtered. (Deterministic defense-in-depth: with
-# isolated grounding default-on a name-only behavioral claim usually drops at grounding already, but
-# the guard remains as the deterministic backstop for the residual — same direction, never opposing.) ---
+# --- Name-only GROUNDING backstop (ADR-0016 audit rec 1, upgraded 2026-06-03): the bridge DEMOTES
+# from `grounded` any BEHAVIORAL claim cited to a chunk that merely NAMES the entity (a bare
+# list/heading) — the SAME deterministic, MEMBERSHIP-AWARE rule (`claim_grounded_only_by_name`) the
+# `/ask` verify node uses. It runs BEFORE the present/standalone split, so it shrinks `grounded_claims`
+# itself (footer counts + labelled fallback + BOTH surfaces). Membership claims a name-list genuinely
+# grounds are KEPT. The present-as-answer guard is kept as the membership-aware defense-in-depth layer. ---
 
-_NAME_ONLY_TEXT = (
-    "### Contrôle d'accès\n- Role-Based Access Control (RBAC)\n- Attribute-Based Access Control (ABAC)"
-)
+_NAME_ONLY_TEXT = "### Contrôle d'accès\n- Role-Based Access Control (RBAC)\n- Attribute-Based Access Control (ABAC)"
+_BEHAVIORAL_CLAIM = "RBAC assigns permissions based on a user's job function."
+_MEMBERSHIP_CLAIM = "RBAC is one of the listed access-control models."
 
 
 @pytest.mark.asyncio
-async def test_name_only_claim_held_back_from_presented(
+async def test_name_only_behavioral_claim_demoted_from_grounded(
     settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A claim cited to a name-only chunk is held back from the presented answer; a prose-cited
-    claim is presented. `grounded_claims` keeps BOTH (full gate output)."""
+    """The kill target: a BEHAVIORAL claim cited to a name-only chunk is now dropped from
+    `grounded_claims` ITSELF (not just presentation); a prose-cited claim survives."""
     reranked = [_chunk("d#a", text=_NAME_ONLY_TEXT), _chunk("d#b", text="prose " * 12)]
     _patch_stage1(monkeypatch, "Analysis.", reranked)
-    _patch_extract(monkeypatch, [_claim("name-only claim", "d#a"), _claim("prose claim", "d#b")])
-    _patch_ground(monkeypatch, grounded_keys={"name-only claim", "prose claim"}, responsive=True)
+    _patch_extract(monkeypatch, [_claim(_BEHAVIORAL_CLAIM, "d#a"), _claim("prose claim", "d#b")])
+    _patch_ground(monkeypatch, grounded_keys={_BEHAVIORAL_CLAIM, "prose claim"}, responsive=True)
 
     ans = await reason_then_ground("Q?", present_as_answer=True)
 
+    assert [c.claim for c in ans.grounded_claims] == ["prose claim"]  # behavioral name-only DROPPED
+    assert [c.claim for c in ans.presented_claims] == ["prose claim"]
+    assert ans.n_grounded == 1  # footer count reflects the demotion
     assert ans.presented is True
-    assert [c.claim for c in ans.presented_claims] == ["prose claim"]  # name-only held back
-    assert {c.claim for c in ans.grounded_claims} == {"name-only claim", "prose claim"}  # full gate
-    assert ans.answer_headline == "prose claim"  # headline = presentable only
-    assert ans.n_grounded == 2  # footer count unchanged
 
 
 @pytest.mark.asyncio
-async def test_all_name_only_falls_back_and_skips_gate(
+async def test_name_only_membership_claim_kept_in_grounded(
     settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When every grounded claim is name-only, nothing is presentable → the gate is SKIPPED
-    (no phantom responsive=True), presented is False, and the full grounded subset is retained."""
+    """The over-suppression fix: a MEMBERSHIP claim a name-list genuinely grounds STAYS in
+    `grounded_claims` AND is PRESENTED (membership-first KEEP at both the backstop and the guard)."""
     reranked = [_chunk("d#a", text=_NAME_ONLY_TEXT)]
     _patch_stage1(monkeypatch, "Analysis.", reranked)
-    _patch_extract(monkeypatch, [_claim("name-only claim", "d#a")])
-    seen = _patch_ground(monkeypatch, grounded_keys={"name-only claim"}, responsive=True)
+    _patch_extract(monkeypatch, [_claim(_MEMBERSHIP_CLAIM, "d#a")])
+    _patch_ground(monkeypatch, grounded_keys={_MEMBERSHIP_CLAIM}, responsive=True)
+
+    ans = await reason_then_ground("Q?", present_as_answer=True)
+
+    assert [c.claim for c in ans.grounded_claims] == [_MEMBERSHIP_CLAIM]
+    assert [c.claim for c in ans.presented_claims] == [_MEMBERSHIP_CLAIM]
+    assert ans.presented is True
+
+
+@pytest.mark.asyncio
+async def test_name_only_behavioral_demoted_on_standalone(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The NEW coverage: the STANDALONE `/bridge` (present_as_answer defaults False) ALSO drops a
+    behavioral name-only claim — the residual the old presentation-only guard never reached here."""
+    reranked = [_chunk("d#a", text=_NAME_ONLY_TEXT), _chunk("d#b", text="prose " * 12)]
+    _patch_stage1(monkeypatch, "Analysis.", reranked)
+    _patch_extract(monkeypatch, [_claim(_BEHAVIORAL_CLAIM, "d#a"), _claim("prose claim", "d#b")])
+    _patch_ground(monkeypatch, grounded_keys={_BEHAVIORAL_CLAIM, "prose claim"})
+
+    ans = await reason_then_ground("Q?")  # standalone
+
+    assert ans.present_as_answer is False
+    assert [c.claim for c in ans.grounded_claims] == ["prose claim"]  # demoted on standalone too
+
+
+@pytest.mark.asyncio
+async def test_all_name_only_behavioral_falls_back_and_skips_gate(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the only grounded claim is behavioral-name-only, the backstop empties `grounded` →
+    nothing to present → the responsiveness gate is SKIPPED and the surface falls back to analysis."""
+    reranked = [_chunk("d#a", text=_NAME_ONLY_TEXT)]
+    _patch_stage1(monkeypatch, "Analysis.", reranked)
+    _patch_extract(monkeypatch, [_claim(_BEHAVIORAL_CLAIM, "d#a")])
+    seen = _patch_ground(monkeypatch, grounded_keys={_BEHAVIORAL_CLAIM}, responsive=True)
 
     ans = await reason_then_ground("Q?", present_as_answer=True)
 
     assert ans.presented is False
-    assert ans.responsive is None  # gate skipped — guarded on `presentable`, not `grounded`
+    assert ans.responsive is None  # gate skipped — grounded emptied by the backstop
+    assert ans.grounded_claims == []
     assert ans.presented_claims == []
-    assert [c.claim for c in ans.grounded_claims] == ["name-only claim"]  # full subset for fallback
     assert "RelevanceAssessment" not in seen
 
 
@@ -498,18 +533,19 @@ async def test_all_name_only_falls_back_and_skips_gate(
 async def test_name_only_guard_kill_switch_off(
     settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`bridge_name_only_guard_enabled=False` reverts to no filtering — the name-only claim is
-    presented (the prior behavior)."""
+    """`bridge_name_only_guard_enabled=False` reverts BOTH the grounding demotion and the guard — a
+    behavioral name-only claim stays grounded and is presented (the prior behavior)."""
     settings.agents.bridge_name_only_guard_enabled = False
     reranked = [_chunk("d#a", text=_NAME_ONLY_TEXT)]
     _patch_stage1(monkeypatch, "Analysis.", reranked)
-    _patch_extract(monkeypatch, [_claim("name-only claim", "d#a")])
-    _patch_ground(monkeypatch, grounded_keys={"name-only claim"}, responsive=True)
+    _patch_extract(monkeypatch, [_claim(_BEHAVIORAL_CLAIM, "d#a")])
+    _patch_ground(monkeypatch, grounded_keys={_BEHAVIORAL_CLAIM}, responsive=True)
 
     ans = await reason_then_ground("Q?", present_as_answer=True)
 
+    assert [c.claim for c in ans.grounded_claims] == [_BEHAVIORAL_CLAIM]  # not demoted
     assert ans.presented is True
-    assert [c.claim for c in ans.presented_claims] == ["name-only claim"]
+    assert [c.claim for c in ans.presented_claims] == [_BEHAVIORAL_CLAIM]
 
 
 def test_bridge_isolated_from_ask_graph() -> None:

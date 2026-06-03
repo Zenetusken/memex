@@ -666,13 +666,18 @@ class AgentsSettings(BaseModel):
     # `MEMEX_AGENTS__EXPERT_MODE_ENABLED=true`. See [[reasoning-expert-mode-scope-2026-05-29]].
     expert_mode_enabled: bool = False
 
-    # The reason-then-ground bridge's PRESENT-AS-ANSWER name-only guard (ADR-0016, audit rec 1) —
-    # DEFAULT ON, fail-open. When true, a present-as-answer escalation HOLDS BACK any grounded
-    # claim whose cited chunk merely NAMES the entity (a bare list/heading, no substantive
-    # sentence — `core/text.is_name_only_chunk`) so it is not shown in the VERIFIED answer; if
-    # nothing presentable survives, the surface falls back to the labelled analysis. PRESENTATION-
-    # ONLY — never alters `ground_claims`, the standalone grounded subset, the footer counts, or
-    # the `/ask` path. `MEMEX_AGENTS__BRIDGE_NAME_ONLY_GUARD_ENABLED=false` reverts (audit lever).
+    # The reason-then-ground bridge's NAME-ONLY handling (ADR-0016, audit rec 1) — DEFAULT ON,
+    # fail-open. When true, the bridge DEMOTES from `grounded` any claim grounded ONLY by name —
+    # a behavioural/property/comparative claim cited to a chunk that merely NAMES the entity (a
+    # bare list/heading; `core/text.claim_grounded_only_by_name`, the SAME rule the `/ask` verify
+    # node uses). MEMBERSHIP/existence + unrecognised predicates are KEPT (fail-open). This runs
+    # BEFORE the present/standalone split, so it shrinks `grounded_claims` itself (footer counts +
+    # labelled fallback + BOTH bridge surfaces reflect it) — a GROUNDING-level, membership-aware
+    # demotion (upgraded 2026-06-03 from the earlier presentation-only blanket guard). The
+    # present-as-answer guard is KEPT as the now-membership-aware defense-in-depth layer.
+    # `ground_claims` (summarizer + `/ask` verify node) is UNTOUCHED ⇒ `eval-summary` byte-stable.
+    # `MEMEX_AGENTS__BRIDGE_NAME_ONLY_GUARD_ENABLED=false` reverts the whole bridge name-only
+    # handling (audit lever).
     bridge_name_only_guard_enabled: bool = True
     # The reason-then-ground bridge verifies each claim in ISOLATION (default ON) — the defeat for
     # the `verify_grounding/v2` BATCH-LENIENCY effect (the gate grounds a plausible behavioral claim
