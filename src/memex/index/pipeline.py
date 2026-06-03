@@ -195,10 +195,15 @@ async def index_document(doc_id: str, *, force: bool = False) -> IndexResult:
     # anchors; no regression). Same fallback when there's no manifest yet (very
     # first index call).
     page_char_counts: list[tuple[int, int]] | None = None
+    segment_intervals: list[tuple[int, int, float, float]] | None = None
     chart_extractions: list[ChartExtraction] = []
     if prior_manifest is not None and prior_manifest.parse is not None:
         page_char_counts = [(p.page, p.char_count) for p in prior_manifest.parse.pages]
         chart_extractions = prior_manifest.parse.chart_extractions
+        if prior_manifest.parse.segments:  # audio route (ADR-0017): transcript time-attribution
+            segment_intervals = [
+                (s.char_start, s.char_end, s.start_s, s.end_s) for s in prior_manifest.parse.segments
+            ]
     # Re-attach the chart-OCR `[chart-extracted]` blocks (from the parse manifest sidecar) at the
     # `<!-- image -->` positions, then re-derive the `[table-rows]` linearization — NEITHER lives
     # in the vault `.md`, which is content-only since audit-10. Both transforms reproduce the SAME
@@ -209,7 +214,9 @@ async def index_document(doc_id: str, *, force: bool = False) -> IndexResult:
     # clean. Order matches parse time: chart re-attach (the old stitch) THEN table linearization.
     reattached_body = reattach_chart_extractions(doc.body, chart_extractions)
     indexed_doc = doc.model_copy(update={"body": linearize_gfm_tables(reattached_body)})
-    new_chunks = chunk_document(indexed_doc, page_char_counts=page_char_counts)
+    new_chunks = chunk_document(
+        indexed_doc, page_char_counts=page_char_counts, segment_intervals=segment_intervals
+    )
     new_by_id = {c.chunk_id: c for c in new_chunks}
     new_ids = set(new_by_id.keys())
 

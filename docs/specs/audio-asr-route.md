@@ -172,8 +172,10 @@ if source.suffix.lower() in AUDIO_SUFFIXES:
 
 Gating: there is **no `disable_asr` fallthrough** (unlike `disable_vlm`) — an audio file has no
 non-ASR parse, so if the backend is unavailable **or no `asr` model is configured** the route raises
-a recoverable `ASRUnavailable` (a new `MemexError` subclass in `parse/asr_backend.py`, per the
-error-typing rule), surfaced to the user. (Contrast the scan route, whose `disable_vlm=True` default falls through to Docling-OCR.)
+`ASRUnavailable` (a new `MemexError` subclass in `parse/asr_backend.py`, per the error-typing rule;
+a misconfiguration → NOT recoverable, like its sibling `VLMUnavailable`). The **recoverable** case is
+an empty transcript (all-fail → 0 segments) → `ParseConfidenceTooLow(recoverable=True)` → 0 chunks →
+the answer/summary REFUSES (HARD-gate-safe; never fabricates from silence). (Contrast the scan route, whose `disable_vlm=True` default falls through to Docling-OCR.)
 
 ## 6. `_parse_audio` + the backend module
 
@@ -230,13 +232,13 @@ optional typed list; legacy manifests load unchanged; empty default is a no-op):
 ```python
 class TranscriptSegment(BaseModel):
     index: int            # 0-based, document order
-    char_start: int       # span in the canonical .md (join-time, pre-transform)
+    char_start: int       # the BLOCK span (`## [mm:ss]` header + text) in the .md — exact
     char_end: int
     start_s: float        # GLOBAL seconds vs the whole file — the Phase-2 alignment key
     end_s: float
     language: str = ""    # detected/forced lang tag (FR/EN…)
     confidence: float = 1.0
-    rationale: str = ""   # failure note for a dropped chunk (confidence=0.0)
+    rationale: str = ""   # RESERVED for a per-chunk backend; faster_whisper raises instead
 
 class ParseStage(BaseModel):
     ...
@@ -344,10 +346,12 @@ answer/summarize **REFUSES** (the scan-route precedent; never fabricates from an
 
 ## 14. Testing
 
-- **Unit** (`test_asr_route.py`): the pure VAD-chunk → transcribe → **global-offset** → assemble
-  assembly from a **faked** backend (no GPU); a failed chunk → recorded segment, `confidence=0.0`, no
-  silent drop; the `## [mm:ss]` formatting (incl. `hh:mm:ss` past an hour); the cache key includes the
-  decoding-param `cfg` (a param change ⇒ a miss).
+- **Unit** (`test_asr_backend.py` + `test_audio_route.py`): backend dispatch + the per-file cache
+  (miss→run→store, hit→replay, refresh→bust) + the post-cache normalization (drops emptied segments)
+  from a **faked** `_run_faster_whisper` (no GPU/dep); `transcribe_audio` RAISES on an unconfigured
+  model / a deferred backend, and faster_whisper RAISES `ASRTranscriptionError` on a decode failure
+  (no degraded segment); the pure `_assemble_transcript` (the `## [mm:ss]` body + EXACT char-spans,
+  incl. `hh:mm:ss` past an hour); the cache `cfg` (a decoding-param change ⇒ a miss).
 - **Unit** (`test_chunker.py` additions): `Chunk.time_range` populated from segment intervals via the
   generalized `_page_for_offset` (and `None` when no segments — back-compat).
 - **Integration** (`test_audio_routing.py`, the `test_scan_routing.py` sibling): a faked

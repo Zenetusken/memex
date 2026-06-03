@@ -31,6 +31,7 @@ from memex.parse.office_convert import (
     convert_to_pdf,
 )
 from memex.parse.pipeline import (
+    AUDIO_SUFFIXES,
     ParseResult,
     derive_title,
     parse_document,
@@ -54,6 +55,7 @@ from memex.parse.vlm_backend import VLMUnavailable
 from memex.parse.vlm_cache import VLMTranscriptionCache
 
 __all__ = [
+    "AUDIO_SUFFIXES",
     "OFFICE_SUFFIXES",
     "ASRSegment",
     "ASRTranscriptionCache",

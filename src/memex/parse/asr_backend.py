@@ -46,7 +46,9 @@ class ASRSegment(BaseModel):
     """One transcript segment as produced by the ASR backend — a TRANSIENT, text-carrying type,
     distinct from the manifest `TranscriptSegment` (which has no `text`; the text lives in the
     `.md`, addressed by char-spans — see spec §8). `start_s`/`end_s` are GLOBAL seconds vs the
-    whole file; a failed segment carries `confidence=0.0` + the reason in `rationale`."""
+    whole file. `confidence`/`rationale` are RESERVED for the deferred per-chunk backends —
+    faster_whisper transcribes the whole file and RAISES `ASRTranscriptionError` on failure,
+    never emitting a degraded segment."""
 
     text: str
     start_s: float
@@ -67,14 +69,16 @@ def _audio_sha256(source: Path) -> str:
 
 def _decoding_cfg(settings: MemexSettings) -> dict[str, object]:
     """The decoding params that change the transcription → the cache `cfg` (so a change is a
-    clean miss, never a stale replay)."""
+    clean miss, never a stale replay). `model` is NOT here — it is the cache key's own segment.
+    `device` IS here: it changes the output (cpu→int8 vs cuda→float16), so a device switch
+    correctly re-transcribes."""
     p = settings.parse
     return {
         "backend": settings.models.asr_backend,
-        "model": settings.models.asr,
         "beam_size": p.asr_beam_size,
         "language": p.asr_language or "auto",
         "vad_filter": p.asr_vad_filter,
+        "device": p.asr_device,
     }
 
 

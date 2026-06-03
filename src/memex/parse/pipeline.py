@@ -41,6 +41,7 @@ from memex.core.manifest import (
     ChartExtraction,
     PageDecision,
     ParseStage,
+    TranscriptSegment,
     now_utc,
     read_manifest,
     update_manifest,
@@ -52,6 +53,8 @@ from memex.core.table_linearize import (
     table_cell_lines,
 )
 from memex.core.text import IMAGE_PLACEHOLDER_RE
+from memex.parse.asr_backend import ASRSegment, transcribe_audio
+from memex.parse.asr_cache import ASRTranscriptionCache
 from memex.parse.chart_ocr_backend import (
     ChartOCROutput,
     ChartOCRUnavailable,
@@ -1773,6 +1776,132 @@ async def _parse_scan_with_vlm(
     )
 
 
+AUDIO_SUFFIXES: Final[frozenset[str]] = frozenset(
+    {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".opus", ".aac"}
+)
+
+
+def _format_timestamp(seconds: float) -> str:
+    """`mm:ss` (or `hh:mm:ss` past an hour) for a transcript segment heading."""
+    total = max(0, int(seconds))
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+
+
+def _assemble_transcript(asr_segments: list[ASRSegment]) -> tuple[str, list[TranscriptSegment]]:
+    """PURE: turn ASR segments into the transcript body (`## [mm:ss]` blocks joined by blank
+    lines) + the manifest `TranscriptSegment`s. Each segment's char-span addresses its whole
+    BLOCK (the `## [mm:ss]` header + the text) in the assembled body — so a chunk that starts at
+    the header (where the chunker splits sections) attributes to the segment's time range. The
+    body is written VERBATIM (the route skips `_finalize_body`), so the spans are exact — they
+    drive `Chunk.time_range`. The companion-deck link is document-level, not a field here (§8)."""
+    blocks: list[str] = []
+    segments: list[TranscriptSegment] = []
+    cursor = 0
+    for i, a in enumerate(asr_segments):
+        block = f"## [{_format_timestamp(a.start_s)}]\n{a.text}"
+        segments.append(
+            TranscriptSegment(
+                index=i,
+                char_start=cursor,  # the block start (the `## [mm:ss]` header)
+                char_end=cursor + len(block),
+                start_s=a.start_s,
+                end_s=a.end_s,
+                language=a.language,
+                confidence=a.confidence,
+                rationale=a.rationale,
+            )
+        )
+        blocks.append(block)
+        cursor += len(block) + 2  # the "\n\n" delimiter between blocks
+    return "\n\n".join(blocks), segments
+
+
+async def _parse_audio(
+    vault_path: Path, doc_id: str, source: Path, *, refresh_asr: bool = False
+) -> ParseResult:
+    """Parse an audio source by transcribing it to timestamped Markdown (ADR-0017). The
+    document-level analogue of the scan→VLM route: `transcribe_audio` (under the parse-time GPU
+    pause) → assemble `## [mm:ss]` blocks → the existing chunk/embed/answer pipeline. All-fail →
+    0 segments → recoverable error (HARD-gate-safe; never fabricates from silence).
+
+    Unlike the PDF routes it does NOT run `_finalize_body`: the transcript is already normalized
+    (`normalize_transcript_text`) + structured, has none of the PDF artifacts `_finalize_body`
+    targets, and its duplicate-collapse would corrupt distinct timestamped segments + drift the
+    char-spans. The body is written verbatim, so the segments' char-spans stay exact."""
+    correlation_id = str(ulid.ULID())
+    log = logger.bind(doc_id=doc_id, correlation_id=correlation_id, engine="asr")
+    log.info("parse.audio.start", source=str(source))
+    start = time.monotonic()
+
+    asr_cache = await ASRTranscriptionCache.open(vault_path)
+    try:
+        async with pause_vllm_for_gpu():  # nestable — the CLI's outer pause makes this a no-op
+            asr_segments = await transcribe_audio(
+                source=source, cache=asr_cache, refresh=refresh_asr
+            )
+    finally:
+        await asr_cache.close()
+
+    if not asr_segments:
+        raise ParseConfidenceTooLow(
+            "ASR produced no transcript from the audio source.",
+            context={"doc_id": doc_id},
+            recoverable=True,
+        )
+
+    final_body, segments = _assemble_transcript(asr_segments)
+    duration_ms = int((time.monotonic() - start) * 1000)
+
+    existing = (
+        await read_document(vault_path, doc_id)
+        if (vault_path / "documents" / f"{doc_id}.md").exists()
+        else None
+    )
+    fm = (
+        existing.frontmatter
+        if existing
+        else Frontmatter(title=await derive_title(vault_path, doc_id))
+    )
+    doc = VaultDocument(
+        ref=_bootstrap_ref(vault_path, doc_id, final_body),
+        frontmatter=fm,
+        body=final_body,
+        mtime_ns=0,
+    )
+    ref = await write_document(vault_path, doc)
+
+    parse_stage = ParseStage(
+        correlation_id=correlation_id,
+        parsed_at=now_utc(),
+        parser_version=_PARSER_VERSION,
+        pages=[],  # audio has no pages; the time/char record lives in `segments`
+        segments=segments,
+        duration_ms=duration_ms,
+    )
+    await update_manifest(
+        vault_path,
+        doc_id,
+        content_sha256=ref.content_sha256,
+        parse=parse_stage,
+        correlation_id=correlation_id,
+    )
+    log.info(
+        "parse.audio.done",
+        segments=len(segments),
+        markdown_bytes=len(final_body.encode("utf-8")),
+        duration_ms=duration_ms,
+    )
+    return ParseResult(
+        doc_id=doc_id,
+        correlation_id=correlation_id,
+        engine="asr",
+        pages=[],
+        markdown_bytes=len(final_body.encode("utf-8")),
+    )
+
+
 # Minimum figure area (PDF user-space sq. points) for the diagram
 # classification arm — mirrors chart_ocr_backend's pre-filter so a tiny
 # mis-classified badge/watermark (a 50×50 "flow_chart") doesn't trigger a
@@ -2266,7 +2395,11 @@ async def _ensure_converted_pdf(vault_path: Path, doc_id: str, source: Path) -> 
 
 
 async def parse_document(
-    doc_id: str, *, force_docling: bool | None = None, refresh_vlm: bool = False
+    doc_id: str,
+    *,
+    force_docling: bool | None = None,
+    refresh_vlm: bool = False,
+    refresh_asr: bool = False,
 ) -> ParseResult:
     """Parse the document with `doc_id`'s source into canonical markdown.
 
@@ -2279,7 +2412,9 @@ async def parse_document(
 
     Office/ODF sources (pptx/docx/xlsx/…) are converted to a cached PDF first
     and run through the full PDF pipeline, so their figures + diagrams flow
-    through the VLM / chart-OCR passes like any PDF.
+    through the VLM / chart-OCR passes like any PDF. Audio sources (mp3/wav/…,
+    ADR-0017) route to the ASR transcription path (`refresh_asr` busts the
+    cached transcription, mirroring `refresh_vlm`).
     """
     settings = get_settings()
     effective_force = force_docling if force_docling is not None else settings.parse.force_docling
@@ -2287,6 +2422,12 @@ async def parse_document(
 
     if source.suffix.lower() in {".md", ".markdown"}:
         return await _passthrough_markdown(settings.vault_path, doc_id, source)
+
+    # Audio sources (ADR-0017) → the ASR route: transcribe to timestamped Markdown, then hand
+    # to the existing chunk/embed/answer pipeline. A parse-stage perception model, off the
+    # grounded path; `refresh_asr` busts this doc's cached transcription first.
+    if source.suffix.lower() in AUDIO_SUFFIXES:
+        return await _parse_audio(settings.vault_path, doc_id, source, refresh_asr=refresh_asr)
 
     # Office/ODF sources can't be rasterised by pypdfium2 (the VLM + chart-OCR
     # figure renderers are PDF-only), so convert to a cached PDF and run the
