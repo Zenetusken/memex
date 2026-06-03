@@ -33,9 +33,9 @@ from memex.vault.store import (
 
 logger = structlog.get_logger(__name__)
 
-# Kind "audio" (ADR-0017) is deliberately ABSENT: it is multi-format (mp3/wav/m4a/flac/ogg)
-# under one detected kind, so `_copy_source` falls back to the original source suffix —
-# preserving e.g. `.mp3` vs `.wav`, which the parse route (AUDIO_SUFFIXES) keys on.
+# Kind "audio" (ADR-0017) is deliberately ABSENT: it is multi-format
+# (mp3/wav/m4a/flac/ogg/opus/aac) under one detected kind, so `_copy_source` falls back to the
+# original source suffix — preserving e.g. `.mp3` vs `.wav`, which the parse route keys on.
 _EXTENSION_FOR_KIND: dict[str, str] = {
     "pdf": ".pdf",
     "docx": ".docx",

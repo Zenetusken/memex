@@ -133,3 +133,25 @@ def test_mp4_video_rejected(tmp_path: Path) -> None:
     r = _validate(_write(tmp_path, "lecture.mp4", data))
     assert not r.accepted
     assert r.kind == "unknown"
+
+
+def test_id3_prefixed_text_is_not_audio(tmp_path: Path) -> None:
+    # A prose/markdown/CSV file whose first bytes are "ID3" must stay TEXT, not be misdetected
+    # as audio — the ASCII magics are gated on the head NOT looking like text (validator
+    # AUDIO-BC-001). A real MP3 is binary (NUL / invalid UTF-8) and still detects.
+    r = _validate(_write(tmp_path, "notes.txt", b"ID3 tags are metadata containers in MP3 files.\n"))
+    assert r.accepted
+    assert r.kind == "text"
+
+
+def test_oggs_prefixed_text_is_not_audio(tmp_path: Path) -> None:
+    r = _validate(_write(tmp_path, "notes.txt", b"OggS is the Ogg container page magic.\n"))
+    assert r.accepted
+    assert r.kind == "text"
+
+
+def test_mp3_crc_protected_sync_accepted(tmp_path: Path) -> None:
+    # CRC-protected MP3 frame sync (0xFFFA) — covered by the frame-sync bitmask (AUDIO-BC-002).
+    r = _validate(_write(tmp_path, "crc.mp3", b"\xff\xfa\x90\x00" + b"\x00" * 200))
+    assert r.accepted
+    assert r.kind == "audio"

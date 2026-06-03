@@ -134,21 +134,27 @@ assembly, cache, manifest) is shared.
 
 ## 5. Detection & routing
 
-**Ingest acceptance** (`ingest/validation.py`): add an `"audio"` member to `DetectedKind`. The
-`_MAGIC` mechanism only matches at byte offset 0 (`head.startswith(prefix)`), so the **offset-0**
-magics are plain new `_MAGIC` rows: `ID3` (tagged MP3), the MP3 frame-syncs `\xFF\xFB` (MPEG-1) +
-`\xFF\xF3` (MPEG-2), the AAC-ADTS syncs `\xFF\xF1`/`\xFF\xF9`, `fLaC`, and `OggS` (which also covers
-`.opus`). `RIFF….WAVE` (the `WAVE` tag is at byte 8) and the ISO-BMFF `ftyp` box (at byte 4) are
-**NOT** offset-0, so a dedicated `_detect_audio_container` branch handles them (the precedent is the
-hardcoded `docx → _refine_office` ZIP branch), wired **before** the text fallback (a binary container
-would otherwise misread as `text`/`unknown`). **The `ftyp` box is SHARED by M4A audio, MP4/MOV video,
-and HEIC/AVIF images, so it is accepted ONLY when an AUDIO brand (`M4A`/`M4B`/`M4P`, as the major
-brand or a compatible brand) is present (`_is_m4a_audio`)** — video and image containers stay
-**rejected**, keeping validation tight (GUIDELINES Part VI). MP4/MOV *video-with-audio* (the "class
-video" case) is a Phase-2 audio-extraction extension, NOT v1. The `audio` kind is deliberately ABSENT
-from `ingest/pipeline.py::_EXTENSION_FOR_KIND` so `_copy_source` falls back to the original source
-suffix (multi-format → preserves `.mp3` vs `.wav`, which the parse route keys on). Magic-number
-validation stays non-optional — a new format arrives **with** this ADR per the validation docstring.
+**Ingest acceptance** (`ingest/validation.py`): add an `"audio"` member to `DetectedKind`, detected
+by a dedicated `_detect_audio(head)` (kept OUT of the generic offset-0 `_MAGIC` loop because audio
+needs structural guards a plain prefix row can't express), wired **before** the text fallback (a
+binary container would otherwise misread as `text`/`unknown`):
+- the **binary MPEG/AAC frame sync** is matched by a bitmask (`head[0]==0xFF and head[1]&0xE0==0xE0`)
+  — one check covering MP3 (Layer III, **±CRC**) and AAC-ADTS (the layer bits split the two for the
+  MIME); `0xFF` never starts a UTF-8 file (JPEG's `0xFFD8` fails the mask), so no text/image collision;
+- the **ASCII container magics** `ID3` (tagged MP3), `fLaC`, and `OggS` (also covers `.opus`) are
+  accepted **only when the head does NOT look like text** — they otherwise COLLIDE with prose ABOUT
+  those formats (a note "`ID3` tags …"), which must stay `text`;
+- `RIFF….WAVE` (`WAVE` at byte 8) and the ISO-BMFF `ftyp` box (`ftyp` at byte 4) are not offset-0.
+  **The `ftyp` box is SHARED by M4A audio, MP4/MOV video, and HEIC/AVIF images, so it is accepted ONLY
+  when the `M4A ` audio brand is present (major or compatible brand; `_is_m4a_audio`)** — video and
+  image containers stay **rejected**, keeping validation tight (GUIDELINES Part VI). MP4/MOV
+  *video-with-audio* (the "class video" case) and audiobook `.m4b` / DRM `.m4p` are later extensions,
+  NOT v1.
+
+The `audio` kind is deliberately ABSENT from `ingest/pipeline.py::_EXTENSION_FOR_KIND` so `_copy_source`
+falls back to the original source suffix (multi-format → preserves `.mp3` vs `.wav`, which the parse
+route keys on). Magic-number validation stays non-optional — a new format arrives **with** this ADR
+per the validation docstring.
 
 **Parse dispatch** (`parse/pipeline.py::parse_document`, the suffix switch ~2288–2311): add a branch
 **before** the PDF branch, exactly mirroring the `OFFICE_SUFFIXES` branch:
