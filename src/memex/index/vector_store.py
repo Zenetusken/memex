@@ -48,6 +48,10 @@ class _ChunkRow(LanceModel):
     page: int = -1
     char_start: int = 0
     char_end: int = 0
+    # Audio time anchor (ADR-0017): the chunk's transcript time range, stored as two REALs with
+    # a -1.0 sentinel for "none" (the page convention). None on doc/PDF paths.
+    time_start: float = -1.0
+    time_end: float = -1.0
     heading_path: str = ""  # joined " > " — LanceDB doesn't love list[str] in v0.x
     embedding: Vector(EMBEDDING_DIM)  # type: ignore[valid-type]
 
@@ -61,6 +65,8 @@ def _row_from_chunk(chunk: Chunk, embedding: list[float]) -> _ChunkRow:
         page=chunk.page if chunk.page is not None else -1,
         char_start=chunk.char_start,
         char_end=chunk.char_end,
+        time_start=chunk.time_range[0] if chunk.time_range is not None else -1.0,
+        time_end=chunk.time_range[1] if chunk.time_range is not None else -1.0,
         heading_path=" > ".join(chunk.heading_path),
         embedding=embedding,
     )
@@ -75,6 +81,7 @@ def _chunk_from_row(row: _ChunkRow, *, score: float = 0.0) -> Chunk:
         page=row.page if row.page >= 0 else None,
         char_start=row.char_start,
         char_end=row.char_end,
+        time_range=(row.time_start, row.time_end) if row.time_start >= 0 else None,
         heading_path=row.heading_path.split(" > ") if row.heading_path else [],
         score=score,
     )
