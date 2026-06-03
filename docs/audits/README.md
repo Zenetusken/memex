@@ -19,6 +19,10 @@ of fixes survives long after the commits land.
 | 2026-05-23 | Chart-OCR backend shootout (P3.3-c) | A/B/C/D eval of DePlot / UniChart / OneChart / Nemotron-Parse-v1.2 against the slide-decks corpus. Nemotron-Parse wins (no prose regression). Late-session v7 banner added after the chunker / converter / prompt fixes — see `chart_ocr_shootout_2026-05-23.md` |
 | 2026-05-23 | OneChart retry (P3.3-b) | A/B/C eval revealed CUDA device-side assertion on every chart figure (OPT decoder positional-embedding overflow on OOD imagery); default stays DePlot-only — see `onechart_2026-05-23.md` |
 | 2026-05-23 | Post-v7 verification audit | four parallel agents (resource/concurrency, error/edge, wiring, quality) fanned out on the v7 fix arc; 6 critical/important findings fixed inline (truncated-chart-block defense, multicolumn nested-brace fix, label-number heuristic tightening, ungrounded_reasons overflow log, chunker N+1 regex elimination, stale-docstring fix); 21 new tests; 255 → 276 passing; no eval regression — see `post_v7_2026-05-23.md` |
+| 2026-05-29 | OTTER vs Qwen3 entity-NER A/B | empirical A/B on the 47-doc vault; OTTER wins discovery yield → ADR-0012 — see `08-otter-ner-ab.md` |
+| 2026-05-29 | FTS BM25-on-NL arm-separation | negative-result probe: the phrase-wrap bug is real but provably benign (union@50 == dense@50) — see `09-fts-bm25-arm-separation.md` |
+| 2026-05-30 | Raw-markdown output quality | multi-agent audit over a representative doc set, precursor to the rich document view — see `10-raw-md-output-audit.md` |
+| 2026-06-02 | Bridge present-as-answer over-grounding | live UI re-verification: `verify_grounding/v2` over-grounds on entity-name presence (3/8 supported); presentation-only name-only guard shipped (`3e3d0ba`) — see `11-bridge-name-only-overgrounding.md` |
 
 ## Pattern
 
