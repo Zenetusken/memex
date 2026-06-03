@@ -93,8 +93,12 @@ verbatim from the chunk grounded 1/1, proving the gate itself is sound). It was
 a navigable "Retrieved from your vault" section that lists the reranked chunks the
 model was shown (`BridgeAnswer.evidence`) on both bridge surfaces — most valuably on
 the zero-grounded fallback — so the user can open the docs the model read regardless
-of grounding/extraction coverage. The root-cause extractor improvement is itself an
-LLM-prompt-layer follow-up tracked in `next_priorities.md`.
+of grounding/extraction coverage. The root-cause extractor improvement was then
+**FIXED** (`extract_claims/v2`, 2026-06-02 — comprehensive-but-faithful extraction
+designed via a generate→judge→synthesize workflow; isolated A/B grounded **1→8** on
+the failure case with no fabrication; kill-switch `MEMEX_PROMPTS__PIN__EXTRACT_CLAIMS=v1`;
+ADR-0016 §Amendment), so the evidence surface is now a *complementary* navigation aid
+rather than the sole mitigation.
 
 ## Reproducibility
 

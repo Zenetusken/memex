@@ -174,7 +174,7 @@ async def reason_then_ground(
                     ),
                     schema=DraftAnswer,
                     max_tokens=_EXTRACT_MAX_TOKENS,
-                    prompt_tag="extract_claims@v1",
+                    prompt_tag="extract_claims@v2",
                 )
                 candidates = draft.claims
             except ModelCallError as e:
