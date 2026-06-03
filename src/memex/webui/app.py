@@ -279,22 +279,37 @@ def _find_preview_pdf(vault_path: Path, doc_id: str) -> Path | None:
     return None
 
 
+def _format_time_anchor(time_range: tuple[float, float] | None) -> str:
+    """`mm:ss` (or `hh:mm:ss` past an hour) for an audio chunk's START time — the
+    transcript analogue of the `· p. N` page chip (ADR-0017). `""` for a non-audio
+    chunk (`time_range is None`). Kept local to the webui (no parse import — that
+    boundary is closed; `parse._format_timestamp` is the parse-side twin)."""
+    if time_range is None:
+        return ""
+    total = max(0, int(time_range[0]))
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h:d}:{m:02d}:{s:02d}" if h else f"{m:d}:{s:02d}"
+
+
 def _source_view(response: FinalResponse) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
     """View-model for rendering answer/summary sources by HUMAN TITLE instead of
     the raw `docid#hash` / `[[doc#section]]` syntax. Returns:
 
-    - `chunk_refs`: `chunk_id → {title, section, href, page}` for the per-claim
+    - `chunk_refs`: `chunk_id → {title, section, href, page, time}` for the per-claim
       source chips (a claim whose chunk isn't here — e.g. a synthetic table/SQL
       chunk — falls back to the raw id in the template). `page` is `""` when
       unknown (legacy chunks indexed before the chunker's page-attribution lever
       shipped, OR a doc parsed without per-page char counts in its manifest);
       otherwise the 1-based source page number, threaded into the href as
       `?page=N#section-slug` so the doc-page template can scroll the PDF
-      preview pane to that page on landing.
+      preview pane to that page on landing. `time` is the audio time anchor
+      (`mm:ss`, ADR-0017) for a transcript chunk, `""` otherwise — page/time are
+      mutually exclusive (a doc is either paged or audio).
     - `doc_titles`: `doc_id → title` for the `render_wikilink` Sources labels.
 
-    Built from the cited chunks' OWN `document_title` + `heading_path` + `page` —
-    no extra I/O (the same data the refusal panel already shows)."""
+    Built from the cited chunks' OWN `document_title` + `heading_path` + `page` +
+    `time_range` — no extra I/O (the same data the refusal panel already shows)."""
     chunk_refs: dict[str, dict[str, str]] = {}
     doc_titles: dict[str, str] = {}
     for c in response.used_chunks:
@@ -315,6 +330,7 @@ def _source_view(response: FinalResponse) -> tuple[dict[str, dict[str, str]], di
             "section": section,
             "href": href,
             "page": page_str,
+            "time": _format_time_anchor(c.time_range),
         }
         doc_titles[c.document_id] = title
     return chunk_refs, doc_titles

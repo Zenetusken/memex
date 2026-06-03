@@ -419,13 +419,25 @@ def register(app: typer.Typer) -> None:
                 "default for reproducibility)."
             ),
         ),
+        refresh_asr: bool = _Option(
+            False,
+            "--refresh-asr",
+            help=(
+                "Bust this audio document's cached ASR transcription and re-run it "
+                "(ASR is non-deterministic across lib/CUDA upgrades; transcriptions "
+                "are cached by default for reproducible chunk_ids; ADR-0017)."
+            ),
+        ),
     ) -> None:
         """Re-parse a document already in the vault."""
 
         async def _run():
             bootstrap()
             return await parse_document(
-                doc_id, force_docling=force_docling, refresh_vlm=refresh_vlm
+                doc_id,
+                force_docling=force_docling,
+                refresh_vlm=refresh_vlm,
+                refresh_asr=refresh_asr,
             )
 
         _print(asyncio.run(_run()))

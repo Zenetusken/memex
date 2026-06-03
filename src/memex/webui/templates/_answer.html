@@ -21,7 +21,7 @@
           <span class="conf conf-{{ claim.confidence }}">{{ claim.confidence }} confidence</span>
           <span class="claim-src">source</span>
           {% set ref = (chunk_refs or {}).get(claim.source_chunk_id) -%}
-          {%- if ref %}<a class="claim-source-link" href="{{ ref.href }}" title="{{ claim.source_chunk_id }}"{% if ref.page %} data-page="{{ ref.page }}"{% endif %}>{{ ref.title }}{% if ref.section %} › {{ ref.section }}{% endif %}{% if ref.page %} · p. {{ ref.page }}{% endif %}</a>
+          {%- if ref %}<a class="claim-source-link" href="{{ ref.href }}" title="{{ claim.source_chunk_id }}"{% if ref.page %} data-page="{{ ref.page }}"{% endif %}>{{ ref.title }}{% if ref.section %} › {{ ref.section }}{% endif %}{% if ref.page %} · p. {{ ref.page }}{% endif %}{% if ref.time %} · {{ ref.time }}{% endif %}</a>
           {%- else %}<code class="chunk-id" title="chunk id">{{ claim.source_chunk_id }}</code>{% endif %}
         </p>
       </li>

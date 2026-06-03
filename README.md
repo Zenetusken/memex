@@ -75,6 +75,7 @@ That installs the four Memex extras:
 | `models` | torch + transformers + sentence-transformers + accelerate (all cu129) | Always |
 | `parse` | Docling + PyMuPDF4LLM + pyseccomp + pypdfium2 | Always (PDF / DOCX / PPTX ingest) |
 | `serve` | vLLM (cu129 wheels) | If you're running the inference daemon locally (almost always) |
+| `audio` | faster-whisper (CTranslate2 — ships its own CUDA libs, ABI-independent of the torch/vLLM wheels) | Ingesting **audio / class-lecture** files (MP3/WAV/M4A/FLAC/OGG/…) — the ASR transcription route (ADR-0017). Also set `MEMEX_MODELS__ASR` to a Whisper build. |
 | `dev` | pytest + ruff + pyright + hypothesis + pre-commit | Contributing or running the test suite |
 | `eval` | ragas + jiwer | Running `memex eval` against a query set |
 | `docs` | mkdocs + mkdocs-material | Building the documentation site |

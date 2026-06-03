@@ -255,6 +255,49 @@ async def test_ask_source_link_carries_page_when_chunk_attributed(
 
 
 @pytest.mark.asyncio
+async def test_ask_source_link_carries_time_anchor_for_audio_chunk(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An audio transcript chunk (ADR-0017, `Chunk.time_range` populated) gets a
+    `· mm:ss` time chip on its source link — the audio analogue of the `· p. N`
+    page chip. A non-audio chunk (no time_range) shows no chip (pinned above)."""
+
+    async def _fake(question: str, **_kw: Any) -> FinalResponse:
+        chunk = Chunk(
+            chunk_id="lecture1#t1",
+            document_id="lecture1",
+            document_title="Lecture 1",
+            text="VLANs segment the broadcast domain.",
+            heading_path=["[01:02]"],
+            time_range=(62.0, 66.0),
+        )
+        return FinalResponse(
+            answered=True,
+            summary="VLANs segment the network.",
+            claims=[
+                CitedClaim(
+                    claim="A VLAN segments the broadcast domain.",
+                    source_chunk_id="lecture1#t1",
+                    confidence="high",
+                )
+            ],
+            used_chunks=[chunk],
+            wikilinks=[],
+            correlation_id="01HZTIME0000000000000000",
+            tokens_used=10,
+            nodes_traversed=4,
+            regenerate_attempts=0,
+        )
+
+    monkeypatch.setattr("memex.webui.app.answer_query", _fake)
+    text = await _ask_to_completion(client.app, "what does a VLAN do?")
+    # The transcript chunk's start time (62.0s) renders as a readable mm:ss chip;
+    # no page chip (audio has no pages).
+    assert "· 1:02" in text
+    assert "· p." not in text
+
+
+@pytest.mark.asyncio
 async def test_ask_renders_refusal(client: TestClient, fake_refused: None) -> None:
     text = await _ask_to_completion(client.app, "What is the etymology?")
     assert "Refused" in text
