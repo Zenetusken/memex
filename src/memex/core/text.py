@@ -366,6 +366,77 @@ def is_name_only_chunk(text: str) -> bool:
     return has_any_content_line and list_like_short_lines >= _NAME_ONLY_MIN_LIST_LINES
 
 
+# Membership / existence / definition phrasings — a claim that merely places its subject IN a
+# list (or categorises it) IS grounded by a bare name-list, so these KEEP the claim. Checked
+# first; bilingual (EN+FR). Substrings matched against a space-padded lowercased claim.
+_MEMBERSHIP_MARKERS: frozenset[str] = frozenset(
+    {
+        "is one of", "are one of", "is among", "are among", "is included", "are included",
+        "is listed", "are listed", "listed among", "is a type of", "is a kind of",
+        "is a model", "is a method", "is a mechanism", "is an access control",
+        "is an example of", "such as", "includes", "include ", "including",
+        # FR
+        "est un de", "est une de", "fait partie", "font partie", "figure parmi",
+        "est un type de", "est une sorte de", "inclut", "comprend", "parmi les",
+    }
+)
+
+# Behavioral / property / comparative PREDICATE markers — a claim asserting one of these about
+# its subject needs a real sentence (or a table row) to ground; a bare name-list cannot support
+# it. Curated for PRECISION (fail-open on misses): generic copulas ("is"/"are") are deliberately
+# EXCLUDED. Bilingual (EN+FR). Space-padded substring match.
+_BEHAVIORAL_MARKERS: frozenset[str] = frozenset(
+    {
+        # behaviour / action verbs
+        " assigns ", " assign ", " evaluates ", " evaluate ", " allows ", " allow ",
+        " enables ", " enable ", " requires ", " require ", " provides ", " provide ",
+        " supports ", " support ", " grants ", " grant ", " denies ", " deny ",
+        " controls ", " control ", " enforces ", " enforce ", " processes ", " process ",
+        " operates ", " operate ", " functions ", " relies ", " rely ", " uses ", " use ",
+        " struggles ", " lacks ", " lack ", " introduces ", " validates ", " restricts ",
+        " prevents ", " mitigates ", " determines ", " adapts ", " reacts ", " considers ",
+        # property / behaviour phrases
+        " based on ", " works by ", " used for ", " acts as ", " responsible for ",
+        " capable of ", " is static", " is dynamic", " is rigid", " is scalable",
+        " is flexible", " not scalable", " in real-time", " real time",
+        # comparative
+        " superior", " better ", " worse ", " faster", " slower", " outperforms ",
+        " more granular", " less granular", " compared to", " than ",
+        # FR action / property / comparative
+        " assigne ", " assignent ", " évalue ", " évaluent ", " permet ", " permettent ",
+        " nécessite ", " nécessitent ", " fournit ", " contrôle ", " contrôlent ",
+        " repose sur ", " basé sur ", " basée sur ", " utilise ", " utilisent ",
+        " restreint ", " empêche ", " détermine ", " en fonction de ", " supérieur",
+        " meilleur", " plus rapide", " moins ",
+    }
+)
+
+
+def claim_asserts_behavior(claim_text: str) -> bool:
+    """True when the claim asserts a BEHAVIOUR / PROPERTY / COMPARISON about its subject — as
+    opposed to a pure MEMBERSHIP / EXISTENCE / definition claim ("X is one of the listed items",
+    "X is an access control model").
+
+    Used by the `/ask` `verify` node's NAME-ONLY grounding backstop: a claim cited to an
+    `is_name_only_chunk` chunk is demoted ONLY when it asserts behaviour a bare name-list cannot
+    support. **FAIL-OPEN: returns False (= keep the claim) on a membership phrasing OR an
+    unrecognised one** — so the backstop only ever demotes a claim it is CONFIDENT is behavioural,
+    never a membership claim and never an unknown one. The worst case of a marker-set coverage gap
+    is the status-quo over-grounding (a behavioural claim slips through), NEVER a new over-refusal.
+    Combined with demotion-only, the backstop is over-refusal-safe BY CONSTRUCTION.
+
+    Keys on the PREDICATE CLASS (a curated bilingual marker set), NOT lexical overlap with the
+    chunk — robust to the FR-chunk / EN-claim shape common in this vault. Generic copulas
+    ("is"/"are") are excluded. Known residual (documented, cf. the numeric backstop): a behavioural
+    predicate phrased outside the marker set slips through. Do NOT "unify" the marker sets with
+    `is_name_only_chunk`'s line heuristic — they answer different questions.
+    """
+    low = " " + " ".join(claim_text.lower().split()) + " "
+    if any(m in low for m in _MEMBERSHIP_MARKERS):
+        return False  # membership / existence / definition → a name-list grounds it
+    return any(m in low for m in _BEHAVIORAL_MARKERS)
+
+
 # Bilingual (FR+EN) stopwords + a diacritics-/hyphen-aware word tokenizer, used by the
 # artifact-scope qualifier resolver (`agents/artifact_scope.py`). Lives in `core/` (rather
 # than `agents/`) so any module may share it without importing UP from `agents/` (the

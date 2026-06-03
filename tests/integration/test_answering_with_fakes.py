@@ -1755,6 +1755,100 @@ async def test_numeric_backstop_keeps_rounded_plus_exact_figure(fake_llm: FakeLL
 
 
 # ======================================================================
+# Name-only grounding backstop (2026-06-03): the 5th deterministic verify-node
+# filter. The LLM grounds a BEHAVIORAL claim against a chunk that only NAMES the
+# entity (a bare list/heading); the backstop demotes it. Fail-open + demotion-only
+# ⇒ membership/value/unknown claims are KEPT (never over-refuses).
+# ======================================================================
+
+_NAME_LIST_CHUNK_TEXT = (
+    "### Contrôle d'accès\n"
+    "- Role-Based Access Control (RBAC)\n"
+    "- Attribute-Based Access Control (ABAC)\n"
+    "- Mandatory Access Control (MAC)\n"
+)
+
+
+async def _run_verify_name_only(
+    fake_llm: FakeLLM, *, claim: str, chunk: Chunk, backstop: bool = True
+) -> VerificationResult:
+    """Drive the verify node: the LLM grounds the single claim; the NAME-ONLY backstop then
+    decides keep-vs-demote. Numeric backstop off to isolate (a name-list isn't a table anyway)."""
+    fake_llm.respond(
+        "verify_grounding",
+        VerificationResult,
+        VerificationResult(grounded=[0], ungrounded=[], ungrounded_reasons=[]),
+    )
+    state = AnswerState(
+        query="q",
+        draft=DraftAnswer(
+            summary="s",
+            claims=[CitedClaim(claim=claim, source_chunk_id=chunk.chunk_id, confidence="high")],
+        ),
+        reranked=[chunk],
+        numeric_grounding_backstop=False,
+        name_only_grounding_backstop=backstop,
+    )
+    out = await verify(state)
+    result = out["verification"]
+    assert isinstance(result, VerificationResult)
+    return result
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_prompt")
+async def test_name_only_backstop_demotes_behavioral_claim(fake_llm: FakeLLM) -> None:
+    """The kill target: a BEHAVIORAL claim cited to a bare name-list → demoted (→ refuse)."""
+    v = await _run_verify_name_only(
+        fake_llm,
+        claim="RBAC assigns permissions based on a user's job function.",
+        chunk=_vchunk("nl1", _NAME_LIST_CHUNK_TEXT),
+    )
+    assert v.grounded == []
+    assert 0 in v.ungrounded
+    assert v.ungrounded_reasons
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_prompt")
+async def test_name_only_backstop_keeps_membership_claim(fake_llm: FakeLLM) -> None:
+    """A MEMBERSHIP/existence claim IS grounded by a name-list → KEPT (the over-refusal trap)."""
+    v = await _run_verify_name_only(
+        fake_llm,
+        claim="RBAC is one of the access control models listed.",
+        chunk=_vchunk("nl2", _NAME_LIST_CHUNK_TEXT),
+    )
+    assert v.grounded == [0]
+    assert v.ungrounded == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_prompt")
+async def test_name_only_backstop_keeps_table_value_claim(fake_llm: FakeLLM) -> None:
+    """A behavioral-sounding claim cited to a TABLE chunk is never name-only → KEPT (Table-RAG)."""
+    text = "| Model | Default priority |\n|---|---|\n| RBAC | 1 |\n[table-rows]\n[P] RBAC=1\n"
+    v = await _run_verify_name_only(
+        fake_llm,
+        claim="RBAC uses a default priority of 1.",  # has a behavioral marker, but the chunk is a table
+        chunk=_vchunk("tb1", text),
+    )
+    assert v.grounded == [0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_prompt")
+async def test_name_only_backstop_kill_switch_off_keeps_behavioral(fake_llm: FakeLLM) -> None:
+    """Kill-switch off → the behavioral name-list claim stays grounded (the prior behavior)."""
+    v = await _run_verify_name_only(
+        fake_llm,
+        claim="RBAC assigns permissions based on a user's job function.",
+        chunk=_vchunk("nl3", _NAME_LIST_CHUNK_TEXT),
+        backstop=False,
+    )
+    assert v.grounded == [0]
+
+
+# ======================================================================
 # Answer-node context-overflow degradation (2026-05-31)
 # A vLLM context-length 400 (rendered chunks + output reservation exceed the
 # window) must NOT abort the run: the answer node drops the lowest-ranked chunk

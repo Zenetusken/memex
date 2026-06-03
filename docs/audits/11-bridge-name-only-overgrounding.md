@@ -74,15 +74,37 @@ bridge is already proven unreachable from `answer_query`/`run_eval` by
 Amendment**; spec `docs/specs/grounded-agentic-chat.md` §11 + `src/memex/CLAUDE.md`
 updated.
 
-## Residual (documented follow-up)
+## Residual → the `/ask` root-cause backstop (FIXED 2026-06-03)
 
-The guard masks the symptom **for the bridge presentation surface only**. The
-root cause is the shared gate: `verify_grounding/v2` should require *behaviour/
-predicate* support, not bare entity-name presence. That fix touches a HARD-gate
-node (`/ask` + the summarizer) and is **deferred to its own session** — it needs
-a full answer-eval counterfactual re-baseline (a stricter gate risks over-refusing;
-measure multi-run, the borderline-counterfactual discipline). The presentation
-guard makes the follow-up NON-urgent. Tracked in `next_priorities.md`.
+The presentation guard masks the symptom **for the bridge surface only**; the root
+cause is the shared gate over-grounding on entity-name presence on EVERY consumer.
+That `/ask`-path fix was deferred to its own session — **now done** (`agents/answering.py::verify`,
+the deterministic NAME-ONLY GROUNDING BACKSTOP). It does **not** take the stricter-prompt
+route this residual originally anticipated (a `verify_grounding/v3` "require predicate
+support" rule) — that risks over-refusing and is re-interpreted by the 4B with the eval
+as its sole net (the same trap as the numeric backstop's reverted prompt-floor). Instead
+it mirrors the numeric backstop: a **5th demotion filter** in the `verify` node demotes a
+still-grounded claim ONLY when `is_name_only_chunk(chunk.text)` AND
+`core/text.claim_asserts_behavior(claim)` — a curated **bilingual (EN+FR)** behavioral/
+property/comparative marker set that keys on the PREDICATE CLASS and excludes membership/
+existence (`is one of` / `est un de` / `includes`, checked first). **Fail-OPEN + demotion-only
+⇒ it can never manufacture a NEW over-refusal** (an unknown/membership predicate is KEPT; a
+zero-grounded result routes to the existing `refuse`), so it sidesteps the "a stricter gate
+risks over-refusing" concern this residual flagged — no counterfactual re-baseline needed by
+construction, and the staged eval (cr350-multidoc / nist-zero-trust / annual-report, backstop
+ON) confirmed `refusal_cf=1.0` with zero over-refusal. The name-only chunk test EXCLUDES
+table / `[table-rows]` / `[chart-extracted]` blocks, so Table-RAG and the numeric backstop are
+byte-disjoint; `eval-summary` stayed byte-stable (the summarizer's `ground_claims` is untouched).
+Kill-switch `MEMEX_AGENTS__NAME_ONLY_GROUNDING_BACKSTOP_ENABLED=false`. Pinned by
+`tests/unit/test_name_only_grounding.py` + `test_answering_with_fakes.py::test_name_only_backstop_*`.
+See the verify-backstop bullet in `src/memex/CLAUDE.md`.
+
+**Now-open follow-up (smaller):** consolidate the shared leniency into one place —
+`agents/grounding.py::ground_claims` (so the summarizer + standalone bridge inherit the
+membership-aware demotion too, not just `/ask`) AND narrow this audit's bridge presentation
+GUARD to be membership-aware (it currently holds back ALL name-only-cited claims, including
+membership ones a name-list legitimately supports). Both are HARD-gate-neutral refactors;
+tracked in `next_priorities.md`.
 
 A **separate** audit follow-up surfaced alongside this one — the `extract_claims@v1`
 extractor *under-covering* the discrete groundable sub-claims (it pulls the

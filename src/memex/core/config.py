@@ -625,6 +625,14 @@ class AgentsSettings(BaseModel):
     # verify_grounding aggregate-numeric FALSE-POSITIVE that regressed the 10-K
     # (annual-report-16). Demotion-only ⇒ HARD-gate-safe; default on, fail-open.
     numeric_grounding_backstop_enabled: bool = True
+    # The deterministic NAME-ONLY grounding backstop (2026-06-03): the verify node demotes a
+    # grounded BEHAVIORAL/property/comparative claim whose cited chunk merely NAMES the subject
+    # (a bare list/heading — `core/text.is_name_only_chunk` + `claim_asserts_behavior`), the
+    # entity-name-presence loophole in `verify_grounding/v2`'s "structural adjacency is sufficient"
+    # rule. FAIL-OPEN (membership/existence + unrecognised claims KEPT) + demotion-only ⇒
+    # over-refusal-safe BY CONSTRUCTION; table/chart chunks are never name-only so Table-RAG is
+    # untouched. Default on; `MEMEX_AGENTS__NAME_ONLY_GROUNDING_BACKSTOP_ENABLED=false` reverts.
+    name_only_grounding_backstop_enabled: bool = True
     # Index-time column UNDER-SPLIT recovery (2026-05-31): split a Docling-MERGED
     # table column (a >=2-bold-group header over K>=2 clean number-runs, e.g. the
     # 10-K "Stock Awards ($) Total ($)" / "278,809 342,559") back into K columns

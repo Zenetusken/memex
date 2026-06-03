@@ -65,7 +65,7 @@ from memex.agents.artifact_scope import (
 )
 from memex.agents.table_sql import coerce_number, describe_aggregate
 from memex.core.errors import AnswerStateInvariantError
-from memex.core.text import STOPWORDS, atomise
+from memex.core.text import STOPWORDS, atomise, claim_asserts_behavior, is_name_only_chunk
 from memex.core.types import Chunk, RelatedDocument, StoredTable, TableQueryResult
 from memex.core.wikilinks import format_wikilink
 from memex.models.client import complete_structured
@@ -539,6 +539,13 @@ class AnswerState(BaseModel):
     # via the literal-table-row loophole). Set from
     # `agents.numeric_grounding_backstop_enabled` in `answer_query` (fail-open).
     numeric_grounding_backstop: bool = True
+
+    # The deterministic NAME-ONLY grounding backstop (2026-06-03). When True, the verify node
+    # demotes a grounded BEHAVIORAL/property/comparative claim whose cited chunk merely NAMES the
+    # subject (a bare list/heading; `core/text.is_name_only_chunk` + `claim_asserts_behavior`) —
+    # the entity-name-presence loophole. Fail-open + demotion-only (membership/unknown claims kept).
+    # Set from `agents.name_only_grounding_backstop_enabled` in `answer_query` (fail-open).
+    name_only_grounding_backstop: bool = True
 
     nodes_traversed: int = 0
     max_nodes_traversed: int = 20
@@ -1859,6 +1866,39 @@ async def verify(state: AnswerState) -> AnswerStateUpdate:
                         "table; a computed aggregate is not a literal cell reading."
                     )
 
+    # Name-only grounding backstop (2026-06-03): a 5th deterministic demotion, same shape as the
+    # numeric one. The single greedy `verify_grounding/v2` call grounds a BEHAVIORAL claim against
+    # a chunk that merely NAMES the entity (a bare list/heading) via its "structural adjacency is
+    # sufficient" rule — measured 3/3 (e.g. "RBAC assigns permissions by role" cited to a slide
+    # that only LISTS "RBAC"). Demote a still-grounded claim whose cited chunk is name-only AND
+    # whose predicate is behavioral/property/comparative. FAIL-OPEN + demotion-only ⇒ over-refusal-
+    # safe BY CONSTRUCTION: a membership/existence claim (a name-list DOES support it) and any
+    # unrecognised phrasing are KEPT, so the worst case is the status-quo over-grounding, never a
+    # new refusal; a zero-grounded result routes to `refuse` as usual. `is_name_only_chunk` returns
+    # False for any table/chart chunk, so the Table-RAG/chart literal-read rule is untouched.
+    # Kill-switch on AnswerState (default on, fail-open).
+    if state.name_only_grounding_backstop:
+        name_only_demoted: list[int] = []
+        for i in valid_grounded:
+            claim = state.draft.claims[i]
+            chunk = chunk_by_id.get(claim.source_chunk_id)
+            if chunk is None or not is_name_only_chunk(chunk.text):
+                continue  # substantive / table / chart / dangling chunk: not the loophole site
+            if claim_asserts_behavior(claim.claim):
+                name_only_demoted.append(i)
+        if name_only_demoted:
+            log.info("verify.name_only_demoted", demoted=name_only_demoted)
+            demote = set(name_only_demoted)
+            valid_grounded = [i for i in valid_grounded if i not in demote]
+            already_ungrounded = set(valid_ungrounded)
+            for i in name_only_demoted:
+                if i not in already_ungrounded:
+                    valid_ungrounded.append(i)
+                    valid_reasons.append(
+                        "Cited chunk only NAMES the subject (a bare list/heading); it does not "
+                        "state the behavior/property the claim asserts."
+                    )
+
     verification = VerificationResult(
         grounded=valid_grounded,
         ungrounded=valid_ungrounded,
@@ -2348,6 +2388,13 @@ async def answer_query(
     except (ConfigurationError, MemexError):
         numeric_grounding_backstop = True
 
+    # The name-only grounding backstop is the analogous settings policy toggle (default on),
+    # read fail-open so a non-bootstrapped fixture keeps the default behaviour.
+    try:
+        name_only_grounding_backstop = get_settings().agents.name_only_grounding_backstop_enabled
+    except (ConfigurationError, MemexError):
+        name_only_grounding_backstop = True
+
     # Graph expansion is the param ANDed with the settings kill-switch (default on),
     # read fail-open — so `MEMEX_AGENTS__GRAPH_EXPANSION_ENABLED=false` disables it
     # globally (for the earns-its-keep A/B) while an explicit param=False still wins.
@@ -2367,6 +2414,7 @@ async def answer_query(
         chunks_per_neighbor=chunks_per_neighbor,
         allow_partial_grounded=allow_partial_grounded,
         numeric_grounding_backstop=numeric_grounding_backstop,
+        name_only_grounding_backstop=name_only_grounding_backstop,
         scope_doc_ids=scope_doc_ids or [],
         # The grounded multi-turn chat's bounded prior-chunk carry (Surface A). Default
         # None/[] → byte-identical to a bare `/ask`; `retrieve` unions these into the
