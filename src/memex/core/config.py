@@ -87,6 +87,24 @@ class SummarizerServeSettings(BaseModel):
     startup_timeout_s: int = Field(default=300, ge=10)
 
 
+class ASRServeSettings(BaseModel):
+    """Recipe for the short-lived ASR vLLM process (parse-time only), used ONLY when
+    `ModelSettings.asr_backend == "vllm"` — a Whisper build served over the OpenAI
+    `/v1/audio/transcriptions` API (segment timestamps only; see
+    `docs/specs/audio-asr-route.md` and ADR-0017). The DEFAULT `asr_backend` is the
+    in-process `faster_whisper`, which never starts a server, so this is unused by default.
+
+    Mirrors `VLMServeSettings`: the orchestrator (and VLM) are paused during parse, so the
+    card is free; a port DISTINCT from the orchestrator (8000) / VLM (8001) / summarizer
+    (8002) keeps the parse pause's orchestrator-reachability check from targeting it."""
+
+    host: str = "127.0.0.1"
+    port: int = Field(default=8003, ge=1, le=65535)
+    gpu_memory_utilization: float = Field(default=0.80, ge=0.1, le=1.0)
+    max_model_len: int = Field(default=4096, ge=512)
+    startup_timeout_s: int = Field(default=180, ge=10)
+
+
 class ModelSettings(BaseModel):
     """Pydantic-settings record for every model the registry owns —
     orchestrator (out-of-process via vLLM), embedder, reranker, VLM,
@@ -144,6 +162,21 @@ class ModelSettings(BaseModel):
     # for the reasoner; wire it (clone `serve_summarizer_vllm`) when a 12 GB-fitting specialist
     # lands. This NEVER touches the grounded /ask or chat path. `MEMEX_MODELS__REASONER=...`.
     reasoner: str | None = None
+    # ASR (audio transcription) — the parse-time speech-to-text model for the audio
+    # ingestion route (ADR-0017, spec docs/specs/audio-asr-route.md). A parse-stage
+    # PERCEPTION model, OFF the grounded path — the embedder/reranker/chart-OCR/OTTER
+    # category, NOT the vLLM generation engine (ADR-0001 is neutral). None (default) =
+    # audio ingestion is unconfigured → the route raises `ASRUnavailable`. The recommended
+    # build is a French-capable Whisper-large-v3 (e.g.
+    # `bofenghuang/whisper-large-v3-french-distil-dec16` or stock `large-v3-turbo`), gated
+    # on a hands-on French-audio A/B. `MEMEX_MODELS__ASR=...`.
+    asr: str | None = None
+    # The ASR runtime. "faster_whisper" (default): in-process CTranslate2, loads once,
+    # native VAD + long-form + word timestamps. "transformers": the in-process HF
+    # automatic-speech-recognition pipeline (zero new runtime). "vllm": a short-lived
+    # parse-time vLLM serving a Whisper build (segment timestamps only; see ASRServeSettings).
+    asr_backend: Literal["faster_whisper", "vllm", "transformers"] = "faster_whisper"
+    asr_serve: ASRServeSettings = Field(default_factory=ASRServeSettings)
     embedder: str = "google/embeddinggemma-300m"
     reranker: str = "BAAI/bge-reranker-v2-m3"
     # P3.3 chart-OCR model — default `google/deplot` per Session 1

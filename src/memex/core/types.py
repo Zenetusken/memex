@@ -50,6 +50,10 @@ class Chunk(BaseModel):
     page: int | None = None
     char_start: int = 0
     char_end: int = 0
+    # Time range (audio transcripts only) — (start_s, end_s) seconds in the source file, the
+    # audio analogue of `page`; attributed by the chunker from `TranscriptSegment` spans
+    # (ADR-0017). None on the doc/PDF paths. Navigation-grade, not citation-grade.
+    time_range: tuple[float, float] | None = None
     score: float = 0.0
     rerank_score: float | None = None
     heading_path: list[str] = Field(default_factory=list)

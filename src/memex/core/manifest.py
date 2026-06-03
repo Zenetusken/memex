@@ -76,6 +76,29 @@ class ChartExtraction(BaseModel):
     markdown: str
 
 
+class TranscriptSegment(BaseModel):
+    """One ASR transcript segment — the audio analogue of `PageDecision`, stored in the parse
+    manifest sidecar (audio route, ADR-0017 / `docs/specs/audio-asr-route.md`).
+
+    Audio has no pages, so the audio route leaves `ParseStage.pages` empty and records these
+    instead. `start_s`/`end_s` are **global** seconds vs the whole file (the anchor the eventual
+    companion-slide-merge aligns on); `char_start`/`char_end` is the segment's span in the
+    canonical `.md` AT JOIN TIME (pre-transform), used by the chunker to attribute each
+    transcript chunk a time range (the time analogue of `PageDecision.char_count → Chunk.page`).
+    A failed/empty chunk is recorded with `confidence=0.0` + the error in `rationale` — never a
+    silent drop. The companion-deck link is DOCUMENT-level (a wikilink / CITES edge), NOT a field
+    here (a standalone ingest has no companion, and the merge aligns on the time-range)."""
+
+    index: int
+    char_start: int
+    char_end: int
+    start_s: float
+    end_s: float
+    language: str = ""
+    confidence: float = 1.0
+    rationale: str = ""
+
+
 class ParseStage(BaseModel):
     """Audit record for the parse step — per-page routing decisions
     (Docling / VLM / PyMuPDF / passthrough), counts of figures /
@@ -97,6 +120,9 @@ class ParseStage(BaseModel):
     # `.md` at parse, re-attached at index time. Empty default → legacy manifests load
     # unchanged + the re-attach is a no-op for non-chart docs.
     chart_extractions: list[ChartExtraction] = Field(default_factory=list[ChartExtraction])
+    # Audio route (ADR-0017): per-transcript-segment records (timestamps + char-spans). Empty
+    # for non-audio docs; legacy manifests load unchanged (the re-attach/chunker no-op without it).
+    segments: list[TranscriptSegment] = Field(default_factory=list[TranscriptSegment])
 
 
 class EnrichStage(BaseModel):
