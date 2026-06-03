@@ -93,11 +93,12 @@ class BridgeAnswer(BaseModel):
     # Deterministic synthesis of the PRESENTED claims — the `assess_responsiveness` input. NEVER
     # the ungrounded analysis or the extractor's free summary (no ungrounded text reaches the answer).
     answer_headline: str = ""
-    # The name-only-filtered subset actually shown when presenting (ADR-0016 audit rec 1):
-    # `presented_claims ⊆ grounded_claims`, with claims whose cited chunk only NAMES the entity
-    # (a bare list/heading) held back. The presented surface renders THIS; the labelled-analysis
-    # fallback + the footer counts keep `grounded_claims` (the full gate output). Empty on the
-    # standalone path (gate not run).
+    # The subset of grounded claims presented when presenting (ADR-0016 audit rec 1). The
+    # grounding-level name-only demotion (2026-06-03, after Stage 2) already drops behavioral
+    # name-list-cited claims from `grounded_claims` ITSELF before the present/standalone split, so
+    # `presented_claims ⊆ grounded_claims`; the present-as-answer guard applies the SAME
+    # `claim_grounded_only_by_name` rule as membership-aware defense-in-depth (idempotent after the
+    # backstop). Empty on the standalone path (the present-as-answer gate is not run).
     presented_claims: list[CitedClaim] = []
 
     @property
