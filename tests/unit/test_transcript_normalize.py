@@ -74,3 +74,39 @@ def test_idempotent() -> None:
     raw = "I, um, think the, uh, router um forwards   it"
     once = normalize_transcript_text(raw)
     assert normalize_transcript_text(once) == once
+
+
+def test_legit_leading_comma_preserved() -> None:
+    # No filler was removed → a legitimate sentence-leading comma must NOT be stripped
+    # (the prior over-strip; validator F1).
+    assert normalize_transcript_text(", and then it works") == ", and then it works"
+
+
+def test_filler_as_own_sentence_cleans_doubled_period() -> None:
+    # A filler that was its own "sentence" leaves a doubled period that gets mopped up.
+    assert normalize_transcript_text("I think. Uh. The router") == "I think. The router"
+
+
+def test_trailing_filler_cleans_comma_before_terminal() -> None:
+    # "Yes, um." → "Yes, ." → "Yes." (comma-before-terminal residue removed; AUDIO-NORM-002).
+    assert normalize_transcript_text("Yes, um.") == "Yes."
+
+
+def test_ahem_is_not_stripped() -> None:
+    # `ahem` was dropped from the filler set — it is often an intentional attention-getter
+    # (validator SC-3), so it must survive.
+    assert normalize_transcript_text("ahem let me explain") == "ahem let me explain"
+
+
+def test_capitalized_filler_homograph_is_removed() -> None:
+    # DOCUMENTED accepted limit: a standalone capitalised filler-homograph (a surname "Heu")
+    # is removed too. The verbatim raw stays cached as the faithfulness anchor.
+    assert normalize_transcript_text("Heu is a name") == "is a name"
+
+
+def test_prefix_overlapping_fillers_all_removed_deterministically() -> None:
+    # Longest-match + boundary handling makes equal-length fillers order-invariant, so the
+    # output is hash-seed-independent (the chunk-id-stability property). Prefix-overlapping
+    # fillers are all removed regardless of alternation order.
+    assert normalize_transcript_text("uh uhh uhhh uhm") == ""
+    assert normalize_transcript_text("um umm ummm") == ""

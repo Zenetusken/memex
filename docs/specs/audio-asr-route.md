@@ -83,9 +83,13 @@ deterministically faithful** (the grounding gate reads this text). Two tiers res
 - **v1 — a DETERMINISTIC, content-preserving pass** (`core/text.normalize_transcript_text`, shipped
   with this route): a pure function that removes ONLY non-lexical noise — unambiguous filler
   interjections (`um`/`uh`/`euh`/…, EN+FR; backchannels like `uh-huh` and ambiguous markers like
-  `like`/`so`/`ben` are EXCLUDED) plus whitespace/punctuation artifacts. **By construction it never
-  alters a content word and never adds text**, so it is meaning-preserving ("100% faithful") and
-  reproducible (byte-identical output → stable content-addressed `chunk_id`s). It runs at step 6,
+  `like`/`so`/`ben`, and `ahem`, are EXCLUDED) plus whitespace/punctuation artifacts. **It preserves
+  all LEXICAL content** — a content word is never clipped or dropped (the boundaries match only whole
+  filler tokens) and nothing is added — and is reproducible (byte-identical output → stable
+  content-addressed `chunk_id`s, hash-seed-invariant); the **verbatim raw stays cached as the
+  faithfulness anchor**. (Honest limit: a rare standalone CAPITALISED filler-homograph — a surname
+  `Heu` — is removed too, an accepted conservative loss bounded by the cached raw.) It is applied
+  **per-segment** (NOT to the assembled `## [mm:ss]` body, whose blank lines it would flatten). It runs at step 6,
   **after** the ASR cache, so the **verbatim raw transcript stays cached** (the audit/faithfulness
   anchor), toggling `ParseSettings.asr_normalize` re-cleans from cached raw (no re-transcribe), and it
   is **NOT** part of the cache `cfg` key. It deliberately does NOT collapse content-word stutters

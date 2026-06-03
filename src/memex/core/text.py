@@ -764,51 +764,63 @@ def is_canonical_number_cell(cell: str) -> bool:
 
 # --- ASR transcript normalization (ADR-0017; spec docs/specs/audio-asr-route.md) ---------
 #
-# Non-lexical FILLER interjections stripped from an ASR transcript. DELIBERATELY
-# CONSERVATIVE: only unambiguous hesitation / non-lexical interjections that carry ZERO
-# semantic content, so removal is MEANING-PRESERVING ("100% faithful" — no content word is
-# ever altered). Ambiguous discourse markers (EN "like"/"you know"/"so"/"right"; FR
-# "ben"/"bah"/"quoi"/"voilà"/"hein") and backchannels ("mhm"/"uh-huh") are EXCLUDED — they
-# can be lexical/meaningful, and dropping them risks changing meaning. The verbatim raw
-# transcript is preserved in the ASR cache, so nothing is lost.
+# Non-lexical FILLER interjections stripped from a single ASR transcript SEGMENT. DELIBERATELY
+# CONSERVATIVE: only unambiguous hesitation / non-lexical interjections. Ambiguous discourse
+# markers (EN "like"/"you know"/"so"/"right"; FR "ben"/"bah"/"quoi"/"voilà"/"hein") and
+# backchannels ("mhm"/"uh-huh") are EXCLUDED — they can be lexical and dropping them would
+# change meaning. (`ahem` is excluded too — it is often an INTENTIONAL attention-getter.)
 _TRANSCRIPT_FILLERS: Final[frozenset[str]] = frozenset(
-    {
-        "um", "umm", "ummm", "uh", "uhh", "uhhh", "uhm", "erm", "ahem",  # EN
-        "euh", "euhh", "heu", "heuh",  # FR
-    }
+    {"um", "umm", "ummm", "uh", "uhh", "uhhh", "uhm", "erm", "euh", "euhh", "heu", "heuh"}
 )
-# Bounded by NON-(word-char-or-hyphen) on both sides, so a filler inside a word
-# ("umbrella") or a hyphenated backchannel ("uh-huh") is left untouched; `\w` is unicode
-# (matches accented FR letters) so "euh" never clips a real word.
+# A filler is a WHOLE token bounded by NON-(word-char-or-hyphen) on both sides — so a filler
+# inside a word ("umbrella") or a hyphenated backchannel ("uh-huh") is NEVER clipped; `\w` is
+# unicode, so "euh" never bites an accented FR word. An immediately-following comma (the
+# comma-set-off / sentence-initial form "Um, so" / "I, um, think") is consumed with it.
 _FILLER_RE: Final[re.Pattern[str]] = re.compile(
-    r"(?<![\w-])(?:" + "|".join(sorted(_TRANSCRIPT_FILLERS, key=len, reverse=True)) + r")(?![\w-])",
+    r"(?<![\w-])(?:"
+    + "|".join(sorted(_TRANSCRIPT_FILLERS, key=len, reverse=True))
+    + r")(?![\w-])[ \t]*,?",
     re.IGNORECASE,
 )
-# Cleanup of the punctuation/space artifacts a removed comma-set-off filler leaves behind
-# ("I, um, think" -> "I, , think" -> "I, think").
-_DOUBLED_PUNCT_RE: Final[re.Pattern[str]] = re.compile(r"([,;:])(?:\s*[,;:])+")
+# Mop up the punctuation/space RESIDUE a removed filler leaves — these touch ONLY punctuation
+# + whitespace, never a content word. Order matters (run top-to-bottom).
+_DOUBLED_DELIM_RE: Final[re.Pattern[str]] = re.compile(r"([,;:])(?:\s*[,;:])+")  # ", ," -> ","
+_COMMA_BEFORE_TERMINAL_RE: Final[re.Pattern[str]] = re.compile(r",\s*([.!?])")  # "Yes,." -> "Yes."
+_DOUBLED_TERMINAL_RE: Final[re.Pattern[str]] = re.compile(r"([.!?])\s*\.")  # "think.." -> "think."
 _SPACE_BEFORE_PUNCT_RE: Final[re.Pattern[str]] = re.compile(r"\s+([,.;:!?])")
-_LEADING_PUNCT_RE: Final[re.Pattern[str]] = re.compile(r"^[\s,;:]+")
+# A sentence never legitimately LEADS with terminal punctuation, so a leading `.!?` residue
+# (from a filler that WAS its own "sentence", "Um. Okay") is an artifact — but a leading COMMA
+# is NOT stripped (it can be legitimate continuation: ", and then it works").
+_LEADING_TERMINAL_RE: Final[re.Pattern[str]] = re.compile(r"^\s*[.!?]+\s*")
 _MULTISPACE_RE: Final[re.Pattern[str]] = re.compile(r"[ \t]{2,}")
 
 
 def normalize_transcript_text(text: str) -> str:
-    """Deterministically clean ASR transcript noise WITHOUT touching any lexical / content
-    word (ADR-0017; spec docs/specs/audio-asr-route.md §"Transcript normalization").
+    """Deterministically clean ASR noise from a SINGLE transcript SEGMENT's text (ADR-0017;
+    spec docs/specs/audio-asr-route.md §"Transcript normalization").
 
-    By construction it removes ONLY non-lexical noise — unambiguous filler interjections
-    (`um`/`uh`/`euh`/…, EN+FR) and whitespace/punctuation artifacts — so it is
-    MEANING-PRESERVING ("100% faithful": no content word is ever altered, nothing is added)
-    and REPRODUCIBLE (a pure function → byte-identical output for byte-identical input →
-    stable content-addressed chunk_ids). The verbatim raw transcript stays in the ASR cache.
+    Removes non-lexical filler interjections (`um`/`uh`/`euh`/…, EN+FR) plus the
+    whitespace/punctuation residue they leave. **It preserves all LEXICAL content** — a content
+    word is never clipped or dropped (the `(?<![\\w-])…(?![\\w-])` boundaries match only whole
+    filler tokens), and nothing is ever added — and it is REPRODUCIBLE (a pure function →
+    byte-identical output → stable content-addressed `chunk_id`s, invariant to the interpreter
+    hash seed). The **verbatim raw transcript stays in the ASR cache** as the faithfulness anchor.
 
-    It deliberately does NOT collapse content-word repetitions ("the the cat"), split
-    run-on sentences, or restructure paragraphs — those need semantics and are the deferred,
-    faithfulness-GATED LLM "structuring" pass (spec §Out-of-scope), NOT this pass."""
+    Two honest limits (bounded by the cached raw + the deferred LLM pass): in the rare case a
+    standalone filler token is also a CAPITALISED homograph of a real word/name (`Heu` a surname,
+    `UH` shouted) it is removed too — an accepted conservative loss; and casing after a removed
+    sentence-initial filler is left as-is. It does NOT collapse content-word stutters
+    ("the the cat"), split run-ons, or restructure — those need semantics (the LLM pass, §15).
+
+    **Apply PER-SEGMENT, to a single segment's raw text — NOT to the assembled `## [mm:ss]` body**
+    (it collapses blank lines, which would flatten the heading/section structure the chunker
+    splits on)."""
     cleaned = _FILLER_RE.sub("", text)
-    cleaned = _DOUBLED_PUNCT_RE.sub(r"\1", cleaned)
+    cleaned = _DOUBLED_DELIM_RE.sub(r"\1", cleaned)
+    cleaned = _COMMA_BEFORE_TERMINAL_RE.sub(r"\1", cleaned)
+    cleaned = _DOUBLED_TERMINAL_RE.sub(r"\1", cleaned)
     cleaned = _SPACE_BEFORE_PUNCT_RE.sub(r"\1", cleaned)
     cleaned = _MULTISPACE_RE.sub(" ", cleaned)
-    # Re-flow per line: drop a leading dangling delimiter + trim; drop emptied lines.
-    lines = [_LEADING_PUNCT_RE.sub("", ln).strip() for ln in cleaned.split("\n")]
+    # Re-flow per line: strip a leading terminal-punct residue + trim; drop emptied lines.
+    lines = [_LEADING_TERMINAL_RE.sub("", ln).strip() for ln in cleaned.split("\n")]
     return "\n".join(ln for ln in lines if ln)

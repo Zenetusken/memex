@@ -108,11 +108,13 @@ detect audio → VAD-chunk → transcribe → assemble **timestamped Markdown** 
 - The transcript is its **own content-only vault document** (ADR-0003), grounded on its text. The
   **companion-document merge is deferred to Phase 2** but the v1 metadata contract carries its hooks.
 - **Transcript chunks are CLEANED, not dumped raw.** Spontaneous speech is non-linear (fillers,
-  restarts), so a **deterministic, faithful** normalization (`core/text.normalize_transcript_text`:
-  strips only non-lexical fillers + whitespace artifacts — never a content word, nothing added; raw
-  kept in the ASR cache) runs at assembly, keeping retrieval clean while staying 100% faithful +
-  reproducible. A heavier LLM **"structuring"** pass (paragraphing / run-on splitting) is the deferred
-  immediate follow-up, gated behind a faithfulness guard + eval (spec §"Transcript normalization").
+  restarts), so a **deterministic** normalization (`core/text.normalize_transcript_text`: strips only
+  non-lexical fillers — EN+FR `um`/`uh`/`euh` — + whitespace/punctuation artifacts, **preserving all
+  LEXICAL content** [whole filler tokens only; a rare capitalised filler-homograph is the bounded
+  exception], with the verbatim raw kept in the ASR cache as the faithfulness anchor) runs at assembly,
+  keeping retrieval clean + reproducible. A heavier LLM **"structuring"** pass (paragraphing / run-on
+  splitting) is the deferred immediate follow-up, gated behind a faithfulness guard + eval (spec
+  §"Transcript normalization").
 
 **This does NOT conflict with ADR-0001.** ADR-0001 commits the **agentic generation/orchestration
 engine** (structured-output reliability under 10+ sequential calls per query) to vLLM. ASR is a
