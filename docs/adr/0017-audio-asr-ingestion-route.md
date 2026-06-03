@@ -221,6 +221,28 @@ pluggable backend, with an A/B as the tie-breaker.
 Category error — audio has no pages to rasterise. The scan→VLM route is the structural *analogue*
 (whole-source transcription bypassing the page pipeline), not a literal reuse.
 
+## Amendment (2026-06-03): audio-bearing VIDEO ingestion ("class video", standalone)
+
+The user's actual class recordings are **`.mp4` ZOOM videos** (each ~2.5–3 hr, `ftypisom` major brand,
+an AAC stereo audio track + a video track), not audio files — exactly the "class video" case §5
+originally deferred. The original "audio-only ingest; video is a Phase-2 audio-extraction extension"
+scoping is **promoted now**, because the extraction is trivial: faster-whisper's PyAV decoder reads the
+container's audio stream directly (no separate ffmpeg step), so a video container needs no new
+transcription machinery — only the **gate** had to open.
+
+- **`VIDEO_SUFFIXES = {.mp4, .m4v, .mov, .webm, .mkv}`** route to the **same `_parse_audio`**
+  (`MEDIA_SUFFIXES = AUDIO_SUFFIXES | VIDEO_SUFFIXES`). The **visual track is ignored in v1** — the
+  transcript is audio-only; the slide content comes from the companion PDF via the (still-deferred)
+  Phase-2 merge above, for which these recordings + their `Cours N.pdf` decks are the concrete input.
+- **Ingest acceptance** gains a `"video"` `DetectedKind` + `_detect_video`: a **curated** ISO-BMFF
+  `ftyp` VIDEO-brand set (so HEIC/AVIF **image** brands stay rejected) or the Matroska/WebM **EBML**
+  magic. A video with **no** audio track transcribes to nothing → recoverable refuse — **HARD-gate-safe
+  by the same construction as an empty audio transcript.** Parse-stage only ⇒ the gate posture is
+  unchanged.
+- This is **standalone** video transcription only. The companion-MERGE (aligning the transcript's
+  time-ranges to the slide deck) remains the Phase-2 deferral above; the per-segment timestamp + the
+  document-level link hooks already carry it.
+
 ## Revisit When
 
 - **The French-audio A/B runs** (the gating experiment): on a representative sample of the user's

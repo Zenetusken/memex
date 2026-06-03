@@ -32,6 +32,8 @@ from memex.parse.office_convert import (
 )
 from memex.parse.pipeline import (
     AUDIO_SUFFIXES,
+    MEDIA_SUFFIXES,
+    VIDEO_SUFFIXES,
     ParseResult,
     derive_title,
     parse_document,
@@ -56,7 +58,9 @@ from memex.parse.vlm_cache import VLMTranscriptionCache
 
 __all__ = [
     "AUDIO_SUFFIXES",
+    "MEDIA_SUFFIXES",
     "OFFICE_SUFFIXES",
+    "VIDEO_SUFFIXES",
     "ASRSegment",
     "ASRTranscriptionCache",
     "ASRTranscriptionError",

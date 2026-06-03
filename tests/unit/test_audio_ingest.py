@@ -1,10 +1,11 @@
-"""Unit tests for audio ingest acceptance (Increment 2, ADR-0017).
+"""Unit tests for audio + video ingest acceptance (Increment 2 + the "class video" extension, ADR-0017).
 
 Validates `_detect_audio`: the binary MPEG/AAC frame-sync (a precise 2nd-byte set), the
 text-gated ASCII magics (ID3/fLaC/OggS — the last requiring an audio codec, since Ogg also
 wraps Theora video), and the WAV/`ftyp` containers (M4A-brand-only) — all kept out of the
-generic `_MAGIC` loop. Confirms non-audio binaries / video / image / BOM-text are rejected and
-PDF/text detection is intact.
+generic `_MAGIC` loop. Plus `_detect_video`: audio-bearing VIDEO containers (MP4/MOV/MKV/WebM via
+a curated `ftyp` VIDEO brand set or the EBML magic) are ACCEPTED as kind `video` (transcribed
+audio-only); HEIC/AVIF IMAGE containers and BOM-text stay rejected, and PDF/text is intact.
 """
 
 from __future__ import annotations
@@ -130,13 +131,41 @@ def test_avif_image_rejected(tmp_path: Path) -> None:
     assert r.kind == "unknown"
 
 
-def test_mp4_video_rejected(tmp_path: Path) -> None:
-    # MP4/MOV video (no audio brand) is deliberately rejected at ingest in v1 — the "class
-    # video" case is a Phase-2 audio-extraction extension (ADR-0017).
-    data = struct.pack(">I", 24) + b"ftypisom" + b"\x00\x00\x00\x00" + b"mp41" + b"\x00" * 200
+def test_mp4_video_accepted_as_video(tmp_path: Path) -> None:
+    # MP4 video (the real ZOOM `ftypisom…mp41` brand, ADR-0017 "class video") is now ACCEPTED as
+    # kind `video` — the route transcribes its AUDIO track. This is the exact head of the user's
+    # CR350 recordings (major brand isom, compatible isom/iso2/avc1/mp41).
+    data = struct.pack(">I", 32) + b"ftypisom" + b"\x00\x00\x02\x00" + b"isomiso2avc1mp41" + b"\x00" * 200
     r = _validate(_write(tmp_path, "lecture.mp4", data))
-    assert not r.accepted
-    assert r.kind == "unknown"
+    assert r.accepted
+    assert r.kind == "video"
+    assert r.mime == "video/mp4"
+
+
+def test_mov_quicktime_accepted_as_video(tmp_path: Path) -> None:
+    # QuickTime `.mov` — ftyp major brand `qt  ` (two trailing spaces).
+    data = struct.pack(">I", 24) + b"ftypqt  " + b"\x00" * 200
+    r = _validate(_write(tmp_path, "screen.mov", data))
+    assert r.accepted
+    assert r.kind == "video"
+
+
+def test_webm_ebml_accepted_as_video(tmp_path: Path) -> None:
+    # WebM — EBML magic (0x1A45DFA3) + a `webm` DocType in the head → video/webm.
+    data = b"\x1aE\xdf\xa3" + b"\x01\x00\x00\x00" + b"\x42\x82\x84webm" + b"\x00" * 200
+    r = _validate(_write(tmp_path, "clip.webm", data))
+    assert r.accepted
+    assert r.kind == "video"
+    assert r.mime == "video/webm"
+
+
+def test_mkv_ebml_accepted_as_video(tmp_path: Path) -> None:
+    # Matroska — EBML magic with a `matroska` DocType (no `webm` marker) → video/x-matroska.
+    data = b"\x1aE\xdf\xa3" + b"\x01\x00\x00\x00" + b"\x42\x82\x88matroska" + b"\x00" * 200
+    r = _validate(_write(tmp_path, "clip.mkv", data))
+    assert r.accepted
+    assert r.kind == "video"
+    assert r.mime == "video/x-matroska"
 
 
 def test_id3_prefixed_text_is_not_audio(tmp_path: Path) -> None:

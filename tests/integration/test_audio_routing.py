@@ -84,6 +84,37 @@ async def test_parse_document_routes_audio_to_asr(
 
 
 @pytest.mark.asyncio
+async def test_parse_document_routes_video_to_asr(
+    settings: MemexSettings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An audio-bearing VIDEO container (.mp4, the ADR-0017 "class video" extension) routes to the
+    SAME ASR path as audio — `transcribe_audio` decodes its audio track. Pinned with a faked
+    transcribe + a real ZOOM-style ftyp head, so no GPU/codec dep."""
+    doc_id = "vid1"
+    d = tmp_path / "documents" / doc_id
+    d.mkdir(parents=True, exist_ok=True)
+    # The real CR350 ftyp head (major brand isom; compatible isom/iso2/avc1/mp41).
+    (d / "source.mp4").write_bytes(
+        b"\x00\x00\x00\x20ftypisom\x00\x00\x02\x00isomiso2avc1mp41" + b"\x00" * 64
+    )
+
+    async def fake_transcribe(
+        *, source: Path, cache: object = None, refresh: bool = False
+    ) -> list[ASRSegment]:
+        return [ASRSegment(text="le routeur achemine les paquets", start_s=0.0, end_s=4.0, language="fr")]
+
+    monkeypatch.setattr(pipeline, "transcribe_audio", fake_transcribe)
+    monkeypatch.setattr(pipeline, "pause_vllm_for_gpu", _no_pause)
+
+    result = await pipeline.parse_document(doc_id)
+    assert result.engine == "asr"
+    assert result.pages == []
+    doc = await read_document(tmp_path, doc_id)
+    assert "## [00:00]" in doc.body
+    assert "le routeur achemine les paquets" in doc.body
+
+
+@pytest.mark.asyncio
 async def test_empty_transcript_refuses(
     settings: MemexSettings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

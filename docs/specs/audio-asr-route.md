@@ -1,8 +1,9 @@
 # Spec: audio → timestamped-Markdown ASR parse route
 
 **Status:** **Implemented** (v1 — the `faster_whisper` backend + route + cache + chunk time
-attribution; branch `audio-asr-ingestion`). The `vllm`/`transformers` backends, the French-audio A/B,
-and the Phase-2 companion-merge are **deferred** (§13, §15). **ADR:**
+attribution + **audio-bearing VIDEO ingestion** [MP4/MOV/WebM/MKV, the "class video" case, §5];
+branch `audio-asr-ingestion`). The `vllm`/`transformers` backends, the French-audio A/B, and the
+Phase-2 companion-merge are **deferred** (§13, §15). **ADR:**
 [ADR-0017](../adr/0017-audio-asr-ingestion-route.md).
 **Analogue:** `scan-vlm-parse.md` (whole-source transcription that bypasses the page pipeline).
 **Research basis:** [[asr-audio-scope-2026-06-03]] (the timestamp gate + the French A/B).
@@ -159,24 +160,35 @@ binary container would otherwise misread as `text`/`unknown`):
   audio codec signature (`OpusHead`/`vorbis`/`FLAC`/`Speex`) in its first page, since Ogg also wraps
   Theora **video** (which stays rejected);
 - `RIFF….WAVE` (`WAVE` at byte 8) and the ISO-BMFF `ftyp` box (`ftyp` at byte 4) are not offset-0.
-  **The `ftyp` box is SHARED by M4A audio, MP4/MOV video, and HEIC/AVIF images, so it is accepted ONLY
-  when the `M4A ` audio brand is present (major or compatible brand; `_is_m4a_audio`)** — video and
-  image containers stay **rejected**, keeping validation tight (GUIDELINES Part VI). MP4/MOV
-  *video-with-audio* (the "class video" case) and audiobook `.m4b` / DRM `.m4p` are later extensions,
-  NOT v1.
+  **The `ftyp` box is SHARED by M4A audio, MP4/MOV video, and HEIC/AVIF images, so the AUDIO branch
+  accepts it ONLY when the `M4A ` audio brand is present (major or compatible brand; `_is_m4a_audio`)**
+  — HEIC/AVIF image containers + audiobook `.m4b` / DRM `.m4p` stay **rejected**, keeping validation
+  tight (GUIDELINES Part VI).
 
-The `audio` kind is deliberately ABSENT from `ingest/pipeline.py::_EXTENSION_FOR_KIND` so `_copy_source`
-falls back to the original source suffix (multi-format → preserves `.mp3` vs `.wav`, which the parse
-route keys on). Magic-number validation stays non-optional — a new format arrives **with** this ADR
-per the validation docstring.
+**Audio-bearing VIDEO containers — the "class video" case (`_detect_video`, added with the user's
+CR350 ZOOM recordings).** A `"video"` `DetectedKind` member is accepted (AFTER `_detect_audio`, before
+the text fallback) for an ISO-BMFF `ftyp` box carrying a **curated VIDEO brand** (`_VIDEO_FTYP_BRANDS`
+= `isom`/`iso2`/`mp41`/`mp42`/`avc1`/`M4V `/`qt  `/`hev1`/… — the real ZOOM `.mp4` is `ftypisom`),
+**or** the Matroska/WebM **EBML magic** (`0x1A45DFA3`; the `webm` DocType splits `video/webm` vs
+`video/x-matroska`). The route transcribes the container's **AUDIO track** (faster-whisper/PyAV decodes
+it); the **visual track is ignored in v1** — the slide content comes from the companion PDF via the
+Phase-2 merge. The brand set is curated so **HEIC/AVIF image brands stay excluded** (still rejected),
+and a video with **no audio track** transcribes to nothing → recoverable refuse (HARD-gate-safe).
+
+The `audio`/`video` kinds are deliberately ABSENT from `ingest/pipeline.py::_EXTENSION_FOR_KIND` so
+`_copy_source` falls back to the original source suffix (multi-format → preserves `.mp3` vs `.wav` vs
+`.mp4`, which the parse route keys on). Magic-number validation stays non-optional — a new format
+arrives **with** this ADR per the validation docstring.
 
 **Parse dispatch** (`parse/pipeline.py::parse_document`, the suffix switch ~2288–2311): add a branch
 **before** the PDF branch, exactly mirroring the `OFFICE_SUFFIXES` branch:
 
 ```python
 AUDIO_SUFFIXES = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".opus", ".aac"}
+VIDEO_SUFFIXES = {".mp4", ".m4v", ".mov", ".webm", ".mkv"}   # "class video" — transcribe the audio track
+MEDIA_SUFFIXES = AUDIO_SUFFIXES | VIDEO_SUFFIXES
 ...
-if source.suffix.lower() in AUDIO_SUFFIXES:
+if source.suffix.lower() in MEDIA_SUFFIXES:
     return await _parse_audio(settings.vault_path, doc_id, source, refresh_asr=refresh_asr)
 ```
 
@@ -379,7 +391,9 @@ answer/summarize **REFUSES** (the scan-route precedent; never fabricates from an
 - **Integration** (`test_audio_routing.py`, the `test_scan_routing.py` sibling): a faked
   `transcribe_audio` + an audio-magic source → `parse_document` routes to `_parse_audio`, writes the
   timestamped body, records `segments` (not `pages`) in the manifest with `engine="asr"`; the
-  `AUDIO_SUFFIXES` gate; `ingest/validation` accepts the audio magic + rejects a bogus one.
+  `MEDIA_SUFFIXES` gate (incl. an `.mp4` VIDEO source routing to the SAME path via its real ZOOM
+  `ftypisom` head); `ingest/validation` accepts the audio + VIDEO magic (MP4/MOV/WebM/MKV) and rejects
+  HEIC/AVIF images + a bogus binary.
 - **Live (GPU)**: ingest a real French lecture clip → transcribe → chunks index → `memex ask` answers
   from the transcript → the answer's source chip shows a `[mm:ss]` anchor. (Then the audio eval corpus.)
 
@@ -389,8 +403,11 @@ answer/summarize **REFUSES** (the scan-route precedent; never fabricates from an
   ground on text). A follow-on if multi-speaker recordings enter scope (ADR-0017 §Revisit).
 - **The companion-document merge** — ADR-0017 §Phase-2: align the transcript's per-segment time-ranges
   to a slide deck/PDF's pages via EmbeddingGemma cosine (MaViLS method), as a cross-linked sidecar.
-  v1 only **preserves the hooks** (per-segment global timestamps + char-spans + language; the
-  transcript↔deck link is a **document-level** `[[doc]]`/CITES edge established at merge time).
+  Standalone VIDEO transcription is now **supported** (`_detect_video` + `VIDEO_SUFFIXES`, §5) — what
+  stays deferred is the MERGE: v1 only **preserves the hooks** (per-segment global timestamps +
+  char-spans + language; the transcript↔deck link is a **document-level** `[[doc]]`/CITES edge
+  established at merge time). The CR350 ZOOM `.mp4` recordings + their `Cours N.pdf` slide decks are
+  the concrete Phase-2 input.
 - **Qwen3-ASR + ForcedAligner** (word/char timestamps) — revisit only if an independent French result
   makes Qwen's accuracy decisive (the 2-pass, 300 s-capped, off-HTTP cost is otherwise not worth it).
 - **An LLM "structuring" pass** over the deterministically-normalized transcript (the immediate

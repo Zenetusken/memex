@@ -1779,6 +1779,13 @@ async def _parse_scan_with_vlm(
 AUDIO_SUFFIXES: Final[frozenset[str]] = frozenset(
     {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".opus", ".aac"}
 )
+# Audio-bearing VIDEO containers (ADR-0017 "class video"): routed to the SAME `_parse_audio`,
+# which transcribes the AUDIO track (faster-whisper/PyAV decodes the container's audio stream;
+# the visual track is ignored in v1 — the slide content comes from the companion PDF via the
+# Phase-2 merge). A video with no audio track → empty transcript → recoverable refuse.
+VIDEO_SUFFIXES: Final[frozenset[str]] = frozenset({".mp4", ".m4v", ".mov", ".webm", ".mkv"})
+# The set the parse dispatch + the ingest acceptance key on — both audio + audio-bearing video.
+MEDIA_SUFFIXES: Final[frozenset[str]] = AUDIO_SUFFIXES | VIDEO_SUFFIXES
 
 
 def _format_timestamp(seconds: float) -> str:
@@ -2423,10 +2430,11 @@ async def parse_document(
     if source.suffix.lower() in {".md", ".markdown"}:
         return await _passthrough_markdown(settings.vault_path, doc_id, source)
 
-    # Audio sources (ADR-0017) → the ASR route: transcribe to timestamped Markdown, then hand
-    # to the existing chunk/embed/answer pipeline. A parse-stage perception model, off the
-    # grounded path; `refresh_asr` busts this doc's cached transcription first.
-    if source.suffix.lower() in AUDIO_SUFFIXES:
+    # Audio sources AND audio-bearing video containers (ADR-0017) → the ASR route: transcribe
+    # to timestamped Markdown (the video's audio track), then hand to the existing
+    # chunk/embed/answer pipeline. A parse-stage perception model, off the grounded path;
+    # `refresh_asr` busts this doc's cached transcription first.
+    if source.suffix.lower() in MEDIA_SUFFIXES:
         return await _parse_audio(settings.vault_path, doc_id, source, refresh_asr=refresh_asr)
 
     # Office/ODF sources can't be rasterised by pypdfium2 (the VLM + chart-OCR
