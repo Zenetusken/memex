@@ -387,6 +387,16 @@ class ParseSettings(BaseModel):
     # AFTER the ASR cache (raw stays cached), so flipping it re-cleans without re-transcribe
     # and it is NOT part of the cache key. Read by the route in a later increment.
     asr_normalize: bool = True
+    # ASR decoding knobs (ADR-0017). These + the backend/model id form the cache `cfg` (a
+    # change is a clean cache miss, never a stale replay). `asr_beam_size` 1 = greedy
+    # (reproducible, fast); `asr_language` None = auto-detect (set "fr" to force French and
+    # skip detection); `asr_vad_filter` runs the backend's built-in Silero VAD to drop silence
+    # (prevents long-form hallucination); `asr_device` places the faster-whisper model ("cpu"
+    # int8 — safe everywhere; "cuda" float16 on the GPU freed by the parse-time pause).
+    asr_beam_size: int = Field(default=1, ge=1, le=10)
+    asr_language: str | None = None
+    asr_vad_filter: bool = True
+    asr_device: Literal["cpu", "cuda"] = "cpu"
     # Force Docling routing, bypassing the PyMuPDF pre-filter. The
     # classifier would normally win PyMuPDF on born-digital text-heavy
     # PDFs (Adobe InDesign / Acrobat output / etc.); this flag overrides

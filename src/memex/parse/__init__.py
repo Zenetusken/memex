@@ -9,6 +9,12 @@ network-egress sandbox (see `memex.parse.sandbox`).
 See GUIDELINES.md Part II "The pipeline" and IMPLEMENTATION-PLAN §1.3.
 """
 
+from memex.parse.asr_backend import (
+    ASRSegment,
+    ASRTranscriptionError,
+    ASRUnavailable,
+    transcribe_audio,
+)
 from memex.parse.asr_cache import ASRTranscriptionCache
 from memex.parse.chart_ocr_cache import ChartOCRCache
 from memex.parse.docling_backend import (
@@ -49,7 +55,10 @@ from memex.parse.vlm_cache import VLMTranscriptionCache
 
 __all__ = [
     "OFFICE_SUFFIXES",
+    "ASRSegment",
     "ASRTranscriptionCache",
+    "ASRTranscriptionError",
+    "ASRUnavailable",
     "ChartOCRCache",
     "DoclingConversion",
     "DoclingCrashed",
@@ -75,4 +84,5 @@ __all__ = [
     "pause_vllm_for_gpu",
     "reset_docling_breaker",
     "reset_pymupdf_breaker",
+    "transcribe_audio",
 ]

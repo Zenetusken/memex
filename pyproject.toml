@@ -107,6 +107,14 @@ parse = [
 serve = [
     "vllm>=0.21,<0.22",
 ]
+# Audio ASR ingestion (ADR-0017). faster-whisper runs on CTranslate2 (NOT torch — its own
+# CUDA libs, ABI-independent of the cu129 torch/vLLM wheels) and pulls `av` (PyAV) for
+# decoding + `onnxruntime` for its built-in Silero VAD. The `transformers` ASR backend (an
+# A/B alternative) needs only the [models] extra. The model weights download on first use
+# (provision before air-gapping, like pyannote/OTTER).
+audio = [
+    "faster-whisper>=1.0",
+]
 dev = [
     "ruff>=0.6",
     "pyright>=1.1.380",

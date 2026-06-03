@@ -180,12 +180,21 @@ error-typing rule), surfaced to the user. (Contrast the scan route, whose `disab
 New `parse/asr_backend.py` (the audio sibling of `vlm_backend.py`):
 
 - `async def transcribe_audio(*, source: Path, cache: ASRTranscriptionCache | None = None,
-  refresh: bool = False) -> list[TranscriptSegment]` — the backend-agnostic pipeline of §3, returns
-  time-ordered segments. Per-chunk failures are recorded as a segment with `confidence=0.0` + the
-  error in `rationale` (never a silent drop — the scan-route contract).
+  refresh: bool = False) -> list[ASRSegment]` — the backend-agnostic pipeline of §3. Returns
+  time-ordered **`ASRSegment`**s — a transient text-carrying type (`text` + GLOBAL `start_s`/`end_s`
+  + `language` + `confidence`), distinct from the manifest `TranscriptSegment` (which has no `text`
+  field — the text lives in the `.md`, addressed by char-spans). `_parse_audio` (§3) places each
+  `ASRSegment.text` in the `## [mm:ss]` body and derives the manifest `TranscriptSegment`s' char-spans
+  from it. The per-segment normalization (§"Transcript normalization") is applied here, AFTER the
+  cache (raw stays cached), gated by `ParseSettings.asr_normalize`; an emptied segment is dropped.
+- **v1 implements the `faster_whisper` backend** (the recommended default): `WhisperModel.transcribe`
+  does VAD (`asr_vad_filter`) + long-form chunking + per-segment timestamps internally, so the whole
+  file is one cache unit (`chunk_index=0`); the model load + call is behind a lazy import + a
+  monkeypatchable seam (`_run_faster_whisper`) so the route is unit-testable with **no GPU/deps**.
+  `asr_backend="vllm"`/`"transformers"` are the **deferred A/B alternatives** — they raise
+  `ASRUnavailable("…not implemented in v1; use faster_whisper")` until the A/B selects a backend
+  (the `vllm` one would then reuse the `_serve_vlm_vllm` lifecycle).
 - `ASRUnavailable(MemexError)`, `ASRTranscriptionError(MemexError)` — typed, `context`-carrying.
-- The `vllm` backend's `_serve_asr_vllm` reuses the `_serve_vlm_vllm` lifecycle verbatim (spawn-time
-  gid capture, group-emptiness reap, startup retry, stderr capture — `vlm-vllm-serving.md` §Lifecycle).
 
 `_parse_audio` (in `pipeline.py`, modelled on `_parse_scan_with_vlm`): open the ASR cache,
 transcribe under `pause_vllm_for_gpu()`, assemble the body, `_finalize_body` → `write_document` →
