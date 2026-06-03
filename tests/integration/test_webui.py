@@ -2365,6 +2365,21 @@ async def test_bridge_zero_grounded_shows_note_not_refusal(
     assert 'class="ans-flash-error"' not in text  # NOT a refusal/error
 
 
+@pytest.mark.asyncio
+async def test_bridge_surfaces_evidence_documents_on_fallback(
+    expert_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The user-journey fix: even with NOTHING grounded, the bridge surfaces the vault documents
+    the analysis was reasoned over (the retrieved evidence) as navigable links — so the user can
+    open them and see what the vault actually says. Labelled "reasoned over", NOT a grounding cite."""
+    _install_fake_bridge(monkeypatch, grounded=False)  # zero-grounded fallback
+    text = await _bridge_to_completion(expert_client.app, "An unverifiable question?")
+    assert "Retrieved from your vault" in text  # the evidence section eyebrow
+    assert 'href="/documents/d1"' in text  # the evidence doc is navigable
+    assert "OSPF Guide" in text  # rendered by title
+    assert "not grounding cites" in text  # the honest label (fallback wording)
+
+
 # ── Consented A→B escalation from a Surface-A refusal (§11) ──
 
 

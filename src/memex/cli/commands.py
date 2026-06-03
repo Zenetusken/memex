@@ -221,6 +221,16 @@ def _render_claim_lines(answer: BridgeAnswer, claims: list[CitedClaim]) -> list[
     return lines
 
 
+def _render_bridge_evidence_lines(answer: BridgeAnswer) -> list[str]:
+    """The vault documents the analysis was reasoned over (the retrieved evidence), deduped by
+    title — so the user can open them and see what the vault actually says, even when nothing
+    grounded. NOT a grounding cite (the standing provenance caveat keeps that distinction)."""
+    if not answer.evidence:
+        return []
+    titles = ", ".join(dict.fromkeys(e.title for e in answer.evidence))
+    return ["", f"Retrieved from your vault (open to see what it says): {titles}"]
+
+
 def _render_bridge_answer(answer: BridgeAnswer) -> str:
     """Console rendering of a reason-then-ground result (Surface §11, ADR-0016).
 
@@ -240,6 +250,7 @@ def _render_bridge_answer(answer: BridgeAnswer) -> str:
                 "back from the answer — see the reasoning.)",
             ]
         lines += ["", "REASONING (ungrounded — model reasoning):", "", answer.analysis.strip(), ""]
+        lines.extend(_render_bridge_evidence_lines(answer))
         lines.append(f"⚠ {answer.provenance_note}")
         return "\n".join(lines)
 
@@ -257,6 +268,7 @@ def _render_bridge_answer(answer: BridgeAnswer) -> str:
             "verified against your vault."
         )
     lines.append("")
+    lines.extend(_render_bridge_evidence_lines(answer))
     lines.append(f"⚠ {answer.provenance_note}")
     return "\n".join(lines)
 

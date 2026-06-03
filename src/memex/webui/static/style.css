@@ -1358,6 +1358,11 @@ html { scroll-behavior: smooth; }
 .bridge-reasoning-body p { margin: 0; }
 .bridge-reasoning-body p + p { margin-top: 0.55rem; }
 
+/* Documents the bridge analysis was reasoned over (the retrieved evidence), surfaced as navigable
+   links so the user can open the real vault docs even when nothing grounded — closes the
+   user-journey gap. NOT a grounding cite (the .ans-reasoned-note keeps that distinction). */
+.ans-evidence-docs { margin-top: 1.1rem; }
+
 /* Present-as-answer name-only guard (ADR-0016 audit rec 1): N grounded claims were cited only to a
    list/heading and held back from the VERIFIED answer — a quiet audit-trail note below the claims. */
 .bridge-held-back {

@@ -270,6 +270,7 @@ def test_bridge_escalation_hint_uses_answer_flag() -> None:
 def _bridge_answer(*, presented: bool):
     from memex.agents.answering import CitedClaim
     from memex.agents.bridge import BRIDGE_PROVENANCE_NOTE, BridgeAnswer
+    from memex.agents.expert import ExpertEvidence
     from memex.core.types import Chunk
 
     claim = CitedClaim(claim="OSPF is link-state.", source_chunk_id="d#a", confidence="high")
@@ -279,6 +280,8 @@ def _bridge_answer(*, presented: bool):
         grounded_claims=[claim],
         grounded_sources=[Chunk(chunk_id="d#a", document_id="d", document_title="OSPF Guide",
                                 text="…", heading_path=["Intro"])],
+        evidence=[ExpertEvidence(chunk_id="d#a", document_id="d", title="OSPF Guide",
+                                 section="Intro", snippet="…")],
         provenance_note=BRIDGE_PROVENANCE_NOTE,
         n_extracted=1,
         n_grounded=1,
@@ -287,6 +290,16 @@ def _bridge_answer(*, presented: bool):
         answer_headline=("OSPF is link-state." if presented else ""),
         presented_claims=([claim] if presented else []),
     )
+
+
+def test_cli_render_bridge_surfaces_evidence_consulted() -> None:
+    """Both bridge renders name the vault documents reasoned over (parity with `expert`), so the
+    user can open them and see what the vault actually says even when nothing grounded."""
+    from memex.cli.commands import _render_bridge_answer
+
+    for presented in (True, False):
+        out = _render_bridge_answer(_bridge_answer(presented=presented))
+        assert "Retrieved from your vault (open to see what it says): OSPF Guide" in out
 
 
 def test_cli_render_bridge_presented_leads_with_answer() -> None:

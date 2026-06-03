@@ -86,7 +86,22 @@
   <p class="expert-provenance" role="note">⚠ {{ answer.provenance_note }}</p>
   {% endif %}
 
-  {# --- shared tail: scope note + audit footer (both surfaces) --- #}
+  {# --- shared tail: documents-reasoned-over + scope note + audit footer (both surfaces) --- #}
+  {# The vault documents the analysis was reasoned over (the retrieved evidence) — navigable, so
+     the user can open them and see what the vault actually says, ESPECIALLY when nothing grounded.
+     NOT a grounding cite (the analysis is model reasoning); the note keeps that distinction. #}
+  {% if evidence_docs %}
+  <section class="ans-evidence-docs">
+    <p class="ans-eyebrow">Retrieved from your vault <span class="count">· {{ evidence_docs|length }}</span></p>
+    <p class="ans-reasoned-note">The documents the model was shown as context for this question — open them to see what your vault actually says. {% if answer.presented %}They are the broader evidence set; the claims above are the separately-verified subset.{% else %}These are not grounding cites; the analysis above is unverified reasoning (it may rely on the model's own knowledge rather than these documents).{% endif %}</p>
+    <ul class="ans-sources">
+      {% for d in evidence_docs %}
+      <li><a class="claim-source-link" href="{{ d.href }}" title="{{ d.doc_id }}"{% if d.page %} data-page="{{ d.page }}"{% endif %}>{{ d.title }}{% if d.section %} › {{ d.section }}{% endif %}{% if d.page %} · p. {{ d.page }}{% endif %}</a></li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
   {% if scope_docs %}
   <p class="ans-scope" role="note">
     <span class="ans-scope-label">{% if scope_source == "selected" %}Scoped to your selected document{{ "s" if scope_docs|length > 1 else "" }}:{% else %}Scoped to the document{{ "s" if scope_docs|length > 1 else "" }} you named:{% endif %}</span>

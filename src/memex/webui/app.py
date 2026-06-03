@@ -1411,6 +1411,26 @@ def create_app() -> FastAPI:
             }
             for c in answer.grounded_sources
         }
+        # The DOCUMENTS the analysis was reasoned over (the reranked evidence) — deduped to one
+        # row per document, navigable. This closes the user-journey gap: when nothing grounded
+        # (or to show the fuller retrieval scope), the user can still open the vault documents the
+        # analysis drew on and see what they actually say. It is NOT a grounding cite — the
+        # template labels it as "reasoned over", never "verified" (no I/O — same data the model read).
+        evidence_docs: list[dict[str, object]] = []
+        seen_doc_ids: set[str] = set()
+        for e in answer.evidence:
+            if e.document_id in seen_doc_ids:
+                continue
+            seen_doc_ids.add(e.document_id)
+            evidence_docs.append(
+                {
+                    "doc_id": e.document_id,
+                    "title": e.title or e.document_id,
+                    "section": e.section,
+                    "page": e.page,
+                    "href": f"/documents/{e.document_id}" + (f"?page={e.page}" if e.page else ""),
+                }
+            )
         # Resolve the scope this analysis ran over → titles, for the "Scoped to …" note (parity
         # with /ask). Empty (whole-vault) → [] → the note is omitted. Mirrors `_answer_context`.
         scope_docs = [
@@ -1423,6 +1443,7 @@ def create_app() -> FastAPI:
             {
                 "answer": answer,
                 "sources": sources,
+                "evidence_docs": evidence_docs,
                 "error": None,
                 "scope_docs": scope_docs,
                 "scope_source": entry.scope_source,
