@@ -131,13 +131,25 @@ French access-control slide. Probes settled the root cause — it is **NOT cross
   "no ≥8-word line" rule (`_NAME_ONLY_MIN_SENTENCE_WORDS=8`), so the chunk reads as not-name-only
   and neither the bridge guard nor the `/ask` backstop fires on it.
 
-**Implications for the follow-up (its own session, needs an /ask counterfactual eval re-baseline):**
-the deterministic name-only backstop is the RIGHT pattern (batch-IMMUNE) but its trigger has the
-8-word gap and its marker set is fail-open. Levers: (1) consolidate the backstop into `ground_claims`
-(batch-immune for the bridge/summarizer); (2) harden `is_name_only_chunk` to treat "N. Title"
-numbered lines as inert headings; (3) consider single-claim (isolated) re-verification on the bridge
-present path to defeat batch leniency directly. Full record: `next_priorities.md` +
-the `ui-audit-xling-batch-leniency-2026-06-03` memory.
+**Lever 3 — ISOLATED RE-VERIFICATION — SHIPPED 2026-06-03 (`b3f8033`'s successor).** The bridge now
+verifies EACH claim ALONE (`agents/grounding.py::ground_claims_isolated`: one `ground_claims` call per
+claim, concurrent via `asyncio.gather` + `Semaphore(4)`, reusing the UNCHANGED `verify_grounding/v2`
+gate at N=1 — no new gate, no prompt change). The SAME full reranked chunk set is passed to every call
+(NOT cited-chunk-only — the evidence variable is held constant so only batch→single changes, and a
+claim whose support straddles a chunk boundary still sees its sibling). Per-claim fail-open (one failed
+verify drops only that claim). **Live A/B:** the RBAC present-as-answer escalation went 8/8-grounded-and-
+PRESENTED (batched) → **5/8, NOT presented** (isolated → falls back to the labelled analysis); the
+genuinely-supported Zero-Trust question held **8/8 presented** (no false-negative). BRIDGE-ONLY (the
+summarizer + `/ask` keep batched `ground_claims`; `eval-summary` byte-stable; HARD gate untouched).
+Default-on kill-switch `MEMEX_AGENTS__BRIDGE_ISOLATED_GROUNDING_ENABLED=false`. Pinned by the decisive
+batch-only-drop + kill-switch + sibling-context tests in `test_bridge_with_fakes.py` + `test_grounding_isolated.py`.
+
+**Still-open complementary levers (their own session):** (1) consolidate the deterministic name-only
+backstop into `ground_claims` (catches the name-list-cited residual the LLM still grounds at N=1 — the
+RBAC isolated run kept 5 such claims); (2) harden `is_name_only_chunk` to treat "N. Title" numbered
+lines as inert headings (the 8-word gap). Both need an /ask counterfactual eval re-baseline. The name-only
+PRESENTATION guard is kept as deterministic defense-in-depth (isolation makes it often a no-op, never
+conflicting). Full record: `next_priorities.md` + the `ui-audit-xling-batch-leniency-2026-06-03` memory.
 
 A **separate** audit follow-up surfaced alongside this one — the `extract_claims@v1`
 extractor *under-covering* the discrete groundable sub-claims (it pulls the

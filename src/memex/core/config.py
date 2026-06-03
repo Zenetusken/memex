@@ -674,6 +674,14 @@ class AgentsSettings(BaseModel):
     # ONLY — never alters `ground_claims`, the standalone grounded subset, the footer counts, or
     # the `/ask` path. `MEMEX_AGENTS__BRIDGE_NAME_ONLY_GUARD_ENABLED=false` reverts (audit lever).
     bridge_name_only_guard_enabled: bool = True
+    # The reason-then-ground bridge verifies each claim in ISOLATION (default ON) — the defeat for
+    # the `verify_grounding/v2` BATCH-LENIENCY effect (the gate grounds a plausible behavioral claim
+    # more readily inside a coherent BATCH than alone; measured 4/5 batched vs 0/5 isolated, same
+    # claims/chunk). `agents/grounding.py::ground_claims_isolated` reuses the UNCHANGED gate at N=1.
+    # BRIDGE-ONLY — the summarizer + the `/ask` verify node keep the batched `ground_claims` (so
+    # `eval-summary` stays byte-stable and the HARD gate is untouched). `MEMEX_AGENTS__BRIDGE_ISOLATED_GROUNDING_ENABLED=false`
+    # reverts to the batched gate (the instant revert if isolation over-drops on the fenced surface).
+    bridge_isolated_grounding_enabled: bool = True
 
 
 class MemexSettings(BaseSettings):

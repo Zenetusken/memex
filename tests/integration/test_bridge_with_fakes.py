@@ -8,12 +8,17 @@ chrome (never a refusal); an extraction OR grounding failure fails open to the a
 The three faked seams: `bridge.reason_over_evidence` (Stage 1 — bypasses retrieval/rerank/reason),
 `bridge.complete_structured` (Stage 1.5 — claim extraction), `grounding.complete_structured`
 (Stage 2 — the per-claim verify). `repair_claim_chunk_ids`, the deterministic id filter, and
-`ground_claims`' keep-rule all run for real.
+`ground_claims`/`ground_claims_isolated`' keep-rule all run for real.
+
+The verify fake (`_patch_ground`) is claim-IDENTITY-aware (it parses the rendered prompt's Draft
+lines), so it is correct under BOTH the batched gate AND the default ISOLATED re-verification (the
+batch-leniency fix, 2026-06-03): each isolated call sees ONE claim and the fake returns `[0]`/`[]`.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import re
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -69,22 +74,40 @@ def _patch_extract(
     monkeypatch.setattr(bridge, "complete_structured", _extract)
 
 
+# Matches a rendered `verify_grounding/v2` Draft line `- [N] claim text` (the claim section).
+_CLAIM_LINE = re.compile(r"^- \[(\d+)\] (.+)$", re.MULTILINE)
+
+
 def _patch_ground(
     monkeypatch: pytest.MonkeyPatch,
     *,
-    grounded: list[int],
-    ungrounded: list[int] | None = None,
+    grounded_keys: set[str] | None = None,
+    grounds: Callable[[str, list[str], str], bool] | None = None,
     fail: bool = False,
+    fail_keys: set[str] | None = None,
     responsive: bool = True,
     relevance_reason: str = "addresses the question",
     relevance_fail: bool = False,
 ) -> list[str]:
     """Fake `grounding.complete_structured` — serves BOTH the per-claim verify (VerificationResult)
     AND the present-as-answer responsiveness gate (RelevanceAssessment), discriminated by schema.
-    Returns a list that records each schema seen, so a test can assert the gate did/didn't fire."""
+
+    The VerificationResult branch is **claim-IDENTITY-aware**: it parses the rendered prompt's Draft
+    `- [i] text` lines and decides each claim INDEPENDENTLY, so it is correct under BOTH the batched
+    gate (N claims → several indices) AND isolated re-verification (1 claim per call → `[0]`/`[]`).
+    Grounding is decided per claim by `grounded_keys` (a set of claim texts that ground) or the more
+    flexible `grounds(text, present, prompt)` predicate (e.g. "ground iff a sibling is present", to
+    SIMULATE the batch-leniency). `fail_keys` raises a verify CALL iff any present claim is a
+    fail-key (isolated → only that claim's call fails; batched → the whole call fails). Returns the
+    list of schemas seen, so a test can assert the responsiveness gate did/didn't fire."""
     seen: list[str] = []
 
-    async def _verify(*, schema: type, **_kw: Any) -> tuple[Any, int]:
+    def _decide(text: str, present: list[str], prompt: str) -> bool:
+        if grounds is not None:
+            return grounds(text, present, prompt)
+        return text in (grounded_keys or set())
+
+    async def _verify(*, schema: type, **_kw: object) -> tuple[Any, int]:
         if schema is RelevanceAssessment:
             seen.append("RelevanceAssessment")
             if relevance_fail:
@@ -93,7 +116,15 @@ def _patch_ground(
         seen.append("VerificationResult")
         if fail:
             raise ModelCallError("verify boom")
-        return VerificationResult(grounded=grounded, ungrounded=ungrounded or []), 8
+        prompt_arg = _kw.get("prompt", "")
+        prompt = prompt_arg if isinstance(prompt_arg, str) else str(prompt_arg)
+        pairs = [(int(i), t.strip()) for i, t in _CLAIM_LINE.findall(prompt)]
+        present = [t for _i, t in pairs]
+        if fail_keys and any(t in fail_keys for t in present):
+            raise ModelCallError("verify boom (per-claim)")
+        grounded = [i for i, t in pairs if _decide(t, present, prompt)]
+        ungrounded = [i for i, t in pairs if not _decide(t, present, prompt)]
+        return VerificationResult(grounded=grounded, ungrounded=ungrounded), 8
 
     monkeypatch.setattr(grounding, "complete_structured", _verify)
     return seen
@@ -109,7 +140,7 @@ async def test_only_grounded_claims_survive(
         monkeypatch,
         [_claim("claim A", "d#a"), _claim("claim B", "d#b"), _claim("claim C", "d#c")],
     )
-    _patch_ground(monkeypatch, grounded=[0, 2], ungrounded=[1])
+    _patch_ground(monkeypatch, grounded_keys={"claim A", "claim C"})
 
     ans = await reason_then_ground("How would you harden the DMZ?")
 
@@ -129,7 +160,7 @@ async def test_ungrounded_claim_is_dropped(
     reranked = [_chunk("d#a")]
     _patch_stage1(monkeypatch, "Analysis.", reranked)
     _patch_extract(monkeypatch, [_claim("unsupported claim", "d#a")])
-    _patch_ground(monkeypatch, grounded=[], ungrounded=[0])
+    _patch_ground(monkeypatch, grounded_keys=set())
 
     ans = await reason_then_ground("Q?")
 
@@ -145,7 +176,7 @@ async def test_unresolvable_chunk_id_dropped_before_grounding(
     settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The deterministic faithfulness filter drops a claim whose cited id can't resolve to a
-    reranked chunk BEFORE grounding. Proven by making the verifier WILLING to ground both indices:
+    reranked chunk BEFORE grounding. Proven by making the verifier WILLING to ground both claims:
     if the bad claim reached grounding, n_grounded would be 2; the filter makes it 1."""
     reranked = [_chunk("d#a")]
     _patch_stage1(monkeypatch, "Analysis.", reranked)
@@ -153,7 +184,7 @@ async def test_unresolvable_chunk_id_dropped_before_grounding(
         monkeypatch,
         [_claim("good claim", "d#a"), _claim("fabricated claim", "ghostdoc#zzzzzzz")],
     )
-    _patch_ground(monkeypatch, grounded=[0, 1])  # verifier would ground BOTH if asked
+    _patch_ground(monkeypatch, grounded_keys={"good claim", "fabricated claim"})  # both willing
 
     ans = await reason_then_ground("Q?")
 
@@ -168,7 +199,7 @@ async def test_zero_grounded_returns_analysis_not_refusal(
     reranked = [_chunk("d#a"), _chunk("d#b")]
     _patch_stage1(monkeypatch, "A useful but unverifiable analysis.", reranked)
     _patch_extract(monkeypatch, [_claim("claim A", "d#a"), _claim("claim B", "d#b")])
-    _patch_ground(monkeypatch, grounded=[])
+    _patch_ground(monkeypatch, grounded_keys=set())
 
     ans = await reason_then_ground("Q?")
 
@@ -183,10 +214,12 @@ async def test_zero_grounded_returns_analysis_not_refusal(
 async def test_grounding_failure_fails_open(
     settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A single claim whose verify call raises drops to zero grounded — never ship ungrounded.
+    (Holds in both modes: isolated runs one call which raises; batched raises the only call.)"""
     reranked = [_chunk("d#a")]
     _patch_stage1(monkeypatch, "Analysis.", reranked)
     _patch_extract(monkeypatch, [_claim("claim A", "d#a")])
-    _patch_ground(monkeypatch, grounded=[0], fail=True)  # the verify call raises
+    _patch_ground(monkeypatch, grounded_keys={"claim A"}, fail=True)  # the verify call raises
 
     ans = await reason_then_ground("Q?")
 
@@ -196,19 +229,112 @@ async def test_grounding_failure_fails_open(
 
 
 @pytest.mark.asyncio
+async def test_isolated_per_claim_fail_open(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Isolated mode's deliberate contract: one claim's verify raises → that claim drops, its
+    SIBLINGS still ground (graceful per-claim degradation — the bridge has no refuse state)."""
+    reranked = [_chunk("d#a"), _chunk("d#b")]
+    _patch_stage1(monkeypatch, "Analysis.", reranked)
+    _patch_extract(monkeypatch, [_claim("claim A", "d#a"), _claim("claim B", "d#b")])
+    _patch_ground(monkeypatch, grounded_keys={"claim A", "claim B"}, fail_keys={"claim A"})
+
+    ans = await reason_then_ground("Q?")
+
+    assert ans.n_grounded == 1  # A's isolated call raised → A dropped; B still grounds
+    assert [c.claim for c in ans.grounded_claims] == ["claim B"]
+
+
+@pytest.mark.asyncio
+async def test_batched_fail_open_drops_all(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Kill-switch OFF (batched): a verify failure drops ALL claims (the original all-or-nothing
+    fail-open) — the contrast to isolated per-claim fail-open above."""
+    settings.agents.bridge_isolated_grounding_enabled = False
+    reranked = [_chunk("d#a"), _chunk("d#b")]
+    _patch_stage1(monkeypatch, "Analysis.", reranked)
+    _patch_extract(monkeypatch, [_claim("claim A", "d#a"), _claim("claim B", "d#b")])
+    _patch_ground(monkeypatch, grounded_keys={"claim A", "claim B"}, fail_keys={"claim A"})
+
+    ans = await reason_then_ground("Q?")
+
+    assert ans.n_grounded == 0  # one fail-key claim fails the whole batched call → both dropped
+
+
+@pytest.mark.asyncio
 async def test_extraction_failure_fails_open(
     settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     reranked = [_chunk("d#a")]
     _patch_stage1(monkeypatch, "Analysis.", reranked)
     _patch_extract(monkeypatch, [], fail=True)  # extraction raises
-    _patch_ground(monkeypatch, grounded=[0])
+    _patch_ground(monkeypatch, grounded_keys={"claim A"})
 
     ans = await reason_then_ground("Q?")
 
     assert ans.n_extracted == 0
     assert ans.n_grounded == 0
     assert ans.analysis == "Analysis."
+
+
+# --- Isolated re-verification (the batch-leniency fix, 2026-06-03): each bridge claim is verified
+# ALONE so the `verify_grounding/v2` gate can't rubber-stamp a plausible claim on batch coherence. ---
+
+
+@pytest.mark.asyncio
+async def test_isolated_grounding_drops_batch_only_claim(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The decisive proof: a claim that grounds ONLY when batched with a sibling (the fake grounds
+    a claim iff >1 claim is present in the prompt — the batch-leniency simulacrum) is DROPPED under
+    default-on isolated grounding (each claim is verified alone → present == [self])."""
+    reranked = [_chunk("d#a"), _chunk("d#b")]
+    _patch_stage1(monkeypatch, "Analysis.", reranked)
+    _patch_extract(monkeypatch, [_claim("batch-only claim", "d#a"), _claim("sibling", "d#b")])
+    _patch_ground(monkeypatch, grounds=lambda _text, present, _prompt: len(present) > 1)
+
+    ans = await reason_then_ground("Q?")
+
+    assert ans.n_grounded == 0  # isolated: each claim alone → the batch-only survivor is dropped
+    assert ans.grounded_claims == []
+
+
+@pytest.mark.asyncio
+async def test_isolated_grounding_kill_switch_reverts_to_batch(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`bridge_isolated_grounding_enabled=False` reverts to the batched gate — the same batch-only
+    claim is now KEPT (the prior, lenient behavior). The kill-switch is the instant revert."""
+    settings.agents.bridge_isolated_grounding_enabled = False
+    reranked = [_chunk("d#a"), _chunk("d#b")]
+    _patch_stage1(monkeypatch, "Analysis.", reranked)
+    _patch_extract(monkeypatch, [_claim("batch-only claim", "d#a"), _claim("sibling", "d#b")])
+    _patch_ground(monkeypatch, grounds=lambda _text, present, _prompt: len(present) > 1)
+
+    ans = await reason_then_ground("Q?")
+
+    assert ans.n_grounded == 2  # batched: both present together → both ground (the old leniency)
+    assert {c.claim for c in ans.grounded_claims} == {"batch-only claim", "sibling"}
+
+
+@pytest.mark.asyncio
+async def test_isolated_passes_all_chunks_not_cited_only(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Isolated grounding passes ALL reranked chunks to each per-claim verify (NOT cited-chunk-only),
+    so a claim whose support is in a SIBLING chunk still grounds. The fake grounds a claim iff the
+    sibling chunk id `d#b` appears in the rendered prompt — proving all chunks were passed (guards
+    against a future 'optimize to cited-chunk-only' regression that would false-negative)."""
+    reranked = [_chunk("d#a", text="fragment"), _chunk("d#b", text="the supporting sentence")]
+    _patch_stage1(monkeypatch, "Analysis.", reranked)
+    _patch_extract(monkeypatch, [_claim("needs sibling", "d#a")])
+    _patch_ground(monkeypatch, grounds=lambda _text, _present, prompt: "d#b" in prompt)
+
+    ans = await reason_then_ground("Q?")
+
+    assert ans.n_grounded == 1  # the sibling chunk was in the isolated prompt → grounded
+    assert [c.claim for c in ans.grounded_claims] == ["needs sibling"]
 
 
 # --- Present-as-answer (ADR-0016): the consented escalation presents the grounded subset AS an
@@ -223,7 +349,7 @@ async def test_present_as_answer_responsive_is_presented(
     reranked = [_chunk("d#a"), _chunk("d#b")]
     _patch_stage1(monkeypatch, "Deep reasoning prose that is ungrounded.", reranked)
     _patch_extract(monkeypatch, [_claim("claim A", "d#a"), _claim("claim B", "d#b")])
-    seen = _patch_ground(monkeypatch, grounded=[0, 1], responsive=True)
+    seen = _patch_ground(monkeypatch, grounded_keys={"claim A", "claim B"}, responsive=True)
 
     ans = await reason_then_ground("Q?", present_as_answer=True)
 
@@ -243,7 +369,10 @@ async def test_present_as_answer_non_responsive_falls_back(
     _patch_stage1(monkeypatch, "Analysis.", reranked)
     _patch_extract(monkeypatch, [_claim("claim A", "d#a")])
     _patch_ground(
-        monkeypatch, grounded=[0], responsive=False, relevance_reason="answers a related topic"
+        monkeypatch,
+        grounded_keys={"claim A"},
+        responsive=False,
+        relevance_reason="answers a related topic",
     )
 
     ans = await reason_then_ground("Q?", present_as_answer=True)
@@ -265,7 +394,7 @@ async def test_present_as_answer_zero_grounded_skips_gate(
     reranked = [_chunk("d#a")]
     _patch_stage1(monkeypatch, "Analysis.", reranked)
     _patch_extract(monkeypatch, [_claim("claim A", "d#a")])
-    seen = _patch_ground(monkeypatch, grounded=[])
+    seen = _patch_ground(monkeypatch, grounded_keys=set())
 
     ans = await reason_then_ground("Q?", present_as_answer=True)
 
@@ -284,7 +413,7 @@ async def test_present_as_answer_relevance_failure_fails_closed(
     reranked = [_chunk("d#a")]
     _patch_stage1(monkeypatch, "Analysis.", reranked)
     _patch_extract(monkeypatch, [_claim("claim A", "d#a")])
-    _patch_ground(monkeypatch, grounded=[0], relevance_fail=True)
+    _patch_ground(monkeypatch, grounded_keys={"claim A"}, relevance_fail=True)
 
     ans = await reason_then_ground("Q?", present_as_answer=True)
 
@@ -303,7 +432,7 @@ async def test_standalone_default_never_runs_gate(
     reranked = [_chunk("d#a")]
     _patch_stage1(monkeypatch, "Analysis.", reranked)
     _patch_extract(monkeypatch, [_claim("claim A", "d#a")])
-    seen = _patch_ground(monkeypatch, grounded=[0])
+    seen = _patch_ground(monkeypatch, grounded_keys={"claim A"})
 
     ans = await reason_then_ground("Q?")
 
@@ -316,7 +445,9 @@ async def test_standalone_default_never_runs_gate(
 
 # --- Name-only presentation guard (ADR-0016 audit rec 1): hold back a presented claim whose cited
 # chunk merely NAMES the entity (a bare list/heading). PRESENTATION-ONLY — `grounded_claims` stays
-# the full gate output; only `presented_claims` is filtered. ---
+# the full gate output; only `presented_claims` is filtered. (Deterministic defense-in-depth: with
+# isolated grounding default-on a name-only behavioral claim usually drops at grounding already, but
+# the guard remains as the deterministic backstop for the residual — same direction, never opposing.) ---
 
 _NAME_ONLY_TEXT = (
     "### Contrôle d'accès\n- Role-Based Access Control (RBAC)\n- Attribute-Based Access Control (ABAC)"
@@ -332,7 +463,7 @@ async def test_name_only_claim_held_back_from_presented(
     reranked = [_chunk("d#a", text=_NAME_ONLY_TEXT), _chunk("d#b", text="prose " * 12)]
     _patch_stage1(monkeypatch, "Analysis.", reranked)
     _patch_extract(monkeypatch, [_claim("name-only claim", "d#a"), _claim("prose claim", "d#b")])
-    _patch_ground(monkeypatch, grounded=[0, 1], responsive=True)
+    _patch_ground(monkeypatch, grounded_keys={"name-only claim", "prose claim"}, responsive=True)
 
     ans = await reason_then_ground("Q?", present_as_answer=True)
 
@@ -352,7 +483,7 @@ async def test_all_name_only_falls_back_and_skips_gate(
     reranked = [_chunk("d#a", text=_NAME_ONLY_TEXT)]
     _patch_stage1(monkeypatch, "Analysis.", reranked)
     _patch_extract(monkeypatch, [_claim("name-only claim", "d#a")])
-    seen = _patch_ground(monkeypatch, grounded=[0], responsive=True)
+    seen = _patch_ground(monkeypatch, grounded_keys={"name-only claim"}, responsive=True)
 
     ans = await reason_then_ground("Q?", present_as_answer=True)
 
@@ -373,7 +504,7 @@ async def test_name_only_guard_kill_switch_off(
     reranked = [_chunk("d#a", text=_NAME_ONLY_TEXT)]
     _patch_stage1(monkeypatch, "Analysis.", reranked)
     _patch_extract(monkeypatch, [_claim("name-only claim", "d#a")])
-    _patch_ground(monkeypatch, grounded=[0], responsive=True)
+    _patch_ground(monkeypatch, grounded_keys={"name-only claim"}, responsive=True)
 
     ans = await reason_then_ground("Q?", present_as_answer=True)
 
@@ -404,7 +535,7 @@ async def test_no_evidence_returns_analysis_only(
 ) -> None:
     _patch_stage1(monkeypatch, "Reasoned from expertise; vault was silent.", [])
     # extraction is SKIPPED when there are no reranked chunks; ground fake should never fire.
-    _patch_ground(monkeypatch, grounded=[])
+    _patch_ground(monkeypatch, grounded_keys=set())
 
     ans = await reason_then_ground("Q?")
 

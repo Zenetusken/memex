@@ -41,7 +41,7 @@ from memex.agents.expert import (
     reason_over_evidence,
     to_evidence,
 )
-from memex.agents.grounding import assess_responsiveness, ground_claims
+from memex.agents.grounding import assess_responsiveness, ground_claims, ground_claims_isolated
 from memex.core.config import get_settings
 from memex.core.errors import ModelCallError
 from memex.core.text import is_name_only_chunk
@@ -186,7 +186,13 @@ async def reason_then_ground(
         reranked_ids = {c.chunk_id for c in reranked}
         repaired, _stats = repair_claim_chunk_ids(candidates, reranked)
         groundable = [c for c in repaired if c.source_chunk_id in reranked_ids]
-        grounded, t_ground = await ground_claims(
+        # ISOLATED re-verification (default ON) defeats the `verify_grounding/v2` BATCH-LENIENCY
+        # effect — the gate grounds a plausible behavioral claim more readily inside a coherent
+        # BATCH than alone (measured 4/5 batched vs 0/5 isolated). Verify each claim at N=1; the
+        # kill-switch reverts to the batched gate. Bridge-only (summarizer + /ask keep batched).
+        isolated = settings.agents.bridge_isolated_grounding_enabled
+        ground = ground_claims_isolated if isolated else ground_claims
+        grounded, t_ground = await ground(
             analysis[:300], groundable, reranked, max_tokens=_GROUND_MAX_TOKENS
         )
         grounded_ids = {gc.source_chunk_id for gc in grounded}
@@ -235,6 +241,7 @@ async def reason_then_ground(
             extracted=len(candidates),
             groundable=len(groundable),
             grounded=len(grounded),
+            isolated_grounding=isolated,
             present_as_answer=present_as_answer,
             presented=len(presented_claims),
             responsive=responsive,

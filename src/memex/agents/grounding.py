@@ -27,6 +27,7 @@ to avoid bare computed figures).
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Annotated
 
 import structlog
@@ -95,6 +96,49 @@ async def ground_claims(
     grounded_idx = [i for i in bounded.grounded if 0 <= i < n]
     ungrounded_idx = {i for i in bounded.ungrounded if 0 <= i < n}
     kept = [claims[i] for i in grounded_idx if i not in ungrounded_idx]
+    return kept, tokens
+
+
+# Cap on concurrent isolated verify calls — matches `enrich/pipeline.py`'s `_MAX_CONCURRENT`
+# precedent (concurrent `complete_structured` against the single shared orchestrator). The bridge's
+# `groundable` is <= 8 (DraftAnswer.claims max_length), so this rarely binds; it is a polite ceiling.
+_ISOLATED_GROUND_CONCURRENCY = 4
+
+
+async def ground_claims_isolated(
+    summary: str,
+    claims: list[CitedClaim],
+    chunks: list[Chunk],
+    *,
+    max_tokens: int,
+) -> tuple[list[CitedClaim], int]:
+    """`ground_claims`, but each claim verified ALONE (one verify call per claim, run concurrently)
+    — the BRIDGE's defeat for the `verify_grounding/v2` BATCH-LENIENCY effect: the gate grounds a
+    plausible behavioral claim more readily inside a coherent BATCH than in isolation (measured live
+    4/5 batched vs 0/5 isolated, same claims/chunk; genuine support grounds 3/3 either way). Reuses
+    the UNCHANGED gate via `ground_claims` at N=1 — same prompt, same conservative keep rule, no new
+    grounding path.
+
+    The SAME full `chunks` set is passed to EVERY call (NOT cited-chunk-only): the evidence variable
+    is held constant so only batch→single changes, and a claim whose support straddles a chunk
+    boundary still sees its sibling chunk (no false-negative class introduced).
+
+    Per-claim FAIL-OPEN: `ground_claims` returns `([], 0)` on a `ModelCallError`, so one failed claim
+    drops ONLY itself (siblings still ground) — graceful degradation, valid because the bridge has no
+    refuse state (vs the batched all-or-nothing fail-open). Survivors are returned in INPUT order and
+    tokens are summed. Bridge-only (the summarizer + the `/ask` verify node keep batched grounding).
+    """
+    if not claims:
+        return [], 0
+    sem = asyncio.Semaphore(_ISOLATED_GROUND_CONCURRENCY)
+
+    async def _one(claim: CitedClaim) -> tuple[list[CitedClaim], int]:
+        async with sem:
+            return await ground_claims(summary, [claim], chunks, max_tokens=max_tokens)
+
+    results = await asyncio.gather(*(_one(c) for c in claims))
+    kept = [c for c, (surv, _t) in zip(claims, results, strict=True) if surv]
+    tokens = sum(t for _surv, t in results)
     return kept, tokens
 
 
