@@ -5,6 +5,13 @@ extension. Office documents are inspected for macros and rejected
 unless `IngestSettings.allow_macros=True`. PDFs are verified for the
 `%PDF` header. Markdown and plain text are accepted but length-checked.
 
+Audio sources (MP3/WAV/M4A/FLAC/Ogg/AAC, ADR-0017) are accepted by
+magic. The ISO-BMFF `ftyp` box is SHARED by M4A audio, MP4/MOV video,
+and HEIC/AVIF images, so the `ftyp` branch additionally requires an
+AUDIO brand (M4A/M4B/M4P) — video and image containers stay rejected
+(audio-only ingest; the "class video" case is a Phase-2 audio-extraction
+extension).
+
 Validation is intentionally tight in the formats it recognises; new
 formats arrive with an ADR explaining what they look like and what
 risks they bring.
@@ -56,6 +63,8 @@ _MAGIC: list[tuple[bytes, DetectedKind, str]] = [
     (b"ID3", "audio", "audio/mpeg"),  # MP3 with an ID3v2 tag (the common case)
     (b"\xff\xfb", "audio", "audio/mpeg"),  # MP3 frame sync (MPEG-1 Layer III, untagged)
     (b"\xff\xf3", "audio", "audio/mpeg"),  # MP3 frame sync (MPEG-2 Layer III)
+    (b"\xff\xf1", "audio", "audio/aac"),  # AAC ADTS (MPEG-4, no CRC)
+    (b"\xff\xf9", "audio", "audio/aac"),  # AAC ADTS (MPEG-4, CRC)
     (b"fLaC", "audio", "audio/flac"),
     (b"OggS", "audio", "audio/ogg"),
 ]
@@ -106,15 +115,34 @@ def _refine_office(path: Path) -> tuple[DetectedKind, str, bool]:
     return "unknown", "application/zip", has_macros
 
 
+# ISO-BMFF (`ftyp`) AUDIO brands — M4A / M4B (audiobook) / M4P (protected). The SAME box
+# wraps MP4/MOV video and HEIC/AVIF images, so the ftyp branch accepts ONLY these brands;
+# video + image containers stay rejected (audio-only ingest — the "class video" case is a
+# Phase-2 audio-extraction extension, ADR-0017).
+_M4A_AUDIO_BRANDS: frozenset[bytes] = frozenset({b"M4A ", b"M4B ", b"M4P "})
+
+
+def _is_m4a_audio(head: bytes) -> bool:
+    """True iff an ISO-BMFF `ftyp` head declares an AUDIO brand. The box is
+    `size(4) 'ftyp'(4) major_brand(4) minor_version(4) compatible_brands(4·N)`, so an audio
+    brand can be the MAJOR brand (offset 8) OR any COMPATIBLE brand (offset 16, 20, …). A
+    short/truncated head simply yields no match (safe slice semantics)."""
+    if head[8:12] in _M4A_AUDIO_BRANDS:
+        return True
+    return any(head[off : off + 4] in _M4A_AUDIO_BRANDS for off in range(16, min(len(head), 40), 4))
+
+
 def _detect_audio_container(head: bytes) -> tuple[DetectedKind, str, bool] | None:
     """Audio containers whose magic is NOT at byte offset 0 — so they can't be plain
-    `_MAGIC` prefix rows. WAV is `RIFF`@0 + `WAVE`@8; the ISO-BMFF `ftyp` box (M4A / MP4
-    audio) is `ftyp`@4 (after the 4-byte box-size word). Mirrors the `docx → _refine_office`
-    special-case branch. Offset-0 audio magics (ID3 / MPEG sync / fLaC / OggS) are handled by
-    `_MAGIC` rows instead. Returns `(kind, mime, has_macros=False)`, or None if not audio."""
+    `_MAGIC` prefix rows. WAV is `RIFF`@0 + `WAVE`@8; the ISO-BMFF `ftyp` box is `ftyp`@4
+    (after the 4-byte box-size word) but is SHARED by M4A audio, MP4/MOV video, and HEIC/AVIF
+    images — so it is accepted ONLY when an audio brand is present (`_is_m4a_audio`), keeping
+    validation tight (video/image stay rejected). Mirrors the `docx → _refine_office`
+    special-case branch; offset-0 audio magics (ID3 / MPEG+AAC sync / fLaC / OggS) are
+    `_MAGIC` rows. Returns `(kind, mime, has_macros=False)`, or None if not audio."""
     if head[:4] == b"RIFF" and head[8:12] == b"WAVE":
         return "audio", "audio/wav", False
-    if head[4:8] == b"ftyp":
+    if head[4:8] == b"ftyp" and _is_m4a_audio(head):
         return "audio", "audio/mp4", False
     return None
 

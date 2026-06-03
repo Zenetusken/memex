@@ -85,3 +85,51 @@ def test_plain_text_detection_not_regressed(tmp_path: Path) -> None:
     r = _validate(_write(tmp_path, "notes.txt", b"just some plain text, no magic here\n"))
     assert r.accepted
     assert r.kind == "text"
+
+
+def test_aac_adts_accepted(tmp_path: Path) -> None:
+    r = _validate(_write(tmp_path, "clip.aac", b"\xff\xf1\x50\x80" + b"\x00" * 200))
+    assert r.accepted
+    assert r.kind == "audio"
+    assert r.mime == "audio/aac"
+
+
+def test_m4a_via_compatible_brand_accepted(tmp_path: Path) -> None:
+    # Major brand mp42 (generic), but an M4A audio brand in the compatible list (offset 16).
+    data = (
+        struct.pack(">I", 32)
+        + b"ftyp"
+        + b"mp42"
+        + b"\x00\x00\x00\x00"
+        + b"M4A "
+        + b"isom"
+        + b"\x00" * 200
+    )
+    r = _validate(_write(tmp_path, "voice.m4a", data))
+    assert r.accepted
+    assert r.kind == "audio"
+
+
+def test_heic_image_rejected(tmp_path: Path) -> None:
+    # An ISO-BMFF `ftyp` box with an IMAGE brand (heic) must NOT pass as audio (the
+    # validation-loosening the brand check closes).
+    data = struct.pack(">I", 24) + b"ftypheic" + b"\x00" * 200
+    r = _validate(_write(tmp_path, "photo.heic", data))
+    assert not r.accepted
+    assert r.kind == "unknown"
+
+
+def test_avif_image_rejected(tmp_path: Path) -> None:
+    data = struct.pack(">I", 24) + b"ftypavif" + b"\x00" * 200
+    r = _validate(_write(tmp_path, "photo.avif", data))
+    assert not r.accepted
+    assert r.kind == "unknown"
+
+
+def test_mp4_video_rejected(tmp_path: Path) -> None:
+    # MP4/MOV video (no audio brand) is deliberately rejected at ingest in v1 — the "class
+    # video" case is a Phase-2 audio-extraction extension (ADR-0017).
+    data = struct.pack(">I", 24) + b"ftypisom" + b"\x00\x00\x00\x00" + b"mp41" + b"\x00" * 200
+    r = _validate(_write(tmp_path, "lecture.mp4", data))
+    assert not r.accepted
+    assert r.kind == "unknown"
