@@ -106,6 +106,39 @@ GUARD to be membership-aware (it currently holds back ALL name-only-cited claims
 membership ones a name-list legitimately supports). Both are HARD-gate-neutral refactors;
 tracked in `next_priorities.md`.
 
+### 2026-06-03 follow-up audit — the residual root cause is `verify_grounding/v2` BATCH LENIENCY
+
+A live UI audit of the present-as-answer escalation (the RBAC-vs-ABAC question, the same
+trigger) reproduced the over-presentation: 5 behavioral RBAC claims presented, cited to a
+French access-control slide. Probes settled the root cause — it is **NOT cross-lingual** and
+**NOT `is_name_only_chunk` alone**:
+
+- **Cross-lingual grounding is CLEAN / EN==FR symmetric.** An isolated `ground_claims` probe
+  (real FR chunks; EN+FR claims; N=3) grounds the SUPPORTED claim 3/3, rejects the COUNTERFACTUAL
+  0/3, rejects the BEHAVIORAL over-reach 0/3, grounds MEMBERSHIP 3/3 — **identical in EN and FR**.
+  An EN claim grounds/refuses against a FR chunk exactly like a FR claim.
+- **The over-grounding is a BATCH-LENIENCY effect in the gate.** The SAME 5 behavioral claims
+  against the SAME chunk: **batched in one verify call → grounded 4/5 (4,4,4); each isolated →
+  grounded 0/5.** `verify_grounding/v2` rubber-stamps plausible model-knowledge behavioral claims
+  when shown a coherent BATCH, but scrutinizes-and-rejects each alone. The bridge amplifies it
+  (free reasoning → many coherent claims → batch-grounded).
+- **It is BOUNDED — HARD-gate-safe.** A clear COUNTERFACTUAL batched among 4 true claims did NOT
+  leak (CF rejected 0/3; the 4 true grounded). So the batch effect over-grounds plausible-but-
+  unstated *behavioral* claims (a citation-precision issue on the fenced bridge surface), never a
+  clear falsehood — which is why `refusal_cf=1.0` holds and the `/ask` backstop was safe to ship.
+- **Secondary — `is_name_only_chunk` 8-word-line gap.** The FR slide's misdetected numbered
+  sub-heading "3. Protection du plan de contrôle (Control Plane)" = exactly 8 words defeats the
+  "no ≥8-word line" rule (`_NAME_ONLY_MIN_SENTENCE_WORDS=8`), so the chunk reads as not-name-only
+  and neither the bridge guard nor the `/ask` backstop fires on it.
+
+**Implications for the follow-up (its own session, needs an /ask counterfactual eval re-baseline):**
+the deterministic name-only backstop is the RIGHT pattern (batch-IMMUNE) but its trigger has the
+8-word gap and its marker set is fail-open. Levers: (1) consolidate the backstop into `ground_claims`
+(batch-immune for the bridge/summarizer); (2) harden `is_name_only_chunk` to treat "N. Title"
+numbered lines as inert headings; (3) consider single-claim (isolated) re-verification on the bridge
+present path to defeat batch leniency directly. Full record: `next_priorities.md` +
+the `ui-audit-xling-batch-leniency-2026-06-03` memory.
+
 A **separate** audit follow-up surfaced alongside this one — the `extract_claims@v1`
 extractor *under-covering* the discrete groundable sub-claims (it pulls the
 un-groundable conclusion and mis-cites it; an instrumented trace grounded 0/1
