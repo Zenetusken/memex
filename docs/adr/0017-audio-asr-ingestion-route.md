@@ -242,6 +242,12 @@ transcription machinery — only the **gate** had to open.
 - This is **standalone** video transcription only. The companion-MERGE (aligning the transcript's
   time-ranges to the slide deck) remains the Phase-2 deferral above; the per-segment timestamp + the
   document-level link hooks already carry it.
+- **Operational: `ingest.max_bytes` must accommodate video.** Class recordings are large — the CR350
+  `.mp4` are ~290 MB, over the 256 MB default, which **rejected them before detection ran** (the size
+  guard is the first gate in `validate_file`). The live `config.toml` raises `[ingest] max_bytes` to
+  2 GiB (faster-whisper streams the audio decode; the vault copy is a plain file copy, so a large
+  video is not a memory risk). A future per-kind size policy could lift only media; for now it is one
+  global ceiling.
 
 ## Revisit When
 

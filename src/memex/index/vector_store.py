@@ -95,8 +95,10 @@ async def _migrate_time_columns(db: AsyncConnection) -> None:
     surfaced on the first real audio ingest). Idempotent — skips when the columns are already
     present. The SQL default `CAST(-1.0 AS double)` fills existing rows with the sentinel (→
     `time_range=None` on reconstruction, the non-audio convention) and matches `_ChunkRow`'s
-    float64 mapping. Best-effort: a migration failure logs + re-raises (a broken schema must not be
-    silently appended to)."""
+    float64 mapping. FAIL-LOUD: a migration failure propagates and fails `open()` (a broken schema
+    must NOT be silently appended to — unlike `optimize()`, which is the genuine best-effort path).
+    Safe under the real flow because vault (re)indexing opens the store SERIALLY per document
+    (`index/pipeline.py::reindex_vault`), so the check-then-`add_columns` is never racing itself."""
     table = await db.open_table(_TABLE)
     existing = {field.name for field in await table.schema()}
     missing = [c for c in ("time_start", "time_end") if c not in existing]

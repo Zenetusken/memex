@@ -295,6 +295,15 @@ field `Chunk.time_range: tuple[float, float] | None = None` (`core/types.py`, ad
 backward-compatible — the doc/PDF paths leave it `None`). The webui surfaces it as a `[mm:ss]` label
 on each source chip (the audio analogue of the `?page=N` jump), and Phase-2 alignment reads it.
 
+**Storage-level back-compat (the field is persisted, so the STORES migrate at open).** Both retrieval
+stores gained `time_start`/`time_end` columns (the `-1.0` sentinel = "no time" → reconstructs to
+`time_range=None`), and a table created BEFORE them is migrated **on open** so a pre-existing vault
+indexes new (incl. audio) docs without a forced rebuild: `index/fts_store.py` via a guarded
+`ALTER TABLE … ADD COLUMN` (catch-duplicate), and `index/vector_store.py::_migrate_time_columns` via a
+check-then-`add_columns({…: "CAST(-1.0 AS double)"})` (LanceDB `add()` requires the row schema to match
+the table, so without this an old vault failed to index ANY new doc — caught on the first real audio
+ingest, fixed in `44aaed8`). This mirrors the `chart_extractions` / FTS-`full_text` migration precedent.
+
 Note the companion-deck link is **document-level** (a `[[doc]]`/CITES edge between the transcript doc
 and the slide doc), **not** a `TranscriptSegment` field — a standalone v1 ingest has no companion, and
 the Phase-2 merge aligns on the time-range + char-span, not a per-segment back-pointer. The
