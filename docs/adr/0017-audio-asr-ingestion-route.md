@@ -245,12 +245,16 @@ transcription machinery — only the **gate** had to open.
 
 ## Revisit When
 
-- **The French-audio A/B runs** (the gating experiment): on a representative sample of the user's
-  own lectures, race `faster_whisper` [stock `large-v3-turbo` + `bofenghuang` French-distil],
-  `Whisper-via-vLLM` [pinned 0.21 serve, segment-only, WER spot-checked], and `Parakeet-v3`
-  [transformers path] on spontaneous-FR WER + FR/EN code-switch + long-form hallucination + timestamp
-  usability + runtime-count friction. **Only then** is the default crowned → move Status to Accepted
-  and record the realized backend.
+- **The French-audio A/B — RAN 2026-06-03; default crowned = `large-v3-turbo`** (`faster_whisper`
+  backend, `deepdml/faster-whisper-large-v3-turbo-ct2`). On a fair 10-min window of real CR350 lecture
+  audio it beat the `bofenghuang` French-distil decisively: 8146 vs 2930 chars for the SAME window
+  (the distil **under-transcribes** ~64 % — paraphrases/drops content), correct course name + names +
+  dialogue, phrase-level segmentation (finer time anchors), at identical speed (RTF ≈ 0.036). This
+  **confirmed the documented inversion** — clean-WER rankings invert on spontaneous speech
+  (arXiv:2508.21193), so the spec's original French-distil recommendation was falsified by real audio;
+  faithfulness decided it. `Whisper-via-vLLM`/`Parakeet` were not needed. The phrase granularity is
+  tamed by the DETERMINISTIC `_coalesce_segments` (~30 s blocks; spec §3). Move Status → Accepted once
+  the full CR350 ingest + a transcript eval corpus land.
 - **An independent French/Open-ASR-Leaderboard row** lands for Qwen3-ASR (today its SOTA WER is
   vendor-asserted; replication pending) — re-weigh the Qwen+ForcedAligner path.
 - **The companion-merge is built** — record the alignment design as its own spec amendment and add

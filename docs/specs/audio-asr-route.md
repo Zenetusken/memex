@@ -105,6 +105,18 @@ deterministically faithful** (the grounding gate reads this text). Two tiers res
   anchor), toggling `ParseSettings.asr_normalize` re-cleans from cached raw (no re-transcribe), and it
   is **NOT** part of the cache `cfg` key. It deliberately does NOT collapse content-word stutters
   ("the the cat"), split run-on sentences, or restructure paragraphs.
+- **v1 — DETERMINISTIC segment COALESCING** (`asr_backend._coalesce_segments`, gated by
+  `ParseSettings.asr_coalesce_seconds`, default **30 s**): the chosen model (large-v3-turbo, §13)
+  emits **phrase-level** segments (~1–2 s each → ~370 per 10 min), which `_assemble_transcript` would
+  otherwise dump as one tiny `## [mm:ss]` block per phrase — noisy in the `.md` AND in the chunk text
+  the LLM grounds on. Coalescing merges consecutive segments into ~`N`-second paragraph blocks: the
+  merged text is the members **joined by a single space** (NO content dropped, order preserved), the
+  block keeps the FIRST member's `start_s` + the LAST's `end_s` (faithful span) + the first's
+  language. **Pure → re-parse reproducible.** Applied AFTER the cache + per-segment normalization (so
+  the raw stays cached) → NOT in the cache key; a change re-derives without re-transcribe but churns
+  `chunk_id`s (reindex). `0` disables it (one block per segment). Validated on real CR350 audio: 75
+  phrase segments → 4 clean ~30 s blocks, byte-faithful. It does NOT reorder, summarise, or rewrite —
+  the semantic restructuring stays the deferred LLM pass below.
 - **Follow-up — an OPTIONAL LLM "structuring" pass** (deferred, §15): better paragraphing / sentence
   segmentation / light disfluency smoothing, which needs semantics. Because it would rewrite the
   grounding source-of-truth, it is gated behind (a) a **deterministic faithfulness guard** — the
@@ -370,22 +382,31 @@ answer/summarize **REFUSES** (the scan-route precedent; never fabricates from an
   scoring). **Clips stay LOCAL** (the eval-corpus convention).
 - **End-to-end answer-eval:** a query set over a transcribed lecture, run through `memex eval` — must
   hold `refusal_cf=1.0` / 0-hallucination like every other corpus.
-- **The backend A/B (the gating experiment, ADR-0017 §Revisit):** on a representative sample of the
-  user's own French lectures, race `faster_whisper` [stock `large-v3-turbo` + `bofenghuang`
-  French-distil], `Whisper-via-vLLM` [pinned 0.21 serve, WER spot-checked], and `Parakeet-v3`
-  [transformers path], scoring **spontaneous-FR WER + FR/EN code-switch handling + long-form
-  hallucination + timestamp usability + runtime-count friction**. Clean-WER rankings invert on
-  spontaneous speech (arXiv:2508.21193) → **read-speech benchmarks are not decision-grade**; the A/B
-  on real lecture audio settles the default.
+- **The backend A/B — RAN 2026-06-03; verdict `large-v3-turbo` (the default).** On a fair 10-min
+  window of real CR350 lecture audio (the first ~13.5 min is dead air / Zoom-join — VAD skips it),
+  `deepdml/faster-whisper-large-v3-turbo-ct2` vs `bofenghuang/whisper-large-v3-french-distil-dec16`
+  (CT2 weights live in the repo's `ctranslate2/` subdir): **turbo WON DECISIVELY** — 8146 chars vs the
+  distil's 2930 for the SAME window (the distil **under-transcribes**, dropping ~64 % of content —
+  paraphrasing/skipping), turbo got the course name right ("CR350, réseautique et sécurité" vs the
+  distil's "350, réseau de sécurité"), captured names + dialogue, and segmented at phrase level
+  (373 vs 28 segments → finer time anchors), all at **identical speed** (RTF ≈ 0.036, ~27× realtime).
+  This **confirms the documented inversion** (clean-WER rankings invert on spontaneous speech,
+  arXiv:2508.21193) — the spec's original French-distil *recommendation was FALSIFIED by the real
+  audio*; faithfulness (no content loss) decided it. `Whisper-via-vLLM` + `Parakeet-v3` were not
+  needed (turbo on faster-whisper already meets the bar). Config: `models.asr =
+  "deepdml/faster-whisper-large-v3-turbo-ct2"`, `parse.asr_device = "cuda"`, `asr_language = "fr"`,
+  `asr_coalesce_seconds = 30`.
 
 ## 14. Testing
 
 - **Unit** (`test_asr_backend.py` + `test_audio_route.py`): backend dispatch + the per-file cache
   (miss→run→store, hit→replay, refresh→bust) + the post-cache normalization (drops emptied segments)
-  from a **faked** `_run_faster_whisper` (no GPU/dep); `transcribe_audio` RAISES on an unconfigured
-  model / a deferred backend, and faster_whisper RAISES `ASRTranscriptionError` on a decode failure
-  (no degraded segment); the pure `_assemble_transcript` (the `## [mm:ss]` body + EXACT char-spans,
-  incl. `hh:mm:ss` past an hour); the cache `cfg` (a decoding-param change ⇒ a miss).
+  + the DETERMINISTIC `_coalesce_segments` (phrase segments → ~30 s blocks, faithful join, span =
+  first-start→last-end, disabled/≤1-segment no-op, runs AFTER normalization end-to-end) from a
+  **faked** `_run_faster_whisper` (no GPU/dep); `transcribe_audio` RAISES on an unconfigured model /
+  a deferred backend, and faster_whisper RAISES `ASRTranscriptionError` on a decode failure (no
+  degraded segment); the pure `_assemble_transcript` (the `## [mm:ss]` body + EXACT char-spans, incl.
+  `hh:mm:ss` past an hour); the cache `cfg` (a decoding-param change ⇒ a miss).
 - **Unit** (`test_chunker.py` additions): `Chunk.time_range` populated from segment intervals via the
   generalized `_page_for_offset` (and `None` when no segments — back-compat).
 - **Integration** (`test_audio_routing.py`, the `test_scan_routing.py` sibling): a faked

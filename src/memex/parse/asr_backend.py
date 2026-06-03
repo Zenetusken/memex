@@ -58,6 +58,42 @@ class ASRSegment(BaseModel):
     rationale: str = ""
 
 
+def _coalesce_segments(
+    segments: list[ASRSegment], *, target_seconds: float
+) -> list[ASRSegment]:
+    """DETERMINISTIC, FAITHFUL merge of consecutive segments into ~`target_seconds` blocks (so a
+    phrase-level model like large-v3-turbo doesn't dump one tiny `## [mm:ss]` block per ~1 s
+    phrase). A block flushes once its span (last.end − first.start) reaches the target; the merged
+    text is the members joined by a single space (NO content dropped, order preserved), the block
+    keeps the FIRST member's `start_s` + the LAST member's `end_s` + the first's `language`, and
+    `confidence` is the conservative min. `target_seconds<=0` (or ≤1 segment) → unchanged. Pure →
+    re-parse reproducible."""
+    if target_seconds <= 0 or len(segments) <= 1:
+        return segments
+    out: list[ASRSegment] = []
+    buf: list[ASRSegment] = []
+    for s in segments:
+        buf.append(s)
+        if buf[-1].end_s - buf[0].start_s >= target_seconds:
+            out.append(_merge_block(buf))
+            buf = []
+    if buf:
+        out.append(_merge_block(buf))
+    return out
+
+
+def _merge_block(buf: list[ASRSegment]) -> ASRSegment:
+    """Merge a non-empty run of segments into one block — the faithful join (see
+    `_coalesce_segments`)."""
+    return ASRSegment(
+        text=" ".join(b.text for b in buf),
+        start_s=buf[0].start_s,
+        end_s=buf[-1].end_s,
+        language=buf[0].language,
+        confidence=min(b.confidence for b in buf),
+    )
+
+
 def _audio_sha256(source: Path) -> str:
     """Content hash of the audio file — the cache key's input-derived prefix."""
     h = hashlib.sha256()
@@ -198,11 +234,14 @@ async def transcribe_audio(
             context={"backend": backend, "source": str(source)},
         )
 
-    if not settings.parse.asr_normalize:
-        return raw
-    normed: list[ASRSegment] = []
-    for s in raw:
-        text = normalize_transcript_text(s.text)
-        if text:  # a segment emptied by normalization (all-filler) is dropped
-            normed.append(s.model_copy(update={"text": text}))
-    return normed
+    segments = raw
+    if settings.parse.asr_normalize:
+        normed: list[ASRSegment] = []
+        for s in raw:
+            text = normalize_transcript_text(s.text)
+            if text:  # a segment emptied by normalization (all-filler) is dropped
+                normed.append(s.model_copy(update={"text": text}))
+        segments = normed
+    # Coalesce phrase-level segments into ~N-second blocks (deterministic, faithful; AFTER
+    # normalization so empty-by-filler segments are already gone) for a clean transcript.
+    return _coalesce_segments(segments, target_seconds=settings.parse.asr_coalesce_seconds)

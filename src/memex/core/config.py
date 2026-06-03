@@ -397,6 +397,15 @@ class ParseSettings(BaseModel):
     asr_language: str | None = None
     asr_vad_filter: bool = True
     asr_device: Literal["cpu", "cuda"] = "cpu"
+    # Coalesce consecutive ASR segments into ~N-second blocks before assembling the `## [mm:ss]`
+    # transcript (ADR-0017). A model like large-v3-turbo emits PHRASE-level segments (~1-2 s each
+    # → hundreds per 10 min), which would dump one tiny timestamped block per phrase — noisy in
+    # the `.md` AND in the chunk text the LLM grounds on. Coalescing is DETERMINISTIC + FAITHFUL
+    # (adjacent texts joined with a space, the block keeps the FIRST segment's start + LAST's end;
+    # no content dropped, order preserved), so re-parse stays reproducible. Applied AFTER the cache
+    # + normalization (raw stays cached) → NOT in the cache key; a change re-derives without
+    # re-transcribe but churns chunk_ids (reindex). 0 = disabled (one block per segment).
+    asr_coalesce_seconds: float = Field(default=30.0, ge=0.0, le=300.0)
     # Force Docling routing, bypassing the PyMuPDF pre-filter. The
     # classifier would normally win PyMuPDF on born-digital text-heavy
     # PDFs (Adobe InDesign / Acrobat output / etc.); this flag overrides
