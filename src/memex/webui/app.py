@@ -280,10 +280,12 @@ def _find_preview_pdf(vault_path: Path, doc_id: str) -> Path | None:
 
 
 def _format_time_anchor(time_range: tuple[float, float] | None) -> str:
-    """`mm:ss` (or `hh:mm:ss` past an hour) for an audio chunk's START time — the
-    transcript analogue of the `· p. N` page chip (ADR-0017). `""` for a non-audio
-    chunk (`time_range is None`). Kept local to the webui (no parse import — that
-    boundary is closed; `parse._format_timestamp` is the parse-side twin)."""
+    """The COMPACT chip form of an audio chunk's START time — `m:ss` (or `h:mm:ss`
+    past an hour) — the transcript analogue of the `· p. N` page chip (ADR-0017),
+    so it follows the chip convention (no zero-padded leading unit) rather than the
+    body-heading form `[mm:ss]`/`[hh:mm:ss]` that `parse._format_timestamp` writes.
+    `""` for a non-audio chunk (`time_range is None`). Kept local to the webui (no
+    parse import — that boundary is closed)."""
     if time_range is None:
         return ""
     total = max(0, int(time_range[0]))

@@ -293,8 +293,12 @@ async def test_ask_source_link_carries_time_anchor_for_audio_chunk(
     text = await _ask_to_completion(client.app, "what does a VLAN do?")
     # The transcript chunk's start time (62.0s) renders as a readable mm:ss chip;
     # no page chip (audio has no pages).
-    assert "· 1:02" in text
+    assert "Lecture 1 · 1:02" in text
     assert "· p." not in text
+    # The section heading IS the timestamp `[01:02]` for a transcript chunk, so the
+    # redundant `› [01:02]` segment is suppressed in favour of the normalized chip
+    # (F1: no `Lecture 1 › [01:02] · 1:02` duplication).
+    assert "[01:02]" not in text
 
 
 @pytest.mark.asyncio
@@ -719,6 +723,49 @@ def test_summary_labels_sources_by_section_not_repeated_doc_title(client: TestCl
     assert "Access Control Exercise › Key Components" not in r.text
     # No redundant Sources section (every source is this one doc).
     assert "Sources" not in r.text
+
+
+def test_summary_source_chip_shows_time_anchor_for_audio_chunk(client: TestClient) -> None:
+    """A summary of an audio transcript labels each key-point source by its `· mm:ss`
+    time chip (F3 coverage, ADR-0017). The redundant `[00:30]` heading-as-section is
+    suppressed in favour of the normalized chip — the summary analogue of the `/ask`
+    suppression."""
+    registry = client.app.state.progress
+    cid = "01HZSUMMARYTIME000000000000"
+    registry.new(cid, scope_doc_ids=[], scope_source="named")
+    chunk = Chunk(
+        chunk_id="lecture2#t0",
+        document_id="lecture2",
+        document_title="Lecture 2",
+        text="Routers forward packets between networks.",
+        heading_path=["[00:30]"],
+        time_range=(30.0, 35.0),
+    )
+    registry.finish(
+        cid,
+        response=FinalResponse(
+            answered=True,
+            summary="A grounded transcript summary.",
+            claims=[
+                CitedClaim(
+                    claim="A router forwards packets between networks.",
+                    source_chunk_id="lecture2#t0",
+                    confidence="high",
+                )
+            ],
+            used_chunks=[chunk],
+            wikilinks=[],
+            correlation_id=cid,
+            tokens_used=5,
+            nodes_traversed=2,
+            regenerate_attempts=0,
+        ),
+    )
+    r = client.get(f"/documents/lecture2/summarize/status?cid={cid}&v=0")
+    assert r.status_code == 200
+    assert "· 0:30" in r.text  # the time chip
+    assert "[00:30]" not in r.text  # the redundant bracketed section is suppressed
+    assert "· p." not in r.text  # audio has no page chip
 
 
 @pytest.mark.asyncio
