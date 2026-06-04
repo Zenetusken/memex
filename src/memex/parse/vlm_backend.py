@@ -605,3 +605,48 @@ async def convert_pages(
                     markdown=output.markdown,
                 )
     return results
+
+
+async def transcribe_images(
+    images: list[Image.Image],
+    *,
+    prompt: str = _PROMPT,
+    max_new_tokens: int = _MAX_NEW_TOKENS,
+) -> list[str]:
+    """OCR a batch of IN-MEMORY images (not PDF pages) to Markdown via the VLM.
+
+    The public seam for callers that already hold PIL images — e.g. the
+    companion-merge keyframe-OCR pass, which decodes lecture-video frames with
+    PyAV (ADR-0018 §13). Reuses the same VLM backend as `convert_pages` (the
+    short-lived vLLM-served Qwen3-VL, or the legacy in-process path), with ONE
+    serve spawn for the whole batch (the parse-time GPU-handoff pattern — the
+    caller wraps this in `pause_vllm_for_gpu()`). Returns markdown parallel to
+    `images`; a per-image transcription failure becomes `""` (the caller drops
+    near-empty results), never aborting the batch. No caching here — the caller
+    owns its own content-addressed cache (the key differs per image source)."""
+    if not images:
+        return []
+    settings = get_settings()
+    results: list[str] = ["" for _ in images]
+    if settings.models.vlm_serving == "vllm":
+        model_id = settings.models.vlm
+        async with _serve_vlm_vllm(model_id) as base_url:
+            for i, image in enumerate(images):
+                try:
+                    results[i] = await _vllm_transcribe(
+                        base_url, model_id, image, prompt, max_new_tokens
+                    )
+                except (VLMUnavailable, PDFRenderError) as e:
+                    logger.warning("vlm.transcribe_image_failed", index=i, error=str(e))
+        return results
+
+    registry = get_registry()
+    async with registry.use("vlm") as handle:
+        for i, image in enumerate(images):
+            try:
+                results[i] = await asyncio.to_thread(
+                    _vlm_transcribe_sync, handle, image, prompt, max_new_tokens
+                )
+            except (VLMUnavailable, PDFRenderError) as e:
+                logger.warning("vlm.transcribe_image_failed", index=i, error=str(e))
+    return results

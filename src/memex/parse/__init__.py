@@ -25,6 +25,11 @@ from memex.parse.docling_backend import (
     DoclingUnavailable,
     SandboxLoadFailed,
 )
+from memex.parse.keyframe_ocr import (
+    KeyframeOCRError,
+    ocr_frames_for_chunks,
+)
+from memex.parse.keyframe_ocr_cache import KeyframeOCRCache
 from memex.parse.office_convert import (
     OFFICE_SUFFIXES,
     OfficeConversionError,
@@ -53,7 +58,7 @@ from memex.parse.sandbox import (
     SandboxStatus,
     enable_network_block,
 )
-from memex.parse.vlm_backend import VLMUnavailable
+from memex.parse.vlm_backend import VLMUnavailable, transcribe_images
 from memex.parse.vlm_cache import VLMTranscriptionCache
 
 __all__ = [
@@ -71,6 +76,8 @@ __all__ = [
     "DoclingPageOutput",
     "DoclingTimeout",
     "DoclingUnavailable",
+    "KeyframeOCRCache",
+    "KeyframeOCRError",
     "OfficeConversionError",
     "ParseResult",
     "PdfSignals",
@@ -86,9 +93,11 @@ __all__ = [
     "convert_to_pdf",
     "derive_title",
     "enable_network_block",
+    "ocr_frames_for_chunks",
     "parse_document",
     "pause_vllm_for_gpu",
     "reset_docling_breaker",
     "reset_pymupdf_breaker",
     "transcribe_audio",
+    "transcribe_images",
 ]
