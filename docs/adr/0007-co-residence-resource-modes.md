@@ -5,6 +5,37 @@
 - **Deciders**: Memex core team
 - **Tags**: stack, gpu, models, resources, architecture
 
+> **Update (2026-06-04, the dynamic VRAM manager — §5 realized; the `auto` mode is the NEW DEFAULT).**
+> The "auto-deciding policy" §5 promised as "the increment after" the hot-switch
+> **shipped**. A new **`auto`** co-residence mode (`CoResidenceMode` gains it;
+> `ModelSettings.co_residence_mode` default `manual` → **`auto`**) reads **live
+> free-VRAM** at each model's load point and adapts placement: the **embedder always
+> on GPU** (keeps the query embedding bf16 in lockstep with the index), the
+> **reranker on GPU iff live free-VRAM ≥ `RERANKER_GPU_FLOOR_GB` (2.0, calibrated
+> empirically on this rig — the reranker's real footprint is ~1.49 GB, not the 2.1 GB
+> bootstrap estimate), else CPU** (graceful fallback, never OOM). This is the vertical
+> deepening §5/§Vertically-1 described — `resolve_profile` gained a `free_vram_gb`
+> driver and a NEW `core/vram.py` seam (`free_vram_gb`/`total_vram_gb` via
+> `torch.cuda.mem_get_info`; `fit_serve_util` for the parse-time VLM serve), with
+> **every caller unchanged**. `auto` mirrors `fast`'s orchestrator posture
+> (0.62/8192/top-5), so flipping the default changes NOTHING the orchestrator runs in
+> the common solo case — it resolves to today's GPU-embedder + GPU-reranker placement;
+> only under live contention does it demote the reranker to CPU instead of OOMing.
+> **Correctness-neutral by construction** (the reranker order is byte-identical CPU vs
+> GPU — the ADR-0015 follow-on A/B above — so placement is latency-only; the eval MUST
+> pin a device, e.g. `MEMEX_MODELS__CO_RESIDENCE_MODE=manual`, so `refusal_cf` doesn't
+> vary with ambient GPU pressure). Lifecycle hardening rode along: a bounded
+> restart-retry in `pause_vllm_for_gpu` (the load-bearing /ask-alive fix — a stuck-down
+> orchestrator was what broke the next answer), a dynamic VLM-serve util that widens by
+> unloading retrieval + a new `VRAMExhausted` that NAMES the holding process, a reactive
+> GPU→CPU OOM fallback in the registry, a clean webui-shutdown `unload_all` (FastAPI
+> lifespan), and a boot pre-flight that REPORTS GPU holders and warns (never auto-kills —
+> a holder may be a concurrent legit parse). Surfaced in `/resources` (the `auto` row
+> leads, shows live free-VRAM + "auto-placed"). The user requirement: works optimally
+> out of the box with **zero manual configuration** — no `…DEVICE=cpu` / `daemon
+> stop|start` / hand-set serve-util. Shipped on `audio-asr-ingestion`. See the memory
+> `dynamic-vram-manager-2026-06-04`.
+>
 > **Update (2026-05-28, [ADR-0009](0009-remove-free-form-synthesis-baseline.md)):**
 > the "full-document synthesis" consumer this ADR names (`agents/synthesize.py`,
 > the free-form baseline) was **removed** — it was unwired and unreliable on vLLM
@@ -74,17 +105,18 @@ Two further forces shaped this ADR:
 
 ### 1. A "mode" is a first-class named bundle resolving to a `ResourceProfile`
 
-`CoResidenceMode = Literal["fast", "full", "gpu_only", "manual"]`
-(`ModelSettings.co_residence_mode`, default `manual`). Each non-manual mode is a
-**curated bundle** of the whole tradeoff, calibrated for the 12 GB reference
-tier:
+`CoResidenceMode = Literal["auto", "fast", "full", "gpu_only", "manual"]`
+(`ModelSettings.co_residence_mode`, default **`auto`** as of 2026-06-04 — see the
+header Update; was `manual`). `auto` is computed from live free-VRAM; the others are
+**curated bundles** of the whole tradeoff, calibrated for the 12 GB reference tier:
 
 | mode | embedder | reranker | gpu_fraction | max_model_len | character |
 |---|---|---|---|---|---|
-| `fast` | cuda | cuda | 0.60 | 6144 | low-latency top-k RAG; tighter context |
+| `auto` | cuda | **cuda if free-VRAM ≥ 2.0 GB else cpu** | 0.62 | 8192 | **default** — live-VRAM-driven placement, zero manual config; mirrors `fast`'s posture, demotes the reranker to CPU only under contention (never OOM) |
+| `fast` | cuda | cuda | 0.62 | 8192 | low-latency top-k RAG; tighter context |
 | `full` | cuda | **cpu** | 0.80 | **24576** | whole-document context for long-form synthesis; slower (CPU) reranking |
-| `gpu_only` | cuda | cuda | 0.72 | 6144 | all-GPU at full util — for >12 GB cards / orchestrator not co-resident |
-| `manual` | explicit | explicit | (as launched) | (as launched) | honors the raw device knobs; **default**, backward-compatible |
+| `gpu_only` | cuda | cuda | 0.72 | 8192 | all-GPU at full util — for >12 GB cards / orchestrator not co-resident |
+| `manual` | explicit | explicit | (as launched) | (as launched) | honors the raw device knobs; backward-compatible escape hatch |
 
 ### 2. One pure resolver is the single policy seam (`core/resources.py`)
 
@@ -130,7 +162,9 @@ caller (registry, bootstrap, daemon, CLI, webui) untouched. A user-triggered
 `registry.unload` → restart the orchestrator via the daemon → poll readiness)
 **shipped 2026-05-27** (webui `POST /resources/mode` + `_apply_mode`; Chrome-e2e'd:
 Apply `fast` restarted the daemon 24,576→6,144 live) on this same seam; the
-auto-deciding policy is the increment after.
+auto-deciding policy **shipped 2026-06-04 as the `auto` mode** (now the default) —
+`resolve_profile` reads live `free_vram_gb` and adapts reranker placement, via the new
+`core/vram.py` probe, with every caller unchanged (see the header Update).
 
 ## Expanding the mode system
 
@@ -237,7 +271,9 @@ auto-selection exists (an override / an explanation of what the manager chose).
 ## Revisit When
 
 - The dynamic VRAM manager lands (the resolver becomes VRAM-aware) — fold its
-  policy into §5 here.
+  policy into §5 here. **(Fired 2026-06-04 — the `auto` mode shipped: `resolve_profile`
+  gained a `free_vram_gb` driver + the `core/vram.py` seam, and `auto` is the new
+  default. See the header Update + the memory `dynamic-vram-manager-2026-06-04`.)**
 - A second card tier is calibrated, or a non-Qwen3-8B orchestrator changes the
   weight/KV arithmetic. **(Fired 2026-06-01 — ADR-0015 swapped in Qwen3.5-4B;
   the `fast`/`gpu_only` profiles in `core/resources.py` were retuned to
