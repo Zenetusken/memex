@@ -41,7 +41,8 @@ from __future__ import annotations
 import asyncio
 import mimetypes
 import re
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Callable
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -519,7 +520,20 @@ def create_app() -> FastAPI:
     # surface its nav link when it's enabled, so a disabled deployment shows no dead link.
     env.globals["expert_enabled"] = get_settings().agents.expert_mode_enabled  # type: ignore[reportUnknownMemberType]  # reason: jinja2 leaves Environment.globals unannotated
     templates = Jinja2Templates(env=env)
-    app = FastAPI(title="Memex", docs_url=None, redoc_url=None)
+
+    @asynccontextmanager
+    async def _lifespan(_app: FastAPI) -> AsyncGenerator[None]:
+        """Clean shutdown (dynamic VRAM manager): on exit, release every GPU model this server loaded so
+        its VRAM doesn't linger and contend with the next process's parse / VLM-serve — the proactive fix
+        for the stale-webui-holds-VRAM trap. No-op if the registry was never initialised (a test app)."""
+        yield
+        try:
+            await get_registry().unload_all()
+            logger.info("webui.shutdown.gpu_released")
+        except ModelNotConfigured:
+            pass  # registry never set up (e.g. a TestClient app) — nothing resident to release
+
+    app = FastAPI(title="Memex", docs_url=None, redoc_url=None, lifespan=_lifespan)
 
     if _STATIC_DIR.exists():
         app.mount(

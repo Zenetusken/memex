@@ -75,3 +75,33 @@ def fit_serve_util(
     if budget_gb < floor_gb:
         return None  # can't fit weights + minimal KV even using all available free VRAM
     return min(budget_gb / total_gb, cap)
+
+
+def gpu_compute_apps() -> list[str] | None:
+    """Best-effort list of `"pid <pid>: <name> (<MiB> MiB)"` for processes holding GPU memory, via
+    `nvidia-smi`. Returns `None` if `nvidia-smi` is absent / errors / has no apps. NEVER raises — it runs
+    inside the `VRAMExhausted` error path to name WHICH process holds the GPU (the actionable cause)."""
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            [  # noqa: S607 — nvidia-smi is a trusted system binary on PATH; fixed argv, no shell
+                "nvidia-smi",
+                "--query-compute-apps=pid,used_memory,process_name",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=4,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):  # nvidia-smi absent / timeout — no holder info
+        return None
+    if out.returncode != 0 or not out.stdout.strip():
+        return None
+    apps: list[str] = []
+    for line in out.stdout.strip().splitlines():
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) >= 3:
+            apps.append(f"pid {parts[0]}: {parts[2]} ({parts[1]} MiB)")
+    return apps or None

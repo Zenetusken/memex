@@ -799,6 +799,12 @@ async def _vllm_restart(scripts_dir: Path) -> None:
     log.info("vllm.restart.via_script", pid=proc.pid)
 
 
+# Bounded restart-retry budget for `pause_vllm_for_gpu` (the dynamic-VRAM-manager reliability fix).
+_RESTART_ATTEMPTS = 2  # re-pkill + GPU-settle on the 2nd attempt (the script fallback isn't idempotent)
+_RESTART_SETTLE_S = 5  # wait for VRAM release before re-launching (the contention failure is an EXIT)
+_RESTART_POLL_S = 120  # cold-start budget per attempt (model materialisation + CUDA-graph compile)
+
+
 @asynccontextmanager
 async def pause_vllm_for_gpu() -> AsyncGenerator[None]:
     """Pause-and-restart vLLM around a GPU-heavy parse OR index pass.
@@ -847,29 +853,40 @@ async def pause_vllm_for_gpu() -> AsyncGenerator[None]:
     try:
         yield
     finally:
-        log.info("vllm.restart.start")
+        # BOUNDED RESTART RETRY (the load-bearing reliability fix): the single 120s attempt used to log
+        # one `vllm.restart.timeout` and leave the 4B DOWN — which broke the next `/ask` (hit live this
+        # session after a keyframe run). Now N attempts; from the 2nd on, re-`_vllm_pkill` (the
+        # `serve-vllm.sh` fallback is NOT idempotent — a naive re-issue double-spawns a 2nd vLLM racing
+        # the port) + a GPU-settle wait (the REAL fix — a GPU-contention failure makes vLLM EXIT, so
+        # re-issuing into a still-occupied card just re-fails; waiting for VRAM release is what lets the
+        # next launch fit). NB: log only — NEVER `raise`/`return` out of this `finally` (B012) — that
+        # would suppress a parse-body exception.
         scripts_dir = _detect_scripts_dir()
-        try:
-            await _vllm_restart(scripts_dir)
-            # Wait for vLLM to come back. 120s budget = first-load
-            # latency on cold start (model materialisation + CUDA-graph
-            # compile). Subsequent restarts in the same process should
-            # be faster (~40s) but the budget covers worst case.
-            #
-            # NB: `break` on success, never `return` — a `return` in this
-            # `finally` would suppress any exception raised inside the
-            # `async with` body (B012), silently swallowing a parse crash.
-            restarted = False
-            for _ in range(120):
-                if await _vllm_reachable(base_url, timeout_s=1.0):
-                    log.info("vllm.restarted")
-                    restarted = True
-                    break
-                await asyncio.sleep(1.0)
-            if not restarted:
-                log.error("vllm.restart.timeout")
-        except Exception as e:
-            log.error("vllm.restart.failed", error=str(e))
+        restarted = False
+        for attempt in range(1, _RESTART_ATTEMPTS + 1):
+            log.info("vllm.restart.start", attempt=attempt)
+            try:
+                if attempt > 1:
+                    await _vllm_pkill()  # clear any half-started/stale vLLM before re-issuing
+                    await asyncio.sleep(_RESTART_SETTLE_S)  # let the GPU release before re-launch
+                await _vllm_restart(scripts_dir)
+                for _ in range(_RESTART_POLL_S):
+                    if await _vllm_reachable(base_url, timeout_s=1.0):
+                        log.info("vllm.restarted", attempt=attempt)
+                        restarted = True
+                        break
+                    await asyncio.sleep(1.0)
+            except Exception as e:
+                log.error("vllm.restart.failed", attempt=attempt, error=str(e))
+            if restarted:
+                break
+        if not restarted:
+            log.error(
+                "vllm.restart.exhausted",
+                attempts=_RESTART_ATTEMPTS,
+                base_url=base_url,
+                fix="the next /ask self-heals, or run `memex daemon restart`",
+            )
 
 
 def _detect_scripts_dir() -> Path:

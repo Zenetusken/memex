@@ -333,6 +333,14 @@ class ModelRegistry:
         await self.unload("embedder")
         await self.unload("reranker")
 
+    async def unload_all(self) -> None:
+        """Release EVERY resident model from VRAM (+ empty the CUDA cache via each `unload`). The clean-
+        shutdown hook: a long-running server (the webui) calls this on exit so its GPU models don't linger
+        and contend with the next process's parse/VLM-serve (the stale-webui-holds-VRAM trap). Idempotent —
+        no-op for slots that aren't loaded."""
+        for name in ("embedder", "reranker", "vlm", "chart_ocr"):
+            await self.unload(name)
+
     async def _load(self, name: ModelName) -> None:
         log = logger.bind(name=name)
         log.info("model.load.start")

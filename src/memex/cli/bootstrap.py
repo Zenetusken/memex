@@ -249,6 +249,36 @@ def _verify_vram_fit(settings: MemexSettings) -> None:
         )
 
 
+# Below this much free VRAM at boot WITH an external holder, surface the contention (the auto runtime
+# still adapts, but a squeezed start should be visible). Above it = a normal orchestrator-resident card.
+_PREFLIGHT_LOW_FREE_GB = 3.0
+
+
+def _preflight_gpu(settings: MemexSettings) -> None:
+    """Boot-time GPU pre-flight (dynamic VRAM manager): report total/free VRAM + the processes holding the
+    GPU, and WARN if free VRAM is low so a degraded start is VISIBLE. Report-and-warn only — NOT auto-kill
+    (a GPU holder at boot may be a concurrent legit parse, not a dead orphan); the `auto` runtime adapts
+    (CPU reranker fallback / dynamic VLM-serve util / VRAMExhausted naming the holder). Best-effort +
+    non-fatal — a probe failure leaves startup unchanged."""
+    from memex.core import vram
+
+    free = vram.free_vram_gb()
+    total = vram.total_vram_gb()
+    if free is None or total is None:
+        return  # off-GPU / torch-less — nothing to pre-flight
+    holders = vram.gpu_compute_apps()
+    log = structlog.get_logger(__name__).bind(component="bootstrap.gpu")
+    log.info("gpu.preflight", total_gb=round(total, 2), free_gb=round(free, 2), holders=holders or [])
+    if free < _PREFLIGHT_LOW_FREE_GB and holders:
+        log.warning(
+            "gpu.preflight.low_free",
+            free_gb=round(free, 2),
+            holders=holders,
+            note="auto mode places retrieval on CPU under pressure; free a stray GPU process for full "
+            "speed (a parse VLM-serve fails fast naming the holder if it still can't fit)",
+        )
+
+
 def bootstrap() -> MemexSettings:
     """Read config, configure singletons, return the loaded settings."""
     settings = MemexSettings()  # type: ignore[call-arg]  # vault_path comes from TOML/env
@@ -258,6 +288,7 @@ def bootstrap() -> MemexSettings:
 
     _configure_cuda(settings)
     _verify_vram_fit(settings)
+    _preflight_gpu(settings)
 
     configure_tracing(settings.observability)
     configure_client(settings.inference)
