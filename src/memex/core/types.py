@@ -50,6 +50,10 @@ class Chunk(BaseModel):
     page: int | None = None
     char_start: int = 0
     char_end: int = 0
+    # Time range (audio transcripts only) — (start_s, end_s) seconds in the source file, the
+    # audio analogue of `page`; attributed by the chunker from `TranscriptSegment` spans
+    # (ADR-0017). None on the doc/PDF paths. Navigation-grade, not citation-grade.
+    time_range: tuple[float, float] | None = None
     score: float = 0.0
     rerank_score: float | None = None
     heading_path: list[str] = Field(default_factory=list)
@@ -140,6 +144,47 @@ class RelatedDocument(BaseModel):
     title: str
     score: float  # Σ IDF(entity) over the shared, non-generic entities — higher = stronger
     shared_entities: list[str]  # the connecting entities, most-specific first
+
+
+class GpuProcess(BaseModel):
+    """One process holding GPU memory, as reported by `nvidia-smi` (the structured probe
+    `core/vram.gpu_processes`). Lives in `core/types` because it crosses the boundary from
+    `core/vram` (the torch/nvidia-smi probe) to the webui `/resources` VRAM panel + the CLI.
+    Infrastructure, not domain state — a live snapshot, never persisted or grounded on."""
+
+    pid: int
+    name: str  # the process name nvidia-smi reports (e.g. "VLLM::EngineCore", "python3")
+    used_mib: int  # GPU memory this process holds, in MiB
+
+
+class AlignmentBlock(BaseModel):
+    """One transcript chunk aligned to its best-matching slide-deck PAGE (ADR-0018 companion-merge).
+    PRIMARY identity = the two content-addressed chunk_ids; `deck_page`/`time_range` are CACHED
+    navigation hints for the webui label (re-derivable). `deck_chunk_id is None` ⇒ a NULL block (the
+    chunk matched no slide above the score floor — an off-slide tangent). Derived sidecar state;
+    navigation/discovery-grade, NEVER read on the grounding path. Lives in `core/types` because it
+    crosses boundaries (`index/companion` writes; the `augment_companion` node + webui read)."""
+
+    transcript_chunk_id: str
+    time_range: tuple[float, float] | None = (
+        None  # the transcript chunk's audio anchor (cached label)
+    )
+    deck_chunk_id: str | None = None  # None ⇒ NULL: no slide above the floor
+    deck_page: int | None = None  # cached nav hint = the aligned deck chunk's Chunk.page
+    score: float  # cosine similarity of the alignment (≈0..1 for L2-normalized embeddings)
+
+
+class CompanionAlignment(BaseModel):
+    """The per-pair companion-merge alignment (ADR-0018): every chunk of a lecture TRANSCRIPT doc
+    aligned to a SLIDE-DECK doc's page. A DERIVED, regenerable sidecar
+    (`vault/.memex/companion_alignments.json`); HARD-gate-neutral discovery/navigation state — the
+    transcript + deck remain first-class grounded docs in their own right."""
+
+    transcript_doc: str
+    deck_doc: str
+    embedding_recipe_version: str = ""
+    blocks: list[AlignmentBlock] = Field(default_factory=list[AlignmentBlock])
+    null_count: int = 0
 
 
 class BridgeDoc(BaseModel):

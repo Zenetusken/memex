@@ -41,6 +41,7 @@ from memex.core.manifest import (
     ChartExtraction,
     PageDecision,
     ParseStage,
+    TranscriptSegment,
     now_utc,
     read_manifest,
     update_manifest,
@@ -52,6 +53,8 @@ from memex.core.table_linearize import (
     table_cell_lines,
 )
 from memex.core.text import IMAGE_PLACEHOLDER_RE
+from memex.parse.asr_backend import ASRSegment, transcribe_audio
+from memex.parse.asr_cache import ASRTranscriptionCache
 from memex.parse.chart_ocr_backend import (
     ChartOCROutput,
     ChartOCRUnavailable,
@@ -796,6 +799,12 @@ async def _vllm_restart(scripts_dir: Path) -> None:
     log.info("vllm.restart.via_script", pid=proc.pid)
 
 
+# Bounded restart-retry budget for `pause_vllm_for_gpu` (the dynamic-VRAM-manager reliability fix).
+_RESTART_ATTEMPTS = 2  # re-pkill + GPU-settle on the 2nd attempt (the script fallback isn't idempotent)
+_RESTART_SETTLE_S = 5  # wait for VRAM release before re-launching (the contention failure is an EXIT)
+_RESTART_POLL_S = 120  # cold-start budget per attempt (model materialisation + CUDA-graph compile)
+
+
 @asynccontextmanager
 async def pause_vllm_for_gpu() -> AsyncGenerator[None]:
     """Pause-and-restart vLLM around a GPU-heavy parse OR index pass.
@@ -844,29 +853,40 @@ async def pause_vllm_for_gpu() -> AsyncGenerator[None]:
     try:
         yield
     finally:
-        log.info("vllm.restart.start")
+        # BOUNDED RESTART RETRY (the load-bearing reliability fix): the single 120s attempt used to log
+        # one `vllm.restart.timeout` and leave the 4B DOWN — which broke the next `/ask` (hit live this
+        # session after a keyframe run). Now N attempts; from the 2nd on, re-`_vllm_pkill` (the
+        # `serve-vllm.sh` fallback is NOT idempotent — a naive re-issue double-spawns a 2nd vLLM racing
+        # the port) + a GPU-settle wait (the REAL fix — a GPU-contention failure makes vLLM EXIT, so
+        # re-issuing into a still-occupied card just re-fails; waiting for VRAM release is what lets the
+        # next launch fit). NB: log only — NEVER `raise`/`return` out of this `finally` (B012) — that
+        # would suppress a parse-body exception.
         scripts_dir = _detect_scripts_dir()
-        try:
-            await _vllm_restart(scripts_dir)
-            # Wait for vLLM to come back. 120s budget = first-load
-            # latency on cold start (model materialisation + CUDA-graph
-            # compile). Subsequent restarts in the same process should
-            # be faster (~40s) but the budget covers worst case.
-            #
-            # NB: `break` on success, never `return` — a `return` in this
-            # `finally` would suppress any exception raised inside the
-            # `async with` body (B012), silently swallowing a parse crash.
-            restarted = False
-            for _ in range(120):
-                if await _vllm_reachable(base_url, timeout_s=1.0):
-                    log.info("vllm.restarted")
-                    restarted = True
-                    break
-                await asyncio.sleep(1.0)
-            if not restarted:
-                log.error("vllm.restart.timeout")
-        except Exception as e:
-            log.error("vllm.restart.failed", error=str(e))
+        restarted = False
+        for attempt in range(1, _RESTART_ATTEMPTS + 1):
+            log.info("vllm.restart.start", attempt=attempt)
+            try:
+                if attempt > 1:
+                    await _vllm_pkill()  # clear any half-started/stale vLLM before re-issuing
+                    await asyncio.sleep(_RESTART_SETTLE_S)  # let the GPU release before re-launch
+                await _vllm_restart(scripts_dir)
+                for _ in range(_RESTART_POLL_S):
+                    if await _vllm_reachable(base_url, timeout_s=1.0):
+                        log.info("vllm.restarted", attempt=attempt)
+                        restarted = True
+                        break
+                    await asyncio.sleep(1.0)
+            except Exception as e:
+                log.error("vllm.restart.failed", attempt=attempt, error=str(e))
+            if restarted:
+                break
+        if not restarted:
+            log.error(
+                "vllm.restart.exhausted",
+                attempts=_RESTART_ATTEMPTS,
+                base_url=base_url,
+                fix="the next /ask self-heals, or run `memex daemon restart`",
+            )
 
 
 def _detect_scripts_dir() -> Path:
@@ -1773,6 +1793,156 @@ async def _parse_scan_with_vlm(
     )
 
 
+AUDIO_SUFFIXES: Final[frozenset[str]] = frozenset(
+    {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".opus", ".aac"}
+)
+# Audio-bearing VIDEO containers (ADR-0017 "class video"): routed to the SAME `_parse_audio`,
+# which transcribes the AUDIO track (faster-whisper/PyAV decodes the container's audio stream;
+# the visual track is ignored in v1 — the slide content comes from the companion PDF via the
+# Phase-2 merge). A video with no audio track → empty transcript → recoverable refuse.
+VIDEO_SUFFIXES: Final[frozenset[str]] = frozenset({".mp4", ".m4v", ".mov", ".webm", ".mkv"})
+# The set the parse dispatch + the ingest acceptance key on — both audio + audio-bearing video.
+MEDIA_SUFFIXES: Final[frozenset[str]] = AUDIO_SUFFIXES | VIDEO_SUFFIXES
+
+
+def video_source_path(vault_path: Path, doc_id: str) -> Path | None:
+    """The doc's VIDEO source file (`source.mp4`/`.mov`/…) if it has one, else `None`.
+
+    The `link-slides --use-video` gate (ADR-0018 §13): keyframe-OCR can only decode frames from a
+    VIDEO source. An audio-only doc (`.mp3` — its slides have no on-screen frames), a non-media doc,
+    or a doc with no copied source returns `None` → the caller falls back to the transcript-text
+    alignment. A missing asset dir is treated as "no video" here; the real "doc not indexed" error
+    surfaces from `compute_alignment`."""
+    try:
+        source = _source_file(vault_path, doc_id)
+    except VaultIntegrityError:
+        return None
+    if source.is_file() and source.suffix.lower() in VIDEO_SUFFIXES:
+        return source
+    return None
+
+
+def _format_timestamp(seconds: float) -> str:
+    """`mm:ss` (or `hh:mm:ss` past an hour) for a transcript segment heading."""
+    total = max(0, int(seconds))
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+
+
+def _assemble_transcript(asr_segments: list[ASRSegment]) -> tuple[str, list[TranscriptSegment]]:
+    """PURE: turn ASR segments into the transcript body (`## [mm:ss]` blocks joined by blank
+    lines) + the manifest `TranscriptSegment`s. Each segment's char-span addresses its whole
+    BLOCK (the `## [mm:ss]` header + the text) in the assembled body — so a chunk that starts at
+    the header (where the chunker splits sections) attributes to the segment's time range. The
+    body is written VERBATIM (the route skips `_finalize_body`), so the spans are exact — they
+    drive `Chunk.time_range`. The companion-deck link is document-level, not a field here (§8)."""
+    blocks: list[str] = []
+    segments: list[TranscriptSegment] = []
+    cursor = 0
+    for i, a in enumerate(asr_segments):
+        block = f"## [{_format_timestamp(a.start_s)}]\n{a.text}"
+        segments.append(
+            TranscriptSegment(
+                index=i,
+                char_start=cursor,  # the block start (the `## [mm:ss]` header)
+                char_end=cursor + len(block),
+                start_s=a.start_s,
+                end_s=a.end_s,
+                language=a.language,
+                confidence=a.confidence,
+                rationale=a.rationale,
+            )
+        )
+        blocks.append(block)
+        cursor += len(block) + 2  # the "\n\n" delimiter between blocks
+    return "\n\n".join(blocks), segments
+
+
+async def _parse_audio(
+    vault_path: Path, doc_id: str, source: Path, *, refresh_asr: bool = False
+) -> ParseResult:
+    """Parse an audio source by transcribing it to timestamped Markdown (ADR-0017). The
+    document-level analogue of the scan→VLM route: `transcribe_audio` (under the parse-time GPU
+    pause) → assemble `## [mm:ss]` blocks → the existing chunk/embed/answer pipeline. All-fail →
+    0 segments → recoverable error (HARD-gate-safe; never fabricates from silence).
+
+    Unlike the PDF routes it does NOT run `_finalize_body`: the transcript is already normalized
+    (`normalize_transcript_text`) + structured, has none of the PDF artifacts `_finalize_body`
+    targets, and its duplicate-collapse would corrupt distinct timestamped segments + drift the
+    char-spans. The body is written verbatim, so the segments' char-spans stay exact."""
+    correlation_id = str(ulid.ULID())
+    log = logger.bind(doc_id=doc_id, correlation_id=correlation_id, engine="asr")
+    log.info("parse.audio.start", source=str(source))
+    start = time.monotonic()
+
+    asr_cache = await ASRTranscriptionCache.open(vault_path)
+    try:
+        async with pause_vllm_for_gpu():  # nestable — the CLI's outer pause makes this a no-op
+            asr_segments = await transcribe_audio(
+                source=source, cache=asr_cache, refresh=refresh_asr
+            )
+    finally:
+        await asr_cache.close()
+
+    if not asr_segments:
+        raise ParseConfidenceTooLow(
+            "ASR produced no transcript from the audio source.",
+            context={"doc_id": doc_id},
+            recoverable=True,
+        )
+
+    final_body, segments = _assemble_transcript(asr_segments)
+    duration_ms = int((time.monotonic() - start) * 1000)
+
+    existing = (
+        await read_document(vault_path, doc_id)
+        if (vault_path / "documents" / f"{doc_id}.md").exists()
+        else None
+    )
+    fm = (
+        existing.frontmatter
+        if existing
+        else Frontmatter(title=await derive_title(vault_path, doc_id))
+    )
+    doc = VaultDocument(
+        ref=_bootstrap_ref(vault_path, doc_id, final_body),
+        frontmatter=fm,
+        body=final_body,
+        mtime_ns=0,
+    )
+    ref = await write_document(vault_path, doc)
+
+    parse_stage = ParseStage(
+        correlation_id=correlation_id,
+        parsed_at=now_utc(),
+        parser_version=_PARSER_VERSION,
+        pages=[],  # audio has no pages; the time/char record lives in `segments`
+        segments=segments,
+        duration_ms=duration_ms,
+    )
+    await update_manifest(
+        vault_path,
+        doc_id,
+        content_sha256=ref.content_sha256,
+        parse=parse_stage,
+        correlation_id=correlation_id,
+    )
+    log.info(
+        "parse.audio.done",
+        segments=len(segments),
+        markdown_bytes=len(final_body.encode("utf-8")),
+        duration_ms=duration_ms,
+    )
+    return ParseResult(
+        doc_id=doc_id,
+        correlation_id=correlation_id,
+        engine="asr",
+        pages=[],
+        markdown_bytes=len(final_body.encode("utf-8")),
+    )
+
+
 # Minimum figure area (PDF user-space sq. points) for the diagram
 # classification arm — mirrors chart_ocr_backend's pre-filter so a tiny
 # mis-classified badge/watermark (a 50×50 "flow_chart") doesn't trigger a
@@ -2266,7 +2436,11 @@ async def _ensure_converted_pdf(vault_path: Path, doc_id: str, source: Path) -> 
 
 
 async def parse_document(
-    doc_id: str, *, force_docling: bool | None = None, refresh_vlm: bool = False
+    doc_id: str,
+    *,
+    force_docling: bool | None = None,
+    refresh_vlm: bool = False,
+    refresh_asr: bool = False,
 ) -> ParseResult:
     """Parse the document with `doc_id`'s source into canonical markdown.
 
@@ -2279,7 +2453,9 @@ async def parse_document(
 
     Office/ODF sources (pptx/docx/xlsx/…) are converted to a cached PDF first
     and run through the full PDF pipeline, so their figures + diagrams flow
-    through the VLM / chart-OCR passes like any PDF.
+    through the VLM / chart-OCR passes like any PDF. Audio sources (mp3/wav/…,
+    ADR-0017) route to the ASR transcription path (`refresh_asr` busts the
+    cached transcription, mirroring `refresh_vlm`).
     """
     settings = get_settings()
     effective_force = force_docling if force_docling is not None else settings.parse.force_docling
@@ -2287,6 +2463,13 @@ async def parse_document(
 
     if source.suffix.lower() in {".md", ".markdown"}:
         return await _passthrough_markdown(settings.vault_path, doc_id, source)
+
+    # Audio sources AND audio-bearing video containers (ADR-0017) → the ASR route: transcribe
+    # to timestamped Markdown (the video's audio track), then hand to the existing
+    # chunk/embed/answer pipeline. A parse-stage perception model, off the grounded path;
+    # `refresh_asr` busts this doc's cached transcription first.
+    if source.suffix.lower() in MEDIA_SUFFIXES:
+        return await _parse_audio(settings.vault_path, doc_id, source, refresh_asr=refresh_asr)
 
     # Office/ODF sources can't be rasterised by pypdfium2 (the VLM + chart-OCR
     # figure renderers are PDF-only), so convert to a cached PDF and run the

@@ -26,6 +26,9 @@
     </dl>
   </section>
 
+  {# Live GPU-memory panel (auto-refreshing); the partial owns the HTMX self-poll. #}
+  {% include "_vram_panel.html" %}
+
   <div class="mode-eyebrow-row">
     <span class="mode-eyebrow mode-eyebrow-block">All modes</span>
     <span id="mode-loading" class="htmx-indicator mode-loading">switching… (restarting the orchestrator can take ~40s)</span>
@@ -62,7 +65,9 @@
   <p class="mode-howto">
     Applying a mode swaps the retrieval device (embedder/reranker reload on the new
     device) and, when the mode prescribes a posture, restarts the daemon-managed
-    orchestrator at its util + context window. To make a mode durable across
-    restarts, also set <code>MEMEX_MODELS__CO_RESIDENCE_MODE</code>.
+    orchestrator at its util + context window. <b>Manual</b> pins retrieval to the
+    explicit device knobs — no auto-tuning, and the one switch that never restarts the
+    orchestrator. To make a mode durable across restarts, also set
+    <code>MEMEX_MODELS__CO_RESIDENCE_MODE</code>.
   </p>
 </div>

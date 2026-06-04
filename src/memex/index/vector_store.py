@@ -48,6 +48,10 @@ class _ChunkRow(LanceModel):
     page: int = -1
     char_start: int = 0
     char_end: int = 0
+    # Audio time anchor (ADR-0017): the chunk's transcript time range, stored as two REALs with
+    # a -1.0 sentinel for "none" (the page convention). None on doc/PDF paths.
+    time_start: float = -1.0
+    time_end: float = -1.0
     heading_path: str = ""  # joined " > " — LanceDB doesn't love list[str] in v0.x
     embedding: Vector(EMBEDDING_DIM)  # type: ignore[valid-type]
 
@@ -61,6 +65,8 @@ def _row_from_chunk(chunk: Chunk, embedding: list[float]) -> _ChunkRow:
         page=chunk.page if chunk.page is not None else -1,
         char_start=chunk.char_start,
         char_end=chunk.char_end,
+        time_start=chunk.time_range[0] if chunk.time_range is not None else -1.0,
+        time_end=chunk.time_range[1] if chunk.time_range is not None else -1.0,
         heading_path=" > ".join(chunk.heading_path),
         embedding=embedding,
     )
@@ -75,9 +81,30 @@ def _chunk_from_row(row: _ChunkRow, *, score: float = 0.0) -> Chunk:
         page=row.page if row.page >= 0 else None,
         char_start=row.char_start,
         char_end=row.char_end,
+        time_range=(row.time_start, row.time_end) if row.time_start >= 0 else None,
         heading_path=row.heading_path.split(" > ") if row.heading_path else [],
         score=score,
     )
+
+
+async def _migrate_time_columns(db: AsyncConnection) -> None:
+    """Add the audio `time_start`/`time_end` columns (ADR-0017) to a `chunks` table created
+    BEFORE they existed, so an append/upsert with the current `_ChunkRow` schema succeeds (LanceDB
+    `add()` requires the row schema to match the table). Without this, every vault indexed before
+    the time-range columns shipped would fail to index ANY new document (the live failure that
+    surfaced on the first real audio ingest). Idempotent — skips when the columns are already
+    present. The SQL default `CAST(-1.0 AS double)` fills existing rows with the sentinel (→
+    `time_range=None` on reconstruction, the non-audio convention) and matches `_ChunkRow`'s
+    float64 mapping. FAIL-LOUD: a migration failure propagates and fails `open()` (a broken schema
+    must NOT be silently appended to — unlike `optimize()`, which is the genuine best-effort path).
+    Safe under the real flow because vault (re)indexing opens the store SERIALLY per document
+    (`index/pipeline.py::reindex_vault`), so the check-then-`add_columns` is never racing itself."""
+    table = await db.open_table(_TABLE)
+    existing = {field.name for field in await table.schema()}
+    missing = [c for c in ("time_start", "time_end") if c not in existing]
+    if missing:
+        await table.add_columns({c: "CAST(-1.0 AS double)" for c in missing})
+        logger.info("vector.migrate.time_columns", added=missing)
 
 
 class VectorStore:
@@ -121,6 +148,8 @@ class VectorStore:
             names = list(cast(Any, response))
         if _TABLE not in names:
             await db.create_table(_TABLE, schema=_ChunkRow)
+        else:
+            await _migrate_time_columns(db)
         return cls(db)
 
     async def upsert(self, chunks: list[Chunk], embeddings: list[list[float]]) -> None:

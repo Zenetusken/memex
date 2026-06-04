@@ -27,8 +27,17 @@ from pydantic import BaseModel
 
 from memex.core.errors import ConfigurationError
 
-CoResidenceMode = Literal["fast", "full", "gpu_only", "manual"]
+CoResidenceMode = Literal["auto", "fast", "full", "gpu_only", "manual"]
 Device = Literal["cuda", "cpu"]
+
+# The `auto` mode (the default) keeps the reranker on the GPU while the live FREE VRAM at its load point
+# clears this floor, else demotes it to the CPU (graceful fallback instead of OOM). CALIBRATED EMPIRICALLY
+# (2026-06-04) by loading the reranker on GPU co-resident with the 4B (which reserves ~7.4 GB at 0.62 util)
+# and running a rerank: the reranker's REAL footprint is ~1.49 GB (load ~1.06 + forward ~0.43), and free at
+# the decision point measured ~3.77 GB → GPU fits with ~2.28 GB slack. Floor = footprint + 0.5 GB buffer =
+# 2.0 GB, leaving ~1.77 GB of ambient-contention tolerance before the fallback to CPU. (Reranker order is
+# byte-identical CPU vs GPU — see the reranker-GPU-AB finding — so this is a latency knob, not correctness.)
+RERANKER_GPU_FLOOR_GB = 2.0
 
 # The reference rig these curated bundles are calibrated for (RTX 4070 12 GB).
 # `resolve_profile(total_vram_gb=...)` accepts a real card size as the seam the
@@ -136,23 +145,51 @@ def _curated(mode: CoResidenceMode) -> ResourceProfile:
     )
 
 
+def _auto_reranker_device(free_vram_gb: float | None) -> Device:
+    """The `auto` mode's reranker placement: GPU while the live free VRAM clears `RERANKER_GPU_FLOOR_GB`,
+    else CPU. `None` (probe unavailable / off-GPU) → GPU (optimistic — the pre-dynamic-manager behaviour).
+    The embedder always stays on GPU (small + keeps the query embedding bf16 in lockstep with the index)."""
+    if free_vram_gb is None:
+        return "cuda"
+    return "cuda" if free_vram_gb >= RERANKER_GPU_FLOOR_GB else "cpu"
+
+
 def resolve_profile(
     mode: CoResidenceMode,
     *,
     total_vram_gb: float | None = None,
+    free_vram_gb: float | None = None,
     embedder_device: Device = "cuda",
     reranker_device: Device = "cuda",
 ) -> ResourceProfile:
     """Resolve a mode to a concrete `ResourceProfile`.
 
-    `manual` echoes the explicit per-model device fields (the orchestrator
-    util / max-model-len are whatever the user launched → `None`). The curated
-    modes are calibrated for the `REFERENCE_VRAM_GB` tier; `total_vram_gb`,
-    when supplied, is reserved for the future dynamic manager (which will
-    COMPUTE the bundle from live VRAM) — today it does not alter the curated
-    operating points.
+    `auto` (the default) reads the LIVE `free_vram_gb` and adapts the reranker placement (GPU when it
+    fits, else CPU), at today's `fast` orchestrator posture. `manual` echoes the explicit per-model device
+    fields (the orchestrator util / max-model-len are whatever the user launched → `None`). The other
+    curated modes are calibrated for the `REFERENCE_VRAM_GB` tier; `total_vram_gb` is accepted for symmetry
+    (reserved for a fuller dynamic manager) and does not alter the curated operating points today.
     """
-    _ = total_vram_gb  # reserved: the dynamic-VRAM-manager seam
+    _ = total_vram_gb  # reserved: the dynamic-VRAM-manager seam (free_vram_gb is the live driver)
+    if mode == "auto":
+        rr = _auto_reranker_device(free_vram_gb)
+        return ResourceProfile(
+            mode="auto",
+            label="Auto",
+            summary=(
+                "Auto-tunes to your live GPU memory: retrieval runs on the GPU when it fits, and the "
+                "reranker falls back to the CPU under VRAM pressure (slower, but never an out-of-memory "
+                "failure). The orchestrator runs at the low-latency posture. No manual configuration."
+            ),
+            # Embedder always GPU; reranker adapts to live free VRAM. Orchestrator mirrors `fast`.
+            embedder_device="cuda",
+            reranker_device=rr,
+            orchestrator_gpu_fraction=0.62,
+            orchestrator_max_model_len=8192,
+            retrieval_top_k=5,
+            expected_latency="~14 s (GPU rerank) · ~34 s (CPU fallback)",
+            context_window="8,192 tokens · top-5 chunks",
+        )
     if mode == "manual":
         return ResourceProfile(
             mode="manual",
@@ -176,20 +213,26 @@ def effective_devices(
     mode: CoResidenceMode,
     embedder_device: Device,
     reranker_device: Device,
+    *,
+    free_vram_gb: float | None = None,
 ) -> tuple[Device, Device]:
     """The `(embedder, reranker)` device placement a mode dictates.
 
-    `manual` uses the explicit fields; every other mode OVERRIDES them with
-    its curated placement (the mode is the higher-level knob). The registry
-    loads each retrieval model on the returned device.
+    `manual` uses the explicit fields; `auto` reads the LIVE `free_vram_gb` (embedder GPU, reranker
+    GPU-if-it-fits-else-CPU); every other (curated) mode OVERRIDES with its fixed placement. The registry
+    loads each retrieval model on the returned device; for `auto` it passes a fresh probe so the reranker
+    decision sees the embedder + orchestrator already resident.
     """
     if mode == "manual":
         return embedder_device, reranker_device
+    if mode == "auto":
+        return "cuda", _auto_reranker_device(free_vram_gb)
     profile = _curated(mode)
     return profile.embedder_device, profile.reranker_device
 
 
-def all_modes() -> list[ResourceProfile]:
-    """Every curated mode's profile, in display order (for the webui compare
-    panel + `memex mode show`). Excludes `manual` (no fixed profile)."""
-    return [_curated(m) for m in _CURATED_ORDER]
+def all_modes(*, free_vram_gb: float | None = None) -> list[ResourceProfile]:
+    """Every selectable mode's profile, in display order (the webui `/resources` compare panel + `memex
+    mode show`). `auto` LEADS (it's the default) and reflects the live `free_vram_gb` when supplied — so
+    its row shows the placement it would resolve to right now. `manual` is excluded (no fixed profile)."""
+    return [resolve_profile("auto", free_vram_gb=free_vram_gb), *(_curated(m) for m in _CURATED_ORDER)]

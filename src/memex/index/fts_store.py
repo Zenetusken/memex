@@ -68,6 +68,10 @@ CREATE TABLE IF NOT EXISTS chunks_meta (
     char_start INTEGER NOT NULL,
     char_end INTEGER NOT NULL,
     heading_path TEXT NOT NULL,
+    -- Audio time anchor (ADR-0017): the chunk's transcript time range, two REALs with a
+    -- -1.0 sentinel for "none" (the `page` convention). -1 on doc/PDF + legacy rows.
+    time_start REAL DEFAULT -1.0,
+    time_end REAL DEFAULT -1.0,
     -- The UNSTRIPPED chunk body. The FTS5 `text` column is stripped for BM25
     -- (chart-extracted blocks + superseded GFM tables removed); the non-search
     -- read primitives (`chunks_for_document`, `chunks_by_ids`) reconstruct the
@@ -122,6 +126,12 @@ class FTSStore:
             except sqlite3.OperationalError as e:
                 if "duplicate column" not in str(e).lower():
                     raise
+            for col in ("time_start", "time_end"):  # ADR-0017 — same guarded ALTER as full_text
+                try:
+                    db.execute(f"ALTER TABLE chunks_meta ADD COLUMN {col} REAL DEFAULT -1.0")
+                except sqlite3.OperationalError as e:
+                    if "duplicate column" not in str(e).lower():
+                        raise
             return db
 
         db = await asyncio.to_thread(_connect)
@@ -185,8 +195,8 @@ class FTSStore:
             )
             self._db.executemany(
                 "INSERT INTO chunks_meta (chunk_id, document_id, document_title, "
-                "page, char_start, char_end, heading_path, full_text) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "page, char_start, char_end, heading_path, time_start, time_end, full_text) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     (
                         c.chunk_id,
@@ -196,6 +206,8 @@ class FTSStore:
                         c.char_start,
                         c.char_end,
                         " > ".join(c.heading_path),
+                        c.time_range[0] if c.time_range is not None else -1.0,
+                        c.time_range[1] if c.time_range is not None else -1.0,
                         c.text,  # UNSTRIPPED — non-search reads reconstruct from here
                     )
                     for c in deduped
@@ -321,7 +333,7 @@ class FTSStore:
                 """
                 SELECT
                   m.chunk_id, m.document_id, m.document_title, COALESCE(m.full_text, f.text),
-                  m.page, m.char_start, m.char_end, m.heading_path
+                  m.page, m.char_start, m.char_end, m.heading_path, m.time_start, m.time_end
                 FROM chunks_meta m
                 JOIN chunks_fts f ON f.chunk_id = m.chunk_id
                 WHERE m.document_id = ?
@@ -339,6 +351,7 @@ class FTSStore:
                     char_start=r[5],
                     char_end=r[6],
                     heading_path=r[7].split(" > ") if r[7] else [],
+                    time_range=(r[8], r[9]) if r[8] >= 0 else None,
                 )
                 for r in rows
             ]
@@ -361,7 +374,7 @@ class FTSStore:
                 f"""
                 SELECT
                   m.chunk_id, m.document_id, m.document_title, COALESCE(m.full_text, f.text),
-                  m.page, m.char_start, m.char_end, m.heading_path
+                  m.page, m.char_start, m.char_end, m.heading_path, m.time_start, m.time_end
                 FROM chunks_meta m
                 JOIN chunks_fts f ON f.chunk_id = m.chunk_id
                 WHERE m.chunk_id IN ({placeholders})
@@ -378,6 +391,7 @@ class FTSStore:
                     char_start=r[5],
                     char_end=r[6],
                     heading_path=r[7].split(" > ") if r[7] else [],
+                    time_range=(r[8], r[9]) if r[8] >= 0 else None,
                 )
                 for r in rows
             }
@@ -409,7 +423,7 @@ class FTSStore:
                 SELECT
                   f.chunk_id, f.document_id, f.document_title, f.text,
                   m.page, m.char_start, m.char_end, m.heading_path,
-                  bm25(chunks_fts) AS score
+                  bm25(chunks_fts) AS score, m.time_start, m.time_end
                 FROM chunks_fts f
                 JOIN chunks_meta m ON m.chunk_id = f.chunk_id
                 WHERE chunks_fts MATCH ?
@@ -428,6 +442,7 @@ class FTSStore:
                     char_start=r[5],
                     char_end=r[6],
                     heading_path=r[7].split(" > ") if r[7] else [],
+                    time_range=(r[9], r[10]) if r[9] >= 0 else None,
                     # BM25 is "lower is better"; flip + offset so larger is better.
                     score=-float(r[8]),
                 )
@@ -464,7 +479,7 @@ class FTSStore:
                 SELECT
                   f.chunk_id, f.document_id, f.document_title, f.text,
                   m.page, m.char_start, m.char_end, m.heading_path,
-                  bm25(chunks_fts) AS score
+                  bm25(chunks_fts) AS score, m.time_start, m.time_end
                 FROM chunks_fts f
                 JOIN chunks_meta m ON m.chunk_id = f.chunk_id
                 WHERE chunks_fts MATCH ?
@@ -484,6 +499,7 @@ class FTSStore:
                     char_start=r[5],
                     char_end=r[6],
                     heading_path=r[7].split(" > ") if r[7] else [],
+                    time_range=(r[9], r[10]) if r[9] >= 0 else None,
                     score=-float(r[8]),
                 )
                 for r in rows

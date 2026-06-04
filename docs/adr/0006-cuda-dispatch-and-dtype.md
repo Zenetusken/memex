@@ -31,6 +31,17 @@ This ADR settles five questions in one place so the codebase, the pyproject, and
 
 ### 1. CUDA toolkit and PyTorch wheel
 
+> **Amendment (2026-06-03) — the wheel pin moved `cu128` → `cu129`.** The decision text below records
+> the original **cu128** choice; the stack subsequently migrated to the **cu129** PyTorch index
+> (**CUDA 12.9** runtime, **driver floor unchanged at R570+**) — recorded in ROADMAP's 2026-05-20
+> E2E-production-tuning entry (audits 05–07). The driver is the pinned **vLLM 0.21+** wheels, which ship
+> CUDA 12.9 as their lowest floor (the PyPI default is CUDA 13.0); cu129 is the highest toolkit that
+> still pairs with the community AWQ kernels we depend on. So **torch / torchvision / vLLM are all routed
+> to cu129 indexes** to keep one matching `libcudart` ABI. **The authoritative declaration is
+> `pyproject.toml`** (`[[tool.uv.index]]` `pytorch-cu129` + `vllm-cu129`). The `cu128` / `CUDA 12.8`
+> strings below are preserved as the original record — **read `cu129` / `12.9` as the current state**;
+> the R570+ driver floor and the CPU-default-wheel hazard this section warns about are unchanged.
+
 - **CUDA toolkit floor**: 12.8 (paired with NVIDIA driver R570+).
 - **PyTorch wheel**: `torch>=2.7` resolved against the PyTorch `cu128` index, declared explicitly in `pyproject.toml`. The default PyPI wheel ships CPU-only — relying on it is the difference between a working system and a system that silently runs every model on CPU.
 - **uv configuration** (in `pyproject.toml`):
@@ -128,7 +139,7 @@ Rejected. The default PyPI wheel for `torch>=2.7` on Linux is `cu126`; users run
 ## Revisit When
 
 - A reference rig with FA3-capable shared-memory budget (Hopper / Blackwell consumer card) becomes a first-class target
-- PyTorch drops `cu128` wheels (no current signal) — pivot to whatever the supported pairing is
+- PyTorch drops `cu129` wheels (the current pin; see the §1 amendment) — pivot to whatever the supported pairing is
 - ~~Qwen3-VL-8B official FP8 build becomes `transformers`-loadable~~ — **superseded 2026-05-26 (P2.3 §4 amendment): shipped Qwen3-VL-8B-AWQ via a parse-time vLLM process instead** (the in-process route was a dead end for its compressed-tensors build). Revisit if an official Qwen3-VL AWQ or a transformers-loadable build appears (would allow dropping the second-process dance).
 - An open-weight VLM in the 4–8B range with materially better OCR + a transformers loader appears
 

@@ -35,6 +35,13 @@ class InsufficientVRAMError(MemexError):
     """The requested model does not fit alongside currently resident models."""
 
 
+class VRAMExhausted(MemexError):
+    """A GPU-exclusive op (the parse-time VLM serve / chart-OCR) can't fit even after freeing the
+    retrieval models — the GPU is held by another process. Carries the live free/total + the floor it
+    needed + a best-effort holder list (which process holds the VRAM), so the user sees the actionable
+    cause instead of vLLM's cryptic 'No available memory for the cache blocks'."""
+
+
 class ParseConfidenceTooLow(MemexError):
     """Docling and the VLM both produced low-confidence output for a page."""
 

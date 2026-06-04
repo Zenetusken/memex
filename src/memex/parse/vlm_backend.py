@@ -24,8 +24,9 @@ from typing import TYPE_CHECKING, Any, cast
 
 import structlog
 
+from memex.core import vram
 from memex.core.config import get_settings
-from memex.core.errors import MemexError
+from memex.core.errors import MemexError, VRAMExhausted
 from memex.models.registry import VLMHandle, get_registry
 from memex.parse.docling_backend import DoclingPageOutput
 
@@ -270,42 +271,57 @@ async def _serve_vlm_vllm(model_id: str) -> AsyncGenerator[str]:
     serve = get_settings().models.vlm_serve
     base_url = f"http://{serve.host}:{serve.port}/v1"
     log = logger.bind(component="vlm.vllm", model=model_id, port=serve.port)
-    cmd = [
-        "uv",
-        "run",
-        "--extra",
-        "serve",
-        "vllm",
-        "serve",
-        model_id,
-        "--host",
-        serve.host,
-        "--port",
-        str(serve.port),
-        "--gpu-memory-utilization",
-        str(serve.gpu_memory_utilization),
-        "--max-model-len",
-        str(serve.max_model_len),
-        "--max-num-seqs",
-        "1",
-        "--max-num-batched-tokens",
-        str(serve.max_model_len),
-        "--enforce-eager",
-        "--kv-cache-dtype",
-        "auto",
-        "--mm-processor-kwargs",
-        json.dumps({"max_pixels": serve.max_pixels, "min_pixels": serve.min_pixels}),
-        "--limit-mm-per-prompt",
-        json.dumps({"image": 1, "video": 0}),
-    ]
     env = {**os.environ, "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"}
     errlog_path = Path(tempfile.gettempdir()) / "memex_vlm_vllm_serve.log"
     proc: asyncio.subprocess.Process | None = None
     gid = 0
     attempts = 2
+    widened = False  # free the retrieval models AT MOST once (the pre-flight auto-free)
     for attempt in range(1, attempts + 1):
+        # DYNAMIC UTIL (the never-OOM fix): fit `--gpu-memory-utilization` to the LIVE free VRAM — the
+        # static 0.80 cap on a clear card (orchestrator paused), LOWER when a stray process holds VRAM (the
+        # fix for the "Free memory < desired" / "No available memory for cache blocks" startup OOMs hit
+        # live this session). `None` = even the max-available free can't hold weights+KV → WIDEN (free the
+        # retrieval models the answer path left resident) + re-check; still `None` → fail fast NAMING the
+        # holder (vs vLLM's cryptic ValueError). Probe-None (torch-less) → the static cap, unchanged.
+        util = vram.fit_serve_util(
+            vram.free_vram_gb(), vram.total_vram_gb(), cap=serve.gpu_memory_utilization
+        )
+        if util is None and not widened:
+            widened = True
+            log.info("vlm.vllm.widen.unload_retrieval")
+            await get_registry().unload_retrieval()
+            await asyncio.sleep(2.0)  # let the freed retrieval VRAM release before re-probing
+            util = vram.fit_serve_util(
+                vram.free_vram_gb(), vram.total_vram_gb(), cap=serve.gpu_memory_utilization
+            )
+        if util is None:
+            raise VRAMExhausted(
+                "the VLM serve can't fit on the GPU even after freeing the retrieval models — "
+                "another process is holding the VRAM",
+                context={
+                    "model": model_id,
+                    "free_gb": vram.free_vram_gb(),
+                    "total_gb": vram.total_vram_gb(),
+                    "holders": vram.gpu_compute_apps(),
+                },
+            )
+        cmd = [
+            "uv", "run", "--extra", "serve", "vllm", "serve", model_id,
+            "--host", serve.host,
+            "--port", str(serve.port),
+            "--gpu-memory-utilization", f"{util:g}",
+            "--max-model-len", str(serve.max_model_len),
+            "--max-num-seqs", "1",
+            "--max-num-batched-tokens", str(serve.max_model_len),
+            "--enforce-eager",
+            "--kv-cache-dtype", "auto",
+            "--mm-processor-kwargs",
+            json.dumps({"max_pixels": serve.max_pixels, "min_pixels": serve.min_pixels}),
+            "--limit-mm-per-prompt", json.dumps({"image": 1, "video": 0}),
+        ]
         errlog = errlog_path.open("wb")
-        log.info("vlm.vllm.start", attempt=attempt)
+        log.info("vlm.vllm.start", attempt=attempt, util=round(util, 3))
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=errlog,
@@ -336,6 +352,10 @@ async def _serve_vlm_vllm(model_id: str) -> AsyncGenerator[str]:
         proc = None
         log.warning("vlm.vllm.start_failed", attempt=attempt, exited_early=exited, stderr_tail=tail)
         if attempt < attempts:
+            if not widened:  # give the retry more room (it re-probes a higher free → higher util)
+                widened = True
+                log.info("vlm.vllm.widen.unload_retrieval")
+                await get_registry().unload_retrieval()
             await asyncio.sleep(5.0)  # let the GPU settle, then retry once
             continue
         raise VLMUnavailable(
@@ -604,4 +624,49 @@ async def convert_pages(
                     prompt_sha8=prompt_sha8,
                     markdown=output.markdown,
                 )
+    return results
+
+
+async def transcribe_images(
+    images: list[Image.Image],
+    *,
+    prompt: str = _PROMPT,
+    max_new_tokens: int = _MAX_NEW_TOKENS,
+) -> list[str]:
+    """OCR a batch of IN-MEMORY images (not PDF pages) to Markdown via the VLM.
+
+    The public seam for callers that already hold PIL images — e.g. the
+    companion-merge keyframe-OCR pass, which decodes lecture-video frames with
+    PyAV (ADR-0018 §13). Reuses the same VLM backend as `convert_pages` (the
+    short-lived vLLM-served Qwen3-VL, or the legacy in-process path), with ONE
+    serve spawn for the whole batch (the parse-time GPU-handoff pattern — the
+    caller wraps this in `pause_vllm_for_gpu()`). Returns markdown parallel to
+    `images`; a per-image transcription failure becomes `""` (the caller drops
+    near-empty results), never aborting the batch. No caching here — the caller
+    owns its own content-addressed cache (the key differs per image source)."""
+    if not images:
+        return []
+    settings = get_settings()
+    results: list[str] = ["" for _ in images]
+    if settings.models.vlm_serving == "vllm":
+        model_id = settings.models.vlm
+        async with _serve_vlm_vllm(model_id) as base_url:
+            for i, image in enumerate(images):
+                try:
+                    results[i] = await _vllm_transcribe(
+                        base_url, model_id, image, prompt, max_new_tokens
+                    )
+                except (VLMUnavailable, PDFRenderError) as e:
+                    logger.warning("vlm.transcribe_image_failed", index=i, error=str(e))
+        return results
+
+    registry = get_registry()
+    async with registry.use("vlm") as handle:
+        for i, image in enumerate(images):
+            try:
+                results[i] = await asyncio.to_thread(
+                    _vlm_transcribe_sync, handle, image, prompt, max_new_tokens
+                )
+            except (VLMUnavailable, PDFRenderError) as e:
+                logger.warning("vlm.transcribe_image_failed", index=i, error=str(e))
     return results

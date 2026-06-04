@@ -40,8 +40,10 @@ from __future__ import annotations
 
 import asyncio
 import mimetypes
+import os
 import re
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Callable
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -59,6 +61,7 @@ from memex.agents.bridge import BridgeAnswer, reason_then_ground
 from memex.agents.chat import answer_turn
 from memex.agents.document_summarizer import SummaryDetail, summarize_document
 from memex.agents.expert import ExpertAnswer, expert_answer
+from memex.core import vram
 from memex.core.config import get_settings
 from memex.core.conversation_store import ConversationStore
 from memex.core.errors import (
@@ -68,14 +71,20 @@ from memex.core.errors import (
     VaultIntegrityError,
 )
 from memex.core.manifest import update_manifest
-from memex.core.resources import CoResidenceMode, ResourceProfile, all_modes, resolve_profile
+from memex.core.resources import (
+    RERANKER_GPU_FLOOR_GB,
+    CoResidenceMode,
+    ResourceProfile,
+    all_modes,
+    resolve_profile,
+)
 from memex.core.scope_sets import (
     delete_scope_set,
     get_scope_set,
     list_scope_sets,
     save_scope_set,
 )
-from memex.core.types import Chunk
+from memex.core.types import Chunk, CompanionAlignment
 from memex.daemon import restart as daemon_restart
 from memex.daemon import status as daemon_status
 from memex.index.graph_store import GraphStore
@@ -196,9 +205,66 @@ def _active_profile() -> ResourceProfile:
     s = get_settings()
     return resolve_profile(
         s.models.co_residence_mode,
+        free_vram_gb=vram.free_vram_gb(),  # `auto` resolves its reranker placement from live VRAM
         embedder_device=s.models.embedder_device,
         reranker_device=s.models.reranker_device,
     )
+
+
+def _vram_panel(active: ResourceProfile) -> dict[str, object] | None:
+    """The live GPU-memory view-model for the `/resources` panel: total / used / free + the
+    per-process holder breakdown (orchestrator vs THIS web UI vs other), and the `auto`-mode
+    placement rationale (the reranker floor decision made visible). Returns `None` when the VRAM
+    probe is unavailable (CPU-only / no CUDA) so the template can show an explanatory fallback
+    instead of a blank figure. Presentation-only — a live snapshot, never read on the answer path."""
+    total = vram.total_vram_gb()
+    free = vram.free_vram_gb()
+    if total is None or free is None or total <= 0:
+        return None
+    used = max(0.0, total - free)
+    total_mib = total * 1024.0
+    self_pid = os.getpid()
+    holders: list[dict[str, object]] = []
+    for p in sorted(vram.gpu_processes() or [], key=lambda x: x.used_mib, reverse=True):
+        lname = p.name.lower()
+        if p.pid == self_pid:
+            label, kind = "This web UI", "self"
+        elif "vllm" in lname or "enginecore" in lname:
+            label, kind = "Orchestrator (vLLM)", "orchestrator"
+        else:
+            # nvidia-smi reports the absolute exe path — show just the basename (e.g. "python3").
+            label, kind = p.name.rsplit("/", 1)[-1], "other"
+        holders.append(
+            {
+                "label": label,
+                "pid": p.pid,
+                "mib": p.used_mib,
+                "pct": round(100.0 * p.used_mib / total_mib, 1),  # bar-segment width
+                "kind": kind,  # drives the colour swatch (.vram-seg-{kind})
+            }
+        )
+    # The auto-mode "why is the reranker placed here" rationale — the floor decision, surfaced.
+    rationale: str | None = None
+    if active.mode == "auto":
+        if active.reranker_device == "cuda":
+            rationale = (
+                f"Reranker on the GPU — {free:.1f} GB free clears the "
+                f"{RERANKER_GPU_FLOOR_GB:.1f} GB floor, so retrieval stays fast."
+            )
+        else:
+            rationale = (
+                f"Reranker on the CPU — {free:.1f} GB free is below the "
+                f"{RERANKER_GPU_FLOOR_GB:.1f} GB floor, so it falls back gracefully (slower, never an OOM)."
+            )
+    return {
+        "total_gb": round(total, 1),
+        "used_gb": round(used, 1),
+        "free_gb": round(free, 1),
+        "used_pct": round(100.0 * used / total),
+        "holders": holders,
+        "floor_gb": RERANKER_GPU_FLOOR_GB,
+        "rationale": rationale,
+    }
 
 
 async def _apply_mode(mode: CoResidenceMode) -> tuple[ResourceProfile, str]:
@@ -279,22 +345,39 @@ def _find_preview_pdf(vault_path: Path, doc_id: str) -> Path | None:
     return None
 
 
+def _format_time_anchor(time_range: tuple[float, float] | None) -> str:
+    """The COMPACT chip form of an audio chunk's START time — `m:ss` (or `h:mm:ss`
+    past an hour) — the transcript analogue of the `· p. N` page chip (ADR-0017),
+    so it follows the chip convention (no zero-padded leading unit) rather than the
+    body-heading form `[mm:ss]`/`[hh:mm:ss]` that `parse._format_timestamp` writes.
+    `""` for a non-audio chunk (`time_range is None`). Kept local to the webui (no
+    parse import — that boundary is closed)."""
+    if time_range is None:
+        return ""
+    total = max(0, int(time_range[0]))
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h:d}:{m:02d}:{s:02d}" if h else f"{m:d}:{s:02d}"
+
+
 def _source_view(response: FinalResponse) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
     """View-model for rendering answer/summary sources by HUMAN TITLE instead of
     the raw `docid#hash` / `[[doc#section]]` syntax. Returns:
 
-    - `chunk_refs`: `chunk_id → {title, section, href, page}` for the per-claim
+    - `chunk_refs`: `chunk_id → {title, section, href, page, time}` for the per-claim
       source chips (a claim whose chunk isn't here — e.g. a synthetic table/SQL
       chunk — falls back to the raw id in the template). `page` is `""` when
       unknown (legacy chunks indexed before the chunker's page-attribution lever
       shipped, OR a doc parsed without per-page char counts in its manifest);
       otherwise the 1-based source page number, threaded into the href as
       `?page=N#section-slug` so the doc-page template can scroll the PDF
-      preview pane to that page on landing.
+      preview pane to that page on landing. `time` is the audio time anchor
+      (`mm:ss`, ADR-0017) for a transcript chunk, `""` otherwise — page/time are
+      mutually exclusive (a doc is either paged or audio).
     - `doc_titles`: `doc_id → title` for the `render_wikilink` Sources labels.
 
-    Built from the cited chunks' OWN `document_title` + `heading_path` + `page` —
-    no extra I/O (the same data the refusal panel already shows)."""
+    Built from the cited chunks' OWN `document_title` + `heading_path` + `page` +
+    `time_range` — no extra I/O (the same data the refusal panel already shows)."""
     chunk_refs: dict[str, dict[str, str]] = {}
     doc_titles: dict[str, str] = {}
     for c in response.used_chunks:
@@ -315,6 +398,7 @@ def _source_view(response: FinalResponse) -> tuple[dict[str, dict[str, str]], di
             "section": section,
             "href": href,
             "page": page_str,
+            "time": _format_time_anchor(c.time_range),
         }
         doc_titles[c.document_id] = title
     return chunk_refs, doc_titles
@@ -414,7 +498,41 @@ async def _answer_context(
         "chunk_refs": chunk_refs,
         "doc_titles": doc_titles,
         "related": await _related_for_answer(vault_path, response),
+        "companion": await _companion_labels(vault_path, response),
     }
+
+
+async def _companion_labels(vault_path: Path, response: FinalResponse) -> dict[str, str]:
+    """`chunk_id → a companion nav label` for the cited chunks (ADR-0018 B3): a cited TRANSCRIPT chunk
+    gets `slide N` (the slide it explains); a cited DECK chunk gets `lecture mm:ss` (the spoken
+    commentary on it). Read FAIL-OPEN from the alignment sidecar — no pair / no alignment → `{}`, so
+    the answer renders exactly as before. HARD-gate-neutral (a presentation lookup over the cited
+    chunks + a read-only sidecar; never touches the answer/grounding)."""
+    from memex.core.companion_store import alignments_for_doc
+
+    out: dict[str, str] = {}
+    cache: dict[str, list[CompanionAlignment]] = {}
+    for c in response.used_chunks:
+        if c.document_id not in cache:
+            cache[c.document_id] = await alignments_for_doc(vault_path, c.document_id)
+        for a in cache[c.document_id]:
+            if c.document_id == a.transcript_doc:
+                block = next(
+                    (b for b in a.blocks if b.transcript_chunk_id == c.chunk_id and b.deck_page),
+                    None,
+                )
+                if block is not None:
+                    out[c.chunk_id] = f"slide {block.deck_page}"
+                    break
+            elif c.document_id == a.deck_doc and c.page is not None:
+                block = next(
+                    (b for b in a.blocks if b.deck_page == c.page and b.time_range is not None),
+                    None,
+                )
+                if block is not None:
+                    out[c.chunk_id] = f"lecture {_format_time_anchor(block.time_range)}"
+                    break
+    return out
 
 
 def _kind_for(path: Path) -> tuple[str, str]:
@@ -467,7 +585,20 @@ def create_app() -> FastAPI:
     # surface its nav link when it's enabled, so a disabled deployment shows no dead link.
     env.globals["expert_enabled"] = get_settings().agents.expert_mode_enabled  # type: ignore[reportUnknownMemberType]  # reason: jinja2 leaves Environment.globals unannotated
     templates = Jinja2Templates(env=env)
-    app = FastAPI(title="Memex", docs_url=None, redoc_url=None)
+
+    @asynccontextmanager
+    async def _lifespan(_app: FastAPI) -> AsyncGenerator[None]:
+        """Clean shutdown (dynamic VRAM manager): on exit, release every GPU model this server loaded so
+        its VRAM doesn't linger and contend with the next process's parse / VLM-serve — the proactive fix
+        for the stale-webui-holds-VRAM trap. No-op if the registry was never initialised (a test app)."""
+        yield
+        try:
+            await get_registry().unload_all()
+            logger.info("webui.shutdown.gpu_released")
+        except ModelNotConfigured:
+            pass  # registry never set up (e.g. a TestClient app) — nothing resident to release
+
+    app = FastAPI(title="Memex", docs_url=None, redoc_url=None, lifespan=_lifespan)
 
     if _STATIC_DIR.exists():
         app.mount(
@@ -535,14 +666,20 @@ def create_app() -> FastAPI:
         )
         n = len(ctx["suggested"])  # type: ignore[arg-type]  # reason: list[dict] from the context
         if not scope_doc_ids:
-            ctx["scope_flash"] = {"kind": "error", "text": "Tick one or more documents, then Suggest related."}
+            ctx["scope_flash"] = {
+                "kind": "error",
+                "text": "Tick one or more documents, then Suggest related.",
+            }
         elif n:
             ctx["scope_flash"] = {
                 "kind": "ok",
                 "text": f"{n} related document{'' if n == 1 else 's'} — tick any to add to your scope.",
             }
         else:
-            ctx["scope_flash"] = {"kind": "ok", "text": "No related documents found for your selection."}
+            ctx["scope_flash"] = {
+                "kind": "ok",
+                "text": "No related documents found for your selection.",
+            }
         return templates.TemplateResponse(request, "_scope_picker.html", ctx)
 
     @app.post("/scope-sets/apply", response_class=HTMLResponse)
@@ -645,9 +782,7 @@ def create_app() -> FastAPI:
             )
         cid = str(ulid.ULID())
         scope_source = "selected" if scope_doc_ids else "named"
-        progress.new(
-            cid, scope_doc_ids=scope_doc_ids, scope_source=scope_source, question=question
-        )
+        progress.new(cid, scope_doc_ids=scope_doc_ids, scope_source=scope_source, question=question)
         task = asyncio.create_task(_run_ask(cid, question, scope_doc_ids))
         progress.attach_task(cid, task)  # strong ref → the loop won't GC the task mid-run
         return templates.TemplateResponse(
@@ -711,13 +846,39 @@ def create_app() -> FastAPI:
     ) -> dict[str, object]:
         # `oob_chip` emits an out-of-band swap for the header mode chip — only on the
         # POST (a live switch), so the GET full-page render has no duplicate id.
+        # Pass the LIVE free-VRAM so the `auto` row reflects the placement it would resolve to right now
+        # (GPU vs CPU reranker) and the page can show the current headroom.
+        free = vram.free_vram_gb()
+        active = _active_profile()
+        # `all_modes` excludes `manual` (it has no fixed profile — it echoes the explicit device
+        # knobs). Surface it anyway so the user can PIN to the manual escape hatch from the table:
+        # resolve it against the current device settings. Applying it skips the daemon restart
+        # (its orchestrator posture is None), so it's the one switch that never bounces the 4B.
+        s = get_settings()
+        manual = resolve_profile(
+            "manual",
+            embedder_device=s.models.embedder_device,
+            reranker_device=s.models.reranker_device,
+        )
         return {
-            "active": _active_profile(),
-            "modes": all_modes(),
+            "active": active,
+            "modes": [*all_modes(free_vram_gb=free), manual],
+            "free_vram_gb": round(free, 1) if free is not None else None,
+            "vram": _vram_panel(active),  # total/used/free + holder breakdown + auto rationale
             "flash": flash,
             "flash_error": flash_error,
             "oob_chip": oob_chip,
         }
+
+    @app.get("/resources/vram", response_class=HTMLResponse)
+    async def resources_vram(request: Request) -> HTMLResponse:
+        """The live GPU-memory panel fragment — the HTMX auto-refresh target (every 5s). Read-only
+        (an nvidia-smi holder probe + a torch VRAM read); NEVER touches the daemon, so it is safe to
+        poll while an answer / eval is in flight. Returns just the `_vram_panel.html` partial, which
+        re-arms its own `hx-trigger`."""
+        return templates.TemplateResponse(
+            request, "_vram_panel.html", {"vram": _vram_panel(_active_profile())}
+        )
 
     @app.get("/resources", response_class=HTMLResponse)
     async def resources(request: Request) -> HTMLResponse:
@@ -732,7 +893,7 @@ def create_app() -> FastAPI:
         orchestrator at the mode's util/context window. Serialized; the daemon
         restart blocks ~40 s (the form shows an indicator). Returns the
         `_resources.html` partial (HTMX swap) reflecting the new active profile."""
-        valid = ("fast", "full", "gpu_only", "manual")
+        valid = ("auto", "fast", "full", "gpu_only", "manual")
         if mode not in valid:
             return templates.TemplateResponse(
                 request,
@@ -1275,7 +1436,9 @@ def create_app() -> FastAPI:
                 "_expert.html",
                 {"answer": None, "error": entry.error or "Reasoning produced no result."},
             )
-        return templates.TemplateResponse(request, "_expert.html", {"answer": answer, "error": None})
+        return templates.TemplateResponse(
+            request, "_expert.html", {"answer": answer, "error": None}
+        )
 
     async def _run_bridge(
         cid: str, question: str, scope_doc_ids: list[str], present_as_answer: bool = False
@@ -1747,9 +1910,7 @@ def create_app() -> FastAPI:
             try:
                 # Both lenses share one graph open — the document lens drives the header
                 # count + the alternate view; the bridge lens is the default render.
-                related = [
-                    r.model_dump() for r in await store.related_documents(doc_id, limit=50)
-                ]
+                related = [r.model_dump() for r in await store.related_documents(doc_id, limit=50)]
                 bridges = [b.model_dump() for b in await store.related_bridges(doc_id)]
             finally:
                 await store.close()
@@ -1829,9 +1990,7 @@ async def _scope_picker_context(
     """
     docs: list[dict[str, str]] = []
     async for ref in list_documents(vault_path):
-        docs.append(
-            {"doc_id": ref.doc_id, "title": await _safe_doc_title(vault_path, ref.doc_id)}
-        )
+        docs.append({"doc_id": ref.doc_id, "title": await _safe_doc_title(vault_path, ref.doc_id)})
     docs.sort(key=lambda d: d["title"].lower())
     try:
         saved = await list_scope_sets(vault_path)

@@ -859,3 +859,26 @@ async def test_recipe_bump_off_to_on_forces_reembed(
     manifest_on = await read_manifest(settings.vault_path, doc_id)
     assert manifest_on is not None and manifest_on.index is not None
     assert manifest_on.index.embedding_recipe_version == "v1-gemma-prompts"
+
+
+@pytest.mark.asyncio
+async def test_reindex_force_drops_derived_sidecars_keeps_user_data(
+    settings: MemexSettings, tmp_vault: Path
+) -> None:
+    """`reindex_vault(force=True)` tears down DERIVED state — including the ADR-0017 `asr_cache.sqlite`
+    and the ADR-0018 `companion_alignments.json` sidecars — but PRESERVES user-authored data
+    (`scope_sets.json`). A 0-document vault runs the teardown then re-indexes nothing (no GPU)."""
+    from memex.index.pipeline import reindex_vault
+
+    memex = tmp_vault / ".memex"
+    memex.mkdir(parents=True, exist_ok=True)
+    derived = ["asr_cache.sqlite", "companion_alignments.json", "vlm_cache.sqlite", "search.sqlite"]
+    for name in derived:
+        (memex / name).write_text("x", encoding="utf-8")
+    (memex / "scope_sets.json").write_text('{"sets": []}', encoding="utf-8")  # user-authored: KEEP
+
+    await reindex_vault(force=True)
+
+    for name in derived:
+        assert not (memex / name).exists(), f"{name} (derived) should be dropped on force-reindex"
+    assert (memex / "scope_sets.json").exists()  # user data survives a full rebuild

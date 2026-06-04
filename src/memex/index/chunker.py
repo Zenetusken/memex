@@ -461,10 +461,27 @@ def _page_for_offset(intervals: list[tuple[int, int, int]], offset: int) -> int 
     return intervals[-1][0]
 
 
+def _time_range_for_offset(
+    intervals: list[tuple[int, int, float, float]], offset: int
+) -> tuple[float, float] | None:
+    """The audio analogue of `_page_for_offset` (ADR-0017): find the transcript SEGMENT whose
+    char-span `(char_start, char_end)` contains `offset` and return its `(start_s, end_s)` GLOBAL
+    time range. A chunk past the last segment's end attributes to the last segment (post-finalize
+    drift — navigation-grade, like the page mapping). `None` when there are no segments."""
+    if not intervals:
+        return None
+    for char_start, char_end, start_s, end_s in intervals:
+        if char_start <= offset < char_end:
+            return (start_s, end_s)
+    last = intervals[-1]
+    return (last[2], last[3])
+
+
 def chunk_document(
     doc: VaultDocument,
     *,
     page_char_counts: list[tuple[int, int]] | None = None,
+    segment_intervals: list[tuple[int, int, float, float]] | None = None,
 ) -> list[Chunk]:
     """Produce the canonical chunk list for a vault document.
 
@@ -486,6 +503,13 @@ def chunk_document(
     manifests), `Chunk.page` stays `None` and the webui falls back to
     section-only anchors. HARD-gate-neutral (a derived navigation
     metadata field; never alters retrieval or grounding).
+
+    `segment_intervals` is the audio analogue (ADR-0017): optional
+    `[(char_start, char_end, start_s, end_s), ...]` from `ParseStage.segments`
+    — when provided, each chunk's `Chunk.time_range` is set to the GLOBAL
+    `(start_s, end_s)` of the transcript segment its `char_start` falls in
+    (drives the webui's `[mm:ss]` source label). `None` for non-audio docs;
+    same navigation-grade / HARD-gate-neutral contract as `page`.
     """
     try:
         settings = get_settings()
@@ -513,6 +537,9 @@ def chunk_document(
         ):
             heading_path = _heading_path_at(doc.body, cs, chart_spans=chart_spans)
             page = _page_for_offset(intervals, cs) if intervals else None
+            time_range = (
+                _time_range_for_offset(segment_intervals, cs) if segment_intervals else None
+            )
             out.append(
                 Chunk(
                     chunk_id=_stable_chunk_id(doc.ref.doc_id, text),
@@ -523,6 +550,7 @@ def chunk_document(
                     char_start=cs,
                     char_end=ce,
                     heading_path=heading_path,
+                    time_range=time_range,
                 )
             )
     return out

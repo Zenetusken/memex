@@ -84,9 +84,43 @@ def test_unknown_mode_raises() -> None:
         resolve_profile("bogus")  # type: ignore[arg-type]  # deliberately invalid
 
 
-def test_all_modes_lists_curated_in_order_excluding_manual() -> None:
+def test_all_modes_leads_with_auto_then_curated_excluding_manual() -> None:
     modes = all_modes()
-    assert [m.mode for m in modes] == ["fast", "full", "gpu_only"]
+    assert [m.mode for m in modes] == ["auto", "fast", "full", "gpu_only"]
     assert all(isinstance(m, ResourceProfile) for m in modes)
-    # Every curated profile prescribes an orchestrator posture.
+    # Every selectable profile prescribes an orchestrator posture (auto mirrors fast's 0.62/8192).
     assert all(m.orchestrator_gpu_fraction is not None for m in modes)
+
+
+def test_all_modes_auto_row_reflects_live_free_vram() -> None:
+    # The auto row's reranker placement tracks the supplied live free-VRAM (GPU when it fits, else CPU).
+    assert all_modes(free_vram_gb=5.0)[0].reranker_device == "cuda"
+    assert all_modes(free_vram_gb=1.0)[0].reranker_device == "cpu"
+
+
+# ── auto mode (the default; live-VRAM-driven reranker placement) ─────────────────────────────────────
+def test_auto_keeps_reranker_on_gpu_when_free_clears_the_floor() -> None:
+    # Free at the decision point ≥ RERANKER_GPU_FLOOR_GB (2.0) → GPU rerank (the optimal default).
+    p = resolve_profile("auto", free_vram_gb=3.77)  # the measured live operating point
+    assert (p.embedder_device, p.reranker_device) == ("cuda", "cuda")
+    # Posture mirrors fast (no orchestrator change vs today's default).
+    assert (p.orchestrator_gpu_fraction, p.orchestrator_max_model_len, p.retrieval_top_k) == (0.62, 8192, 5)
+
+
+def test_auto_demotes_reranker_to_cpu_under_vram_pressure() -> None:
+    # Free below the floor (a 2nd GPU consumer / desktop spike) → CPU reranker (graceful, never OOM).
+    p = resolve_profile("auto", free_vram_gb=1.5)
+    assert (p.embedder_device, p.reranker_device) == ("cuda", "cpu")
+
+
+def test_auto_optimistic_gpu_when_probe_unavailable() -> None:
+    # No probe (off-GPU / torch-less) → GPU reranker (the pre-dynamic-manager behaviour); embedder GPU.
+    p = resolve_profile("auto", free_vram_gb=None)
+    assert (p.embedder_device, p.reranker_device) == ("cuda", "cuda")
+
+
+def test_effective_devices_auto_reads_free_vram_and_ignores_explicit_knobs() -> None:
+    # auto OVERRIDES the explicit device fields (like the curated modes), driven by free_vram_gb.
+    assert effective_devices("auto", "cpu", "cpu", free_vram_gb=4.0) == ("cuda", "cuda")
+    assert effective_devices("auto", "cuda", "cuda", free_vram_gb=1.0) == ("cuda", "cpu")
+    assert effective_devices("auto", "cpu", "cpu", free_vram_gb=None) == ("cuda", "cuda")  # optimistic

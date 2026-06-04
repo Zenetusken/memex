@@ -255,6 +255,53 @@ async def test_ask_source_link_carries_page_when_chunk_attributed(
 
 
 @pytest.mark.asyncio
+async def test_ask_source_link_carries_time_anchor_for_audio_chunk(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An audio transcript chunk (ADR-0017, `Chunk.time_range` populated) gets a
+    `· mm:ss` time chip on its source link — the audio analogue of the `· p. N`
+    page chip. A non-audio chunk (no time_range) shows no chip (pinned above)."""
+
+    async def _fake(question: str, **_kw: Any) -> FinalResponse:
+        chunk = Chunk(
+            chunk_id="lecture1#t1",
+            document_id="lecture1",
+            document_title="Lecture 1",
+            text="VLANs segment the broadcast domain.",
+            heading_path=["[01:02]"],
+            time_range=(62.0, 66.0),
+        )
+        return FinalResponse(
+            answered=True,
+            summary="VLANs segment the network.",
+            claims=[
+                CitedClaim(
+                    claim="A VLAN segments the broadcast domain.",
+                    source_chunk_id="lecture1#t1",
+                    confidence="high",
+                )
+            ],
+            used_chunks=[chunk],
+            wikilinks=[],
+            correlation_id="01HZTIME0000000000000000",
+            tokens_used=10,
+            nodes_traversed=4,
+            regenerate_attempts=0,
+        )
+
+    monkeypatch.setattr("memex.webui.app.answer_query", _fake)
+    text = await _ask_to_completion(client.app, "what does a VLAN do?")
+    # The transcript chunk's start time (62.0s) renders as a readable mm:ss chip;
+    # no page chip (audio has no pages).
+    assert "Lecture 1 · 1:02" in text
+    assert "· p." not in text
+    # The section heading IS the timestamp `[01:02]` for a transcript chunk, so the
+    # redundant `› [01:02]` segment is suppressed in favour of the normalized chip
+    # (F1: no `Lecture 1 › [01:02] · 1:02` duplication).
+    assert "[01:02]" not in text
+
+
+@pytest.mark.asyncio
 async def test_ask_renders_refusal(client: TestClient, fake_refused: None) -> None:
     text = await _ask_to_completion(client.app, "What is the etymology?")
     assert "Refused" in text
@@ -659,7 +706,9 @@ def test_summary_labels_sources_by_section_not_repeated_doc_title(client: TestCl
             answered=True,
             summary="A grounded summary.",
             claims=[
-                CitedClaim(claim="R1 and R2 are routers.", source_chunk_id="abcd1234#k", confidence="high")
+                CitedClaim(
+                    claim="R1 and R2 are routers.", source_chunk_id="abcd1234#k", confidence="high"
+                )
             ],
             used_chunks=[chunk],
             wikilinks=["[[abcd1234#Key Components]]"],
@@ -676,6 +725,49 @@ def test_summary_labels_sources_by_section_not_repeated_doc_title(client: TestCl
     assert "Access Control Exercise › Key Components" not in r.text
     # No redundant Sources section (every source is this one doc).
     assert "Sources" not in r.text
+
+
+def test_summary_source_chip_shows_time_anchor_for_audio_chunk(client: TestClient) -> None:
+    """A summary of an audio transcript labels each key-point source by its `· mm:ss`
+    time chip (F3 coverage, ADR-0017). The redundant `[00:30]` heading-as-section is
+    suppressed in favour of the normalized chip — the summary analogue of the `/ask`
+    suppression."""
+    registry = client.app.state.progress
+    cid = "01HZSUMMARYTIME000000000000"
+    registry.new(cid, scope_doc_ids=[], scope_source="named")
+    chunk = Chunk(
+        chunk_id="lecture2#t0",
+        document_id="lecture2",
+        document_title="Lecture 2",
+        text="Routers forward packets between networks.",
+        heading_path=["[00:30]"],
+        time_range=(30.0, 35.0),
+    )
+    registry.finish(
+        cid,
+        response=FinalResponse(
+            answered=True,
+            summary="A grounded transcript summary.",
+            claims=[
+                CitedClaim(
+                    claim="A router forwards packets between networks.",
+                    source_chunk_id="lecture2#t0",
+                    confidence="high",
+                )
+            ],
+            used_chunks=[chunk],
+            wikilinks=[],
+            correlation_id=cid,
+            tokens_used=5,
+            nodes_traversed=2,
+            regenerate_attempts=0,
+        ),
+    )
+    r = client.get(f"/documents/lecture2/summarize/status?cid={cid}&v=0")
+    assert r.status_code == 200
+    assert "· 0:30" in r.text  # the time chip
+    assert "[00:30]" not in r.text  # the redundant bracketed section is suppressed
+    assert "· p." not in r.text  # audio has no page chip
 
 
 @pytest.mark.asyncio
@@ -773,7 +865,10 @@ class _SuggestFake:
 
         return [
             RelatedDocument(
-                doc_id="rel-doc-1", title="Related Suggestion", score=5.0, shared_entities=["DNS spoofing"]
+                doc_id="rel-doc-1",
+                title="Related Suggestion",
+                score=5.0,
+                shared_entities=["DNS spoofing"],
             )
         ]
 
@@ -1304,9 +1399,7 @@ async def test_graph_renders_bridges_view(
     related docs under their bridging ENTITY, each entity a `/entity?name=` traversal link and
     each doc a `/documents/` link. The single-doc bridge ('reflexivity') folds into the tail."""
     ref = await ingest_markdown_passthrough("# Center\n\nThe centerpiece.\n", source_stem="center")
-    monkeypatch.setattr(
-        "memex.webui.app.GraphStore.open", staticmethod(_fake_graph_store().open)
-    )
+    monkeypatch.setattr("memex.webui.app.GraphStore.open", staticmethod(_fake_graph_store().open))
 
     r = client.get(f"/graph/{ref.doc_id}")
     assert r.status_code == 200
@@ -1336,9 +1429,7 @@ async def test_graph_document_lens_renders_ranked_list(
     """`?group=document` renders the flat strength-ranked neighbour list (the alternate lens),
     each row a doc link + its connecting entities."""
     ref = await ingest_markdown_passthrough("# Center\n\nThe centerpiece.\n", source_stem="center2")
-    monkeypatch.setattr(
-        "memex.webui.app.GraphStore.open", staticmethod(_fake_graph_store().open)
-    )
+    monkeypatch.setattr("memex.webui.app.GraphStore.open", staticmethod(_fake_graph_store().open))
 
     r = client.get(f"/graph/{ref.doc_id}?group=document")
     assert r.status_code == 200
@@ -1496,13 +1587,27 @@ class _RelatedFake:
 
         if doc_id == "aaaa1111":
             return [
-                RelatedDocument(doc_id="cccc3333-sibling", title="Sibling C", score=3.9, shared_entities=["DNS spoofing"]),
-                RelatedDocument(doc_id="bbbb2222", title="Doc B", score=2.0, shared_entities=["x"]),  # CITED → excluded
+                RelatedDocument(
+                    doc_id="cccc3333-sibling",
+                    title="Sibling C",
+                    score=3.9,
+                    shared_entities=["DNS spoofing"],
+                ),
+                RelatedDocument(
+                    doc_id="bbbb2222", title="Doc B", score=2.0, shared_entities=["x"]
+                ),  # CITED → excluded
             ]
         if doc_id == "bbbb2222":
             return [
-                RelatedDocument(doc_id="cccc3333-sibling", title="Sibling C", score=4.5, shared_entities=["firewall"]),
-                RelatedDocument(doc_id="dddd4444-other", title="Doc D", score=1.0, shared_entities=["y"]),
+                RelatedDocument(
+                    doc_id="cccc3333-sibling",
+                    title="Sibling C",
+                    score=4.5,
+                    shared_entities=["firewall"],
+                ),
+                RelatedDocument(
+                    doc_id="dddd4444-other", title="Doc D", score=1.0, shared_entities=["y"]
+                ),
             ]
         return []
 
@@ -1569,7 +1674,9 @@ async def test_ask_refusal_has_no_related_panel(
             answered=False,
             refusal_reason="Not in the corpus.",
             used_chunks=[
-                Chunk(chunk_id="aaaa1111#h1", document_id="aaaa1111", document_title="Doc A", text="a"),
+                Chunk(
+                    chunk_id="aaaa1111#h1", document_id="aaaa1111", document_title="Doc A", text="a"
+                ),
             ],
             correlation_id="01HZREFUSE0000000000000000",
             tokens_used=5,
@@ -1676,10 +1783,17 @@ async def test_entity_view_renders_did_you_mean_when_unresolved(
     async def _fake(name: str, **_kw: object) -> object:
         return EntityOverview(
             profile=EntityProfile(
-                query_name=name, matched_names=[], kinds=[], doc_count=0,
-                mentions=[], cooccurring=[], resolved=False,
+                query_name=name,
+                matched_names=[],
+                kinds=[],
+                doc_count=0,
+                mentions=[],
+                cooccurring=[],
+                resolved=False,
                 suggestions=[
-                    EntitySuggestion(name="Domain Name System", kind="concept", doc_count=3, relation="acronym")
+                    EntitySuggestion(
+                        name="Domain Name System", kind="concept", doc_count=3, relation="acronym"
+                    )
                 ],
             ),
             passages=[Chunk(chunk_id="z#1", document_id="z", document_title="Z", text="…")],
@@ -1706,11 +1820,23 @@ async def test_entity_unknown_with_no_bridge_stays_honest(
     async def _fake(name: str, **_kw: object) -> object:
         return EntityOverview(
             profile=EntityProfile(
-                query_name=name, matched_names=[], kinds=[], doc_count=0,
-                mentions=[], cooccurring=[], resolved=False, suggestions=[],
+                query_name=name,
+                matched_names=[],
+                kinds=[],
+                doc_count=0,
+                mentions=[],
+                cooccurring=[],
+                resolved=False,
+                suggestions=[],
             ),
-            passages=[Chunk(chunk_id="z#1", document_id="z", document_title="Z",
-                            text="Spanning Tree Protocol prevents loops.")],
+            passages=[
+                Chunk(
+                    chunk_id="z#1",
+                    document_id="z",
+                    document_title="Z",
+                    text="Spanning Tree Protocol prevents loops.",
+                )
+            ],
             passages_scoped=False,
         )
 
@@ -1734,13 +1860,21 @@ async def test_entity_view_unknown_falls_back_to_fts(
     async def _fake(name: str, **_kw: object) -> object:
         return EntityOverview(
             profile=EntityProfile(
-                query_name=name, matched_names=[], kinds=[], doc_count=0,
-                mentions=[], cooccurring=[], resolved=False,
+                query_name=name,
+                matched_names=[],
+                kinds=[],
+                doc_count=0,
+                mentions=[],
+                cooccurring=[],
+                resolved=False,
             ),
             passages=[
                 Chunk(
-                    chunk_id="z#1", document_id="zzzz9999-mod-5", document_title="Module 5",
-                    text="Spanning Tree Protocol prevents loops.", heading_path=["STP"],
+                    chunk_id="z#1",
+                    document_id="zzzz9999-mod-5",
+                    document_title="Module 5",
+                    text="Spanning Tree Protocol prevents loops.",
+                    heading_path=["STP"],
                 )
             ],
             passages_scoped=False,
@@ -1818,10 +1952,10 @@ def test_title_save_404s_on_unknown_doc(client: TestClient) -> None:
 
 
 def test_header_shows_mode_chip(client: TestClient) -> None:
-    # Default mode is "manual"; the chip renders on every page.
+    # Default mode is now "auto" (the dynamic VRAM manager); the chip renders on every page.
     body = client.get("/").text
     assert "mode-chip" in body
-    assert "Manual" in body  # the active label
+    assert "Auto" in body  # the active label
 
 
 def test_resources_page_compares_all_modes(client: TestClient) -> None:
@@ -1854,6 +1988,84 @@ def test_resources_page_highlights_active_curated_mode(
         assert "Full context" in client.get("/").text  # chip label
     finally:
         set_settings(None)
+
+
+def test_resources_renders_vram_panel(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The /resources page surfaces a live GPU-memory panel: total/used/free + the per-process
+    # holder breakdown (orchestrator vs this web UI vs other) + the auto-mode placement rationale.
+    import os
+
+    from memex.core.types import GpuProcess
+
+    monkeypatch.setattr("memex.core.vram.total_vram_gb", lambda: 12.0)
+    monkeypatch.setattr("memex.core.vram.free_vram_gb", lambda: 4.0)
+    monkeypatch.setattr(
+        "memex.core.vram.gpu_processes",
+        lambda: [
+            GpuProcess(pid=99001, name="VLLM::EngineCore", used_mib=6090),
+            GpuProcess(pid=os.getpid(), name="python3", used_mib=2026),
+            GpuProcess(pid=99002, name="Xorg", used_mib=300),
+        ],
+    )
+    r = client.get("/resources")
+    assert r.status_code == 200
+    assert "GPU memory" in r.text
+    assert "<b>8.0</b> GB used" in r.text  # 12.0 total − 4.0 free
+    assert "<b>4.0</b> GB free" in r.text
+    assert "12.0 GB total" in r.text
+    assert "Orchestrator (vLLM)" in r.text  # the vLLM holder labelled
+    assert "This web UI" in r.text  # the in-process holder labelled (pid == os.getpid())
+    assert "vram-seg-orchestrator" in r.text  # the bar-segment swatch
+    # auto + reranker-on-GPU (4.0 GB free ≥ 2.0 GB floor) → the placement rationale is shown
+    assert "Reranker on the GPU" in r.text
+    assert "2.0 GB floor" in r.text
+
+
+def test_resources_vram_panel_unavailable_fallback(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Off-GPU / no-CUDA: the probe returns None → a clear fallback message, NOT a blank figure
+    # (the old `{% if free_vram_gb is not none %}` guard rendered "<b> GB</b>" on an Undefined var).
+    monkeypatch.setattr("memex.core.vram.total_vram_gb", lambda: None)
+    monkeypatch.setattr("memex.core.vram.free_vram_gb", lambda: None)
+    r = client.get("/resources")
+    assert r.status_code == 200
+    assert "VRAM probe unavailable" in r.text
+    assert "GB used" not in r.text  # no figures rendered when the probe is unavailable
+
+
+def test_resources_vram_fragment_auto_refreshes(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # GET /resources/vram is the HTMX auto-refresh target — it returns JUST the panel partial,
+    # which re-arms its own `every 5s` trigger so the cycle is self-sustaining. Read-only.
+    from memex.core.types import GpuProcess
+
+    monkeypatch.setattr("memex.core.vram.total_vram_gb", lambda: 12.0)
+    monkeypatch.setattr("memex.core.vram.free_vram_gb", lambda: 5.0)
+    monkeypatch.setattr(
+        "memex.core.vram.gpu_processes",
+        lambda: [GpuProcess(pid=99001, name="VLLM::EngineCore", used_mib=6090)],
+    )
+    r = client.get("/resources/vram")
+    assert r.status_code == 200
+    assert "GPU memory" in r.text
+    assert "<b>5.0</b> GB free" in r.text  # live figure
+    assert "Orchestrator (vLLM)" in r.text
+    # the returned fragment carries its own poll trigger (the self-sustaining refresh loop)
+    assert 'hx-get="/resources/vram"' in r.text
+    assert 'hx-trigger="every 5s"' in r.text
+    # …and the full page embeds the same auto-refreshing panel
+    assert 'hx-trigger="every 5s"' in client.get("/resources").text
+
+
+def test_resources_table_surfaces_manual_mode(client: TestClient) -> None:
+    # `manual` (the escape hatch — pin to the explicit device knobs) is now a selectable table row,
+    # even though `all_modes()` excludes it (no fixed profile). Applying it skips the daemon restart.
+    r = client.get("/resources")
+    assert r.status_code == 200
+    assert '<code class="mode-table-id">manual</code>' in r.text  # the manual row is present
+    assert '{"mode": "manual"}' in r.text  # …with an apply button wired to switch to it
 
 
 # ── live mode hot-switch (ADR-0007) — POST /resources/mode ──
@@ -1941,7 +2153,9 @@ def fake_chat_answered(monkeypatch: pytest.MonkeyPatch) -> None:
             answered=True,
             summary="Chat grounded answer.",
             claims=[CitedClaim(claim="a chat claim", source_chunk_id="d1#a", confidence="high")],
-            used_chunks=[Chunk(chunk_id="d1#a", document_id="d1", document_title="Doc One", text="x")],
+            used_chunks=[
+                Chunk(chunk_id="d1#a", document_id="d1", document_title="Doc One", text="x")
+            ],
             wikilinks=["[[d1#Section]]"],
             correlation_id="01HZCHATWEBUI00000000000000",
             tokens_used=7,
@@ -2100,7 +2314,9 @@ async def test_chat_turn_zero_persists_scope_pin(
 
     app = create_app()
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
-        conv = (await ac.get("/chat", follow_redirects=False)).headers["location"].rsplit("/", 1)[-1]
+        conv = (
+            (await ac.get("/chat", follow_redirects=False)).headers["location"].rsplit("/", 1)[-1]
+        )
         r = await ac.post(
             f"/chat/{conv}/turn", data={"message": "q", "scope_doc_ids": ["d1", "d2"]}
         )
@@ -2145,8 +2361,11 @@ def fake_expert(monkeypatch: pytest.MonkeyPatch) -> None:
             answer="RSTP converges faster than STP because of its handshake.",
             evidence=[
                 ExpertEvidence(
-                    chunk_id="d1#a", document_id="d1", title="RSTP Guide",
-                    section="Convergence", snippet="…",
+                    chunk_id="d1#a",
+                    document_id="d1",
+                    title="RSTP Guide",
+                    section="Convergence",
+                    snippet="…",
                 )
             ],
             provenance_note=EXPERT_PROVENANCE_NOTE,
@@ -2248,13 +2467,26 @@ def _install_fake_bridge(
             on_phase("Reasoning")
             on_phase("Grounding claims")
         claims = (
-            [CitedClaim(claim="OSPF is a link-state protocol.", source_chunk_id="d1#a", confidence="high")]
+            [
+                CitedClaim(
+                    claim="OSPF is a link-state protocol.",
+                    source_chunk_id="d1#a",
+                    confidence="high",
+                )
+            ]
             if grounded
             else []
         )
         sources = (
-            [Chunk(chunk_id="d1#a", document_id="d1", document_title="OSPF Guide",
-                   text="OSPF is link-state.", heading_path=["Intro"])]
+            [
+                Chunk(
+                    chunk_id="d1#a",
+                    document_id="d1",
+                    document_title="OSPF Guide",
+                    text="OSPF is link-state.",
+                    heading_path=["Intro"],
+                )
+            ]
             if grounded
             else []
         )
@@ -2267,8 +2499,15 @@ def _install_fake_bridge(
             analysis="OSPF converges quickly; BGP is policy-driven.",
             grounded_claims=claims,
             grounded_sources=sources,
-            evidence=[ExpertEvidence(chunk_id="d1#a", document_id="d1", title="OSPF Guide",
-                                     section="Intro", snippet="…")],
+            evidence=[
+                ExpertEvidence(
+                    chunk_id="d1#a",
+                    document_id="d1",
+                    title="OSPF Guide",
+                    section="Intro",
+                    snippet="…",
+                )
+            ],
             provenance_note=BRIDGE_PROVENANCE_NOTE,
             n_extracted=2,
             n_grounded=len(claims),
@@ -2277,7 +2516,9 @@ def _install_fake_bridge(
             correlation_id=kw.get("correlation_id") or "cid",
             present_as_answer=present,
             responsive=(responsive if gate_runs else None),
-            relevance_reason=("" if responsive else "answers a related question") if gate_runs else "",
+            relevance_reason=("" if responsive else "answers a related question")
+            if gate_runs
+            else "",
             answer_headline=(" ".join(c.claim for c in claims) if gate_runs else ""),
             # The name-only guard normally filters this; the fake's chunk text is substantive,
             # so presentable == grounded (the surface renders presented_claims when presented).
@@ -2391,7 +2632,9 @@ async def test_ask_refusal_offers_escalation_when_expert_enabled(
     assert "Refused" in text
     assert 'hx-post="/bridge"' in text  # the consented escalation form targets the bridge
     assert "verify this" in text  # the "Reason & verify this →" affordance
-    assert "an unanswerable question?" in text  # the original question carried into the hidden input
+    assert (
+        "an unanswerable question?" in text
+    )  # the original question carried into the hidden input
 
 
 @pytest.mark.asyncio
@@ -2585,3 +2828,62 @@ async def test_bridge_scopes_to_selected_docs(
     assert captured["scope_doc_ids"] == [lec.doc_id]  # the route forwarded the selection
     assert "Scoped to your selected document" in text  # the result-side scope note
     assert "ENSA Module 1 OSPF" in text  # scoped doc shown by title
+
+
+@pytest.mark.asyncio
+async def test_ask_renders_companion_chip_for_aligned_transcript_chunk(
+    settings: MemexSettings, client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-0018 B3: a cited TRANSCRIPT chunk that is aligned to a slide deck shows a `↔ slide N`
+    companion chip on its source link (read fail-open from the alignment sidecar). No alignment → no
+    chip; HARD-gate-neutral (presentation lookup over the cited chunks)."""
+    from memex.core.companion_store import upsert_alignment
+    from memex.core.types import AlignmentBlock, CompanionAlignment
+
+    await upsert_alignment(
+        settings.vault_path,
+        CompanionAlignment(
+            transcript_doc="lecture1",
+            deck_doc="deck1",
+            null_count=0,
+            blocks=[
+                AlignmentBlock(
+                    transcript_chunk_id="lecture1#t1",
+                    deck_chunk_id="deck1#g",
+                    deck_page=12,
+                    score=0.61,
+                )
+            ],
+        ),
+    )
+
+    async def _fake(question: str, **_kw: Any) -> FinalResponse:
+        chunk = Chunk(
+            chunk_id="lecture1#t1",
+            document_id="lecture1",
+            document_title="Lecture 1",
+            text="VLANs segment the broadcast domain.",
+            heading_path=["[01:02]"],
+            time_range=(62.0, 66.0),
+        )
+        return FinalResponse(
+            answered=True,
+            summary="VLANs segment the network.",
+            claims=[
+                CitedClaim(
+                    claim="A VLAN segments the broadcast domain.",
+                    source_chunk_id="lecture1#t1",
+                    confidence="high",
+                )
+            ],
+            used_chunks=[chunk],
+            wikilinks=[],
+            correlation_id="01HZCOMP0000000000000000",
+            tokens_used=10,
+            nodes_traversed=4,
+            regenerate_attempts=0,
+        )
+
+    monkeypatch.setattr("memex.webui.app.answer_query", _fake)
+    text = await _ask_to_completion(client.app, "what does a VLAN do?")
+    assert "↔ slide 12" in text  # the cited transcript chunk's aligned slide

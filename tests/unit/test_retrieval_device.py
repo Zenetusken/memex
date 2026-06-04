@@ -61,11 +61,16 @@ def test_load_reranker_honors_device(monkeypatch: pytest.MonkeyPatch, device: st
 
 
 def _settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, **env: str):  # type: ignore[no-untyped-def]  # returns MemexSettings; lazy import keeps torch out of the import path
-    """Build MemexSettings with a tmp vault and a clean device-env slate."""
+    """Build MemexSettings with a tmp vault and a clean device-env slate.
+
+    Pins `co_residence_mode=manual` so the explicit device knobs this module exercises are HONORED — the
+    new `auto` default would override them from live free-VRAM (which is what the auto tests in
+    `test_resources.py` cover instead)."""
     from memex.core.config import MemexSettings
 
     monkeypatch.setenv("MEMEX_VAULT_PATH", str(tmp_path))
     monkeypatch.setenv("MEMEX_OBSERVABILITY__LANGFUSE_ENABLED", "false")
+    monkeypatch.setenv("MEMEX_MODELS__CO_RESIDENCE_MODE", "manual")
     for var in ("MEMEX_MODELS__EMBEDDER_DEVICE", "MEMEX_MODELS__RERANKER_DEVICE"):
         monkeypatch.delenv(var, raising=False)
     for k, v in env.items():
@@ -123,3 +128,32 @@ async def test_registry_loads_reranker_on_mode_resolved_device(
     async with reg.use("reranker"):
         pass
     assert captured["device"] == "cpu"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("free_gb", "expected"),
+    [(1.0, "cpu"), (5.0, "cuda"), (None, "cuda")],  # low→CPU, high→GPU, no-probe→GPU (optimistic)
+)
+async def test_registry_auto_mode_places_reranker_from_live_vram(
+    monkeypatch: pytest.MonkeyPatch, free_gb: float | None, expected: str
+) -> None:
+    """`auto` (the default, ADR-0007 P4.4) reads LIVE free-VRAM at the reranker's load point: GPU when it
+    clears the floor (2.0 GB), CPU under pressure, GPU optimistically when the probe is unavailable."""
+    from memex.core.config import ModelSettings
+    from memex.models.registry import ModelRegistry
+
+    captured: dict[str, object] = {}
+
+    def _fake_load_reranker(model_id: str, device: str = "cuda") -> object:
+        captured["device"] = device
+        return object()
+
+    monkeypatch.setattr(ModelRegistry, "_load_reranker", staticmethod(_fake_load_reranker))
+    # The live probe is the auto-mode driver — fake it at the registry's import site.
+    monkeypatch.setattr("memex.core.vram.free_vram_gb", lambda: free_gb)
+
+    reg = ModelRegistry(ModelSettings(co_residence_mode="auto"))
+    async with reg.use("reranker"):
+        pass
+    assert captured["device"] == expected

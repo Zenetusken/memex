@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
 import structlog
 from pydantic import BaseModel
 
+from memex.core import vram
 from memex.core.breakers import CircuitBreaker, CircuitBreakerOpen
 from memex.core.config import ModelSettings
 from memex.core.errors import InsufficientVRAMError, MemexError
@@ -225,6 +226,17 @@ def _is_oom(exc: BaseException) -> bool:
     return "out of memory" in msg or "cuda oom" in msg
 
 
+def _empty_cuda_cache() -> None:
+    """Reclaim freed CUDA blocks before a fallback retry (best-effort; no-op off-GPU / torch-less)."""
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except (ImportError, RuntimeError):  # torch absent / CUDA driver error — nothing to reclaim
+        pass
+
+
 ModelName = Literal["embedder", "reranker", "vlm", "chart_ocr"]
 
 
@@ -313,34 +325,64 @@ class ModelRegistry:
             except ImportError:
                 pass
 
+    async def unload_retrieval(self) -> None:
+        """Release the embedder + reranker from VRAM so a GPU-EXCLUSIVE op (the parse-time VLM serve,
+        chart-OCR) gets the freed budget. They reload lazily on the next retrieval at the then-current
+        `auto` placement. The pre-flight half of the dynamic VRAM manager (the auto analogue of the manual
+        `…DEVICE=cpu` I had to set for keyframe batches). Idempotent."""
+        await self.unload("embedder")
+        await self.unload("reranker")
+
+    async def unload_all(self) -> None:
+        """Release EVERY resident model from VRAM (+ empty the CUDA cache via each `unload`). The clean-
+        shutdown hook: a long-running server (the webui) calls this on exit so its GPU models don't linger
+        and contend with the next process's parse/VLM-serve (the stale-webui-holds-VRAM trap). Idempotent —
+        no-op for slots that aren't loaded."""
+        for name in ("embedder", "reranker", "vlm", "chart_ocr"):
+            await self.unload(name)
+
     async def _load(self, name: ModelName) -> None:
         log = logger.bind(name=name)
         log.info("model.load.start")
 
-        # The co-residence mode (ADR-0007) resolves the effective device for
-        # each retrieval model; `manual` falls back to the explicit knobs.
+        # The co-residence mode (ADR-0007) resolves the effective device for each retrieval model;
+        # `manual` falls back to the explicit knobs. `auto` (the default) reads the LIVE free-VRAM at THIS
+        # model's load point — the reranker loads after the embedder + the out-of-process orchestrator are
+        # resident, so the probe sees the true remaining budget (the dynamic-VRAM-manager decision).
         emb_device, rr_device = effective_devices(
             self._settings.co_residence_mode,
             self._settings.embedder_device,
             self._settings.reranker_device,
+            free_vram_gb=vram.free_vram_gb(),
         )
+
+        async def _load_retrieval(loader: Any, model_id: str, device: str) -> Any:
+            """Load a retrieval model, reactively falling back GPU→CPU on a CUDA OOM — the safety net that
+            makes `auto` never-OOM even if the calibrated margin is slightly off (a CPU-placed retrieval
+            model is correct, just slower; reranker order is device-invariant)."""
+            try:
+                return await asyncio.to_thread(loader, model_id, device)
+            except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
+                raise
+            except Exception as e:
+                if device == "cuda" and _is_oom(e):
+                    logger.bind(name=name).warning("model.load.oom_fallback_cpu", error=str(e)[:160])
+                    _empty_cuda_cache()
+                    return await asyncio.to_thread(loader, model_id, "cpu")
+                raise
 
         async def _do_load() -> None:
             if name == "embedder":
-                self._models[name] = await asyncio.to_thread(
+                self._models[name] = await _load_retrieval(
                     self._load_embedder, self._settings.embedder, emb_device
                 )
             elif name == "reranker":
-                if self._settings.reranker_backend == "qwen3":
-                    self._models[name] = await asyncio.to_thread(
-                        self._load_reranker_qwen3,
-                        self._settings.reranker,
-                        rr_device,
-                    )
-                else:
-                    self._models[name] = await asyncio.to_thread(
-                        self._load_reranker, self._settings.reranker, rr_device
-                    )
+                loader = (
+                    self._load_reranker_qwen3
+                    if self._settings.reranker_backend == "qwen3"
+                    else self._load_reranker
+                )
+                self._models[name] = await _load_retrieval(loader, self._settings.reranker, rr_device)
             elif name == "vlm":
                 self._models[name] = await asyncio.to_thread(self._load_vlm, self._settings.vlm)
             elif name == "chart_ocr":

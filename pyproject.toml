@@ -53,7 +53,7 @@ dependencies = [
 [project.optional-dependencies]
 # Local embedder + reranker + VLM. See ADR-0006 for the dtype + dispatch policy.
 # Required to run any GPU path; not required to import the package or run
-# unit tests with faked I/O. Resolves `torch` against the cu128 wheel index
+# unit tests with faked I/O. Resolves `torch` against the cu129 wheel index
 # declared below — the default PyPI wheel is CPU-only on Linux.
 models = [
     "sentence-transformers>=5.0",
@@ -65,7 +65,7 @@ models = [
     "torch>=2.7",
     # torchvision is a *direct* dep (not transitive via transformers)
     # so the `[tool.uv.sources]` override below routes it to the
-    # cu128 index — uv ignores source overrides on transitive deps
+    # cu129 index — uv ignores source overrides on transitive deps
     # (see astral-sh/uv#13774, #8253, #11388).
     "torchvision>=0.22",
     "accelerate>=1.0",
@@ -102,10 +102,18 @@ parse = [
 # vLLM orchestrator. Memex talks to it over the OpenAI-compatible HTTP
 # endpoint (ADR-0001); the daemon is started/stopped via
 # `scripts/serve-vllm.sh` (which `memex daemon start` shells into). Pin
-# to a vLLM that shares torch 2.11+cu128 so installing this extra into
+# to a vLLM that shares torch 2.11+cu129 so installing this extra into
 # the same venv doesn't downgrade or fork the torch ABI.
 serve = [
     "vllm>=0.21,<0.22",
+]
+# Audio ASR ingestion (ADR-0017). faster-whisper runs on CTranslate2 (NOT torch — its own
+# CUDA libs, ABI-independent of the cu129 torch/vLLM wheels) and pulls `av` (PyAV) for
+# decoding + `onnxruntime` for its built-in Silero VAD. The `transformers` ASR backend (an
+# A/B alternative) needs only the [models] extra. The model weights download on first use
+# (provision before air-gapping, like pyannote/OTTER).
+audio = [
+    "faster-whisper>=1.0",
 ]
 dev = [
     "ruff>=0.6",

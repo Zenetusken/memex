@@ -236,3 +236,46 @@ async def test_chunks_by_ids_returns_input_order_skips_missing(tmp_path: Path) -
     assert [c.chunk_id for c in out] == ["d2#c", "d1#a"]
     assert out[0].text == "charlie body"
     assert await store.chunks_by_ids([]) == []
+
+
+@pytest.mark.asyncio
+async def test_time_range_round_trips_across_all_read_paths(tmp_path: Path) -> None:
+    """ADR-0017: a chunk's audio `time_range` persists through the FTS store and is
+    reconstructed by EVERY read path (search / search_in_docs / chunks_for_document /
+    chunks_by_ids). A non-audio chunk (no time_range) round-trips back to None — so the
+    -1.0 sentinel is never mistaken for a real 0.0s anchor."""
+    vault_path = tmp_path / "vault"
+    vault_path.mkdir(parents=True)
+    store = await FTSStore.open(vault_path)
+
+    timed = Chunk(
+        chunk_id="aud#0",
+        document_id="aud",
+        document_title="Lecture",
+        text="the router forwards packets across the link",
+        char_start=0,
+        char_end=43,
+        time_range=(62.0, 66.0),
+    )
+    untimed = _chunk("pdf#0", "pdf", "the router forwards packets across the link")  # no time_range
+    await store.upsert([timed, untimed])
+
+    # 1) search — the BM25 arm reconstructs time_range.
+    hits = {c.chunk_id: c for c in await store.search("router", k=10)}
+    assert hits["aud#0"].time_range == (62.0, 66.0)
+    assert hits["pdf#0"].time_range is None  # -1.0 sentinel → None, not (-1.0, -1.0)
+
+    # 2) search_in_docs — scoped BM25 reconstructs it too.
+    scoped = await store.search_in_docs("router", doc_ids=["aud"], k=10)
+    assert scoped and scoped[0].time_range == (62.0, 66.0)
+
+    # 3) chunks_for_document — the summarizer's full-doc read.
+    by_doc = {c.chunk_id: c for c in await store.chunks_for_document("aud")}
+    assert by_doc["aud#0"].time_range == (62.0, 66.0)
+
+    # 4) chunks_by_ids — the entity-attested by-id read.
+    by_id = await store.chunks_by_ids(["aud#0", "pdf#0"])
+    assert by_id[0].time_range == (62.0, 66.0)
+    assert by_id[1].time_range is None
+
+    await store.close()

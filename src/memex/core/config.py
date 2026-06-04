@@ -87,6 +87,24 @@ class SummarizerServeSettings(BaseModel):
     startup_timeout_s: int = Field(default=300, ge=10)
 
 
+class ASRServeSettings(BaseModel):
+    """Recipe for the short-lived ASR vLLM process (parse-time only), used ONLY when
+    `ModelSettings.asr_backend == "vllm"` — a Whisper build served over the OpenAI
+    `/v1/audio/transcriptions` API (segment timestamps only; see
+    `docs/specs/audio-asr-route.md` and ADR-0017). The DEFAULT `asr_backend` is the
+    in-process `faster_whisper`, which never starts a server, so this is unused by default.
+
+    Mirrors `VLMServeSettings`: the orchestrator (and VLM) are paused during parse, so the
+    card is free; a port DISTINCT from the orchestrator (8000) / VLM (8001) / summarizer
+    (8002) keeps the parse pause's orchestrator-reachability check from targeting it."""
+
+    host: str = "127.0.0.1"
+    port: int = Field(default=8003, ge=1, le=65535)
+    gpu_memory_utilization: float = Field(default=0.80, ge=0.1, le=1.0)
+    max_model_len: int = Field(default=4096, ge=512)
+    startup_timeout_s: int = Field(default=180, ge=10)
+
+
 class ModelSettings(BaseModel):
     """Pydantic-settings record for every model the registry owns —
     orchestrator (out-of-process via vLLM), embedder, reranker, VLM,
@@ -144,6 +162,21 @@ class ModelSettings(BaseModel):
     # for the reasoner; wire it (clone `serve_summarizer_vllm`) when a 12 GB-fitting specialist
     # lands. This NEVER touches the grounded /ask or chat path. `MEMEX_MODELS__REASONER=...`.
     reasoner: str | None = None
+    # ASR (audio transcription) — the parse-time speech-to-text model for the audio
+    # ingestion route (ADR-0017, spec docs/specs/audio-asr-route.md). A parse-stage
+    # PERCEPTION model, OFF the grounded path — the embedder/reranker/chart-OCR/OTTER
+    # category, NOT the vLLM generation engine (ADR-0001 is neutral). None (default) =
+    # audio ingestion is unconfigured → the route raises `ASRUnavailable`. The recommended
+    # build is a French-capable Whisper-large-v3 (e.g.
+    # `bofenghuang/whisper-large-v3-french-distil-dec16` or stock `large-v3-turbo`), gated
+    # on a hands-on French-audio A/B. `MEMEX_MODELS__ASR=...`.
+    asr: str | None = None
+    # The ASR runtime. "faster_whisper" (default): in-process CTranslate2, loads once,
+    # native VAD + long-form + word timestamps. "transformers": the in-process HF
+    # automatic-speech-recognition pipeline (zero new runtime). "vllm": a short-lived
+    # parse-time vLLM serving a Whisper build (segment timestamps only; see ASRServeSettings).
+    asr_backend: Literal["faster_whisper", "vllm", "transformers"] = "faster_whisper"
+    asr_serve: ASRServeSettings = Field(default_factory=ASRServeSettings)
     embedder: str = "google/embeddinggemma-300m"
     reranker: str = "BAAI/bge-reranker-v2-m3"
     # P3.3 chart-OCR model — default `google/deplot` per Session 1
@@ -179,7 +212,10 @@ class ModelSettings(BaseModel):
     # top-k RAG; `full` = whole-document context for long-form synthesis
     # (reranker→CPU); `gpu_only` = all-GPU at full util (>12 GB cards).
     # `MEMEX_MODELS__CO_RESIDENCE_MODE=full`.
-    co_residence_mode: CoResidenceMode = "manual"
+    # `auto` (ADR-0007 P4.4, the dynamic VRAM manager): reads live free-VRAM at each retrieval-model load
+    # and places the reranker on GPU when it fits (the optimal default) else CPU — works out of the box
+    # with no manual device/env config. `manual`/`fast`/`full`/`gpu_only` remain for explicit control.
+    co_residence_mode: CoResidenceMode = "auto"
     # Device placement for the two retrieval models. Default "cuda" (bf16,
     # per ADR-0006). Set either to "cpu" (loads fp32 on CPU) to free GPU VRAM
     # for a fuller orchestrator KV cache when co-residing on a single 12 GB
@@ -347,6 +383,32 @@ class ParseSettings(BaseModel):
     # confirmed Nemotron-Parse-v1.2 doesn't regress prose answering
     # (ANS == baseline on the CUDA deck).
     disable_chart_ocr: bool = False
+    # Audio route (ADR-0017): apply the deterministic, faithful transcript normalization
+    # (`core/text.normalize_transcript_text` — strips non-lexical fillers + whitespace
+    # artifacts, never a content word) when assembling the transcript `.md`. Default ON;
+    # set `MEMEX_PARSE__ASR_NORMALIZE=false` to write the raw ASR text instead. Applied
+    # AFTER the ASR cache (raw stays cached), so flipping it re-cleans without re-transcribe
+    # and it is NOT part of the cache key. Read by the route in a later increment.
+    asr_normalize: bool = True
+    # ASR decoding knobs (ADR-0017). These + the backend/model id form the cache `cfg` (a
+    # change is a clean cache miss, never a stale replay). `asr_beam_size` 1 = greedy
+    # (reproducible, fast); `asr_language` None = auto-detect (set "fr" to force French and
+    # skip detection); `asr_vad_filter` runs the backend's built-in Silero VAD to drop silence
+    # (prevents long-form hallucination); `asr_device` places the faster-whisper model ("cpu"
+    # int8 — safe everywhere; "cuda" float16 on the GPU freed by the parse-time pause).
+    asr_beam_size: int = Field(default=1, ge=1, le=10)
+    asr_language: str | None = None
+    asr_vad_filter: bool = True
+    asr_device: Literal["cpu", "cuda"] = "cpu"
+    # Coalesce consecutive ASR segments into ~N-second blocks before assembling the `## [mm:ss]`
+    # transcript (ADR-0017). A model like large-v3-turbo emits PHRASE-level segments (~1-2 s each
+    # → hundreds per 10 min), which would dump one tiny timestamped block per phrase — noisy in
+    # the `.md` AND in the chunk text the LLM grounds on. Coalescing is DETERMINISTIC + FAITHFUL
+    # (adjacent texts joined with a space, the block keeps the FIRST segment's start + LAST's end;
+    # no content dropped, order preserved), so re-parse stays reproducible. Applied AFTER the cache
+    # + normalization (raw stays cached) → NOT in the cache key; a change re-derives without
+    # re-transcribe but churns chunk_ids (reindex). 0 = disabled (one block per segment).
+    asr_coalesce_seconds: float = Field(default=30.0, ge=0.0, le=300.0)
     # Force Docling routing, bypassing the PyMuPDF pre-filter. The
     # classifier would normally win PyMuPDF on born-digital text-heavy
     # PDFs (Adobe InDesign / Acrobat output / etc.); this flag overrides
@@ -618,6 +680,32 @@ class AgentsSettings(BaseModel):
     artifact_scope_enabled: bool = True
     partial_grounded_answers: bool = True
     graph_expansion_enabled: bool = False
+    # Companion-merge (ADR-0018, spec docs/specs/companion-merge.md): align a lecture TRANSCRIPT to
+    # its SLIDE-DECK and make slide+commentary jointly groundable. `companion_align_min_score` is the
+    # cosine NULL floor — a transcript chunk whose best slide scores below it is an off-slide tangent
+    # (no slide). `companion_augment_*` gate the B4 `/ask` `augment_companion` node: when ON, a
+    # reranked winner from one side of an aligned pair pulls its aligned counterpart (≤max per winner)
+    # into the candidate pool — additive, per-chunk-pure ⇒ HARD-gate-safe (verify still grounds each
+    # claim against its own chunk); DEFAULT-OFF until the §9 eval validates it. `MEMEX_AGENTS__*`.
+    companion_align_min_score: float = 0.40
+    companion_augment_enabled: bool = False
+    companion_augment_max: int = 3
+    # Keyframe-OCR alignment floor (ADR-0018 §13, `link-slides --use-video`): for a lecture with a
+    # VIDEO source, each transcript chunk's slide can come from the VIDEO FRAME shown during it (OCR →
+    # cosine to the deck) — a near-exact signal vs the transcript-text cosine. A frame match `≥` this
+    # floor is PRIMARY; below it (a live demo / off-slide moment) the chunk falls back to the
+    # transcript-text signal. CALIBRATED to 0.80 via a floor SWEEP on the Cours 03 ↔ Cours 3 gold set
+    # (18 hand-labeled frames): TRUE frame↔slide matches cluster at cosine ≥0.82 (frame-OCR is a
+    # near-duplicate of the slide's deck text), while the DEMO / OFF-DECK false matches sit at 0.64–0.78
+    # — so 0.80 cleanly drops every live-demo / off-deck frame to fallback (4/4) AND keeps the true
+    # matches. AT THIS FLOOR the --use-video system (keyframe-primary + transcript fallback) scores 79%
+    # on-slide argmax vs 50% transcript-only (+29%); at the old 0.50 it was 71% (+21%) with only 1/4
+    # off-slide fallback. ONE residual on-slide error survives the floor (a frame at 0.85 that matched an
+    # ADJACENT lookup-step slide — same topic, off by one step — not an off-topic force); a clean
+    # separation is not perfect because a real-but-near-miss slide still OCRs to a high cosine. Re-tune
+    # per deck: a higher floor falls back MORE (to the safe transcript signal), so the failure mode of a
+    # too-high floor is conservative (lost keyframe lift), never a forced wrong slide.
+    companion_keyframe_min_score: float = 0.80
     # The deterministic numeric-grounding backstop (2026-05-31): a post-verify
     # gate that demotes a grounded claim whose principal LARGE figure is absent
     # from its cited TABLE chunk (a computed aggregate the LLM verifier
