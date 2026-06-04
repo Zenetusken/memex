@@ -212,7 +212,10 @@ class ModelSettings(BaseModel):
     # top-k RAG; `full` = whole-document context for long-form synthesis
     # (reranker→CPU); `gpu_only` = all-GPU at full util (>12 GB cards).
     # `MEMEX_MODELS__CO_RESIDENCE_MODE=full`.
-    co_residence_mode: CoResidenceMode = "manual"
+    # `auto` (ADR-0007 P4.4, the dynamic VRAM manager): reads live free-VRAM at each retrieval-model load
+    # and places the reranker on GPU when it fits (the optimal default) else CPU — works out of the box
+    # with no manual device/env config. `manual`/`fast`/`full`/`gpu_only` remain for explicit control.
+    co_residence_mode: CoResidenceMode = "auto"
     # Device placement for the two retrieval models. Default "cuda" (bf16,
     # per ADR-0006). Set either to "cpu" (loads fp32 on CPU) to free GPU VRAM
     # for a fuller orchestrator KV cache when co-residing on a single 12 GB

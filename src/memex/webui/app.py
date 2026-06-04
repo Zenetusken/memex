@@ -784,7 +784,7 @@ def create_app() -> FastAPI:
         orchestrator at the mode's util/context window. Serialized; the daemon
         restart blocks ~40 s (the form shows an indicator). Returns the
         `_resources.html` partial (HTMX swap) reflecting the new active profile."""
-        valid = ("fast", "full", "gpu_only", "manual")
+        valid = ("auto", "fast", "full", "gpu_only", "manual")
         if mode not in valid:
             return templates.TemplateResponse(
                 request,

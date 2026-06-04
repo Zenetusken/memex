@@ -1821,7 +1821,7 @@ def mode_set(
     `MEMEX_MODELS__CO_RESIDENCE_MODE` and restart `memex serve web` for the
     retrieval-device change to take effect.
     """
-    valid = ("fast", "full", "gpu_only", "manual")
+    valid = ("auto", "fast", "full", "gpu_only", "manual")
     if mode not in valid:
         err.print(f"[red]Unknown mode {mode!r}.[/red] Choose one of: {', '.join(valid)}")
         raise typer.Exit(code=2)

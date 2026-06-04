@@ -1908,10 +1908,10 @@ def test_title_save_404s_on_unknown_doc(client: TestClient) -> None:
 
 
 def test_header_shows_mode_chip(client: TestClient) -> None:
-    # Default mode is "manual"; the chip renders on every page.
+    # Default mode is now "auto" (the dynamic VRAM manager); the chip renders on every page.
     body = client.get("/").text
     assert "mode-chip" in body
-    assert "Manual" in body  # the active label
+    assert "Auto" in body  # the active label
 
 
 def test_resources_page_compares_all_modes(client: TestClient) -> None:
