@@ -11,10 +11,24 @@ touches the grounding path (the transcript + deck stay first-class grounded docs
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import AsyncExitStack
+from typing import Any
+
 import numpy as np
 from numpy.typing import NDArray
 
-from memex.core.types import AlignmentBlock, Chunk
+from memex.core.config import get_settings
+from memex.core.errors import MemexError
+from memex.core.types import AlignmentBlock, Chunk, CompanionAlignment
+from memex.index.embed_prompts import (
+    EMBED_QUERY_PROMPT_NAME,
+    chunk_title,
+    document_input,
+    native_prompts_enabled,
+)
+from memex.index.fts_store import FTSStore
+from memex.models.registry import get_registry
 
 # Near-tie band for the monotonic tie-break: two slide pages whose cosine to a transcript chunk are
 # within this are "tied", and we prefer the non-decreasing one (a lecture advances). Small by design —
@@ -111,3 +125,82 @@ def align_blocks(
             page_prev = dc.page
 
     return blocks, null_count
+
+
+class CompanionMergeError(MemexError):
+    """A companion-merge alignment couldn't be computed — a doc isn't indexed, or the deck lacks the
+    per-page attribution the alignment needs. Not recoverable (a user-fix prerequisite)."""
+
+
+async def _embed(inputs: list[str], *, prompt_name: str | None) -> list[list[float]]:
+    """Batch-embed via the LIVE EmbeddingGemma, L2-normalized (so cosine == dot). The monkeypatchable
+    GPU seam — tests fake THIS to run the orchestrator with no model. `prompt_name="query"` for the
+    transcript narration (query-side); `None` for the deck (its inputs are pre-wrapped `document_input`
+    strings, OR raw text when native prompts are off). Empty input → `[]`."""
+    if not inputs:
+        return []
+    registry = get_registry()
+    async with registry.use("embedder") as embedder:
+
+        def _run() -> Any:
+            return embedder.encode(
+                inputs, prompt_name=prompt_name, normalize_embeddings=True, convert_to_numpy=True
+            )
+
+        arr = await asyncio.to_thread(_run)
+    return [[float(x) for x in row] for row in arr]
+
+
+async def compute_alignment(transcript_doc: str, deck_doc: str) -> CompanionAlignment:
+    """Read both docs' INDEXED chunks (via FTSStore), embed (transcript query-side, deck document-side
+    — the §3 committed asymmetry, both flipped together with `native_prompts`), and align
+    (`align_blocks`). Raises `CompanionMergeError` if either doc is un-indexed or the deck has no page
+    attribution. Deterministic given fixed embeddings ⇒ reproducible; carries the embed-recipe version
+    so a recipe bump (or `--refresh`) re-aligns. HARD-gate-neutral: pure read of indexed chunks +
+    embedder, no grounding-path touch."""
+    settings = get_settings()
+    async with AsyncExitStack() as stack:
+        fstore = await FTSStore.open(settings.vault_path)
+        stack.push_async_callback(fstore.close)
+        t_chunks = await fstore.chunks_for_document(transcript_doc)
+        d_chunks = await fstore.chunks_for_document(deck_doc)
+
+    if not t_chunks:
+        raise CompanionMergeError(
+            "transcript has no indexed chunks — ingest + index it first",
+            context={"transcript_doc": transcript_doc},
+        )
+    if not d_chunks:
+        raise CompanionMergeError(
+            "slide deck has no indexed chunks — ingest + index it first",
+            context={"deck_doc": deck_doc},
+        )
+    if all(c.page is None for c in d_chunks):
+        raise CompanionMergeError(
+            "slide deck has no per-page attribution (a pre-2026-05-27 manifest); re-parse the deck "
+            "(`memex parse <deck>`) so each chunk carries its slide page",
+            context={"deck_doc": deck_doc},
+        )
+
+    use_prompt = native_prompts_enabled()
+    if use_prompt:
+        t_emb = await _embed([c.text for c in t_chunks], prompt_name=EMBED_QUERY_PROMPT_NAME)
+        d_emb = await _embed(
+            [document_input(chunk_title(c), c.text) for c in d_chunks], prompt_name=None
+        )
+    else:  # native prompts off (the A/B/revert path): both sides bare, same space
+        t_emb = await _embed([c.text for c in t_chunks], prompt_name=None)
+        d_emb = await _embed([c.text for c in d_chunks], prompt_name=None)
+
+    blocks, null_count = align_blocks(
+        t_chunks, d_chunks, t_emb, d_emb, min_score=settings.agents.companion_align_min_score
+    )
+    return CompanionAlignment(
+        transcript_doc=transcript_doc,
+        deck_doc=deck_doc,
+        # Inlined recipe string (index/pipeline._embed_recipe_version is private — no cross-module
+        # private import); MUST stay in lockstep with it.
+        embedding_recipe_version="v1-gemma-prompts" if use_prompt else "v0",
+        blocks=blocks,
+        null_count=null_count,
+    )

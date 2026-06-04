@@ -677,6 +677,16 @@ class AgentsSettings(BaseModel):
     artifact_scope_enabled: bool = True
     partial_grounded_answers: bool = True
     graph_expansion_enabled: bool = False
+    # Companion-merge (ADR-0018, spec docs/specs/companion-merge.md): align a lecture TRANSCRIPT to
+    # its SLIDE-DECK and make slide+commentary jointly groundable. `companion_align_min_score` is the
+    # cosine NULL floor — a transcript chunk whose best slide scores below it is an off-slide tangent
+    # (no slide). `companion_augment_*` gate the B4 `/ask` `augment_companion` node: when ON, a
+    # reranked winner from one side of an aligned pair pulls its aligned counterpart (≤max per winner)
+    # into the candidate pool — additive, per-chunk-pure ⇒ HARD-gate-safe (verify still grounds each
+    # claim against its own chunk); DEFAULT-OFF until the §9 eval validates it. `MEMEX_AGENTS__*`.
+    companion_align_min_score: float = 0.40
+    companion_augment_enabled: bool = False
+    companion_augment_max: int = 3
     # The deterministic numeric-grounding backstop (2026-05-31): a post-verify
     # gate that demotes a grounded claim whose principal LARGE figure is absent
     # from its cited TABLE chunk (a computed aggregate the LLM verifier

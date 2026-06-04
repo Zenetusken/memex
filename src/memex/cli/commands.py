@@ -75,6 +75,11 @@ mode_app = typer.Typer(
     help="Co-residence resource modes (ADR-0007): the VRAM tradeoff between the "
     "orchestrator's context window and GPU-resident retrieval."
 )
+companion_app = typer.Typer(
+    help="Companion-merge (ADR-0018): align a lecture TRANSCRIPT to its SLIDE-DECK so slide + "
+    "spoken commentary are jointly grounded. `create <transcript> <deck>` aligns the pair; "
+    "`list`/`delete` manage them."
+)
 
 
 def _print(payload: object) -> None:
@@ -1197,6 +1202,7 @@ def register(app: typer.Typer) -> None:
     app.add_typer(mcp_app, name="mcp")
     app.add_typer(scope_set_app, name="scope-set")
     app.add_typer(mode_app, name="mode")
+    app.add_typer(companion_app, name="link-slides")
 
 
 def _find_repo_root() -> Path:
@@ -1401,6 +1407,115 @@ def scope_set_delete(
         vault_path = get_settings().vault_path
         removed = await delete_scope_set(vault_path, name)
         return {"name": name, "deleted": removed}
+
+    _print(asyncio.run(_run()))
+
+
+@companion_app.command("create")
+def link_slides_create(
+    transcript_doc: str = _Argument(..., help="The lecture TRANSCRIPT document id."),
+    deck_doc: str = _Argument(..., help="The SLIDE-DECK document id it pairs with."),
+) -> None:
+    """Align a lecture transcript to its slide deck (ADR-0018) and persist the alignment.
+
+    Embeds both docs' indexed chunks (transcript query-side, deck document-side), aligns each
+    transcript chunk to its best slide page by cosine, and writes the derived sidecar
+    (`companion_alignments.json`) + a reciprocal `CITES` companion link. Idempotent — re-running
+    REPLACES the pair (so it doubles as a refresh after a re-index). Both docs must already be
+    ingested + indexed; the deck must have per-page attribution (re-parse a legacy deck if not).
+    """
+
+    async def _run() -> dict[str, object]:
+        bootstrap()
+        from memex.core.companion_store import upsert_alignment
+        from memex.core.config import get_settings
+        from memex.index.companion import compute_alignment
+        from memex.parse import pause_vllm_for_gpu
+        from memex.vault.store import list_documents
+
+        vault_path = get_settings().vault_path
+        known = {ref.doc_id async for ref in list_documents(vault_path)}
+        unknown = [d for d in (transcript_doc, deck_doc) if d not in known]
+        if unknown:
+            err.print(f"[red]Unknown document id(s):[/red] {', '.join(unknown)}")
+            raise typer.Exit(code=2)
+
+        async with pause_vllm_for_gpu():  # free the GPU for the embedder (mirrors ingest/index)
+            alignment = await compute_alignment(transcript_doc, deck_doc)
+        await upsert_alignment(vault_path, alignment)
+
+        # The document-level companion link (read-only discovery; fail-open if the graph is absent).
+        linked = False
+        try:
+            from memex.index.graph_store import GraphStore
+
+            graph = await GraphStore.open(vault_path)
+            try:
+                await graph.link_cites(transcript_doc, deck_doc, "companion deck", 1.0)
+                await graph.link_cites(deck_doc, transcript_doc, "companion lecture", 1.0)
+                linked = True
+            finally:
+                await graph.close()
+        except ImportError:
+            pass  # ryugraph not installed → the sidecar alignment still stands; no CITES link
+
+        aligned = sum(1 for b in alignment.blocks if b.deck_chunk_id is not None)
+        return {
+            "transcript_doc": transcript_doc,
+            "deck_doc": deck_doc,
+            "blocks": len(alignment.blocks),
+            "aligned": aligned,
+            "null": alignment.null_count,
+            "cites_linked": linked,
+            "embedding_recipe_version": alignment.embedding_recipe_version,
+        }
+
+    _print(asyncio.run(_run()))
+
+
+@companion_app.command("list")
+def link_slides_list() -> None:
+    """List every transcript↔deck companion alignment (pair + aligned/null block counts)."""
+
+    async def _run() -> list[dict[str, object]]:
+        bootstrap()
+        from memex.core.companion_store import read_alignments
+        from memex.core.config import get_settings
+
+        vault_path = get_settings().vault_path
+        coll = await read_alignments(vault_path)  # loud VaultIntegrityError at this management surface
+        return [
+            {
+                "transcript_doc": a.transcript_doc,
+                "deck_doc": a.deck_doc,
+                "aligned": sum(1 for b in a.blocks if b.deck_chunk_id is not None),
+                "null": a.null_count,
+                "recipe": a.embedding_recipe_version,
+            }
+            for a in coll.pairs
+        ]
+
+    _print(asyncio.run(_run()))
+
+
+@companion_app.command("delete")
+def link_slides_delete(
+    transcript_doc: str = _Argument(..., help="The lecture TRANSCRIPT document id."),
+    deck_doc: str = _Argument(..., help="The SLIDE-DECK document id."),
+    yes: bool = _Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+) -> None:
+    """Remove a transcript↔deck companion alignment (the sidecar entry only; no document is touched)."""
+    if not yes:
+        typer.confirm(f"Delete the companion alignment {transcript_doc!r} ↔ {deck_doc!r}?", abort=True)
+
+    async def _run() -> dict[str, object]:
+        bootstrap()
+        from memex.core.companion_store import delete_alignment
+        from memex.core.config import get_settings
+
+        vault_path = get_settings().vault_path
+        removed = await delete_alignment(vault_path, transcript_doc, deck_doc)
+        return {"transcript_doc": transcript_doc, "deck_doc": deck_doc, "deleted": removed}
 
     _print(asyncio.run(_run()))
 
