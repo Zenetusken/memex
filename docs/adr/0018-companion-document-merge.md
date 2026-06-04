@@ -85,6 +85,31 @@ validated (`refusal_cf=1.0` must hold with it ON over a real pair) before any de
 ## Revisit when
 
 - v1's argmax under-performs on a real pair → ship the asymmetric-jump DP + the `start_s` prior.
-- Alignment is still weak → video-keyframe-OCR matching (the principled accuracy lever).
+- ~~Alignment is still weak → video-keyframe-OCR matching~~ → **DONE (Amendment 2026-06-04).**
 - A gold transcript↔slide alignment set exists → calibrate `τ_null` + the (query,doc)/(doc,doc) A/B.
 - The augmentation eval clears with a measured win → consider default-ON.
+
+## Amendment (2026-06-04): video keyframe-OCR matching SHIPPED
+
+The principled accuracy lever from decision 3 / "Revisit when" is now implemented (opt-in,
+video-gated) — spec `docs/specs/companion-merge.md` §14. For a transcript whose source is a VIDEO
+(a screen-recorded lecture showing the slides), each chunk's slide is taken from the on-screen FRAME
+at its `time_range` midpoint (PyAV decode → Qwen3-VL OCR → cosine to the deck), recovering MaViLS's
+strong frame-text modality (F1 ≈ 0.76) over the transcript-text cosine (F1 ≈ 0.53). Keyframe-PRIMARY
+above the floor, transcript-text FALLBACK below it. `parse/keyframe_ocr` owns frames+OCR+cache;
+`index/companion.compute_alignment(keyframe_texts=)` does the embed+match (the `index/` ↛ `parse/`
+boundary holds — the CLI wires them); `link-slides create --use-video`. Content-addressed OCR cache
+keeps the derived sidecar reproducible. HARD-gate-neutral (still a derived sidecar; the augment node is
+untouched).
+
+**Validated** on Cours 03 ↔ Cours 3 against 18 hand-labeled gold frames (argmax-correctness, demo +
+off-deck frames included), via a floor SWEEP. **At the calibrated/shipped floor 0.80** the `--use-video`
+system (keyframe-primary + transcript fallback) scores **79% on-slide vs 50% transcript-only (+29%)**,
+off-slide fallback **4/4** (the old 0.50 floor was 71%/+21% with 1/4 fallback — the floor buys the
+off-slide robustness). `companion_keyframe_min_score = 0.80`: true matches cluster ≥0.82, demo/off-deck
+false matches 0.64–0.78 (cleanly dropped); the separation isn't perfect — one on-slide error survives
+(a 0.85 frame matching an ADJACENT lookup-step slide, same topic). A too-high floor only falls back more
+(conservative), never forces a wrong slide. **Calibrated on ONE deck — re-check before treating 0.80 as
+universal.** Caveat: the deck's `Chunk.page` is navigation-grade and can drift from the true PDF page on
+a figure-heavy deck, so the alignment matches by CONTENT (`deck_chunk_id`) and the scoring mapped each
+predicted chunk to its true PDF page by text-overlap; a citation-grade page map is a separate follow-up.

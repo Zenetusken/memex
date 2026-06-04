@@ -691,9 +691,18 @@ class AgentsSettings(BaseModel):
     # VIDEO source, each transcript chunk's slide can come from the VIDEO FRAME shown during it (OCR →
     # cosine to the deck) — a near-exact signal vs the transcript-text cosine. A frame match `≥` this
     # floor is PRIMARY; below it (a live demo / off-slide moment) the chunk falls back to the
-    # transcript-text signal. Higher than `companion_align_min_score` because frame-OCR text is a
-    # near-duplicate of the slide's deck text (its cosines run systematically higher).
-    companion_keyframe_min_score: float = 0.50
+    # transcript-text signal. CALIBRATED to 0.80 via a floor SWEEP on the Cours 03 ↔ Cours 3 gold set
+    # (18 hand-labeled frames): TRUE frame↔slide matches cluster at cosine ≥0.82 (frame-OCR is a
+    # near-duplicate of the slide's deck text), while the DEMO / OFF-DECK false matches sit at 0.64–0.78
+    # — so 0.80 cleanly drops every live-demo / off-deck frame to fallback (4/4) AND keeps the true
+    # matches. AT THIS FLOOR the --use-video system (keyframe-primary + transcript fallback) scores 79%
+    # on-slide argmax vs 50% transcript-only (+29%); at the old 0.50 it was 71% (+21%) with only 1/4
+    # off-slide fallback. ONE residual on-slide error survives the floor (a frame at 0.85 that matched an
+    # ADJACENT lookup-step slide — same topic, off by one step — not an off-topic force); a clean
+    # separation is not perfect because a real-but-near-miss slide still OCRs to a high cosine. Re-tune
+    # per deck: a higher floor falls back MORE (to the safe transcript signal), so the failure mode of a
+    # too-high floor is conservative (lost keyframe lift), never a forced wrong slide.
+    companion_keyframe_min_score: float = 0.80
     # The deterministic numeric-grounding backstop (2026-05-31): a post-verify
     # gate that demotes a grounded claim whose principal LARGE figure is absent
     # from its cited TABLE chunk (a computed aggregate the LLM verifier

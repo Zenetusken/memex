@@ -278,11 +278,58 @@ re-`create`; in the `reindex --force` teardown (regenerable — alongside `asr_c
 - **The MaViLS asymmetric-jump DP** (`λ_jump≈0.1`, backward 2×/forward 1×/stay 0; lower for
   revisit-heavy lectures) + the **real `start_s` time→slide prior** (our edge over MaViLS) — the
   principled monotonic refinement once v1's argmax is measured.
-- **Video KEYFRAME-OCR matching** — recovers MaViLS's discarded strong signal (F1 0.76); THE accuracy
-  upgrade if transcript-only under-performs. Needs the video frames (we keep `source.mp4`).
+- ~~**Video KEYFRAME-OCR matching**~~ — **IMPLEMENTED 2026-06-04, see §14.** (recovered MaViLS's
+  discarded strong signal: +29% on-slide argmax over transcript-only on the Cours 03 gold set.)
 - **Chunk-fusion** (slide+commentary in one chunk) — REJECTED for grounding safety (chunk_id churn +
   mixed source); a faithfulness-gated "contextualized" view is a separate, gate-sensitive arc.
 - **Auto-pairing** (course-code/ordinal inference) — SUGGEST-only later; v1 is explicit.
 - **Segment-level alignment** (finer than chunks) + **stored-embedding reuse** (vs re-embed) +
   **title/agenda-slide downweighting** (a slide that matches everything) + **principled `τ_null`
   calibration** (needs a gold set).
+
+## 14. Realized: video keyframe-OCR matching (ADR-0018 §13 fast-follow, 2026-06-04)
+
+The accuracy lever §13 flagged, now SHIPPED (opt-in, video-gated). For a transcript whose source is a
+VIDEO (a screen-recorded lecture that shows the projected slides — the CR350 ZOOM classes), each
+transcript chunk's slide is taken from the on-screen FRAME shown DURING it, recovering MaViLS's strong
+frame-text modality (F1 ≈ 0.76) instead of the weak transcript-text cosine (F1 ≈ 0.53).
+
+**Pipeline** (`memex link-slides create --use-video`): for each transcript chunk, decode one video
+frame (PyAV) at its `time_range` midpoint → OCR it via the parse-time Qwen3-VL serve
+(`parse/keyframe_ocr.ocr_frames_for_chunks` + `parse/vlm_backend.transcribe_images`; a slide-focused
+prompt that isolates the slide under desktop chrome / an overlaid demo / a webcam PiP) → embed the OCR
+text DOC-side → cosine to the deck pages (REUSING the same embedder + `cosine_matrix` as the
+transcript-text path). A frame whose best deck match is `≥ companion_keyframe_min_score` is **PRIMARY**
+(`index/companion._keyframe_signal_from_texts` → `align_blocks(keyframe_signal=)`); below the floor — a
+live demo, an off-deck moment, a sparse title slide — the chunk **falls back** to its transcript-text
+cosine. The boundary is clean: `parse/` owns frames+OCR (it may not import `index/`), `index/companion`
+takes the OCR texts as input, the CLI wires them. The frame OCR is content-addressed cached
+(`KeyframeOCRCache`, keyed `(video_sha256, timestamp_ms, model, prompt)`) so re-runs of the derived
+sidecar stay byte-stable. HARD-gate-neutral (the alignment is a derived sidecar; the augment node is
+unchanged). Audio-only lectures (`.mp3`, no frames) cleanly fall back to transcript-text.
+
+**Validation** (Cours 03 ↔ Cours 3, 18 hand-labeled gold frames spread across the 135-min lecture,
+incl. demo-heavy + off-deck frames — argmax-CORRECTNESS, NOT the confounded "more aligned / higher
+scores"). Measured via a floor SWEEP; the headline numbers are **at the calibrated/shipped floor 0.80**:
+the `--use-video` system (keyframe-PRIMARY + transcript FALLBACK) scores **79% on-slide argmax vs 50%
+transcript-only (+29%)**, with **4/4** off-slide fallback (every live-demo / off-deck frame correctly
+fell back). At the old 0.50 floor it was 71% (+21%) with only 1/4 off-slide fallback — the floor is what
+buys the off-slide robustness. **Floor calibration (the sweep):** TRUE frame↔slide matches cluster at
+cosine ≥0.82 (the frame-OCR text is a near-duplicate of the slide it shows); the DEMO / OFF-DECK false
+matches sit at 0.64–0.78 — so 0.80 cleanly drops all of THOSE to fallback. The separation is not
+perfect: ONE on-slide error survives the floor (a frame at 0.85 that OCR-matched an ADJACENT lookup-step
+slide — same topic, off by one step — because a real-but-near-miss slide still scores high). A too-high
+floor only falls back MORE (to the safe transcript signal), so its failure mode is conservative (lost
+keyframe lift), never a forced wrong slide. NB the floor is calibrated on ONE deck — re-check on a
+second deck before treating 0.80 as universal.
+
+**Caveat (pre-existing, not introduced here): the deck's `Chunk.page` is navigation-grade and can DRIFT
+several pages from the true PDF page** on a chart/figure-heavy deck (post-stitch offset accumulation —
+see `src/memex/CLAUDE.md` "Page mapping is navigation-grade"). The alignment matches by CONTENT
+(`deck_chunk_id`) so retrieval/augmentation is correct, but the stored `deck_page` SLIDE NUMBER may be
+off; the gold scoring therefore mapped each predicted deck chunk to its true PDF page by text-overlap,
+not by `Chunk.page`. A citation-grade page map is a separate deck-parse follow-up.
+
+**Deferred within this lever:** a perceptual-hash dedup (OCR only on slide changes — the current pass
+OCRs one frame per chunk, ~one VLM call each, cached); sampling a couple frames around the midpoint and
+keeping the best match (for transition frames); rolling the keyframe page into the §13 monotonic DP.
