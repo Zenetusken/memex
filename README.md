@@ -20,7 +20,7 @@ You have:
 - 🚫 A strong preference for not uploading any of it to a third-party service.
 
 Memex helps you:
-- 📖 **Read** your documents into clean Markdown (with figures, tables, equations preserved).
+- 📖 **Read** your documents into clean Markdown (with figures, tables, equations preserved) — PDFs, Office files, scans, and **audio / video recordings** (lectures, meetings) transcribed to a timestamped transcript.
 - 🔍 **Search** across them with hybrid retrieval (BM25 + dense + cross-encoder rerank).
 - 💬 **Ask** real questions and get answers that cite the source paragraphs — or *refuse* when there isn't enough grounding (refusal is a first-class outcome).
 - 🔗 **Cross-reference** through an entity graph that links docs sharing topics, citations, or named entities.
@@ -75,7 +75,7 @@ That installs the four Memex extras:
 | `models` | torch + transformers + sentence-transformers + accelerate (all cu129) | Always |
 | `parse` | Docling + PyMuPDF4LLM + pyseccomp + pypdfium2 | Always (PDF / DOCX / PPTX ingest) |
 | `serve` | vLLM (cu129 wheels) | If you're running the inference daemon locally (almost always) |
-| `audio` | faster-whisper (CTranslate2 — ships its own CUDA libs, ABI-independent of the torch/vLLM wheels) | Ingesting **audio / class-lecture** files (MP3/WAV/M4A/FLAC/OGG/…) — the ASR transcription route (ADR-0017). Also set `MEMEX_MODELS__ASR` to a Whisper build. |
+| `audio` | faster-whisper (CTranslate2 — ships its own CUDA libs, ABI-independent of the torch/vLLM wheels) | Ingesting **audio / class-lecture** files (MP3/WAV/M4A/FLAC/OGG/…) **and native video** (MP4/MOV/WEBM/MKV/… — the audio track is transcribed) — the ASR transcription route (ADR-0017). Also set `MEMEX_MODELS__ASR` to a Whisper build. |
 | `dev` | pytest + ruff + pyright + hypothesis + pre-commit | Contributing or running the test suite |
 | `eval` | ragas + jiwer | Running `memex eval` against a query set |
 | `docs` | mkdocs + mkdocs-material | Building the documentation site |
@@ -175,6 +175,8 @@ For scanned content add `MEMEX_PARSE_DOCLING_OCR=1`; for born-digital PDFs (Powe
 
 **Office documents** (`.pptx`/`.docx`/`.xlsx` + their ODF cousins) are first converted to PDF via headless LibreOffice, then run through the normal PDF pipeline — so a diagram-heavy slide deck's figures flow through the VLM diagram-transcription + chart-OCR passes (enable the VLM with `MEMEX_PARSE__DISABLE_VLM=false` for diagram-rich decks). The converted PDF is cached per document and reused on re-parse. LibreOffice must be installed (`soffice` on PATH). On the 12 GB tier `memex ingest`/`index`/`reindex` pause vLLM for the duration so the embedder isn't starved by a co-resident vLLM — no manual `MEMEX_RERANK_BATCH_SIZE` or daemon juggling needed. The VLM is **Qwen3-VL-8B-AWQ**, run as a short-lived vLLM process *during parse only* (the orchestrator is paused to free the GPU); it transcribes directed flow/state diagrams correctly where the older Qwen2.5-VL flattened them into a list. Tune via `MEMEX_MODELS__VLM_SERVING` (`vllm` | `transformers`) + `MEMEX_MODELS__VLM_SERVE__*` (port / `gpu_memory_utilization` / `max_model_len`) — see [`docs/specs/vlm-vllm-serving.md`](docs/specs/vlm-vllm-serving.md).
 
+**Audio + video recordings** (audio `.mp3`/`.wav`/`.m4a`/`.flac`/`.ogg`/… and native video `.mp4`/`.mov`/`.webm`/`.mkv`/…) ingest through a speech-to-text route (ADR-0017): faster-whisper transcribes the media to a deterministic `## [mm:ss]` Markdown transcript (segments coalesced into ~30 s blocks), which then flows through the normal parse/index/answer path. A transcript chunk carries a `time_range` so the web UI shows time chips and answers cite the moment. Needs the `audio` extra (`uv sync … --extra audio`) and a Whisper build set via `MEMEX_MODELS__ASR` (reference: `large-v3-turbo`). A lecture transcript can also be **aligned to its slide deck** via `memex link-slides` (ADR-0018), making the slides and the spoken commentary jointly groundable. Spec: [`docs/specs/audio-asr-route.md`](docs/specs/audio-asr-route.md).
+
 ### Ask grounded questions
 
 ```sh
@@ -204,11 +206,12 @@ On a 12 GB card the orchestrator's context window and the GPU-resident reranker 
 
 ```sh
 uv run memex mode show              # the active profile + VRAM estimate
+uv run memex mode set auto          # the default — adapts placement to live free-VRAM
 uv run memex mode set fast          # GPU reranker, 6 K context, ~14 s/ask
 uv run memex mode set full          # reranker→CPU (fallback for concurrent-GPU / long eval), 24 K context
 ```
 
-`fast` is low-latency top-k RAG; `full` frees the GPU into a ~24 K orchestrator window (the reranker moves to CPU, ~20–30 s/query). On the 4B orchestrator the reranker now **co-resides on the GPU by default** for single-process `ask`/`chat`/`expert`/`bridge` (~70–90× faster than CPU, quality-identical, fits with ~3 GB headroom — see [ADR-0007](docs/adr/0007-co-residence-resource-modes.md)); `full` moves it to CPU only when you need the wide window or are sharing the GPU with another process. `memex mode set` restarts the daemon-managed orchestrator; set `MEMEX_MODELS__CO_RESIDENCE_MODE` + restart `memex serve web` to also move the retrieval models. The full matrix + the eval numbers are in [`docs/deploy/hardware-tiers.md`](docs/deploy/hardware-tiers.md); the design is [ADR-0007](docs/adr/0007-co-residence-resource-modes.md).
+**`auto` is the default mode** (ADR-0007 P4.4): it reads *live* free-VRAM at load and adapts — the embedder always stays on the GPU, and the reranker co-resides on the GPU when there's ≥2 GB free, else falls back to CPU (graceful, never an OOM). This is **correctness-neutral** — the reranker order is byte-identical CPU vs GPU, so placement only changes latency, never the answer — so it works optimally out of the box with zero manual config. `fast` is low-latency top-k RAG; `full` frees the GPU into a ~24 K orchestrator window (the reranker moves to CPU, ~20–30 s/query). On the 4B orchestrator the reranker co-residing on the GPU (the common `auto`/`fast` case for single-process `ask`/`chat`/`expert`/`bridge`) is ~70–90× faster than CPU, quality-identical, and fits with ~3 GB headroom; `full` moves it to CPU only when you need the wide window or are sharing the GPU with another process. `memex mode set` restarts the daemon-managed orchestrator; set `MEMEX_MODELS__CO_RESIDENCE_MODE` + restart `memex serve web` to also move the retrieval models. The full matrix + the eval numbers are in [`docs/deploy/hardware-tiers.md`](docs/deploy/hardware-tiers.md); the design is [ADR-0007](docs/adr/0007-co-residence-resource-modes.md).
 
 ### Browse the vault
 

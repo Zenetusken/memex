@@ -10,7 +10,7 @@ Memex is a local-first, fully agentic document-understanding system. Runs entire
 | Engineering practices (full) | [`docs/GUIDELINES.md`](docs/GUIDELINES.md) |
 | Operational status | [`docs/ROADMAP.md`](docs/ROADMAP.md) |
 | Architectural blueprint | [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) |
-| ADRs (`0001`–`0016`) | [`docs/adr/`](docs/adr/) |
+| ADRs (`0001`–`0018`) | [`docs/adr/`](docs/adr/) |
 | Eval corpus design | [`docs/eval-corpus-plan.md`](docs/eval-corpus-plan.md) |
 | Python source | [`src/memex/`](src/memex/) — see [`src/memex/CLAUDE.md`](src/memex/CLAUDE.md) for backend rules |
 | Web UI | [`src/memex/webui/`](src/memex/webui/) — see [`src/memex/webui/CLAUDE.md`](src/memex/webui/CLAUDE.md) for frontend rules |
