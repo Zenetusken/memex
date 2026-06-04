@@ -4,12 +4,15 @@
 torch-dependent LIVE probe lives. `resolve_profile`/`fit_serve_util` take the probed numbers as inputs,
 so the policy logic stays pure and unit-testable while the placement decisions become VRAM-aware.
 
-No Memex deps → importable anywhere without a cycle (registry, parse, webui all read it). Off-GPU /
-torch-absent → the probes return `None` and every caller falls back to its static default (so a CPU-only
-or torch-less environment behaves exactly as before).
+Only Memex dep is the leaf `core.types` (pure pydantic, never imports this → no cycle), so this stays
+importable anywhere (registry, parse, webui all read it). Off-GPU / torch-absent → the probes return
+`None` and every caller falls back to its static default (so a CPU-only or torch-less environment behaves
+exactly as before).
 """
 
 from __future__ import annotations
+
+from memex.core.types import GpuProcess
 
 _GB = 1024.0**3
 
@@ -77,10 +80,11 @@ def fit_serve_util(
     return min(budget_gb / total_gb, cap)
 
 
-def gpu_compute_apps() -> list[str] | None:
-    """Best-effort list of `"pid <pid>: <name> (<MiB> MiB)"` for processes holding GPU memory, via
-    `nvidia-smi`. Returns `None` if `nvidia-smi` is absent / errors / has no apps. NEVER raises — it runs
-    inside the `VRAMExhausted` error path to name WHICH process holds the GPU (the actionable cause)."""
+def gpu_processes() -> list[GpuProcess] | None:
+    """Best-effort STRUCTURED list of processes holding GPU memory, via `nvidia-smi`. Returns `None` if
+    `nvidia-smi` is absent / errors / reports nothing. NEVER raises. The structured sibling of
+    `gpu_compute_apps` (which formats from this) — consumed by the webui `/resources` VRAM panel to show
+    the holder breakdown (orchestrator vs this process vs other), and by the `VRAMExhausted` error path."""
     import subprocess
 
     try:
@@ -99,9 +103,23 @@ def gpu_compute_apps() -> list[str] | None:
         return None
     if out.returncode != 0 or not out.stdout.strip():
         return None
-    apps: list[str] = []
+    procs: list[GpuProcess] = []
     for line in out.stdout.strip().splitlines():
         parts = [p.strip() for p in line.split(",")]
         if len(parts) >= 3:
-            apps.append(f"pid {parts[0]}: {parts[2]} ({parts[1]} MiB)")
-    return apps or None
+            try:
+                procs.append(GpuProcess(pid=int(parts[0]), name=parts[2], used_mib=int(parts[1])))
+            except ValueError:  # a non-integer pid/used_memory row (e.g. "[N/A]") — skip it
+                continue
+    return procs or None
+
+
+def gpu_compute_apps() -> list[str] | None:
+    """Best-effort list of `"pid <pid>: <name> (<MiB> MiB)"` for processes holding GPU memory, via
+    `nvidia-smi`. Returns `None` if `nvidia-smi` is absent / errors / has no apps. NEVER raises — it runs
+    inside the `VRAMExhausted` error path to name WHICH process holds the GPU (the actionable cause).
+    A thin human-readable formatting of `gpu_processes` (the single source of truth for the probe)."""
+    procs = gpu_processes()
+    if procs is None:
+        return None
+    return [f"pid {p.pid}: {p.name} ({p.used_mib} MiB)" for p in procs] or None

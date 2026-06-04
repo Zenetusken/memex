@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import asyncio
 import mimetypes
+import os
 import re
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
@@ -70,7 +71,13 @@ from memex.core.errors import (
     VaultIntegrityError,
 )
 from memex.core.manifest import update_manifest
-from memex.core.resources import CoResidenceMode, ResourceProfile, all_modes, resolve_profile
+from memex.core.resources import (
+    RERANKER_GPU_FLOOR_GB,
+    CoResidenceMode,
+    ResourceProfile,
+    all_modes,
+    resolve_profile,
+)
 from memex.core.scope_sets import (
     delete_scope_set,
     get_scope_set,
@@ -202,6 +209,62 @@ def _active_profile() -> ResourceProfile:
         embedder_device=s.models.embedder_device,
         reranker_device=s.models.reranker_device,
     )
+
+
+def _vram_panel(active: ResourceProfile) -> dict[str, object] | None:
+    """The live GPU-memory view-model for the `/resources` panel: total / used / free + the
+    per-process holder breakdown (orchestrator vs THIS web UI vs other), and the `auto`-mode
+    placement rationale (the reranker floor decision made visible). Returns `None` when the VRAM
+    probe is unavailable (CPU-only / no CUDA) so the template can show an explanatory fallback
+    instead of a blank figure. Presentation-only — a live snapshot, never read on the answer path."""
+    total = vram.total_vram_gb()
+    free = vram.free_vram_gb()
+    if total is None or free is None or total <= 0:
+        return None
+    used = max(0.0, total - free)
+    total_mib = total * 1024.0
+    self_pid = os.getpid()
+    holders: list[dict[str, object]] = []
+    for p in sorted(vram.gpu_processes() or [], key=lambda x: x.used_mib, reverse=True):
+        lname = p.name.lower()
+        if p.pid == self_pid:
+            label, kind = "This web UI", "self"
+        elif "vllm" in lname or "enginecore" in lname:
+            label, kind = "Orchestrator (vLLM)", "orchestrator"
+        else:
+            # nvidia-smi reports the absolute exe path — show just the basename (e.g. "python3").
+            label, kind = p.name.rsplit("/", 1)[-1], "other"
+        holders.append(
+            {
+                "label": label,
+                "pid": p.pid,
+                "mib": p.used_mib,
+                "pct": round(100.0 * p.used_mib / total_mib, 1),  # bar-segment width
+                "kind": kind,  # drives the colour swatch (.vram-seg-{kind})
+            }
+        )
+    # The auto-mode "why is the reranker placed here" rationale — the floor decision, surfaced.
+    rationale: str | None = None
+    if active.mode == "auto":
+        if active.reranker_device == "cuda":
+            rationale = (
+                f"Reranker on the GPU — {free:.1f} GB free clears the "
+                f"{RERANKER_GPU_FLOOR_GB:.1f} GB floor, so retrieval stays fast."
+            )
+        else:
+            rationale = (
+                f"Reranker on the CPU — {free:.1f} GB free is below the "
+                f"{RERANKER_GPU_FLOOR_GB:.1f} GB floor, so it falls back gracefully (slower, never an OOM)."
+            )
+    return {
+        "total_gb": round(total, 1),
+        "used_gb": round(used, 1),
+        "free_gb": round(free, 1),
+        "used_pct": round(100.0 * used / total),
+        "holders": holders,
+        "floor_gb": RERANKER_GPU_FLOOR_GB,
+        "rationale": rationale,
+    }
 
 
 async def _apply_mode(mode: CoResidenceMode) -> tuple[ResourceProfile, str]:
@@ -603,14 +666,20 @@ def create_app() -> FastAPI:
         )
         n = len(ctx["suggested"])  # type: ignore[arg-type]  # reason: list[dict] from the context
         if not scope_doc_ids:
-            ctx["scope_flash"] = {"kind": "error", "text": "Tick one or more documents, then Suggest related."}
+            ctx["scope_flash"] = {
+                "kind": "error",
+                "text": "Tick one or more documents, then Suggest related.",
+            }
         elif n:
             ctx["scope_flash"] = {
                 "kind": "ok",
                 "text": f"{n} related document{'' if n == 1 else 's'} — tick any to add to your scope.",
             }
         else:
-            ctx["scope_flash"] = {"kind": "ok", "text": "No related documents found for your selection."}
+            ctx["scope_flash"] = {
+                "kind": "ok",
+                "text": "No related documents found for your selection.",
+            }
         return templates.TemplateResponse(request, "_scope_picker.html", ctx)
 
     @app.post("/scope-sets/apply", response_class=HTMLResponse)
@@ -713,9 +782,7 @@ def create_app() -> FastAPI:
             )
         cid = str(ulid.ULID())
         scope_source = "selected" if scope_doc_ids else "named"
-        progress.new(
-            cid, scope_doc_ids=scope_doc_ids, scope_source=scope_source, question=question
-        )
+        progress.new(cid, scope_doc_ids=scope_doc_ids, scope_source=scope_source, question=question)
         task = asyncio.create_task(_run_ask(cid, question, scope_doc_ids))
         progress.attach_task(cid, task)  # strong ref → the loop won't GC the task mid-run
         return templates.TemplateResponse(
@@ -782,10 +849,12 @@ def create_app() -> FastAPI:
         # Pass the LIVE free-VRAM so the `auto` row reflects the placement it would resolve to right now
         # (GPU vs CPU reranker) and the page can show the current headroom.
         free = vram.free_vram_gb()
+        active = _active_profile()
         return {
-            "active": _active_profile(),
+            "active": active,
             "modes": all_modes(free_vram_gb=free),
             "free_vram_gb": round(free, 1) if free is not None else None,
+            "vram": _vram_panel(active),  # total/used/free + holder breakdown + auto rationale
             "flash": flash,
             "flash_error": flash_error,
             "oob_chip": oob_chip,
@@ -1347,7 +1416,9 @@ def create_app() -> FastAPI:
                 "_expert.html",
                 {"answer": None, "error": entry.error or "Reasoning produced no result."},
             )
-        return templates.TemplateResponse(request, "_expert.html", {"answer": answer, "error": None})
+        return templates.TemplateResponse(
+            request, "_expert.html", {"answer": answer, "error": None}
+        )
 
     async def _run_bridge(
         cid: str, question: str, scope_doc_ids: list[str], present_as_answer: bool = False
@@ -1819,9 +1890,7 @@ def create_app() -> FastAPI:
             try:
                 # Both lenses share one graph open — the document lens drives the header
                 # count + the alternate view; the bridge lens is the default render.
-                related = [
-                    r.model_dump() for r in await store.related_documents(doc_id, limit=50)
-                ]
+                related = [r.model_dump() for r in await store.related_documents(doc_id, limit=50)]
                 bridges = [b.model_dump() for b in await store.related_bridges(doc_id)]
             finally:
                 await store.close()
@@ -1901,9 +1970,7 @@ async def _scope_picker_context(
     """
     docs: list[dict[str, str]] = []
     async for ref in list_documents(vault_path):
-        docs.append(
-            {"doc_id": ref.doc_id, "title": await _safe_doc_title(vault_path, ref.doc_id)}
-        )
+        docs.append({"doc_id": ref.doc_id, "title": await _safe_doc_title(vault_path, ref.doc_id)})
     docs.sort(key=lambda d: d["title"].lower())
     try:
         saved = await list_scope_sets(vault_path)

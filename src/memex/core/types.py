@@ -146,6 +146,17 @@ class RelatedDocument(BaseModel):
     shared_entities: list[str]  # the connecting entities, most-specific first
 
 
+class GpuProcess(BaseModel):
+    """One process holding GPU memory, as reported by `nvidia-smi` (the structured probe
+    `core/vram.gpu_processes`). Lives in `core/types` because it crosses the boundary from
+    `core/vram` (the torch/nvidia-smi probe) to the webui `/resources` VRAM panel + the CLI.
+    Infrastructure, not domain state — a live snapshot, never persisted or grounded on."""
+
+    pid: int
+    name: str  # the process name nvidia-smi reports (e.g. "VLLM::EngineCore", "python3")
+    used_mib: int  # GPU memory this process holds, in MiB
+
+
 class AlignmentBlock(BaseModel):
     """One transcript chunk aligned to its best-matching slide-deck PAGE (ADR-0018 companion-merge).
     PRIMARY identity = the two content-addressed chunk_ids; `deck_page`/`time_range` are CACHED
@@ -155,7 +166,9 @@ class AlignmentBlock(BaseModel):
     crosses boundaries (`index/companion` writes; the `augment_companion` node + webui read)."""
 
     transcript_chunk_id: str
-    time_range: tuple[float, float] | None = None  # the transcript chunk's audio anchor (cached label)
+    time_range: tuple[float, float] | None = (
+        None  # the transcript chunk's audio anchor (cached label)
+    )
     deck_chunk_id: str | None = None  # None ⇒ NULL: no slide above the floor
     deck_page: int | None = None  # cached nav hint = the aligned deck chunk's Chunk.page
     score: float  # cosine similarity of the alignment (≈0..1 for L2-normalized embeddings)
