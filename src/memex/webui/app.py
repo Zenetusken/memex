@@ -850,15 +850,35 @@ def create_app() -> FastAPI:
         # (GPU vs CPU reranker) and the page can show the current headroom.
         free = vram.free_vram_gb()
         active = _active_profile()
+        # `all_modes` excludes `manual` (it has no fixed profile — it echoes the explicit device
+        # knobs). Surface it anyway so the user can PIN to the manual escape hatch from the table:
+        # resolve it against the current device settings. Applying it skips the daemon restart
+        # (its orchestrator posture is None), so it's the one switch that never bounces the 4B.
+        s = get_settings()
+        manual = resolve_profile(
+            "manual",
+            embedder_device=s.models.embedder_device,
+            reranker_device=s.models.reranker_device,
+        )
         return {
             "active": active,
-            "modes": all_modes(free_vram_gb=free),
+            "modes": [*all_modes(free_vram_gb=free), manual],
             "free_vram_gb": round(free, 1) if free is not None else None,
             "vram": _vram_panel(active),  # total/used/free + holder breakdown + auto rationale
             "flash": flash,
             "flash_error": flash_error,
             "oob_chip": oob_chip,
         }
+
+    @app.get("/resources/vram", response_class=HTMLResponse)
+    async def resources_vram(request: Request) -> HTMLResponse:
+        """The live GPU-memory panel fragment — the HTMX auto-refresh target (every 5s). Read-only
+        (an nvidia-smi holder probe + a torch VRAM read); NEVER touches the daemon, so it is safe to
+        poll while an answer / eval is in flight. Returns just the `_vram_panel.html` partial, which
+        re-arms its own `hx-trigger`."""
+        return templates.TemplateResponse(
+            request, "_vram_panel.html", {"vram": _vram_panel(_active_profile())}
+        )
 
     @app.get("/resources", response_class=HTMLResponse)
     async def resources(request: Request) -> HTMLResponse:

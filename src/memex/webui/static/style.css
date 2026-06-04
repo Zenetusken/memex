@@ -1022,6 +1022,8 @@ html { scroll-behavior: smooth; }
 .vram-holder-mib { margin-left: auto; color: rgb(161 161 170); }  /* zinc-400 (AA) */
 .vram-rationale { margin: 0.8rem 0 0; font-size: 0.8125rem; color: rgb(161 161 170); line-height: 1.5; }  /* zinc-400 */
 .vram-unavailable { font-style: italic; }   /* the degraded/no-CUDA state — signalled without colour (AA) */
+.vram-head { display: flex; align-items: baseline; gap: 0.6rem; }
+.vram-live { font-size: 0.625rem; color: rgb(161 161 170); }   /* zinc-400 — the "auto-refreshing" cue */
 
 /* ── Document summary (ADR-0008) — the Summarize action + per-section panel ── */
 .summary-detail {

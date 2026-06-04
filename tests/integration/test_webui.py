@@ -2034,6 +2034,40 @@ def test_resources_vram_panel_unavailable_fallback(
     assert "GB used" not in r.text  # no figures rendered when the probe is unavailable
 
 
+def test_resources_vram_fragment_auto_refreshes(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # GET /resources/vram is the HTMX auto-refresh target — it returns JUST the panel partial,
+    # which re-arms its own `every 5s` trigger so the cycle is self-sustaining. Read-only.
+    from memex.core.types import GpuProcess
+
+    monkeypatch.setattr("memex.core.vram.total_vram_gb", lambda: 12.0)
+    monkeypatch.setattr("memex.core.vram.free_vram_gb", lambda: 5.0)
+    monkeypatch.setattr(
+        "memex.core.vram.gpu_processes",
+        lambda: [GpuProcess(pid=99001, name="VLLM::EngineCore", used_mib=6090)],
+    )
+    r = client.get("/resources/vram")
+    assert r.status_code == 200
+    assert "GPU memory" in r.text
+    assert "<b>5.0</b> GB free" in r.text  # live figure
+    assert "Orchestrator (vLLM)" in r.text
+    # the returned fragment carries its own poll trigger (the self-sustaining refresh loop)
+    assert 'hx-get="/resources/vram"' in r.text
+    assert 'hx-trigger="every 5s"' in r.text
+    # …and the full page embeds the same auto-refreshing panel
+    assert 'hx-trigger="every 5s"' in client.get("/resources").text
+
+
+def test_resources_table_surfaces_manual_mode(client: TestClient) -> None:
+    # `manual` (the escape hatch — pin to the explicit device knobs) is now a selectable table row,
+    # even though `all_modes()` excludes it (no fixed profile). Applying it skips the daemon restart.
+    r = client.get("/resources")
+    assert r.status_code == 200
+    assert '<code class="mode-table-id">manual</code>' in r.text  # the manual row is present
+    assert '{"mode": "manual"}' in r.text  # …with an apply button wired to switch to it
+
+
 # ── live mode hot-switch (ADR-0007) — POST /resources/mode ──
 
 

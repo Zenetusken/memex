@@ -1,0 +1,43 @@
+{# Live GPU-memory panel — total/used/free + the per-process holder breakdown + the auto
+   rationale. AUTO-REFRESHES itself every 5s via GET /resources/vram (read-only: an nvidia-smi
+   holder probe + a torch VRAM read — never touches the daemon). The returned fragment re-arms
+   its own trigger, so the cycle is self-sustaining; a mode-switch re-includes this fresh. #}
+<section class="vram-panel" id="vram-panel"
+         hx-get="/resources/vram" hx-trigger="every 5s" hx-swap="outerHTML">
+  <div class="vram-head">
+    <span class="mode-eyebrow">GPU memory</span>
+    <span class="vram-live" title="auto-refreshing every 5s">refreshes live</span>
+  </div>
+  {% if vram %}
+  <div class="vram-summary">
+    <div class="vram-bar" role="img"
+         aria-label="{{ vram.used_gb }} of {{ vram.total_gb }} GB used, {{ vram.free_gb }} GB free">
+      {% for h in vram.holders %}<span class="vram-seg vram-seg-{{ h.kind }}" style="width: {{ h.pct }}%"
+            title="{{ h.label }} — {{ h.mib }} MiB"></span>{% endfor %}
+    </div>
+    <p class="vram-figures">
+      <span class="vram-fig"><b>{{ vram.used_gb }}</b> GB used</span>
+      <span class="vram-sep">·</span>
+      <span class="vram-fig"><b>{{ vram.free_gb }}</b> GB free</span>
+      <span class="vram-sep">·</span>
+      <span class="vram-fig">{{ vram.total_gb }} GB total</span>
+    </p>
+  </div>
+  {% if vram.holders %}
+  <ul class="vram-holders">
+    {% for h in vram.holders %}
+    <li class="vram-holder">
+      <span class="vram-dot vram-seg-{{ h.kind }}"></span>
+      <span class="vram-holder-label">{{ h.label }}</span>
+      <code class="vram-holder-pid">pid {{ h.pid }}</code>
+      <span class="vram-holder-mib tabular">{{ h.mib }} MiB</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if vram.rationale %}<p class="vram-rationale">{{ vram.rationale }}</p>{% endif %}
+  {% else %}
+  <p class="vram-rationale vram-unavailable">VRAM probe unavailable — running CPU-only or without CUDA.
+    Retrieval uses the static device configuration; no live tuning to show.</p>
+  {% endif %}
+</section>
