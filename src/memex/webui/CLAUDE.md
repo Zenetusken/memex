@@ -244,6 +244,26 @@ Validated live (Chrome e2e): Apply `fast` → the daemon restarted 24,576→6,14
 panel + chip flipped to Fast. Pinned by `test_webui.py` (restart args + device unload +
 manual-skips-restart + unknown-mode error).
 
+**Live GPU-memory panel (`_vram_panel.html`, dynamic VRAM manager, 2026-06-04).** Below the
+active-mode box, `/resources` renders a VRAM panel built by `app._vram_panel(active)`: total /
+used / free + a segmented usage bar + the **per-process holder breakdown** (from
+`core/vram.gpu_processes()` → `core/types.GpuProcess`; labelled *Orchestrator (vLLM)* / *This
+web UI* [pid == `os.getpid()`] / basenamed others — the nvidia-smi holder data that previously
+lived ONLY in `VRAMExhausted` error contexts) + the **auto-mode placement rationale** ("reranker
+on the GPU — N GB free clears the 2.0 GB floor"). The guard is `{% if vram %}` (truthy — catches
+None AND a missing var, vs the old `is not none` that rendered `<b> GB</b>` on an Undefined) with
+a **probe-unavailable fallback** (CPU-only / no CUDA). It **auto-refreshes**: the partial carries
+`hx-get="/resources/vram" hx-trigger="every 5s" hx-swap="outerHTML"` and the new `GET
+/resources/vram` route returns just the partial (re-arming its own trigger). That route is
+**read-only** (an nvidia-smi probe + a torch VRAM read) — it NEVER touches the daemon, so it polls
+safely mid-answer/mid-eval. The modes table also **surfaces `manual`**: `all_modes()` excludes it
+(no fixed profile), so `_resources_ctx` appends `resolve_profile("manual", …)` with the current
+device knobs — the escape-hatch row whose apply is the one switch that skips the daemon restart
+(its orchestrator posture is `None`). Semantic `.vram-*` CSS (zinc + the one blue accent; holder
+swatches are decorative — labels carry the meaning, WCAG 1.4.1). Pinned by `test_webui.py`
+(`test_resources_renders_vram_panel` / `…unavailable_fallback` / `…vram_fragment_auto_refreshes`
+/ `…table_surfaces_manual_mode`) + `test_vram.py` (`gpu_processes` parsing).
+
 ## Source-preview pane (`document.html` + `pdf-page` images, 2026-05-27)
 
 The side-by-side preview (the Phase-4 "source ↔ extracted markdown" view) renders
