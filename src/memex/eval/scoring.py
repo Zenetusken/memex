@@ -22,7 +22,7 @@ import unicodedata
 from pydantic import BaseModel
 
 from memex.agents.table_sql import coerce_number
-from memex.core.text import chart_extracted_spans, is_inside_any_span
+from memex.core.text import chart_extracted_spans, content_tokens, is_inside_any_span
 
 
 def _normalize(text: str) -> str:
@@ -104,6 +104,27 @@ def word_error_rate(predicted: str, reference: str) -> float:
     if not rn:
         return 0.0 if not pn else 1.0
     return _levenshtein_seq(pn, rn) / max(len(rn), 1)
+
+
+def content_token_precision(structured: str, reference: str) -> float:
+    """Fraction of the STRUCTURED transcript's unique content tokens that exist in the REFERENCE
+    (the deterministic baseline). 1.0 ⇒ no ADDITIONS (no hallucinated words) — the structuring
+    analogue of the answer-path no-hallucination gate. Uses the same `core.text.content_tokens`
+    the runtime faithfulness guard uses, so the eval measures exactly the gate's invariant. An empty
+    structured side scores 1.0 (no false tokens)."""
+    s = set(content_tokens(structured))
+    r = set(content_tokens(reference))
+    return 1.0 if not s else len(s & r) / len(s)
+
+
+def content_token_recall(structured: str, reference: str) -> float:
+    """Fraction of the REFERENCE's unique content tokens preserved in the STRUCTURED transcript.
+    1.0 ⇒ no unique-content LOSS (a collapsed duplicate still appears once, so smoothing scores 1.0;
+    a dropped unique word lowers it). Same `content_tokens` invariant as the runtime guard. An empty
+    reference scores 1.0 (nothing to preserve)."""
+    s = set(content_tokens(structured))
+    r = set(content_tokens(reference))
+    return 1.0 if not r else len(s & r) / len(r)
 
 
 _FRONTMATTER_RE = re.compile(r"\A---\r?\n.*?\r?\n---\r?\n", re.DOTALL)
@@ -664,4 +685,6 @@ def unexpected_refusal(answer_text: str, *, case_expects_engagement: bool) -> bo
     if not case_expects_engagement:
         return False
     norm = _normalize(answer_text)
-    return any(p in norm for p in _REFUSAL_SHAPED_PHRASES) and len(norm.split()) < _REFUSAL_MAX_WORDS
+    return (
+        any(p in norm for p in _REFUSAL_SHAPED_PHRASES) and len(norm.split()) < _REFUSAL_MAX_WORDS
+    )

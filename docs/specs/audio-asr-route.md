@@ -440,9 +440,16 @@ answer/summarize **REFUSES** (the scan-route precedent; never fabricates from an
   the concrete Phase-2 input.
 - **Qwen3-ASR + ForcedAligner** (word/char timestamps) — revisit only if an independent French result
   makes Qwen's accuracy decisive (the 2-pass, 300 s-capped, off-HTTP cost is otherwise not worth it).
-- **An LLM "structuring" pass** over the deterministically-normalized transcript (the immediate
-  follow-up to v1's deterministic clean) — paragraphing / run-on splitting / light disfluency
-  smoothing that needs semantics — gated behind a **deterministic faithfulness guard** (cleaned
-  content tokens ⊆ raw; fall back to raw on violation), a content-addressed cache, and a
-  transcript-fidelity eval (§"Transcript normalization"). v1 ships only the deterministic pass.
+- **An LLM "structuring" pass** over the deterministically-normalized transcript (paragraphing /
+  run-on splitting / light disfluency smoothing) — **TRIED + VALIDATED NEGATIVE 2026-06-04, reverted.**
+  Built (guard + cache + prompt + a `restructure` CLI with a `--dry-run` diff) and live-tested on the
+  real CR350 lectures: `large-v3-turbo` ALREADY punctuates + sentence-segments, so the 4B returns every
+  block VERBATIM (a no-op — ruled out prompt-conservatism and block-size live; the 3/24 blocks it edited
+  were content fixes the gate correctly rejected). **The real readability lever is COALESCING**
+  (`asr_coalesce_seconds` 30s→90s ≈ 201→70 blocks), not an LLM. KEPT the adversarially-hardened
+  faithfulness guard + fidelity scorers (`core/text.structure_block_is_faithful`,
+  `eval/scoring.content_token_{precision,recall}`) as a banked primitive — final rule = verbatim
+  number-surfaces + adjacent-duplicate-collapse equality (an `atomise`-token gate is blind to
+  `3.14`≡`314`). Don't retry unless a NON-punctuating ASR model enters scope. Memory:
+  `transcript-structuring-negative-2026-06-04`.
 - **A synced audio player UI** and an **LLM-titled transcript pass**.

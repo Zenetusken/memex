@@ -824,3 +824,80 @@ def normalize_transcript_text(text: str) -> str:
     # Re-flow per line: strip a leading terminal-punct residue + trim; drop emptied lines.
     lines = [_LEADING_TERMINAL_RE.sub("", ln).strip() for ln in cleaned.split("\n")]
     return "\n".join(ln for ln in lines if ln)
+
+
+# ----- Faithful-transform guard (ADR-0017 §3/§15 — BANKED primitive) ------------
+# A deterministic gate for "did an LLM only re-FORMAT this text, or did it change the
+# content?": every candidate is checked against its verbatim baseline. Built for an
+# OPTIONAL LLM transcript-structuring pass (paragraphing / sentence-splitting / light
+# disfluency smoothing). **That pass was a VALIDATED NEGATIVE (2026-06-04):**
+# `large-v3-turbo` already punctuates + sentence-segments, so the 4B returned every real
+# block verbatim — no value to add (see the `transcript-structuring-negative-2026-06-04`
+# memory + `docs/specs/audio-asr-route.md` §15). The pass was reverted; this guard + its
+# fidelity scorers are KEPT as a reusable, adversarially-hardened primitive for any future
+# faithful-rewrite feature (or a non-punctuating ASR model). DELIBERATELY NOT filtered by
+# STOPWORDS: `STOPWORDS` carries lecture CONTENT words (`project`/`page`/`course`/`figure`)
+# for FTS/artifact-scope disambiguation — excluding them would let an edit drop them past
+# the gate. Tokenise EVERYTHING via `atomise`.
+
+
+def content_tokens(text: str) -> list[str]:
+    """The ordered content-token sequence of `text` — each whitespace word run through `atomise`
+    (lowercase, diacritics/punctuation dropped, hyphen/apostrophe split). The single tokeniser the
+    transcript-structuring faithfulness guard AND its fidelity eval share, so both measure the same
+    invariant. No stopword filtering (see the module note): every lexical token counts as content."""
+    return [tok for word in text.split() for tok in atomise(word)]
+
+
+# A numeric run = digits with internal separators (`3.14`, `1,000`, `192.168.0.1`, `12:30`). `atomise`
+# STRIPS `.`/`,`, so `3.14` and `314` collapse to the SAME content token — a number value/format change
+# is invisible to `content_tokens`. Since the structuring pass must never touch a number (changing one
+# is a fabrication, the canonical hallucination), numbers are checked VERBATIM and separately.
+_NUMBER_RUN_RE: Final[re.Pattern[str]] = re.compile(r"\d[\d.,:/]*\d|\d")
+
+
+def _number_surfaces(text: str) -> list[str]:
+    """Ordered verbatim numeric runs in `text` — the surface forms the structuring pass must leave
+    byte-identical (a `3.14`→`314` or IP/port/value edit is content change `content_tokens` can't see)."""
+    return _NUMBER_RUN_RE.findall(text)
+
+
+def _collapse_adjacent(tokens: list[str]) -> list[str]:
+    """Collapse runs of an immediately-repeated token to a single occurrence — the ONLY content-token
+    deletion the structuring pass may perform (a stutter `the the`→`the`). A NON-adjacent duplicate
+    survives, so dropping one is caught as real content loss."""
+    out: list[str] = []
+    for tok in tokens:
+        if not out or out[-1] != tok:
+            out.append(tok)
+    return out
+
+
+def structure_block_is_faithful(structured: str, baseline: str) -> bool:
+    """Deterministic per-block faithfulness gate for the LLM structuring pass (ADR-0017 §3).
+
+    `structured` may differ from `baseline` ONLY by re-formatting (paragraph breaks, sentence splits,
+    punctuation, capitalisation) and by collapsing an IMMEDIATELY-repeated content-word stutter. Two
+    independent deterministic checks, both must hold — else the caller falls back to the verbatim
+    baseline block, so a hallucinated / dropped / reordered / value-changed word can never reach the
+    grounding text (HARD-gate-safe):
+
+    1. **Numbers verbatim** — the ordered VERBATIM numeric runs (`_number_surfaces`) are identical.
+       `atomise` strips `.`/`,`, so `3.14` ≡ `314` as a `content_token`; this separate check is what
+       actually rejects a number value/format change (the canonical fabrication).
+    2. **Content modulo adjacent-stutter** — `content_tokens` with ADJACENT duplicates collapsed
+       (`_collapse_adjacent`) must be EQUAL on both sides. Equality (not subsequence) rejects
+       ADDITIONS, real unique-content LOSS, and REORDERING; the adjacent-collapse is the sole
+       sanctioned deletion — so a dropped NON-adjacent duplicate is correctly rejected too.
+
+    NO stopword filter (see the module note). The raw transcript is also cached upstream as the deeper
+    audit anchor; this gate compares against the deterministic baseline the structuring step was handed.
+
+    Known bounded residual: a SYMBOLIC operator change (`5 < 3`→`5 > 3`) is invisible (operators atomise
+    to nothing and aren't numeric runs) — extremely rare in speech-transcribed text, and surfaced by the
+    human diff review; revisit only if symbol-heavy transcripts enter scope."""
+    if _number_surfaces(structured) != _number_surfaces(baseline):
+        return False
+    return _collapse_adjacent(content_tokens(structured)) == _collapse_adjacent(
+        content_tokens(baseline)
+    )
