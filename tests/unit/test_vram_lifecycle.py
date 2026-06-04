@@ -135,6 +135,36 @@ def test_gpu_compute_apps_none_when_nvidia_smi_absent(monkeypatch: pytest.Monkey
     assert vram.gpu_compute_apps() is None
 
 
+@pytest.mark.asyncio
+async def test_serve_vlm_fails_fast_with_vramexhausted_naming_holder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The dynamic VLM-serve util: when even after freeing the retrieval models the GPU can't hold
+    weights+KV, raise VRAMExhausted NAMING the holder (vs vLLM's cryptic ValueError) — and it WIDENS
+    (unload_retrieval) before giving up. No subprocess is spawned (it fails before the spawn)."""
+    from memex.core.errors import VRAMExhausted
+    from memex.parse import vlm_backend as V
+
+    # free 7.0 → budget 6.4 < the 8.5 GB floor → fit_serve_util returns None (can't fit) on every probe.
+    monkeypatch.setattr("memex.core.vram.free_vram_gb", lambda: 7.0)
+    monkeypatch.setattr("memex.core.vram.total_vram_gb", lambda: 12.0)
+    monkeypatch.setattr("memex.core.vram.gpu_compute_apps", lambda: ["pid 9: hog (5000 MiB)"])
+    monkeypatch.setattr(V.asyncio, "sleep", _noop_sleep)
+    unloaded = {"n": 0}
+
+    class _Reg:
+        async def unload_retrieval(self) -> None:
+            unloaded["n"] += 1
+
+    monkeypatch.setattr(V, "get_registry", lambda: _Reg())
+
+    with pytest.raises(VRAMExhausted) as ei:
+        async with V._serve_vlm_vllm("model-x"):
+            pass
+    assert unloaded["n"] == 1  # it widened (freed the retrieval models) before failing fast
+    assert "hog" in str(ei.value.context.get("holders"))  # the error names which process holds the GPU
+
+
 def test_webui_shutdown_releases_gpu_models() -> None:
     """The webui lifespan calls registry.unload_all() on shutdown (the clean-shutdown half of the dynamic
     VRAM manager) so its VRAM doesn't linger and contend with the next process."""
