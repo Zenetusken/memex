@@ -2425,7 +2425,10 @@ async def answer_query(
     graph_expansion_enabled: bool = True,
     graph_expansion_budget: int = 3,
     chunks_per_neighbor: int = 2,
-    companion_augment_enabled: bool = False,
+    # Param default True so the SETTINGS kill-switch controls it (`param AND setting`, the
+    # graph_expansion pattern): the setting `companion_augment_enabled` defaults FALSE → effective
+    # OFF; `MEMEX_AGENTS__COMPANION_AUGMENT_ENABLED=true` enables it; an explicit param=False force-off.
+    companion_augment_enabled: bool = True,
     scope_doc_ids: list[str] | None = None,
     prior_carry_chunk_ids: list[str] | None = None,
     correlation_id: str | None = None,
