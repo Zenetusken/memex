@@ -146,6 +146,34 @@ class RelatedDocument(BaseModel):
     shared_entities: list[str]  # the connecting entities, most-specific first
 
 
+class AlignmentBlock(BaseModel):
+    """One transcript chunk aligned to its best-matching slide-deck PAGE (ADR-0018 companion-merge).
+    PRIMARY identity = the two content-addressed chunk_ids; `deck_page`/`time_range` are CACHED
+    navigation hints for the webui label (re-derivable). `deck_chunk_id is None` ⇒ a NULL block (the
+    chunk matched no slide above the score floor — an off-slide tangent). Derived sidecar state;
+    navigation/discovery-grade, NEVER read on the grounding path. Lives in `core/types` because it
+    crosses boundaries (`index/companion` writes; the `augment_companion` node + webui read)."""
+
+    transcript_chunk_id: str
+    time_range: tuple[float, float] | None = None  # the transcript chunk's audio anchor (cached label)
+    deck_chunk_id: str | None = None  # None ⇒ NULL: no slide above the floor
+    deck_page: int | None = None  # cached nav hint = the aligned deck chunk's Chunk.page
+    score: float  # cosine similarity of the alignment (≈0..1 for L2-normalized embeddings)
+
+
+class CompanionAlignment(BaseModel):
+    """The per-pair companion-merge alignment (ADR-0018): every chunk of a lecture TRANSCRIPT doc
+    aligned to a SLIDE-DECK doc's page. A DERIVED, regenerable sidecar
+    (`vault/.memex/companion_alignments.json`); HARD-gate-neutral discovery/navigation state — the
+    transcript + deck remain first-class grounded docs in their own right."""
+
+    transcript_doc: str
+    deck_doc: str
+    embedding_recipe_version: str = ""
+    blocks: list[AlignmentBlock] = Field(default_factory=list[AlignmentBlock])
+    null_count: int = 0
+
+
 class BridgeDoc(BaseModel):
     """One related document reached THROUGH a bridging entity — a row under a `DocumentBridge`.
     Carries the doc's OVERALL relatedness `score` (identical to its `RelatedDocument.score`, so
