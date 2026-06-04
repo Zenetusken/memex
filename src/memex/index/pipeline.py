@@ -535,6 +535,8 @@ async def reindex_vault(*, force: bool = False) -> ReindexReport:
             "graph.ryu",
             "vlm_cache.sqlite",
             "chart_ocr_cache.sqlite",
+            "asr_cache.sqlite",  # ADR-0017 parse-time ASR transcription cache (derived)
+            "companion_alignments.json",  # ADR-0018 transcript↔deck alignment sidecar (derived)
         ):
             path = derived / target
             if path.is_file():

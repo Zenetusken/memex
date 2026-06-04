@@ -124,12 +124,16 @@ Auto-pairing is out of scope (the real pairing is non-trivial: `Cours-04` video 
 a wrong pair would mis-attribute commentary). v1 is an **explicit CLI verb:**
 
 ```
-memex link-slides <transcript_doc_id> <deck_doc_id>   # [--refresh] re-embed + re-align
+memex link-slides create <transcript_doc_id> <deck_doc_id>   # align + persist + CITES-link
+memex link-slides list                                       # all pairs (aligned/null counts)
+memex link-slides delete <transcript_doc_id> <deck_doc_id>   # drop a pair's sidecar entry
 ```
 
-It (a) writes the document-level link (§6), (b) computes + stores the alignment (§5), (c) is
-idempotent (re-running re-aligns). A future inference layer (course-code/ordinal, the `course_refs`
-resolver precedent) may SUGGEST pairs, but the link is only written on the user's explicit command.
+`create` (a) computes + stores the alignment (§5), (b) writes the document-level link (§6). It is
+**IDEMPOTENT — re-running re-embeds + re-aligns + REPLACES the pair, so re-running IS the refresh** (no
+separate `--refresh` flag; `compute_alignment` always recomputes from the live chunks + embeddings). A
+future inference layer (course-code/ordinal, the `course_refs` resolver precedent) may SUGGEST pairs,
+but the link is only written on the user's explicit command.
 
 ## 5. Storage — a derived-state sidecar
 
@@ -151,11 +155,11 @@ resolver precedent) may SUGGEST pairs, but the link is only written on the user'
   what it joins on. `deck_page` is a CACHED navigation hint (the deck chunk's `Chunk.page`, re-derivable
   from the chunk) for the §8 webui label — NOT the join key. `time_range` is a cached copy of the
   transcript chunk's anchor for the §8 label. So a re-index that churns chunk_ids makes BOTH ids stale →
-  `null` resolutions in the augmentation (which silently skips them, fail-open) until `--refresh`. JSON
+  `null` resolutions in the augmentation (which silently skips them, fail-open) until a re-`create`. JSON
   is written with sorted keys for stable diffs.
 - **DERIVED state** (regenerable from the indexed chunks + embedder) ⇒ in the `reindex_vault(force=
   True)` teardown allow-list (unlike user-authored `scope_sets`). A stale entry (chunk_ids changed) is
-  re-derivable; `link-slides --refresh` rebuilds.
+  re-derivable; re-running `link-slides create` rebuilds it (and `reindex --force` drops it).
 - Read fails **OPEN** to "no alignment" — a corrupt/missing file makes the §7 `augment_companion` node
   **silently skip** (it is purely additive; `/ask` proceeds exactly as if no pair were aligned) and a
   doc view shows no companion chip; NEVER an error on the read path (the `resolve_scope_set_doc_ids`
@@ -249,15 +253,16 @@ stay an opt-in enhancement rather than a default — **data decides.**
 
 ## 10. Reproducibility & lifecycle
 
-Deterministic given fixed embeddings; carries `embedding_recipe_version`; re-runs on a recipe bump or
-`--refresh`; in the `reindex --force` teardown (regenerable). `link-slides` is offline (no orchestrator
-needed); it pauses nothing (read-only over the index + the CPU/GPU embedder).
+Deterministic given fixed embeddings; carries `embedding_recipe_version`; re-runs on a recipe bump or a
+re-`create`; in the `reindex --force` teardown (regenerable — alongside `asr_cache.sqlite` etc.).
+`link-slides create` pauses the orchestrator (`pause_vllm_for_gpu`) to free the GPU for the embedder
+(mirrors ingest/index), then restarts it; the read-only `list`/`delete` touch no model.
 
 ## 11. Config / surfaces summary
 
 - `AgentsSettings.companion_augment_enabled: bool = False`, `companion_augment_max: int = 3`,
   `companion_align_min_score: float = 0.40`.
-- CLI `memex link-slides <transcript> <deck> [--refresh]` + `memex link-slides list`.
+- CLI `memex link-slides create <transcript> <deck>` (idempotent) + `list` + `delete`.
 - Sidecar `vault/.memex/companion_alignments.json`; CITES edges; webui companion chips + doc-view line.
 
 ## 12. Eval / calibration
