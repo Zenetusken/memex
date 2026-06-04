@@ -84,12 +84,18 @@ def test_unknown_mode_raises() -> None:
         resolve_profile("bogus")  # type: ignore[arg-type]  # deliberately invalid
 
 
-def test_all_modes_lists_curated_in_order_excluding_manual() -> None:
-    # V1 keeps the surfaces neutral — `auto` is wired + surfaced in V2/V4, not shown here yet.
+def test_all_modes_leads_with_auto_then_curated_excluding_manual() -> None:
     modes = all_modes()
-    assert [m.mode for m in modes] == ["fast", "full", "gpu_only"]
+    assert [m.mode for m in modes] == ["auto", "fast", "full", "gpu_only"]
     assert all(isinstance(m, ResourceProfile) for m in modes)
+    # Every selectable profile prescribes an orchestrator posture (auto mirrors fast's 0.62/8192).
     assert all(m.orchestrator_gpu_fraction is not None for m in modes)
+
+
+def test_all_modes_auto_row_reflects_live_free_vram() -> None:
+    # The auto row's reranker placement tracks the supplied live free-VRAM (GPU when it fits, else CPU).
+    assert all_modes(free_vram_gb=5.0)[0].reranker_device == "cuda"
+    assert all_modes(free_vram_gb=1.0)[0].reranker_device == "cpu"
 
 
 # ── auto mode (the default; live-VRAM-driven reranker placement) ─────────────────────────────────────

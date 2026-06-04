@@ -231,8 +231,8 @@ def effective_devices(
     return profile.embedder_device, profile.reranker_device
 
 
-def all_modes() -> list[ResourceProfile]:
-    """Every curated mode's profile, in display order (for the webui compare
-    panel + `memex mode show`). Excludes `manual` (no fixed profile). `auto` is
-    surfaced separately once it's wired + selectable (V4)."""
-    return [_curated(m) for m in _CURATED_ORDER]
+def all_modes(*, free_vram_gb: float | None = None) -> list[ResourceProfile]:
+    """Every selectable mode's profile, in display order (the webui `/resources` compare panel + `memex
+    mode show`). `auto` LEADS (it's the default) and reflects the live `free_vram_gb` when supplied — so
+    its row shows the placement it would resolve to right now. `manual` is excluded (no fixed profile)."""
+    return [resolve_profile("auto", free_vram_gb=free_vram_gb), *(_curated(m) for m in _CURATED_ORDER)]

@@ -60,6 +60,7 @@ from memex.agents.bridge import BridgeAnswer, reason_then_ground
 from memex.agents.chat import answer_turn
 from memex.agents.document_summarizer import SummaryDetail, summarize_document
 from memex.agents.expert import ExpertAnswer, expert_answer
+from memex.core import vram
 from memex.core.config import get_settings
 from memex.core.conversation_store import ConversationStore
 from memex.core.errors import (
@@ -197,6 +198,7 @@ def _active_profile() -> ResourceProfile:
     s = get_settings()
     return resolve_profile(
         s.models.co_residence_mode,
+        free_vram_gb=vram.free_vram_gb(),  # `auto` resolves its reranker placement from live VRAM
         embedder_device=s.models.embedder_device,
         reranker_device=s.models.reranker_device,
     )
@@ -777,9 +779,13 @@ def create_app() -> FastAPI:
     ) -> dict[str, object]:
         # `oob_chip` emits an out-of-band swap for the header mode chip — only on the
         # POST (a live switch), so the GET full-page render has no duplicate id.
+        # Pass the LIVE free-VRAM so the `auto` row reflects the placement it would resolve to right now
+        # (GPU vs CPU reranker) and the page can show the current headroom.
+        free = vram.free_vram_gb()
         return {
             "active": _active_profile(),
-            "modes": all_modes(),
+            "modes": all_modes(free_vram_gb=free),
+            "free_vram_gb": round(free, 1) if free is not None else None,
             "flash": flash,
             "flash_error": flash_error,
             "oob_chip": oob_chip,

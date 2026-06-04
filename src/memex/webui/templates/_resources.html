@@ -18,6 +18,9 @@
     <p class="mode-active-summary">{{ active.summary }}</p>
     <dl class="mode-facts">
       <div class="mode-fact"><dt>Retrieval</dt><dd>embedder <b>{{ active.embedder_device }}</b> · reranker <b>{{ active.reranker_device }}</b></dd></div>
+      {% if free_vram_gb is not none %}
+      <div class="mode-fact"><dt>Live VRAM</dt><dd><b>{{ free_vram_gb }} GB</b> free now{% if active.mode == "auto" %} · auto-placed{% endif %}</dd></div>
+      {% endif %}
       <div class="mode-fact"><dt>Context window</dt><dd>{{ active.context_window }}</dd></div>
       <div class="mode-fact"><dt>Latency</dt><dd>{{ active.expected_latency }}</dd></div>
       {% if active.orchestrator_gpu_fraction is not none %}
