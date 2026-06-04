@@ -196,10 +196,11 @@ NOT its graph position.
   doc with a companion alignment (§5 sidecar), pull its **aligned counterpart chunk(s)** and APPEND
   them to `state.reranked`: a winning DECK chunk on page P → the transcript chunks aligned to P (the
   teacher's words on that slide); a winning TRANSCRIPT chunk → the deck chunks on its aligned page (the
-  slide it explains). Bounded to at most `companion_augment_max` counterparts PER WINNING CHUNK
-  (default `3`) AND a global cap of `companion_augment_max` total additions per query, de-duped against
-  the existing reranked set, and only counterparts whose stored alignment `score ≥
-  companion_align_min_score`. The appended counterparts are
+  slide it explains). Bounded to at most `companion_augment_max` **TOTAL** counterpart additions per
+  query (default `3`), collected greedily in rerank order across the winners and de-duped against the
+  existing reranked set. The `score ≥ companion_align_min_score` floor is ALREADY enforced at
+  alignment time — a below-floor block has `deck_chunk_id=None`/`deck_page=None` (a NULL block), so the
+  counterpart lookup (`_companion_counterpart_ids`) skips it by construction. The appended counterparts are
   contextually relevant BY ALIGNMENT (they're the companion of a reranked winner), so appending them
   unranked is sound; assess/answer/verify then treat them like any other chunk.
 - **HARD-gate-safe BY CONSTRUCTION** (the `expand_graph` argument): it only **ADDS real, already-

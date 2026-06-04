@@ -66,7 +66,13 @@ from memex.agents.artifact_scope import (
 from memex.agents.table_sql import coerce_number, describe_aggregate
 from memex.core.errors import AnswerStateInvariantError
 from memex.core.text import STOPWORDS, atomise, claim_grounded_only_by_name
-from memex.core.types import Chunk, RelatedDocument, StoredTable, TableQueryResult
+from memex.core.types import (
+    Chunk,
+    CompanionAlignment,
+    RelatedDocument,
+    StoredTable,
+    TableQueryResult,
+)
 from memex.core.wikilinks import format_wikilink
 from memex.models.client import complete_structured
 from memex.observability.tracing import (
@@ -516,6 +522,15 @@ class AnswerState(BaseModel):
     # search. The reranker is the quality gate downstream.
     chunks_per_neighbor: int = 2
 
+    # --- Companion-merge retrieval augmentation (ADR-0018, B4) ---
+    # When True, AFTER rerank a winning chunk from one side of an aligned transcript↔deck pair pulls
+    # its aligned counterpart(s) into `reranked` (the teacher's commentary for a slide, or the slide
+    # for a commentary chunk) — additive, per-chunk-pure ⇒ HARD-gate-safe (verify still grounds each
+    # claim against its OWN chunk). DEFAULT-OFF; set from `agents.companion_augment_enabled` in
+    # `answer_query` (fail-open). `companion_augment_max` bounds counterparts per winner AND the total.
+    companion_augment_enabled: bool = False
+    companion_augment_max: int = 3
+
     # --- Reasoning intermediates ---
     sufficiency: SufficiencyAssessment | None = None
     draft: DraftAnswer | None = None
@@ -877,6 +892,85 @@ def _resolve_rerank_top_k(env_value: str | None) -> int:
         reranker_device=s.models.reranker_device,
     )
     return max(1, profile.retrieval_top_k)
+
+
+async def augment_companion(state: AnswerState) -> AnswerStateUpdate:
+    """Best-effort companion-merge retrieval augmentation (ADR-0018 B4, spec §7). DEFAULT-OFF.
+
+    Runs AFTER `rerank`: for the reranked WINNERS, if a chunk belongs to a doc that has a companion
+    alignment (a lecture transcript ↔ its slide deck), pull the chunk's ALIGNED COUNTERPART(s) — a
+    winning DECK chunk → the transcript chunks aligned to its slide (the teacher's spoken commentary);
+    a winning TRANSCRIPT chunk → the deck chunk it explains (the slide) — and APPEND them to
+    `state.reranked`. **Additive + per-chunk-PURE** (the counterparts are real indexed chunks with
+    their OWN chunk_id + single source) ⇒ HARD-gate-safe: `verify` still grounds each claim against the
+    chunk its own `source_chunk_id` names — NO cross-source grounding, NO fabrication, NO chunk_id
+    churn. Bounded by `companion_augment_max` total. Best-effort like `expand_graph`: expected failure
+    modes (missing store/graph, settings unset, store I/O) are swallowed + logged; programming bugs
+    propagate."""
+    from memex.core.errors import ConfigurationError, MemexError
+
+    log = logger.bind(node="augment_companion")
+    if not state.companion_augment_enabled or not state.reranked:
+        return {"nodes_traversed": state.nodes_traversed + 1}
+    try:
+        added = await _augment_companion_impl(state)
+    except (ImportError, ConfigurationError, MemexError, OSError) as exc:
+        log.warning("augment_companion.skipped", reason=type(exc).__name__, error=str(exc))
+        return {"nodes_traversed": state.nodes_traversed + 1}
+    if not added:
+        return {"nodes_traversed": state.nodes_traversed + 1}
+    log.info("augment_companion.added", count=len(added))
+    return {"reranked": [*state.reranked, *added], "nodes_traversed": state.nodes_traversed + 1}
+
+
+def _companion_counterpart_ids(chunk: Chunk, alignments: list[CompanionAlignment]) -> list[str]:
+    """PURE: the aligned counterpart chunk_ids for ONE reranked chunk — a TRANSCRIPT chunk → its
+    aligned deck chunk(s) (the slide it explains); a DECK chunk → the transcript chunks aligned to its
+    slide `page` (the commentary on it)."""
+    out: list[str] = []
+    for a in alignments:
+        if chunk.document_id == a.transcript_doc:
+            out.extend(
+                b.deck_chunk_id
+                for b in a.blocks
+                if b.transcript_chunk_id == chunk.chunk_id and b.deck_chunk_id is not None
+            )
+        elif chunk.document_id == a.deck_doc and chunk.page is not None:
+            out.extend(b.transcript_chunk_id for b in a.blocks if b.deck_page == chunk.page)
+    return out
+
+
+async def _augment_companion_impl(state: AnswerState) -> list[Chunk]:
+    """Resolve the reranked winners' aligned counterparts (greedy in rerank order, de-duped, capped at
+    `companion_augment_max` TOTAL) and fetch the real chunks by id. Pure read of the sidecar + FTS."""
+    from contextlib import AsyncExitStack
+
+    from memex.core.companion_store import alignments_for_doc
+    from memex.core.config import get_settings
+    from memex.index.fts_store import FTSStore
+
+    vault = get_settings().vault_path
+    existing = {c.chunk_id for c in state.reranked}
+    cache: dict[str, list[CompanionAlignment]] = {}
+    for doc_id in {c.document_id for c in state.reranked}:
+        cache[doc_id] = await alignments_for_doc(vault, doc_id)
+    if not any(cache.values()):
+        return []
+    cap = max(0, state.companion_augment_max)
+    wanted: list[str] = []
+    for c in state.reranked:
+        for cid in _companion_counterpart_ids(c, cache.get(c.document_id, [])):
+            if cid not in existing and cid not in wanted:
+                wanted.append(cid)
+        if len(wanted) >= cap:
+            break
+    wanted = wanted[:cap]
+    if not wanted:
+        return []
+    async with AsyncExitStack() as stack:
+        fstore = await FTSStore.open(vault)
+        stack.push_async_callback(fstore.close)
+        return await fstore.chunks_by_ids(wanted)
 
 
 async def rerank(state: AnswerState) -> AnswerStateUpdate:
@@ -2271,6 +2365,7 @@ def build_answering_graph() -> CompiledStateGraph:
     g.add_node("resolve_artifact_scope", resolve_artifact_scope)
     g.add_node("expand_graph", expand_graph)
     g.add_node("rerank", rerank)
+    g.add_node("augment_companion", augment_companion)
     g.add_node("query_tables", query_tables)
     g.add_node("assess", assess)
     g.add_node("answer", answer)
@@ -2285,7 +2380,8 @@ def build_answering_graph() -> CompiledStateGraph:
     g.add_edge("retrieve", "resolve_artifact_scope")
     g.add_edge("resolve_artifact_scope", "expand_graph")
     g.add_edge("expand_graph", "rerank")
-    g.add_edge("rerank", "query_tables")
+    g.add_edge("rerank", "augment_companion")  # ADR-0018 B4: targeted on the reranked winners
+    g.add_edge("augment_companion", "query_tables")
     g.add_edge("query_tables", "assess")
     g.add_edge("answer", "verify")
     g.add_edge("regenerate", "answer")  # the loop
@@ -2329,6 +2425,7 @@ async def answer_query(
     graph_expansion_enabled: bool = True,
     graph_expansion_budget: int = 3,
     chunks_per_neighbor: int = 2,
+    companion_augment_enabled: bool = False,
     scope_doc_ids: list[str] | None = None,
     prior_carry_chunk_ids: list[str] | None = None,
     correlation_id: str | None = None,
@@ -2406,6 +2503,18 @@ async def answer_query(
     except (ConfigurationError, MemexError):
         pass
 
+    # The companion-merge augmentation (ADR-0018 B4): the param ANDed with the settings kill-switch
+    # (DEFAULT-OFF), read fail-open. `companion_augment_max` comes from settings (default 3).
+    companion_augment_max = 3
+    try:
+        agents_cfg = get_settings().agents
+        companion_augment_enabled = (
+            companion_augment_enabled and agents_cfg.companion_augment_enabled
+        )
+        companion_augment_max = agents_cfg.companion_augment_max
+    except (ConfigurationError, MemexError):
+        pass
+
     initial = AnswerState(
         query=query,
         token_budget=token_budget,
@@ -2413,6 +2522,8 @@ async def answer_query(
         graph_expansion_enabled=graph_expansion_enabled,
         graph_expansion_budget=graph_expansion_budget,
         chunks_per_neighbor=chunks_per_neighbor,
+        companion_augment_enabled=companion_augment_enabled,
+        companion_augment_max=companion_augment_max,
         allow_partial_grounded=allow_partial_grounded,
         numeric_grounding_backstop=numeric_grounding_backstop,
         name_only_grounding_backstop=name_only_grounding_backstop,
