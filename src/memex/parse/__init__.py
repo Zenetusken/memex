@@ -45,6 +45,7 @@ from memex.parse.pipeline import (
     pause_vllm_for_gpu,
     reset_docling_breaker,
     reset_pymupdf_breaker,
+    video_source_path,
 )
 from memex.parse.pymupdf_backend import (
     PdfSignals,
@@ -100,4 +101,5 @@ __all__ = [
     "reset_pymupdf_breaker",
     "transcribe_audio",
     "transcribe_images",
+    "video_source_path",
 ]

@@ -97,3 +97,32 @@ def test_parallel_length_validation() -> None:
         align_blocks([_t("t#a")], [_d("d#1", 1)], [], [[1.0, 0]], min_score=0.4)
     with pytest.raises(ValueError, match="parallel deck_chunks"):
         align_blocks([_t("t#a")], [_d("d#1", 1)], [[1.0, 0]], [], min_score=0.4)
+
+
+def test_keyframe_signal_is_primary_over_transcript_argmax() -> None:
+    # The keyframe signal (ADR-0018 §13) for a chunk OVERRIDES its transcript-text argmax: t#a's text
+    # matches page 1, but its keyframe entry assigns page 3 (the frame showed slide 3).
+    deck = [_d("d#1", 1), _d("d#2", 2), _d("d#3", 3)]
+    p_emb = [[1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0]]
+    tx = [_t("t#a")]
+    t_emb = [[1.0, 0, 0]]  # transcript text → page 1
+    blocks, null_count = align_blocks(
+        tx, deck, t_emb, p_emb, min_score=0.5, keyframe_signal={"t#a": ("d#3", 3, 0.93)}
+    )
+    assert null_count == 0
+    assert blocks[0].deck_page == 3 and blocks[0].deck_chunk_id == "d#3"  # keyframe wins, not page 1
+    assert blocks[0].score == 0.93
+
+
+def test_keyframe_partial_falls_back_and_advances_page_prev() -> None:
+    # t#a has a keyframe (page 2); t#b has NONE → transcript-text path, and its monotonic tie-break
+    # must see page_prev=2 from the keyframe (a near-tie between page 1 and page 3 → forward page 3).
+    deck = [_d("d#1", 1), _d("d#2", 2), _d("d#3", 3)]
+    p_emb = [[1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0]]
+    a, b = _t("t#a", 0.0), _t("t#b", 30.0)
+    t_emb = [[1.0, 0, 0], [0.71, 0.0, 0.70]]  # t#a text → page1; t#b near-tie page1(.71)/page3(.70)
+    blocks, _ = align_blocks(
+        [a, b], deck, t_emb, p_emb, min_score=0.4, epsilon=0.02, keyframe_signal={"t#a": ("d#2", 2, 0.88)}
+    )
+    assert blocks[0].deck_page == 2  # t#a from the keyframe (not its text's page 1)
+    assert blocks[1].deck_page == 3  # t#b falls back, tie-broken FORWARD from the keyframe's page 2

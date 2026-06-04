@@ -12,6 +12,7 @@ touches the grounding path (the transcript + deck stay first-class grounded docs
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from contextlib import AsyncExitStack
 from typing import Any
 
@@ -34,6 +35,11 @@ from memex.models.registry import get_registry
 # within this are "tied", and we prefer the non-decreasing one (a lecture advances). Small by design —
 # it NEVER overrides a clear argmax, only breaks genuine near-ties.
 _TIE_EPSILON = 0.02
+
+# Title used to embed a keyframe-OCR text DOC-side (ADR-0018 §13), so a frame's slide content sits in
+# the same space as the deck chunks (which embed `document_input(heading, text)`). The frame has no
+# heading; the OCR text dominates the embedding, so a neutral constant is sufficient.
+_KEYFRAME_TITLE = "slide"
 
 
 def cosine_matrix(
@@ -59,12 +65,20 @@ def align_blocks(
     *,
     min_score: float,
     epsilon: float = _TIE_EPSILON,
+    keyframe_signal: dict[str, tuple[str, int | None, float]] | None = None,
 ) -> tuple[list[AlignmentBlock], int]:
     """PURE MaViLS-style alignment. Each transcript chunk → its best deck page by cosine ARGMAX, NULL
     below `min_score` (an off-slide tangent / no good slide), with a cheap MONOTONIC tie-break: among
     pages within `epsilon` of the best, prefer the smallest page `≥` the last assigned page (lectures
     advance) — never overriding a clear argmax, never forbidding a clear backward jump (the asymmetric-
     penalty DP is the §13 fast-follow). Returns `(blocks, null_count)`.
+
+    `keyframe_signal` (ADR-0018 §13, video lectures) maps a transcript `chunk_id` → its
+    `(deck_chunk_id, deck_page, score)` derived from the VIDEO FRAME shown during it (OCR → cosine to
+    the deck), pre-filtered to entries above the keyframe floor by `compute_alignment`. When a chunk has
+    a keyframe entry it is PRIMARY (used verbatim, no null floor — the floor already passed); otherwise
+    the chunk falls back to the transcript-text argmax below. The keyframe page still advances
+    `page_prev`, so a following transcript-fallback chunk tie-breaks forward from it.
 
     `transcript_chunks` MUST be in TIME order (the monotonic tie-break assumes it); `FTSStore`
     `chunks_for_document` returns `char_start` order, which IS time order for a transcript. `t_emb` /
@@ -80,6 +94,21 @@ def align_blocks(
     page_prev: int | None = None  # last assigned non-null page (for the monotonic tie-break)
 
     for i, tc in enumerate(transcript_chunks):
+        kf = keyframe_signal.get(tc.chunk_id) if keyframe_signal else None
+        if kf is not None:  # keyframe-PRIMARY (already above the keyframe floor) → use it verbatim
+            kf_deck_chunk_id, kf_deck_page, kf_score = kf
+            blocks.append(
+                AlignmentBlock(
+                    transcript_chunk_id=tc.chunk_id,
+                    time_range=tc.time_range,
+                    deck_chunk_id=kf_deck_chunk_id,
+                    deck_page=kf_deck_page,
+                    score=kf_score,
+                )
+            )
+            if kf_deck_page is not None:
+                page_prev = kf_deck_page
+            continue
         if not deck_chunks:  # nothing to align to → all NULL
             blocks.append(AlignmentBlock(transcript_chunk_id=tc.chunk_id, time_range=tc.time_range, score=0.0))
             null_count += 1
@@ -151,13 +180,59 @@ async def _embed(inputs: list[str], *, prompt_name: str | None) -> list[list[flo
     return [[float(x) for x in row] for row in arr]
 
 
-async def compute_alignment(transcript_doc: str, deck_doc: str) -> CompanionAlignment:
+async def _keyframe_signal_from_texts(
+    t_chunks: list[Chunk],
+    d_chunks: list[Chunk],
+    d_emb: list[list[float]],
+    keyframe_texts: Mapping[str, str],
+    *,
+    use_prompt: bool,
+    floor: float,
+) -> dict[str, tuple[str, int | None, float]]:
+    """Build the keyframe signal (ADR-0018 §13): embed each transcript chunk's FRAME-OCR text DOC-side
+    (so it shares the deck's space) and cosine-match it to the deck pages. A chunk's best deck page at
+    cosine `≥ floor` becomes its PRIMARY slide `(deck_chunk_id, deck_page, score)`; below the floor
+    (a live demo / off-slide frame) the chunk is omitted → it falls back to its transcript-text signal
+    in `align_blocks`. Reuses the SAME embedder + `cosine_matrix` as the transcript-text path."""
+    kf_ids = [c.chunk_id for c in t_chunks if c.chunk_id in keyframe_texts]
+    if not kf_ids:
+        return {}
+    if use_prompt:
+        kf_inputs = [document_input(_KEYFRAME_TITLE, keyframe_texts[cid]) for cid in kf_ids]
+        kf_emb = await _embed(kf_inputs, prompt_name=None)
+    else:  # native prompts off: bare text, same space as the bare deck embeddings
+        kf_emb = await _embed([keyframe_texts[cid] for cid in kf_ids], prompt_name=None)
+
+    sim = cosine_matrix(kf_emb, d_emb)
+    signal: dict[str, tuple[str, int | None, float]] = {}
+    for k, cid in enumerate(kf_ids):
+        row = sim[k]
+        best_j = int(np.argmax(row))
+        best = float(row[best_j])
+        if best >= floor:
+            dc = d_chunks[best_j]
+            signal[cid] = (dc.chunk_id, dc.page, best)
+    return signal
+
+
+async def compute_alignment(
+    transcript_doc: str,
+    deck_doc: str,
+    *,
+    keyframe_texts: Mapping[str, str] | None = None,
+) -> CompanionAlignment:
     """Read both docs' INDEXED chunks (via FTSStore), embed (transcript query-side, deck document-side
     — the §3 committed asymmetry, both flipped together with `native_prompts`), and align
     (`align_blocks`). Raises `CompanionMergeError` if either doc is un-indexed or the deck has no page
     attribution. Deterministic given fixed embeddings ⇒ reproducible; carries the embed-recipe version
     so a recipe bump (or `--refresh`) re-aligns. HARD-gate-neutral: pure read of indexed chunks +
-    embedder, no grounding-path touch."""
+    embedder, no grounding-path touch.
+
+    `keyframe_texts` (ADR-0018 §13, `link-slides --use-video`): a `{transcript_chunk_id: frame_ocr_text}`
+    map produced by `parse/keyframe_ocr.ocr_frames_for_chunks` (the CLI wires parse→index). When given,
+    each covered chunk's slide is computed from its VIDEO FRAME (the stronger MaViLS signal) and is
+    PRIMARY above the keyframe floor; uncovered / below-floor chunks fall back to the transcript-text
+    cosine. `None` ⇒ the transcript-only path, byte-identical to before."""
     settings = get_settings()
     async with AsyncExitStack() as stack:
         fstore = await FTSStore.open(settings.vault_path)
@@ -192,15 +267,35 @@ async def compute_alignment(transcript_doc: str, deck_doc: str) -> CompanionAlig
         t_emb = await _embed([c.text for c in t_chunks], prompt_name=None)
         d_emb = await _embed([c.text for c in d_chunks], prompt_name=None)
 
+    keyframe_signal: dict[str, tuple[str, int | None, float]] = {}
+    if keyframe_texts:
+        keyframe_signal = await _keyframe_signal_from_texts(
+            t_chunks,
+            d_chunks,
+            d_emb,
+            keyframe_texts,
+            use_prompt=use_prompt,
+            floor=settings.agents.companion_keyframe_min_score,
+        )
+
     blocks, null_count = align_blocks(
-        t_chunks, d_chunks, t_emb, d_emb, min_score=settings.agents.companion_align_min_score
+        t_chunks,
+        d_chunks,
+        t_emb,
+        d_emb,
+        min_score=settings.agents.companion_align_min_score,
+        keyframe_signal=keyframe_signal or None,
     )
+    # Inlined recipe string (index/pipeline._embed_recipe_version is private — no cross-module private
+    # import); MUST stay in lockstep with it. A `+keyframe` suffix records that the VIDEO-frame signal
+    # produced this alignment (provenance; distinguishes it from a transcript-only re-run of the pair).
+    recipe = "v1-gemma-prompts" if use_prompt else "v0"
+    if keyframe_signal:
+        recipe += "+keyframe"
     return CompanionAlignment(
         transcript_doc=transcript_doc,
         deck_doc=deck_doc,
-        # Inlined recipe string (index/pipeline._embed_recipe_version is private — no cross-module
-        # private import); MUST stay in lockstep with it.
-        embedding_recipe_version="v1-gemma-prompts" if use_prompt else "v0",
+        embedding_recipe_version=recipe,
         blocks=blocks,
         null_count=null_count,
     )

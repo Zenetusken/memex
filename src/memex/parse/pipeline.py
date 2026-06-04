@@ -1788,6 +1788,23 @@ VIDEO_SUFFIXES: Final[frozenset[str]] = frozenset({".mp4", ".m4v", ".mov", ".web
 MEDIA_SUFFIXES: Final[frozenset[str]] = AUDIO_SUFFIXES | VIDEO_SUFFIXES
 
 
+def video_source_path(vault_path: Path, doc_id: str) -> Path | None:
+    """The doc's VIDEO source file (`source.mp4`/`.mov`/…) if it has one, else `None`.
+
+    The `link-slides --use-video` gate (ADR-0018 §13): keyframe-OCR can only decode frames from a
+    VIDEO source. An audio-only doc (`.mp3` — its slides have no on-screen frames), a non-media doc,
+    or a doc with no copied source returns `None` → the caller falls back to the transcript-text
+    alignment. A missing asset dir is treated as "no video" here; the real "doc not indexed" error
+    surfaces from `compute_alignment`."""
+    try:
+        source = _source_file(vault_path, doc_id)
+    except VaultIntegrityError:
+        return None
+    if source.is_file() and source.suffix.lower() in VIDEO_SUFFIXES:
+        return source
+    return None
+
+
 def _format_timestamp(seconds: float) -> str:
     """`mm:ss` (or `hh:mm:ss` past an hour) for a transcript segment heading."""
     total = max(0, int(seconds))

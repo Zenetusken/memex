@@ -1415,6 +1415,13 @@ def scope_set_delete(
 def link_slides_create(
     transcript_doc: str = _Argument(..., help="The lecture TRANSCRIPT document id."),
     deck_doc: str = _Argument(..., help="The SLIDE-DECK document id it pairs with."),
+    use_video: bool = _Option(
+        False,
+        "--use-video",
+        help="If the transcript has a VIDEO source, align via VIDEO KEYFRAME OCR (the stronger "
+        "MaViLS signal, ADR-0018 §13) — OCR the frame shown during each chunk and match it to the "
+        "deck. Falls back to transcript-text for audio-only docs / off-slide frames. (GPU + slower.)",
+    ),
 ) -> None:
     """Align a lecture transcript to its slide deck (ADR-0018) and persist the alignment.
 
@@ -1423,14 +1430,27 @@ def link_slides_create(
     (`companion_alignments.json`) + a reciprocal `CITES` companion link. Idempotent — re-running
     REPLACES the pair (so it doubles as a refresh after a re-index). Both docs must already be
     ingested + indexed; the deck must have per-page attribution (re-parse a legacy deck if not).
+
+    With `--use-video`, a transcript with a video source aligns each chunk from the on-screen SLIDE
+    in the video frame at its time-range midpoint (OCR → cosine to the deck) — recovering MaViLS's
+    strong frame signal; chunks below the keyframe floor (a live demo / off-slide moment) fall back
+    to the transcript-text cosine.
     """
 
     async def _run() -> dict[str, object]:
         bootstrap()
+        from collections.abc import Mapping
+
         from memex.core.companion_store import upsert_alignment
         from memex.core.config import get_settings
         from memex.index.companion import compute_alignment
-        from memex.parse import pause_vllm_for_gpu
+        from memex.index.fts_store import FTSStore
+        from memex.parse import (
+            KeyframeOCRCache,
+            ocr_frames_for_chunks,
+            pause_vllm_for_gpu,
+            video_source_path,
+        )
         from memex.vault.store import list_documents
 
         vault_path = get_settings().vault_path
@@ -1440,8 +1460,38 @@ def link_slides_create(
             err.print(f"[red]Unknown document id(s):[/red] {', '.join(unknown)}")
             raise typer.Exit(code=2)
 
-        async with pause_vllm_for_gpu():  # free the GPU for the embedder (mirrors ingest/index)
-            alignment = await compute_alignment(transcript_doc, deck_doc)
+        # The whole GPU run (keyframe OCR via the short-lived VLM serve, THEN the embedder) holds ONE
+        # orchestrator pause — the VLM serve spawns on the freed GPU + tears down before the embed.
+        async with pause_vllm_for_gpu():
+            keyframe_texts: Mapping[str, str] | None = None
+            keyframe_video = False
+            if use_video:
+                vpath = video_source_path(vault_path, transcript_doc)
+                if vpath is None:
+                    err.print(
+                        "[yellow]--use-video:[/yellow] transcript has no video source "
+                        "(audio-only / non-media) — aligning with transcript text instead."
+                    )
+                else:
+                    keyframe_video = True
+                    fstore = await FTSStore.open(vault_path)
+                    try:
+                        t_chunks = await fstore.chunks_for_document(transcript_doc)
+                    finally:
+                        await fstore.close()
+                    frames = [
+                        (c.chunk_id, (c.time_range[0] + c.time_range[1]) / 2.0)
+                        for c in t_chunks
+                        if c.time_range is not None
+                    ]
+                    cache = await KeyframeOCRCache.open(vault_path)
+                    try:
+                        keyframe_texts = await ocr_frames_for_chunks(vpath, frames, cache=cache)
+                    finally:
+                        await cache.close()
+            alignment = await compute_alignment(
+                transcript_doc, deck_doc, keyframe_texts=keyframe_texts
+            )
         await upsert_alignment(vault_path, alignment)
 
         # The document-level companion link (read-only discovery; fail-open if the graph is absent).
@@ -1468,6 +1518,8 @@ def link_slides_create(
             "null": alignment.null_count,
             "cites_linked": linked,
             "embedding_recipe_version": alignment.embedding_recipe_version,
+            "keyframe_video": keyframe_video,
+            "keyframe_ocr_frames": len(keyframe_texts) if keyframe_texts else 0,
         }
 
     _print(asyncio.run(_run()))

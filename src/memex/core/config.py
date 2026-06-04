@@ -687,6 +687,13 @@ class AgentsSettings(BaseModel):
     companion_align_min_score: float = 0.40
     companion_augment_enabled: bool = False
     companion_augment_max: int = 3
+    # Keyframe-OCR alignment floor (ADR-0018 §13, `link-slides --use-video`): for a lecture with a
+    # VIDEO source, each transcript chunk's slide can come from the VIDEO FRAME shown during it (OCR →
+    # cosine to the deck) — a near-exact signal vs the transcript-text cosine. A frame match `≥` this
+    # floor is PRIMARY; below it (a live demo / off-slide moment) the chunk falls back to the
+    # transcript-text signal. Higher than `companion_align_min_score` because frame-OCR text is a
+    # near-duplicate of the slide's deck text (its cosines run systematically higher).
+    companion_keyframe_min_score: float = 0.50
     # The deterministic numeric-grounding backstop (2026-05-31): a post-verify
     # gate that demotes a grounded claim whose principal LARGE figure is absent
     # from its cited TABLE chunk (a computed aggregate the LLM verifier

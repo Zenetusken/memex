@@ -537,6 +537,7 @@ async def reindex_vault(*, force: bool = False) -> ReindexReport:
             "chart_ocr_cache.sqlite",
             "asr_cache.sqlite",  # ADR-0017 parse-time ASR transcription cache (derived)
             "companion_alignments.json",  # ADR-0018 transcript↔deck alignment sidecar (derived)
+            "keyframe_ocr_cache.sqlite",  # ADR-0018 §13 keyframe-OCR cache (derived)
         ):
             path = derived / target
             if path.is_file():
