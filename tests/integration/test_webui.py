@@ -2675,3 +2675,39 @@ async def test_bridge_scopes_to_selected_docs(
     assert captured["scope_doc_ids"] == [lec.doc_id]  # the route forwarded the selection
     assert "Scoped to your selected document" in text  # the result-side scope note
     assert "ENSA Module 1 OSPF" in text  # scoped doc shown by title
+
+
+@pytest.mark.asyncio
+async def test_ask_renders_companion_chip_for_aligned_transcript_chunk(
+    settings: MemexSettings, client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-0018 B3: a cited TRANSCRIPT chunk that is aligned to a slide deck shows a `↔ slide N`
+    companion chip on its source link (read fail-open from the alignment sidecar). No alignment → no
+    chip; HARD-gate-neutral (presentation lookup over the cited chunks)."""
+    from memex.core.companion_store import upsert_alignment
+    from memex.core.types import AlignmentBlock, CompanionAlignment
+
+    await upsert_alignment(
+        settings.vault_path,
+        CompanionAlignment(
+            transcript_doc="lecture1", deck_doc="deck1", null_count=0,
+            blocks=[AlignmentBlock(transcript_chunk_id="lecture1#t1", deck_chunk_id="deck1#g",
+                                   deck_page=12, score=0.61)],
+        ),
+    )
+
+    async def _fake(question: str, **_kw: Any) -> FinalResponse:
+        chunk = Chunk(chunk_id="lecture1#t1", document_id="lecture1", document_title="Lecture 1",
+                      text="VLANs segment the broadcast domain.", heading_path=["[01:02]"],
+                      time_range=(62.0, 66.0))
+        return FinalResponse(
+            answered=True, summary="VLANs segment the network.",
+            claims=[CitedClaim(claim="A VLAN segments the broadcast domain.",
+                               source_chunk_id="lecture1#t1", confidence="high")],
+            used_chunks=[chunk], wikilinks=[], correlation_id="01HZCOMP0000000000000000",
+            tokens_used=10, nodes_traversed=4, regenerate_attempts=0,
+        )
+
+    monkeypatch.setattr("memex.webui.app.answer_query", _fake)
+    text = await _ask_to_completion(client.app, "what does a VLAN do?")
+    assert "↔ slide 12" in text  # the cited transcript chunk's aligned slide

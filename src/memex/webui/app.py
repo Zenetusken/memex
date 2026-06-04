@@ -75,7 +75,7 @@ from memex.core.scope_sets import (
     list_scope_sets,
     save_scope_set,
 )
-from memex.core.types import Chunk
+from memex.core.types import Chunk, CompanionAlignment
 from memex.daemon import restart as daemon_restart
 from memex.daemon import status as daemon_status
 from memex.index.graph_store import GraphStore
@@ -432,7 +432,41 @@ async def _answer_context(
         "chunk_refs": chunk_refs,
         "doc_titles": doc_titles,
         "related": await _related_for_answer(vault_path, response),
+        "companion": await _companion_labels(vault_path, response),
     }
+
+
+async def _companion_labels(vault_path: Path, response: FinalResponse) -> dict[str, str]:
+    """`chunk_id → a companion nav label` for the cited chunks (ADR-0018 B3): a cited TRANSCRIPT chunk
+    gets `slide N` (the slide it explains); a cited DECK chunk gets `lecture mm:ss` (the spoken
+    commentary on it). Read FAIL-OPEN from the alignment sidecar — no pair / no alignment → `{}`, so
+    the answer renders exactly as before. HARD-gate-neutral (a presentation lookup over the cited
+    chunks + a read-only sidecar; never touches the answer/grounding)."""
+    from memex.core.companion_store import alignments_for_doc
+
+    out: dict[str, str] = {}
+    cache: dict[str, list[CompanionAlignment]] = {}
+    for c in response.used_chunks:
+        if c.document_id not in cache:
+            cache[c.document_id] = await alignments_for_doc(vault_path, c.document_id)
+        for a in cache[c.document_id]:
+            if c.document_id == a.transcript_doc:
+                block = next(
+                    (b for b in a.blocks if b.transcript_chunk_id == c.chunk_id and b.deck_page),
+                    None,
+                )
+                if block is not None:
+                    out[c.chunk_id] = f"slide {block.deck_page}"
+                    break
+            elif c.document_id == a.deck_doc and c.page is not None:
+                block = next(
+                    (b for b in a.blocks if b.deck_page == c.page and b.time_range is not None),
+                    None,
+                )
+                if block is not None:
+                    out[c.chunk_id] = f"lecture {_format_time_anchor(block.time_range)}"
+                    break
+    return out
 
 
 def _kind_for(path: Path) -> tuple[str, str]:

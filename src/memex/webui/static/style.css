@@ -598,6 +598,9 @@ html { scroll-behavior: smooth; }
 .related-link { color: rgb(96 165 250); text-decoration: none; }  /* blue-400, the action accent */
 .related-link:hover { text-decoration: underline; }
 .related-via { color: rgb(161 161 170); font-size: 0.82rem; margin-left: 0.5rem; }  /* zinc-400 */
+/* Companion-merge chip (ADR-0018): a cited transcript chunk's aligned slide, or a cited slide's
+   spoken-commentary time. zinc-400 (AA) like .related-via; the "↔" marks the lecture↔deck link. */
+.claim-companion { color: rgb(161 161 170); font-size: 0.82rem; }
 .related-entity {
   display: inline-block;
   padding: 0.02rem 0.35rem;
