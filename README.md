@@ -54,7 +54,7 @@ The **default 12 GB-tier orchestrator is `cyankiwi/Qwen3.5-4B-AWQ-4bit`** — a 
 # 1. Clone + sync
 git clone https://github.com/Zenetusken/memex.git ~/project/Doc_Flo
 cd ~/project/Doc_Flo
-uv sync --extra models --extra parse --extra serve
+uv sync --extra models --extra parse --extra serve --extra audio
 
 # 2. (optional, recommended) Pre-fetch the HuggingFace models so first
 # boot doesn't hammer the network. ~13 GB on disk.
@@ -175,7 +175,7 @@ For scanned content add `MEMEX_PARSE_DOCLING_OCR=1`; for born-digital PDFs (Powe
 
 **Office documents** (`.pptx`/`.docx`/`.xlsx` + their ODF cousins) are first converted to PDF via headless LibreOffice, then run through the normal PDF pipeline — so a diagram-heavy slide deck's figures flow through the VLM diagram-transcription + chart-OCR passes (enable the VLM with `MEMEX_PARSE__DISABLE_VLM=false` for diagram-rich decks). The converted PDF is cached per document and reused on re-parse. LibreOffice must be installed (`soffice` on PATH). On the 12 GB tier `memex ingest`/`index`/`reindex` pause vLLM for the duration so the embedder isn't starved by a co-resident vLLM — no manual `MEMEX_RERANK_BATCH_SIZE` or daemon juggling needed. The VLM is **Qwen3-VL-8B-AWQ**, run as a short-lived vLLM process *during parse only* (the orchestrator is paused to free the GPU); it transcribes directed flow/state diagrams correctly where the older Qwen2.5-VL flattened them into a list. Tune via `MEMEX_MODELS__VLM_SERVING` (`vllm` | `transformers`) + `MEMEX_MODELS__VLM_SERVE__*` (port / `gpu_memory_utilization` / `max_model_len`) — see [`docs/specs/vlm-vllm-serving.md`](docs/specs/vlm-vllm-serving.md).
 
-**Audio + video recordings** (audio `.mp3`/`.wav`/`.m4a`/`.flac`/`.ogg`/… and native video `.mp4`/`.mov`/`.webm`/`.mkv`/…) ingest through a speech-to-text route (ADR-0017): faster-whisper transcribes the media to a deterministic `## [mm:ss]` Markdown transcript (segments coalesced into ~30 s blocks), which then flows through the normal parse/index/answer path. A transcript chunk carries a `time_range` so the web UI shows time chips and answers cite the moment. Needs the `audio` extra (`uv sync … --extra audio`) and a Whisper build set via `MEMEX_MODELS__ASR` (reference: `large-v3-turbo`). A lecture transcript can also be **aligned to its slide deck** via `memex link-slides` (ADR-0018), making the slides and the spoken commentary jointly groundable. Spec: [`docs/specs/audio-asr-route.md`](docs/specs/audio-asr-route.md).
+**Audio + video recordings** (audio `.mp3`/`.wav`/`.m4a`/`.flac`/`.ogg`/… and native video `.mp4`/`.mov`/`.webm`/`.mkv`/…) ingest through a speech-to-text route (ADR-0017): faster-whisper transcribes the media to a deterministic `## [mm:ss]` Markdown transcript (segments coalesced into ~30 s blocks), which then flows through the normal parse/index/answer path. A transcript chunk carries a `time_range` so the web UI shows time chips and answers cite the moment. Needs the `audio` extra (included in the default `uv sync` above) and a Whisper build set via `MEMEX_MODELS__ASR` (reference: `large-v3-turbo`). A lecture transcript can also be **aligned to its slide deck** via `memex link-slides` (ADR-0018), making the slides and the spoken commentary jointly groundable. Spec: [`docs/specs/audio-asr-route.md`](docs/specs/audio-asr-route.md).
 
 **Or ingest from the browser** — the web UI has an **Add document** page: drag/drop or pick a file and it runs the *whole* pipeline (parse → VLM/chart-OCR/ASR → index → enrich) with chat-style live progress and a real-time VRAM panel, then lands the doc fully searchable + browsable. Ingestion is an **exclusive-GPU mode**: while a document is being consumed the answering surfaces pause (you can still browse everything already ingested), so all VRAM goes to the pipeline. No terminal needed.
 
@@ -292,7 +292,7 @@ By default `memex bridge` is the **reason-then-ground** path (ADR-0016): it reas
 uv run memex upgrade
 ```
 
-Three steps in order: `git pull --ff-only` → `uv sync --extra models --extra parse --extra serve` → `systemctl --user restart` of every installed `memex-*.service`. Refuses if your tree has uncommitted changes (run `git stash` yourself if you want to keep them). vLLM's restart blocks ~30 s for the `Type=notify` readiness gate; the CLI prints a note so you don't mistake it for a hang.
+Three steps in order: `git pull --ff-only` → `uv sync --extra models --extra parse --extra serve --extra audio` → `systemctl --user restart` of every installed `memex-*.service`. Refuses if your tree has uncommitted changes (run `git stash` yourself if you want to keep them). vLLM's restart blocks ~30 s for the `Type=notify` readiness gate; the CLI prints a note so you don't mistake it for a hang.
 
 Flags: `--dry-run` previews, `--no-restart` for Pattern B / Pattern C boxes (no systemd), `--skip-sync` for git-pull-and-restart only.
 

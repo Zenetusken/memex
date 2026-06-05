@@ -1125,7 +1125,7 @@ def register(app: typer.Typer) -> None:
         Runs three steps in order:
 
           1. git pull --ff-only           (refuses if your tree is dirty)
-          2. uv sync --extra models --extra parse --extra serve
+          2. uv sync --extra models --extra parse --extra serve --extra audio
           3. systemctl --user restart memex-{vllm,web,mcp,watch}.service
                                           (only units actually installed)
 
@@ -1148,7 +1148,7 @@ def register(app: typer.Typer) -> None:
         # ── Step 2: uv sync ──────────────────────────────────────────
         if not skip_sync:
             _upgrade_step(
-                "uv sync --extra models --extra parse --extra serve",
+                "uv sync --extra models --extra parse --extra serve --extra audio",
                 [
                     "uv",
                     "sync",
@@ -1158,6 +1158,8 @@ def register(app: typer.Typer) -> None:
                     "parse",
                     "--extra",
                     "serve",
+                    "--extra",
+                    "audio",
                 ],
                 dry_run=dry_run,
                 cwd=repo_root,
