@@ -1,6 +1,6 @@
 # ADR-0018: Companion-document merge — lecture transcript ↔ slide deck (grounded)
 
-**Status:** Proposed (2026-06-03)
+**Status:** Accepted (v1 shipped 2026-06-04, merge `f7fbba5`; keyframe-OCR amendment same merge)
 **Extends:** [ADR-0017](0017-audio-asr-ingestion-route.md) §"Companion-document merge (deferred to Phase 2)"
 **Spec:** [`docs/specs/companion-merge.md`](../specs/companion-merge.md)
 

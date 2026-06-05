@@ -103,7 +103,7 @@ Every parsing decision, every retrieval, every agent step, every model call, eve
 
 ### 5. Composable, Not Captive
 
-Memex exposes its corpus through an MCP server. Any MCP-compatible agent — Claude Code, Cursor, your own — can query the vault. The vault itself is just Markdown, so any tool that reads files reads Memex. There is no proprietary surface area we depend on you depending on.
+Memex exposes its corpus through an MCP server. Any MCP-compatible agent — Claude Code, Cursor, your own — can query the vault. The vault itself is just Markdown, so any tool that reads files reads Memex. There is no proprietary surface area we depend on you depending on. And no *workflow* is captive to one surface: the last terminal-only step — getting a document *into* the vault — is now also a browser drag-and-drop (the exclusive-GPU ingestion mode, ADR-0019), so the CLI is a choice, not a requirement.
 
 ---
 

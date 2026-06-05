@@ -63,3 +63,6 @@ node_modules/
 
 # Claude Code transient runtime lock (the workflows/ scripts stay tracked)
 .claude/scheduled_tasks.lock
+
+# mkdocs build output (`uv run mkdocs build` → site/; regenerable, never committed)
+/site/

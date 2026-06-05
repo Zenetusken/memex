@@ -1,6 +1,6 @@
 # Memex Implementation Plan
 
-A long-form architecture plan that takes Memex from "scaffolded skeleton + working answering agent" to "working end-to-end pipeline." References ADRs 0001–0004 and the seven parts of `docs/GUIDELINES.md`.
+A long-form architecture plan that takes Memex from "scaffolded skeleton + working answering agent" to "working end-to-end pipeline." References ADRs 0001–0019 and the seven parts of `docs/GUIDELINES.md`.
 
 ---
 
@@ -209,7 +209,7 @@ async def reindex_vault(*, force: bool = False) -> ReindexReport: ...
 
 **Minimum viable.** Chunker + LanceDB writer + FTS5 writer. The graph store is required for citation traversal but not for v1 hybrid search; defer graph writes to Phase 2.
 
-**Risks.** Embedding dimensionality is a one-way door — switching from 768 to a different dim later means rebuilding every vector. Pin in config, document in an ADR-to-be (see §5).
+**Risks.** Embedding dimensionality is a one-way door — switching from 768 to a different dim later means rebuilding every vector. Resolved by pinning the dim in config + the `IndexStage.embedding_recipe_version` migration (a recipe change auto-forces a full re-embed on `reindex`); it never became a blocking decision needing its own ADR (the embedder swap is roadmapped P2.5).
 
 ---
 
@@ -388,7 +388,7 @@ async def serve_http(host: str = "127.0.0.1", port: int = 7424) -> None: ...
 
 **Responsibility.** Local-only browser interface for the visual workflows the CLI can't do well: side-by-side preview of source PDF and extracted markdown, citation-graph zoom, per-document correction. Server-rendered HTML with HTMX interactivity per Part V. Mounts on `127.0.0.1:7423` only.
 
-**Public interface** (files: `webui/app.py`, `webui/routes/{ask,documents,graph,review}.py`):
+**Public interface** (files: `webui/app.py` — a single `create_app()` factory, NOT a `routes/` package; `webui/ingest_driver.py` — the boundary-clean subprocess driver for browser ingestion (ADR-0019); `webui/progress.py` — the long-poll registry):
 
 - `GET /` — search-and-ask landing (now also lists the doc-picker checklist + the saved-scope-set bar)
 - `POST /ask` — kicks off `answer_query` in a background task, returns the live progress fragment (the `streams a partial response if SSE is wired in` idea below is realized as HTMX long-polling)
@@ -397,6 +397,10 @@ async def serve_http(host: str = "127.0.0.1", port: int = 7424) -> None: ...
 - `GET /documents/{doc_id}` — side-by-side viewer (markdown + page-image preview when a source PDF / Office-converted PDF is present)
 - `POST /documents/{doc_id}/summarize` — kicks off `summarize_document` in a background task, returns the live progress fragment
 - `GET /documents/{doc_id}/summarize/status?cid=&v=N` — long-polls the summarizer's phase advance; renders `_summary.html` on completion
+- `GET /ingest` — the upload page; RESUMES a live in-flight ingest's progress if you navigated away and came back (B7/B8)
+- `POST /ingest` — stream the upload to a temp file, set the single-flight `_IngestState`, spawn `memex ingest`/`enrich` as CHILD SUBPROCESSES (`webui/ingest_driver.py`, exclusive-GPU mode — ADR-0019 + spec `docs/specs/ui-ingestion.md`), return the live progress fragment
+- `GET /ingest/{cid}/status?v=N` — long-polls the ingest subprocess's phase advance; renders `_ingest_done.html` on completion (ingested-and-askable / partially-ingested-browsable / failed)
+- `GET /ingest/banner`, `GET /ingest/lock` — the self-clearing "ingesting" banner + RAG-paused notice (a 3 s self-refresh that clears the moment the lock releases)
 - `GET /documents/{doc_id}/source` — serves the original file (inline `Content-Disposition` for the pane header `download` link)
 - `GET /documents/{doc_id}/source/page/{n}` — rasterises a **0-based** page to PNG (`parse.pdf_render`, pypdfium2-light, lock-serialized — pypdfium2 is NOT thread-safe)
 - `GET /graph/{doc_id}` — the document-connections "Bridges" page (server-rendered/ranked, `?group=concept|document`; Cytoscape was dropped 2026-05-29 — a 1-hop star has no topology to draw)
@@ -407,7 +411,9 @@ async def serve_http(host: str = "127.0.0.1", port: int = 7424) -> None: ...
 
 **Dependencies.** `fastapi`, `uvicorn`, `jinja2` (already pulled in via prompts), HTMX as a vendored `static/htmx.min.js`, Tailwind as a hand-curated utility subset at `static/tailwind.css`. No build step, no React, no CDN. (Cytoscape.js was vendored the same way for an earlier `/graph` viz; the 2026-05-29 "Bridges" redesign dropped it — the connections page is now pure server-rendered HTML/CSS, zero scripts.)
 
-**Minimum viable (shipped).** Every endpoint above except `/graph` (Phase 3+).
+**Minimum viable (shipped).** Every endpoint above is shipped: the `/graph` "Bridges" view (server-rendered redesign 2026-05-29) and the `/ingest*` exclusive-GPU ingestion flow (v1 2026-06-04, deferred-backlog + live-pass hardening 2026-06-05 — ADR-0019).
+
+**Browser ingestion (exclusive-GPU mode, ADR-0019).** The `/ingest*` routes are the one deliberate webui→subprocess seam: the module boundary forbids `webui/` importing `parse`/`index`/`enrich`, so `webui/ingest_driver.py` spawns the existing CLI (`memex ingest`/`memex enrich`) as child subprocesses — boundary-clean (only `asyncio`/`json`/`os` + `core`/`webui.progress`), one file per `memex ingest`, structlog drained off stderr into the same long-poll progress widget. `_run_ingest` runs an **exclusive-GPU mode**: it drains in-flight RAG answers + `registry.unload_all()`s the webui's GPU models before the subprocess takes the GPU, injects `orchestrator_serve_env` (the configured orchestrator must come back up — ADR-0015), and ACTIVELY reconciles the orchestrator (the "D3" fix) before clearing the single-flight RAG lock. HARD-gate-neutral (GPU-lifecycle / presentation only — an uploaded doc enters the same parse/index/enrich/answer path as a CLI-ingested one). Full design: spec `docs/specs/ui-ingestion.md`.
 
 **Live progress.** Both `POST /ask` and `POST /documents/{id}/summarize` return an immediate `_progress.html` fragment whose `hx-get` chains a long-poll on the corresponding status endpoint. The status route HOLDS the connection (`webui/progress.py::ProgressRegistry::wait_for_change` — `asyncio.Event` + monotonic `version`) until the phase advances or a ~1 s keepalive — SSE-accurate behaviour without any new vendored JS. The agent + summarizer both expose an opt-in, observe-only progress hook (`answer_query(correlation_id, on_node)` via a `_NodeProgressHandler` LangGraph callback; `summarize_document(correlation_id, on_phase)` is linear → calls the sink directly). CLI/MCP/eval pass neither → byte-identical behaviour; HARD gates untouched.
 

@@ -1,6 +1,6 @@
 # ADR-0017: Audio Ingestion via a Local ASR Route (Pluggable Backend, In-Process by Default)
 
-- **Status**: Proposed
+- **Status**: Accepted (v1 shipped 2026-06-04, merge `f7fbba5`)
 - **Date**: 2026-06-03
 - **Deciders**: Memex core team
 - **Tags**: parse, ingest, models, asr, audio, architecture
@@ -259,8 +259,9 @@ transcription machinery — only the **gate** had to open.
   **confirmed the documented inversion** — clean-WER rankings invert on spontaneous speech
   (arXiv:2508.21193), so the spec's original French-distil recommendation was falsified by real audio;
   faithfulness decided it. `Whisper-via-vLLM`/`Parakeet` were not needed. The phrase granularity is
-  tamed by the DETERMINISTIC `_coalesce_segments` (~30 s blocks; spec §3). Move Status → Accepted once
-  the full CR350 ingest + a transcript eval corpus land.
+  tamed by the DETERMINISTIC `_coalesce_segments` (~30 s blocks; spec §3). ~~Move Status → Accepted once
+  the full CR350 ingest + a transcript eval corpus land.~~ → **DONE: Status Accepted, shipped + merged
+  `f7fbba5` 2026-06-04** (the CR350 6-class audio corpus is ingested).
 - **An independent French/Open-ASR-Leaderboard row** lands for Qwen3-ASR (today its SOTA WER is
   vendor-asserted; replication pending) — re-weigh the Qwen+ForcedAligner path.
 - **The companion-merge is built** — record the alignment design as its own spec amendment and add

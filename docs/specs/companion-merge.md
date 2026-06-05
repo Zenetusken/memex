@@ -1,6 +1,8 @@
 # Spec: companion-document merge — lecture transcript ↔ slide deck (grounded)
 
-**Status:** **Proposed** (design — NOT built). **ADR:** [ADR-0018](../adr/0018-companion-document-merge.md)
+**Status:** **SHIPPED 2026-06-04** (merge `f7fbba5`) — core alignment + sidecar storage (§3–§6) + the
+default-OFF `augment_companion` node (§7) + video keyframe-OCR matching (§14, opt-in `--use-video`), all
+in the one merge. **ADR:** [ADR-0018](../adr/0018-companion-document-merge.md)
 (amends/extends [ADR-0017](../adr/0017-audio-asr-ingestion-route.md) §"Companion-document merge").
 **Research basis:** MaViLS (arXiv:2409.16765) + the 4-arm codebase/method research (2026-06-03).
 **Precedents reused:** `Chunk.page` navigation attribution; `expand_graph` candidate augmentation;

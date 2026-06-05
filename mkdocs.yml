@@ -53,6 +53,9 @@ nav:
       - adr/0014-text-to-sql-robustness-safety.md
       - adr/0015-qwen35-4b-unified-orchestrator.md
       - adr/0016-reason-then-ground-bridge.md
+      - adr/0017-audio-asr-ingestion-route.md
+      - adr/0018-companion-document-merge.md
+      - adr/0019-frictionless-ui-ingestion.md
 
 markdown_extensions:
   - admonition

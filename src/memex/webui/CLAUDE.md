@@ -373,6 +373,8 @@ discriminator, the registry incl. `wait_for_change`, the `answer_query` threadin
 
 ## Document ingestion — upload → full pipeline (exclusive-GPU mode, `ingest.html` + `webui/ingest_driver.py`, 2026-06-04)
 
+Decision: [ADR-0019](../../../docs/adr/0019-frictionless-ui-ingestion.md). Build-level spec: [`docs/specs/ui-ingestion.md`](../../../docs/specs/ui-ingestion.md). This section is the authoritative line-level record.
+
 The webui's upload→pipeline surface (ROADMAP "frictionless UI ingestion"). The module
 boundary forbids `webui/ → parse/index/enrich/ingest`, so the route **spawns the CLI as a
 child subprocess** — `ingest_driver.run_ingest` runs `memex ingest <file>` then

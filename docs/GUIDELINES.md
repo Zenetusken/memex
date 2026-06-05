@@ -61,7 +61,8 @@ memex/
 ├── uv.lock                    # committed; reproducible builds
 ├── README.md
 ├── docs/
-│   ├── adr/                   # architectural decision records (ADR-0001 ... 0006)
+│   ├── adr/                   # architectural decision records (ADR-0001 ... 0019)
+│   ├── specs/                 # build-level designs the ADRs decide (one per feature)
 │   ├── audits/                # multi-agent audit reports + per-phase findings
 │   ├── deploy/                # systemd + launchd templates, hardware-tiers.md
 │   └── *.md                   # ROADMAP, IMPLEMENTATION-PLAN, VISION, this file
@@ -419,6 +420,8 @@ A minimal FastAPI app with server-rendered HTML and HTMX for interactivity. No S
 Why HTMX and not React/Svelte: this is a local-only application running on the user's machine. Bundle size doesn't matter, but build complexity does. HTMX gives us all the interactivity we need (search, document preview, graph zoom) for less than 50KB of frontend code total, with no build step.
 
 The UI's job is the *visual* parts of the workflow that CLI can't do well: side-by-side preview of source PDF and extracted Markdown for review, the document-connections view (the `/graph` "Bridges" page — server-rendered/ranked since 2026-05-29; Cytoscape was dropped because a 1-hop neighbourhood is a star with no topology to draw), and document-level annotation correction.
+
+**Browser ingestion (ADR-0019, exclusive-GPU mode).** The UI also has an upload→full-pipeline surface (spec `docs/specs/ui-ingestion.md`): drop a file → it becomes searchable + browsable, zero terminal. The module boundary forbids `webui/` importing `parse`/`index`/`enrich`, so the webui drives the existing CLI as **child subprocesses** (`webui/ingest_driver.py` spawns `memex ingest`/`memex enrich`) — boundary-clean (only `asyncio`/`json`/`os` + `core`), with fresh-process CUDA. Ingestion is an **exclusive-GPU mode**: while a doc ingests, the webui releases its own GPU models, the RAG surfaces lock to an honest "answering paused" (the orchestrator is down during the parse-time VLM serve), and the webui actively reconciles the orchestrator afterwards. All of it is GPU-lifecycle / presentation only ⇒ HARD-gate-neutral; an uploaded doc enters the *same* parse/index/enrich/answer path as a CLI-ingested one.
 
 Dark mode is the default. Light mode is supported. The aesthetic is closer to a developer tool (Linear, Raycast) than a consumer notes app.
 

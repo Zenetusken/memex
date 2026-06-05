@@ -68,6 +68,6 @@ Decompose-and-verify was prototyped and run. Because `__num[i] == coerce_number(
 
 ## References
 - Spec: [`docs/specs/table-sql.md`](../specs/table-sql.md), [`docs/specs/table-rag.md`](../specs/table-rag.md)
-- Backend rules: [`src/memex/CLAUDE.md`](../../src/memex/CLAUDE.md) (the text-to-SQL safety architecture)
+- Backend rules: `src/memex/CLAUDE.md` (the text-to-SQL safety architecture)
 - Commits: `2d27d12` (centralize `coerce_number`), `8e4d322` (column-split + caption), `3a69dc3` (answer-side 10-K gaps), `689dee5` (text-to-SQL robustness), `4835029` (docs)
 - Sibling: [ADR-0009](0009-remove-free-form-synthesis-baseline.md) (precedent for recording a rejected approach)
