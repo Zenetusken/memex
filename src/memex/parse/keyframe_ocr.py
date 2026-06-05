@@ -140,48 +140,6 @@ async def _ocr_images(images: list[Image.Image]) -> list[str]:
     return await transcribe_images(images, prompt=_KEYFRAME_PROMPT)
 
 
-def _avg_hash(image: Image.Image, size: int = 8) -> int:
-    """Average-hash (aHash): a `size×size` grayscale perceptual fingerprint — bit i is set iff
-    pixel i exceeds the frame's mean luminance. Near-identical frames (the SAME slide held on
-    screen, under jittering demo/webcam chrome) hash within a small Hamming distance; a SLIDE
-    CHANGE flips many bits. Pure PIL + stdlib → deterministic + cheap (~1 ms/frame)."""
-    from PIL import Image as _PILImage  # lazy — the module stays importable without the [parse] PIL
-
-    small = image.convert("L").resize((size, size), _PILImage.Resampling.LANCZOS)
-    pixels = list(small.tobytes())  # "L" mode → one byte (int) per pixel — typed + not deprecated
-    mean = sum(pixels) / len(pixels)
-    bits = 0
-    for i, p in enumerate(pixels):
-        if p > mean:
-            bits |= 1 << i
-    return bits
-
-
-def _hamming_distance(a: int, b: int) -> int:
-    """Bit-difference between two average-hashes (0 = identical, 64 = inverted for an 8×8 hash)."""
-    return (a ^ b).bit_count()
-
-
-def _dedup_plan(images: list[Image.Image], *, hamming: int) -> list[int]:
-    """Sliding-window perceptual dedup over decoded frames IN TIME ORDER.
-
-    Returns `source[i]` = the index whose OCR result frame `i` should REUSE: `i` itself when the
-    frame is kept (OCR'd fresh), or the index of the previous KEPT frame when `i` is within
-    `hamming` of it (the slide hasn't changed). Comparing to the previous KEPT frame (not the
-    immediate predecessor) avoids slow drift across a long slide-dwell from accumulating past the
-    threshold."""
-    source: list[int] = []
-    hashes = [_avg_hash(im) for im in images]
-    last_kept = -1
-    for i in range(len(images)):
-        if last_kept >= 0 and _hamming_distance(hashes[i], hashes[last_kept]) <= hamming:
-            source.append(last_kept)  # reuse the kept frame's OCR — no VLM call for `i`
-        else:
-            source.append(i)
-            last_kept = i
-    return source
-
-
 async def ocr_frames_for_chunks(
     video_path: Path,
     frames: list[tuple[str, float]],
@@ -247,26 +205,9 @@ async def ocr_frames_for_chunks(
     if not images:
         return out
 
-    # Pass 1.5: perceptual dedup — OCR only the UNIQUE frames (a held slide's repeats reuse the
-    # kept frame's text), then map each frame's text back via `source`. Each chunk is still cached
-    # under its own key below, so a re-run replays without re-deciding the dedup.
-    if settings.parse.keyframe_dedup_enabled:
-        source = _dedup_plan(images, hamming=settings.parse.keyframe_dedup_hamming)
-    else:
-        source = list(range(len(images)))
-    unique_indices = [i for i in range(len(images)) if source[i] == i]
-    unique_texts = await _ocr_images([images[i] for i in unique_indices])
-    text_by_index: dict[int, str] = dict(zip(unique_indices, unique_texts, strict=True))
-    if len(unique_indices) < len(images):
-        logger.info(
-            "keyframe.dedup",
-            frames=len(images),
-            ocr_calls=len(unique_indices),
-            deduped=len(images) - len(unique_indices),
-        )
-
-    for i, (chunk_id, time_s) in enumerate(decoded):
-        cleaned = text_by_index[source[i]].strip()
+    texts = await _ocr_images(images)
+    for (chunk_id, time_s), text in zip(decoded, texts, strict=True):
+        cleaned = text.strip()
         if len(cleaned) < _MIN_OCR_CHARS:
             continue  # punted / no-slide frame → omit → transcript-text fallback
         out[chunk_id] = cleaned
