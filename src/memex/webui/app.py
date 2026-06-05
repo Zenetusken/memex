@@ -154,6 +154,18 @@ _STATIC_DIR = _HERE / "static"
 # monkeypatch it small; the real magic-based validation lives in the ingest subprocess.
 _MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
 
+
+class _IngestState:
+    """Single-flight ingestion-mode flag (per-app, like the mode-switch lock). When ``active``,
+    the exclusive-GPU ingestion mode is on — a document is running through the pipeline, which
+    holds the orchestrator down + the GPU, so the RAG surfaces (ask/chat/expert/bridge/summarize)
+    are paused. Single-worker uvicorn ⇒ no lock needed (all access on the one event loop)."""
+
+    def __init__(self) -> None:
+        self.active = False
+        self.doc_name = ""
+
+
 # Mirrors `vault.store.assign_doc_id`'s output shape: 8-hex prefix
 # optionally followed by `-` and a slug of [a-z0-9-]. Routes reject
 # anything else — defence in depth against path-traversal via crafted
@@ -747,6 +759,22 @@ def create_app() -> FastAPI:
     progress = ProgressRegistry()
     app.state.progress = progress
 
+    # Single-flight ingestion mode (per-app). When a document is ingesting, the RAG surfaces
+    # pause (the subprocess holds the orchestrator down + all GPU); browsing stays open. The
+    # jinja global exposes the LIVE flag to base.html's banner; `app.state` lets tests force it.
+    ingesting = _IngestState()
+    app.state.ingesting = ingesting
+    env.globals["ingesting_active"] = lambda: ingesting.active  # type: ignore[reportUnknownMemberType]  # reason: jinja2 leaves Environment.globals unannotated
+
+    def _ingest_guard(request: Request) -> HTMLResponse | None:
+        """If a document is ingesting, return the 'answering paused' fragment for a RAG POST to
+        swap into its form target; else None (proceed). Two reasons it must block: a racing
+        retrieval reload would OOM the parse-time VLM serve, AND the orchestrator is down so the
+        answer would 404 mid-flight — an honest 'paused' beats a broken answer."""
+        if not ingesting.active:
+            return None
+        return templates.TemplateResponse(request, "_ingesting.html", {})
+
     async def _run_ask(cid: str, question: str, scope_doc_ids: list[str]) -> None:
         """Background runner: drive the agent, stream node→phase updates into the
         registry, and store the result (or error) for the status poll. This is the
@@ -783,6 +811,9 @@ def create_app() -> FastAPI:
         """Start the answering agent in a background task and IMMEDIATELY return
         the `_progress.html` fragment, which long-polls `/ask/{cid}/status` for the
         live step (Retrieving → … → Composing) until the answer is ready."""
+        guard = _ingest_guard(request)
+        if guard is not None:
+            return guard
         question = question.strip()
         if not question:
             return templates.TemplateResponse(
@@ -1098,6 +1129,9 @@ def create_app() -> FastAPI:
         return the `_progress.html` fragment, which long-polls
         `/documents/{id}/summarize/status` for the live phase ("Summarizing · section
         k of N" → "Reducing" → …) until the summary swaps in."""
+        guard = _ingest_guard(request)
+        if guard is not None:
+            return guard
         doc_id = _validate_doc_id(doc_id)
         level: SummaryDetail = (
             detail if detail in ("brief", "standard", "detailed", "report") else "standard"
@@ -1211,6 +1245,8 @@ def create_app() -> FastAPI:
             progress.finish(cid, error="An unexpected error occurred while ingesting.")
         finally:
             tmp_path.unlink(missing_ok=True)
+            ingesting.active = False  # leave the exclusive-GPU mode → the RAG surfaces resume
+            ingesting.doc_name = ""
 
     def _set_entry_doc_id(cid: str, doc_id: str) -> None:
         entry = progress.get(cid)
@@ -1230,6 +1266,10 @@ def create_app() -> FastAPI:
         """Stream an upload to a temp file and start the ingest subprocess chain in a background
         task — returning `_progress.html`, which long-polls `/ingest/{cid}/status` through
         Parsing → Transcribing → Indexing → Enriching until the document is consumed."""
+        # Single-flight: one ingest at a time (the GPU is exclusive). Reject a 2nd concurrent
+        # upload with the same 'answering paused' notice the RAG surfaces show.
+        if ingesting.active:
+            return templates.TemplateResponse(request, "_ingesting.html", {})
         # Stdlib size pre-check (pre-spawn): a doomed upload must never spawn a subprocess that
         # restarts the orchestrator. The real magic-based validation lives in the subprocess.
         if file.size is not None and file.size > _MAX_UPLOAD_BYTES:
@@ -1238,37 +1278,54 @@ def create_app() -> FastAPI:
                 "_ingest_done.html",
                 {"doc_id": None, "error": "The file exceeds the 2 GiB upload limit."},
             )
-        # Stream to disk in a thread (never read a 2 GiB upload into RAM, never block the loop).
-        suffix = Path(file.filename or "upload").suffix
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            tmp_path = Path(tmp.name)
-            try:
+        # Enter the exclusive-GPU ingestion mode SYNCHRONOUSLY (no await since the checks above),
+        # so a concurrent RAG POST / upload sees it at once. From here a try/finally OWNS the
+        # release: the lock is cleared on EVERY exit UNTIL the background task is scheduled (which
+        # then owns it via _run_ingest's finally). This closes the stuck-lock leak on a temp-create
+        # error, a cancelled / non-OSError stream, or a registry error before scheduling.
+        ingesting.active = True
+        ingesting.doc_name = file.filename or "a document"
+        scheduled = False
+        tmp_path: Path | None = None
+        try:
+            # Stream to disk in a thread (never read a 2 GiB upload into RAM, never block the loop).
+            suffix = Path(file.filename or "upload").suffix
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                tmp_path = Path(tmp.name)
                 await asyncio.to_thread(shutil.copyfileobj, file.file, tmp)
-            except OSError as e:
-                # No background task owns cleanup yet — unlink here so the temp file can't leak.
-                tmp_path.unlink(missing_ok=True)
-                logger.error("ingest.upload_write_failed", error=str(e)[:200])
-                return templates.TemplateResponse(
-                    request,
-                    "_ingest_done.html",
-                    {"doc_id": None, "error": "Could not save the uploaded file."},
-                )
-        cid = str(ulid.ULID())
-        entry = progress.new(cid, scope_doc_ids=[], scope_source="named")
-        entry.phase = INGEST_PHASES[0]  # start on "Parsing", not the /ask default phase
-        task = asyncio.create_task(_run_ingest(cid, tmp_path))
-        progress.attach_task(cid, task)
-        return templates.TemplateResponse(
-            request,
-            "_progress.html",
-            {
-                "poll_url": f"/ingest/{cid}/status?v=0",
-                "phases": INGEST_PHASES,
-                "active_index": 0,
-                "elapsed": 0,
-                "detail": "",
-            },
-        )
+            cid = str(ulid.ULID())
+            entry = progress.new(cid, scope_doc_ids=[], scope_source="named")
+            entry.phase = INGEST_PHASES[0]  # start on "Parsing", not the /ask default phase
+            task = asyncio.create_task(_run_ingest(cid, tmp_path))
+            progress.attach_task(cid, task)
+            scheduled = True  # _run_ingest's finally now owns the lock + temp-file release
+            return templates.TemplateResponse(
+                request,
+                "_progress.html",
+                {
+                    "poll_url": f"/ingest/{cid}/status?v=0",
+                    "phases": INGEST_PHASES,
+                    "active_index": 0,
+                    "elapsed": 0,
+                    "detail": "",
+                },
+            )
+        except OSError as e:
+            logger.error("ingest.upload_write_failed", error=str(e)[:200])
+            return templates.TemplateResponse(
+                request,
+                "_ingest_done.html",
+                {"doc_id": None, "error": "Could not save the uploaded file."},
+            )
+        finally:
+            if not scheduled:
+                # No task owns the release (temp-create OSError, a cancelled / non-OSError stream,
+                # or a registry error) — leave the exclusive-GPU mode so the RAG surfaces aren't
+                # stuck, and clean any temp file that was created.
+                ingesting.active = False
+                ingesting.doc_name = ""
+                if tmp_path is not None:
+                    tmp_path.unlink(missing_ok=True)
 
     @app.get("/ingest/{cid}/status", response_class=HTMLResponse)
     async def ingest_status(request: Request, cid: str = "", v: int = 0) -> HTMLResponse:
@@ -1416,6 +1473,9 @@ def create_app() -> FastAPI:
         progress fragment (appended to #conversation-log; the progress self-replaces with
         the assistant bubble on completion). A turn-0 scope selection is persisted as the
         conversation's scope pin so later turns inherit it."""
+        guard = _ingest_guard(request)
+        if guard is not None:
+            return guard
         message = message.strip()
         if not message:
             return HTMLResponse("", status_code=400)
@@ -1523,6 +1583,9 @@ def create_app() -> FastAPI:
         """Start the ungrounded reasoning pass in a background task and IMMEDIATELY return
         the `_progress.html` fragment, which long-polls `/expert/status` until the answer
         swaps in. Refuses (a flash) when the feature is disabled or the question is empty."""
+        guard = _ingest_guard(request)
+        if guard is not None:
+            return guard
         if not get_settings().agents.expert_mode_enabled:
             return templates.TemplateResponse(
                 request,
@@ -1644,6 +1707,9 @@ def create_app() -> FastAPI:
         AS an answer when responsive; the standalone composer omits it → the labelled-analysis
         surface, unchanged. It rides the result (`BridgeAnswer.present_as_answer`), so the status
         handler needs no extra plumbing."""
+        guard = _ingest_guard(request)
+        if guard is not None:
+            return guard
         if not get_settings().agents.expert_mode_enabled:
             return templates.TemplateResponse(
                 request,

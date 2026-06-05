@@ -3052,8 +3052,10 @@ async def test_ingest_driver_crash_renders_failed(
         raise RuntimeError("driver exploded")
 
     monkeypatch.setattr("memex.webui.ingest_driver.run_ingest", _boom)
-    text = await _ingest_to_completion(create_app(), content=b"x", filename="x.pdf")
+    app = create_app()
+    text = await _ingest_to_completion(app, content=b"x", filename="x.pdf")
     assert "Ingest failed" in text  # the crash is surfaced, not swallowed
+    assert app.state.ingesting.active is False  # the lock is released even on a crash
 
 
 async def test_ingest_enrich_failure_still_links_browsable_doc(
@@ -3075,3 +3077,79 @@ async def test_ingest_enrich_failure_still_links_browsable_doc(
     text = await _ingest_to_completion(create_app(), content=b"%PDF", filename="x.pdf")
     assert "Ingested" in text  # presented as success, NOT "Ingest failed"
     assert "/documents/abcd1234-enrichfail" in text  # the browsable link is preserved
+
+
+# ----- Exclusive-GPU ingestion mode: the RAG-surface lock (Inc 3) -----
+
+
+def test_ingesting_locks_all_rag_posts(client: TestClient) -> None:
+    """While a document is ingesting, every RAG POST returns the 'answering paused' fragment
+    (the orchestrator is down + the GPU is exclusive — an honest pause beats a 404'd answer)."""
+    client.app.state.ingesting.active = True
+    posts: list[tuple[str, dict[str, str]]] = [
+        ("/ask", {"question": "x"}),
+        ("/documents/abcd1234/summarize", {"detail": "standard"}),
+        ("/chat/conv01/turn", {"message": "x"}),
+        ("/expert", {"question": "x"}),
+        ("/bridge", {"question": "x"}),
+    ]
+    for path, data in posts:
+        r = client.post(path, data=data)
+        assert r.status_code == 200, f"{path}: {r.status_code}"
+        assert "answering is paused" in r.text, f"{path} did not lock"
+
+
+def test_ingesting_shows_banner_on_entry_page(client: TestClient) -> None:
+    client.app.state.ingesting.active = True
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "answering is paused" in r.text  # the live jinja global drives the banner
+    client.app.state.ingesting.active = False
+    assert "answering is paused" not in client.get("/").text  # gone when not ingesting
+
+
+def test_ingesting_keeps_browsing_open(client: TestClient) -> None:
+    """Browsing routes touch no GPU and stay available during an ingest."""
+    client.app.state.ingesting.active = True
+    for path in ("/documents", "/resources"):
+        assert client.get(path).status_code == 200
+
+
+def test_ingesting_rejects_concurrent_upload(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_ingest(
+        monkeypatch, outcome=IngestOutcome(accepted=True, exit_code=0, doc_id="abcd1234-x")
+    )
+    client.app.state.ingesting.active = True  # an ingest is already running
+    r = client.post("/ingest", files={"file": ("a.pdf", b"%PDF", "application/pdf")})
+    assert r.status_code == 200
+    assert "answering is paused" in r.text  # single-flight: rejected, not a 2nd ingest
+
+
+async def test_ingesting_lock_set_then_cleared_after_completion(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The lock must be released in _run_ingest's finally — a stuck lock = permanently dead RAG.
+    _patch_ingest(
+        monkeypatch, outcome=IngestOutcome(accepted=True, exit_code=0, doc_id="abcd1234-lk")
+    )
+    app = create_app()
+    text = await _ingest_to_completion(app, content=b"%PDF", filename="x.pdf")
+    assert "Ingested" in text
+    assert app.state.ingesting.active is False  # released → the RAG surfaces resume
+
+
+def test_ingesting_lock_released_on_stream_failure(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A non-OSError mid-stream (e.g. a cancelled 2 GiB upload) must NOT leave the exclusive-GPU
+    # lock stuck (the ship-blocker the validator found): the try/finally releases it before the
+    # exception propagates — no task owns the release yet at that point.
+    def _boom(*_a: object, **_k: object) -> None:
+        raise RuntimeError("stream exploded")
+
+    monkeypatch.setattr("shutil.copyfileobj", _boom)
+    with pytest.raises(RuntimeError):
+        client.post("/ingest", files={"file": ("a.pdf", b"%PDF", "application/pdf")})
+    assert client.app.state.ingesting.active is False  # released by the finally, not stuck
