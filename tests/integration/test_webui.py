@@ -1073,12 +1073,19 @@ async def test_document_view_renders_pane_split_when_pdf_present(
     # all pages render on initial load (the stale-cache foot-gun we just hit).
     assert "--pdf-page-aspect: 1280.000 / 720.000" in r.text
     # Each preview <img> carries `id="page-{1-based}"` so a claim's
-    # `data-page="N"` can `scrollIntoView` to it (the click-source→jump-to-PDF
+    # `data-page="N"` can scroll the preview pane to it (the click-source→jump-to-PDF
     # UX). The inline `<script>` is gated on `has_preview` so it only ships
     # when a preview exists.
     assert 'id="page-1"' in r.text
     assert 'id="page-2"' in r.text
     assert "scrollPreviewTo" in r.text  # the inline script's hook
+    # The jump scrolls the PANE directly (`pane.scrollTo`), NOT `img.scrollIntoView()`
+    # — the latter also scrolls the window and loses to the native `#section-slug`
+    # hash jump when a citation href carries BOTH `?page=N` and a section hash, so
+    # the PDF pane stayed on page 1. The on-load jump is deferred a frame past the
+    # hash. Pins the 2026-06-05 page-jump fix (companion arc-3 migration UI test).
+    assert "pane.scrollTo" in r.text
+    assert "requestAnimationFrame" in r.text
 
 
 def test_document_view_renders_solo_when_no_source(
