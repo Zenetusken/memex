@@ -1,6 +1,6 @@
 # Memex Implementation Plan
 
-A long-form architecture plan that takes Memex from "scaffolded skeleton + working answering agent" to "working end-to-end pipeline." References ADRs 0001–0019 and the seven parts of `docs/GUIDELINES.md`.
+A long-form architecture plan that takes Memex from "scaffolded skeleton + working answering agent" to "working end-to-end pipeline." References ADRs 0001–0020 and the seven parts of `docs/GUIDELINES.md`.
 
 ---
 

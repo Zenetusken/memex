@@ -56,6 +56,7 @@ nav:
       - adr/0017-audio-asr-ingestion-route.md
       - adr/0018-companion-document-merge.md
       - adr/0019-frictionless-ui-ingestion.md
+      - adr/0020-image-file-ingestion.md
 
 markdown_extensions:
   - admonition

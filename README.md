@@ -20,7 +20,7 @@ You have:
 - 🚫 A strong preference for not uploading any of it to a third-party service.
 
 Memex helps you:
-- 📖 **Read** your documents into clean Markdown (with figures, tables, equations preserved) — PDFs, Office files, scans, and **audio / video recordings** (lectures, meetings) transcribed to a timestamped transcript.
+- 📖 **Read** your documents into clean Markdown (with figures, tables, equations preserved) — PDFs, Office files, scans, standalone **images** (screenshots, diagrams, photographed pages), and **audio / video recordings** (lectures, meetings) transcribed to a timestamped transcript.
 - 🔍 **Search** across them with hybrid retrieval (BM25 + dense + cross-encoder rerank).
 - 💬 **Ask** real questions and get answers that cite the source paragraphs — or *refuse* when there isn't enough grounding (refusal is a first-class outcome).
 - 🔗 **Cross-reference** through an entity graph that links docs sharing topics, citations, or named entities.
@@ -176,6 +176,8 @@ For scanned content add `MEMEX_PARSE_DOCLING_OCR=1`; for born-digital PDFs (Powe
 **Office documents** (`.pptx`/`.docx`/`.xlsx` + their ODF cousins) are first converted to PDF via headless LibreOffice, then run through the normal PDF pipeline — so a diagram-heavy slide deck's figures flow through the VLM diagram-transcription + chart-OCR passes (enable the VLM with `MEMEX_PARSE__DISABLE_VLM=false` for diagram-rich decks). The converted PDF is cached per document and reused on re-parse. LibreOffice must be installed (`soffice` on PATH). On the 12 GB tier `memex ingest`/`index`/`reindex` pause vLLM for the duration so the embedder isn't starved by a co-resident vLLM — no manual `MEMEX_RERANK_BATCH_SIZE` or daemon juggling needed. The VLM is **Qwen3-VL-8B-AWQ**, run as a short-lived vLLM process *during parse only* (the orchestrator is paused to free the GPU); it transcribes directed flow/state diagrams correctly where the older Qwen2.5-VL flattened them into a list. Tune via `MEMEX_MODELS__VLM_SERVING` (`vllm` | `transformers`) + `MEMEX_MODELS__VLM_SERVE__*` (port / `gpu_memory_utilization` / `max_model_len`) — see [`docs/specs/vlm-vllm-serving.md`](docs/specs/vlm-vllm-serving.md).
 
 **Audio + video recordings** (audio `.mp3`/`.wav`/`.m4a`/`.flac`/`.ogg`/… and native video `.mp4`/`.mov`/`.webm`/`.mkv`/…) ingest through a speech-to-text route (ADR-0017): faster-whisper transcribes the media to a deterministic `## [mm:ss]` Markdown transcript (segments coalesced into ~30 s blocks), which then flows through the normal parse/index/answer path. A transcript chunk carries a `time_range` so the web UI shows time chips and answers cite the moment. Needs the `audio` extra (included in the default `uv sync` above) and a Whisper build set via `MEMEX_MODELS__ASR` (reference: `large-v3-turbo`). A lecture transcript can also be **aligned to its slide deck** via `memex link-slides` (ADR-0018), making the slides and the spoken commentary jointly groundable. Spec: [`docs/specs/audio-asr-route.md`](docs/specs/audio-asr-route.md).
+
+**Standalone images** (`.png`/`.jpg`/`.jpeg`/`.webp`/`.bmp`/`.tif`/`.tiff`/`.gif`) ingest as a one-page scan (ADR-0020): the image is wrapped into a cached 1-page PDF and run through the VLM transcription route, so a screenshot, infographic, exported topology diagram, or photographed page becomes searchable + grounded-answerable. The VLM is **mandatory** for images (an image has no text layer to read — the same precedent as audio always running ASR), so `memex ingest diagram.png` works out of the box even with the default `MEMEX_PARSE__DISABLE_VLM=true`. A blank/unreadable image transcribes to nothing and is honestly refused, never turned into a junk document. HEIC/AVIF are not yet accepted (they need a separate decode dependency). Spec: [`docs/specs/image-ingestion.md`](docs/specs/image-ingestion.md).
 
 **Or ingest from the browser** — the web UI has an **Add document** page: drag/drop or pick a file and it runs the *whole* pipeline (parse → VLM/chart-OCR/ASR → index → enrich) with chat-style live progress and a real-time VRAM panel, then lands the doc fully searchable + browsable. Ingestion is an **exclusive-GPU mode**: while a document is being consumed the answering surfaces pause (you can still browse everything already ingested), so all VRAM goes to the pipeline. No terminal needed.
 
@@ -487,7 +489,7 @@ Integration tests fake the heavy I/O (vLLM, Docling, PyMuPDF worker, LanceDB, se
 | 🔧 The how (engineering rules + stack) | [`docs/GUIDELINES.md`](docs/GUIDELINES.md) |
 | 🗺️ What's done & what's queued | [`docs/ROADMAP.md`](docs/ROADMAP.md) |
 | 🏗️ The architecture blueprint | [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) |
-| 📐 Why we picked what we picked | [`docs/adr/`](docs/adr/) (ADRs 0001–0019) |
+| 📐 Why we picked what we picked | [`docs/adr/`](docs/adr/) (ADRs 0001–0020) |
 | 🚀 Network-facing MCP setup | [`docs/deploy/mcp-http.md`](docs/deploy/mcp-http.md) |
 | 🖥️ systemd deployment (Linux) | [`docs/deploy/systemd.md`](docs/deploy/systemd.md) |
 | 🍎 launchd deployment (macOS dev) | [`docs/deploy/launchd.md`](docs/deploy/launchd.md) |

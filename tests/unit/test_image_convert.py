@@ -76,6 +76,24 @@ async def test_multiframe_gif_yields_single_page(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_pdf_page_dimensions_are_native_pixels_halved(tmp_path: Path) -> None:
+    # The DPI↔scale coupling guard: _PDF_RESOLUTION_DPI=144 → page_points = px/2, so the scan
+    # route's scale-2.0 `_render_page_to_image` reproduces the image at its NATIVE pixel
+    # resolution. A silent change to the DPI (or a mismatch with the scan render scale) would
+    # up/downscale every image's VLM input with no other test failing — pin the page size here.
+    src = tmp_path / "wide.png"
+    Image.new("RGB", (288, 144), (10, 20, 30)).save(src, "PNG")
+    out = await convert_image_to_pdf(src, tmp_path / "out")
+    pdf = pypdfium2.PdfDocument(str(out))
+    try:
+        width_pts, height_pts = pdf[0].get_size()
+    finally:
+        pdf.close()
+    assert width_pts == pytest.approx(288 / 2, abs=1.0)
+    assert height_pts == pytest.approx(144 / 2, abs=1.0)
+
+
+@pytest.mark.asyncio
 async def test_corrupt_image_raises_typed_error(tmp_path: Path) -> None:
     src = tmp_path / "broken.png"
     src.write_bytes(b"\x89PNG\r\n\x1a\n not a real image, truncated garbage")

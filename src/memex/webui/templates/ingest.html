@@ -2,7 +2,7 @@
 {% block title %}Add a document — Memex{% endblock %}
 {% block content %}
 <h1 class="text-2xl font-semibold mb-2">Add a document</h1>
-<p class="text-zinc-400 text-sm mb-6">Upload a PDF, Office document, scanned PDF, or audio/video file. Memex runs the full pipeline — parsing, figure and audio transcription, indexing, and enrichment — and the document becomes searchable and browsable. While a document ingests, answering pauses (all GPU goes to the pipeline); you can still browse documents you've already added.</p>
+<p class="text-zinc-400 text-sm mb-6">Upload a PDF, Office document, scanned PDF, image (PNG/JPEG/WebP/BMP/TIFF/GIF), or audio/video file. Memex runs the full pipeline — parsing, figure and audio transcription, indexing, and enrichment — and the document becomes searchable and browsable. While a document ingests, answering pauses (all GPU goes to the pipeline); you can still browse documents you've already added.</p>
 
 <form hx-post="/ingest"
       hx-target="#ingest-pane"

@@ -2994,6 +2994,9 @@ def test_ingest_page_renders_upload_form(client: TestClient) -> None:
     assert 'type="file"' in r.text and 'name="file"' in r.text
     assert 'hx-post="/ingest"' in r.text
     assert 'hx-encoding="multipart/form-data"' in r.text
+    # The accepted-types copy advertises standalone images (ADR-0020).
+    assert "image" in r.text.lower()
+    assert "PNG/JPEG/WebP" in r.text
 
 
 def test_nav_has_add_document_link(client: TestClient) -> None:
