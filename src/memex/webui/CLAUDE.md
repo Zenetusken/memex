@@ -401,9 +401,18 @@ at exit) + `MEMEX_INGEST__MAX_BYTES=2GiB` + `MEMEX_PARSE__DISABLE_VLM=false`.
   — the serve-env injection is **load-bearing**: the subprocess's post-parse vLLM restart would
   otherwise bring up the 8B serve-script DEFAULT, 404ing every later `/ask` (ADR-0015/D3). On
   success: `_set_entry_doc_id` BEFORE the now-best-effort enrich (a failed enrich must still render
-  the browsable doc, not "Ingest failed" — the Inc-2 ship-blocker) → `_await_orchestrator_reachable`
-  (poll `daemon_status().reachable`, the subprocess left vLLM mid-restart) → `run_enrich`. `finally`:
-  `rmtree` + a final reachability await + clear the lock.
+  the browsable doc, not "Ingest failed" — the Inc-2 ship-blocker) → **`_reconcile_orchestrator`** →
+  `run_enrich`. `finally`: `rmtree` + `_reconcile_orchestrator` + clear the lock in an INNER
+  try/finally (so the lock ALWAYS clears). **`_reconcile_orchestrator` is the load-bearing D3 fix
+  (2026-06-05):** the subprocess's own `pause_vllm_for_gpu`→`_vllm_restart` is UNRELIABLE on a
+  daemon-managed rig (the `systemctl` unit is absent → the `serve-vllm.sh` fallback can't fit under
+  the webui's residual VRAM → it hangs ~245s then leaves the orchestrator DOWN, 404ing every later
+  `/ask` until a manual `daemon restart`). So don't passively wait: if already reachable (a short
+  retry probe) we're done; else ACTIVELY `daemon_restart(...)` at the current mode's posture. The
+  fast-path skip is REQUIRED for correctness — the supervisor `stop` is a no-op against a stray vLLM
+  it doesn't own, so restarting over a live one would refuse on the still-bound port. This also fixes
+  the ~150s lock-hold + the "Indexing"-freeze (an interstitial phase). The partial-ingest browse link
+  is gated on the canonical `.md` actually existing (no dead 404 when parse failed before the write).
 - **Exclusive-GPU RAG lock:** `_ingest_guard(request)` returns `_ingesting.html` as the FIRST
   statement of every GPU POST (`/ask`, `/documents/{id}/summarize`, `/chat/{id}/turn`, `/expert`,
   `/bridge`) — while the ingest subprocess holds `pause_vllm_for_gpu` the orchestrator is DOWN, so
@@ -418,8 +427,16 @@ Pinned by `test_webui.py` (the `_patch_ingest`/`_patch_daemon_reachable` fakes +
 streaming byte-equality, the 5-POST lock matrix + 4-GET banner, crash/stream-failure lock-release,
 serve-env injection asserting `MEMEX_VLLM_MODEL`, temp-dir-no-leak) + `test_ingest_driver.py` (fake-spawn
 phase sequence + a real-subprocess >64KiB concurrent-drain) + `test_progress.py` (`ingest_phase_view`).
-**Deferred (single-user v1):** in-flight-RAG drain before `unload_all`, a stdout-silence watchdog, a
-lifespan half-doc reconcile, a manifest fully-consumed gate, a multi-upload queue.
+**Mutual-exclusion + hardening (2026-06-05 bug-hunt fixes, merged `7ce735d`):** `POST /resources/mode`
+is rejected during an ingest AND an upload is rejected while `mode_switch_lock` is held — the two
+GPU-orchestrating ops can't race (the observed transient-3-vLLM). `ingest/validation.py` rejects
+0-byte/empty uploads (no junk 0-chunk doc); the ingest subprocess runs in its own session/group +
+is SIGKILL-group-reaped on a cancelled task (no orphaned GPU tree); a signal-exit reports
+"terminated by signal N (likely OOM)"; a null-byte filename degrades to the friendly fragment.
+**Still deferred (single-user v1):** in-flight-RAG drain before `unload_all`, a stdout-silence
+watchdog, a lifespan half-doc reconcile, a chunk_count/`fully-consumed` gate, navigate-away progress
+resume, a pre-stream 2 GiB ASGI cap, a multi-upload queue. The full live + 62-agent code-review hunt
+and the fixes are in the `[[ui-ingestion-livetest-2026-06-05]]` memory.
 
 ## Two inline-edit flows (both HTMX view/edit toggles)
 
