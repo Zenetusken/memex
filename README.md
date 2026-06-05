@@ -177,6 +177,8 @@ For scanned content add `MEMEX_PARSE_DOCLING_OCR=1`; for born-digital PDFs (Powe
 
 **Audio + video recordings** (audio `.mp3`/`.wav`/`.m4a`/`.flac`/`.ogg`/… and native video `.mp4`/`.mov`/`.webm`/`.mkv`/…) ingest through a speech-to-text route (ADR-0017): faster-whisper transcribes the media to a deterministic `## [mm:ss]` Markdown transcript (segments coalesced into ~30 s blocks), which then flows through the normal parse/index/answer path. A transcript chunk carries a `time_range` so the web UI shows time chips and answers cite the moment. Needs the `audio` extra (`uv sync … --extra audio`) and a Whisper build set via `MEMEX_MODELS__ASR` (reference: `large-v3-turbo`). A lecture transcript can also be **aligned to its slide deck** via `memex link-slides` (ADR-0018), making the slides and the spoken commentary jointly groundable. Spec: [`docs/specs/audio-asr-route.md`](docs/specs/audio-asr-route.md).
 
+**Or ingest from the browser** — the web UI has an **Add document** page: drag/drop or pick a file and it runs the *whole* pipeline (parse → VLM/chart-OCR/ASR → index → enrich) with chat-style live progress and a real-time VRAM panel, then lands the doc fully searchable + browsable. Ingestion is an **exclusive-GPU mode**: while a document is being consumed the answering surfaces pause (you can still browse everything already ingested), so all VRAM goes to the pipeline. No terminal needed.
+
 ### Ask grounded questions
 
 ```sh

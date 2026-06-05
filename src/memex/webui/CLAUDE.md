@@ -371,6 +371,56 @@ gated behind `prefers-reduced-motion`), no new Tailwind. Pinned by `test_webui.p
 `httpx.AsyncClient` progression with a gate) + `test_progress.py` (the callback
 discriminator, the registry incl. `wait_for_change`, the `answer_query` threading).
 
+## Document ingestion — upload → full pipeline (exclusive-GPU mode, `ingest.html` + `webui/ingest_driver.py`, 2026-06-04)
+
+The webui's upload→pipeline surface (ROADMAP "frictionless UI ingestion"). The module
+boundary forbids `webui/ → parse/index/enrich/ingest`, so the route **spawns the CLI as a
+child subprocess** — `ingest_driver.run_ingest` runs `memex ingest <file>` then
+`run_enrich` runs `memex enrich <doc_id>`, **one file per `memex ingest`** (also the fix
+for the multi-doc VLM `VRAMExhausted`: the per-doc chart-OCR pass restarts the orchestrator
+between docs). The driver imports ONLY `asyncio`/`json`/`os` + `memex.webui.progress` — zero
+new boundary exceptions. **Stream contract (load-bearing):** structlog milestones go to
+**stderr**, the `IngestResult` JSON lands on **stdout** at exit; both pipes are drained
+CONCURRENTLY (`asyncio.gather`) — awaiting one while the other fills its OS buffer deadlocks
+the child. `_build_env` forces `LOG_JSON=true` + `PYTHONUNBUFFERED=1` (else progress bursts
+at exit) + `MEMEX_INGEST__MAX_BYTES=2GiB` + `MEMEX_PARSE__DISABLE_VLM=false`.
+
+- **`POST /ingest`** streams the upload into `mkdtemp()/safe_name` (`safe_name = Path(filename).name`
+  — NOT a temp filename, else the doc is titled `tmpXXedol6`), sets the per-app `_IngestState`
+  SYNCHRONOUSLY (single-flight: no `await` between check and set, so a 2nd concurrent upload is
+  rejected), and schedules `_run_ingest` as a background task. The `scheduled` try/finally releases
+  the lock + `rmtree`s the temp dir on EVERY pre-schedule error path (a leaked lock = permanently
+  dead RAG). Returns `_progress.html` long-polling `GET /ingest/{cid}/status` — the SAME long-poll
+  widget as `/ask`+Summarize, parameterized by `INGEST_PHASES` (Parsing → Transcribing → Indexing
+  → Enriching) + `ingest_phase_view`. `ingest_phase_for(event, page)` maps structlog events →
+  phases (`vlm.start`→"Transcribing · page N", chart_ocr→"chart OCR", asr→"audio", index.start→
+  Indexing, enrich.start→Enriching). On done: `_ingest_done.html` (3 branches: ingested-and-askable
+  / partially-ingested-but-browsable / failed). `ProgressEntry.doc_id` carries the result.
+- **`_run_ingest` (the GPU-coherence body):** `registry.unload_all()` (free the webui's resident
+  models, `try/except ModelNotConfigured`) → `run_ingest(extra_env=orchestrator_serve_env(settings))`
+  — the serve-env injection is **load-bearing**: the subprocess's post-parse vLLM restart would
+  otherwise bring up the 8B serve-script DEFAULT, 404ing every later `/ask` (ADR-0015/D3). On
+  success: `_set_entry_doc_id` BEFORE the now-best-effort enrich (a failed enrich must still render
+  the browsable doc, not "Ingest failed" — the Inc-2 ship-blocker) → `_await_orchestrator_reachable`
+  (poll `daemon_status().reachable`, the subprocess left vLLM mid-restart) → `run_enrich`. `finally`:
+  `rmtree` + a final reachability await + clear the lock.
+- **Exclusive-GPU RAG lock:** `_ingest_guard(request)` returns `_ingesting.html` as the FIRST
+  statement of every GPU POST (`/ask`, `/documents/{id}/summarize`, `/chat/{id}/turn`, `/expert`,
+  `/bridge`) — while the ingest subprocess holds `pause_vllm_for_gpu` the orchestrator is DOWN, so
+  those would 404 mid-answer regardless of VRAM; the lock converts a broken answer into an honest
+  "answering paused". `base.html` shows the `.ingesting-banner` (amber, `role="status"`) via the
+  `ingesting_active()` jinja global. **Browsing stays fully open** (`/documents`, `/entity`,
+  `/graph`, `/resources`, source-preview — no GPU) per the user's "browse what's already ingested".
+- **Live VRAM:** `ingest.html` embeds the reused `/resources/vram` fragment (`hx-trigger` refresh)
+  — the read-only nvidia-smi probe is safe mid-ingest and shows the parse model as the live holder.
+
+Pinned by `test_webui.py` (the `_patch_ingest`/`_patch_daemon_reachable` fakes + `_ingest_to_completion`:
+streaming byte-equality, the 5-POST lock matrix + 4-GET banner, crash/stream-failure lock-release,
+serve-env injection asserting `MEMEX_VLLM_MODEL`, temp-dir-no-leak) + `test_ingest_driver.py` (fake-spawn
+phase sequence + a real-subprocess >64KiB concurrent-drain) + `test_progress.py` (`ingest_phase_view`).
+**Deferred (single-user v1):** in-flight-RAG drain before `unload_all`, a stdout-silence watchdog, a
+lifespan half-doc reconcile, a manifest fully-consumed gate, a multi-upload queue.
+
 ## Two inline-edit flows (both HTMX view/edit toggles)
 
 - **Body**: the `edit` button swaps `#md-pane` (`/documents/{id}/edit` → form; `/documents/{id}/review` POST writes through `vault.write_document` with optimistic-CAS conflict handling; `/documents/{id}/body` is the view partial).
