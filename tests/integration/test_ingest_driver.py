@@ -253,15 +253,15 @@ async def test_run_ingest_watchdog_does_not_kill_active_child(
 ) -> None:
     # A child that keeps STREAMING output (even slowly) must NOT be killed: every line resets the
     # idle timer, so an active-but-slow ingest survives a tight silence budget. Three lines spaced
-    # BELOW the budget but cumulatively PAST it (0.2s gaps × 3 = 0.6s > the 0.4s budget) → survival
-    # depends on the per-line reset. The 0.4s budget keeps a comfortable margin over the child's
-    # interpreter cold-start (so line 0 lands before the first budget expiry on a loaded machine).
+    # BELOW the budget but cumulatively PAST it (0.3s gaps × 3 = 0.9s > the 0.6s budget) → survival
+    # depends on the per-line reset. The 0.6s budget keeps a wide margin over the child's interpreter
+    # cold-start (so line 0 lands before the first budget expiry even on a heavily-loaded machine).
     monkeypatch.setattr("memex.webui.ingest_driver._WATCHDOG_POLL_S", 0.05)
     script = (
         "import sys, json, time\n"
         "for i in range(3):\n"
         "    sys.stderr.write(json.dumps({'event': 'vlm.start', 'page': i}) + '\\n')\n"
-        "    sys.stderr.flush(); time.sleep(0.2)\n"
+        "    sys.stderr.flush(); time.sleep(0.3)\n"
         "sys.stdout.write(json.dumps({'accepted': True, 'doc_id': 'alive123-doc'}) + '\\n')\n"
     )
 
@@ -276,7 +276,7 @@ async def test_run_ingest_watchdog_does_not_kill_active_child(
         )
 
     outcome = await asyncio.wait_for(
-        run_ingest(Path("slow.pdf"), on_phase=lambda _p: None, spawn=spawn, silence_timeout_s=0.4),
+        run_ingest(Path("slow.pdf"), on_phase=lambda _p: None, spawn=spawn, silence_timeout_s=0.6),
         timeout=10,
     )
     assert outcome.accepted and outcome.doc_id == "alive123-doc"  # streamed → never tripped
@@ -287,13 +287,13 @@ async def test_run_ingest_watchdog_exempts_silent_asr(monkeypatch: pytest.Monkey
     # false-kill legit long media (and ASR caches only on success → an infinite re-transcribe loop).
     # An `asr.transcribe.start` flips the watchdog to the generous ASR budget: a silent stretch that
     # EXCEEDS the normal budget but not the ASR budget must NOT be killed. (Without the exemption the
-    # 0.7s silence would trip the 0.4s normal budget.)
+    # 0.9s silence would trip the 0.6s normal budget.)
     monkeypatch.setattr("memex.webui.ingest_driver._WATCHDOG_POLL_S", 0.05)
     script = (
         "import sys, json, time\n"
         "sys.stderr.write(json.dumps({'event': 'asr.transcribe.start'}) + '\\n')\n"
         "sys.stderr.flush()\n"
-        "time.sleep(0.7)\n"  # silent — past the 0.4s normal budget, under the 30s ASR budget
+        "time.sleep(0.9)\n"  # silent — past the 0.6s normal budget, under the 30s ASR budget
         "sys.stderr.write(json.dumps({'event': 'asr.transcribe.done', 'segments': 3}) + '\\n')\n"
         "sys.stderr.flush()\n"
         "sys.stdout.write(json.dumps({'accepted': True, 'doc_id': 'audio123-doc'}) + '\\n')\n"
@@ -314,7 +314,7 @@ async def test_run_ingest_watchdog_exempts_silent_asr(monkeypatch: pytest.Monkey
             Path("audio.mp4"),
             on_phase=lambda _p: None,
             spawn=spawn,
-            silence_timeout_s=0.4,
+            silence_timeout_s=0.6,
             asr_silence_timeout_s=30.0,
         ),
         timeout=10,

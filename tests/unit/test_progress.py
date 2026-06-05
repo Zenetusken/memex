@@ -153,6 +153,12 @@ def test_ingest_phase_for_maps_subprocess_events() -> None:
     assert ingest_phase_for("chart_ocr.batch.start") == "Transcribing · chart OCR"
     assert ingest_phase_for("asr.transcribe.start") == "Transcribing · audio"
     assert ingest_phase_for("index.start") == "Indexing"
+    # the subprocess's end-of-ingest orchestrator restart → an eyebrow so "Indexing" doesn't freeze
+    assert ingest_phase_for("vllm.restart.start") == "Indexing · restoring the orchestrator"
+    assert ingest_phase_view("Indexing · restoring the orchestrator") == (
+        2,
+        "restoring the orchestrator",
+    )
     assert ingest_phase_for("enrich.start") == "Enriching"
     # an unknown / non-start event keeps the current phase (unknown → no-op, like phase_for)
     assert ingest_phase_for("vlm.done") == ""
