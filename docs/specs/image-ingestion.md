@@ -1,7 +1,9 @@
 # Spec — Standalone image → 1-page PDF at parse, then the scan→VLM route
 
-**Status:** Shipped 2026-06-05 (branch `feat/image-ingestion`; ADR-0020). Inc-1 validation
-`457ec72`, Inc-2 parse route `a548abd`.
+**Status:** Shipped + **live-validated** 2026-06-05 (branch `feat/image-ingestion`; ADR-0020). Inc-1
+validation `457ec72`, Inc-2 parse route `a548abd`, Inc-3 surfaces/docs `296256c`, EXIF-orientation fix
+`3a6caae`. End-to-end through the webui on the real `CISCO CyberOps.png` + a 33-case converter matrix
+(see Verification).
 
 ## Problem
 
@@ -70,10 +72,13 @@ doc dir → a fresh ingest re-converts.
 
 ### 5. HARD-gate neutrality is STRUCTURAL
 Image → VLM → markdown flows through the **unchanged** index/grounding gate (identical posture to a
-scanned PDF). A blank/unreadable image transcribes to nothing → `_parse_scan_with_vlm`'s
-`if not parts: raise ParseConfidenceTooLow(recoverable=True)` fires **before `write_document`** → **no
-junk 0-chunk doc** → an honest refuse. Parse-stage only ⇒ `/ask`/`summarize`/chat/bridge/MCP and their
-HARD gates are byte-untouched.
+scanned PDF). An unreadable image is HARD-gate-safe two ways: (1) if the VLM transcribes nothing,
+`_parse_scan_with_vlm`'s `if not parts: raise ParseConfidenceTooLow(recoverable=True)` fires **before
+`write_document`** → no 0-chunk doc; (2) **live (2026-06-05)** the VLM given an all-white image returns
+an honest *meta-description* ("the image is blank") rather than empty, so a thin doc is written — but it
+holds no assertable content, so **every substantive query against it refuses** (verified: a blank-image
+doc refused an OSPF/VLAN question). No fabrication either way. Parse-stage only ⇒
+`/ask`/`summarize`/chat/bridge/MCP and their HARD gates are byte-untouched.
 
 ### 6. Surfaces (Inc-3)
 - **CLI** — `memex ingest photo.png` works out of the box (validation accepts it; the parse route runs
@@ -108,14 +113,26 @@ HARD gates are byte-untouched.
   image → `ParseConfidenceTooLow`, **no doc written**.
 - `tests/integration/test_webui.py` — the ingest page copy advertises images.
 
-## Verification (live, end-to-end)
-1. **CLI** — `memex ingest diagram.png` (default `disable_vlm=True`, ignored by the image route) →
-   `memex ask "what does the diagram show?"` → a grounded, cited answer transcribed from the image.
-   Re-parse → the VLM does **not** re-run (cache hit via the stable `converted.pdf`); `--refresh-vlm` →
-   a fresh draw.
-2. **WebUI** — `/ingest` upload a `.png` → progress Parsing→Transcribing→Indexing→Enriching → done →
-   the doc is browsable + askable; the source-preview pane renders the page image (from
-   `converted.pdf`); the download link serves the original `.png`.
-3. **HARD-gate honesty** — (a) a blank/all-white image → `ParseConfidenceTooLow`, no 0-chunk doc → any
-   query refuses; (b) a non-document photo + an unsupported question → honest refusal. (Do **not**
-   assert refusal on "what is shown?" — a faithful caption there is *correct* grounded behavior.)
+## Verification (live, end-to-end — RAN 2026-06-05)
+1. **Converter matrix (GPU-free, real pixels) — 33/33 PASS.** Every format (PNG/JPEG/WebP/BMP/TIFF/GIF),
+   every mode (RGB/L/RGBA/P/CMYK/LA), sizes 1×1 → 4000×3000 (all at native px/2), all 4 EXIF
+   orientations (o6/o8 correctly uprighted to portrait), multi-frame GIF + multi-page TIFF → first
+   frame/single page, blank, transparent RGBA, and corrupt/empty/truncated → typed `ImageConversionError`.
+2. **WebUI e2e (the chosen surface) — real CISCO CyberOps.png (1826×823 RGBA).** Upload → live progress
+   Parsing→Transcribing→Indexing→Enriching→"Restoring the orchestrator" → **INGESTED** ("fully consumed,
+   searchable and browsable"). The VLM transcribed every bullet + both `cisco.com/go/...` URLs + the
+   `#CiscoChat on October 15, 2020` faithfully. `memex ask "…date is the CiscoChat?"` → `answered=True`,
+   "October 15, 2020", cited to the exact chunk; a counterfactual ("which IOS version…") → `answered=False`
+   (honest refusal, no fabrication). The exclusive-GPU handoff (ADR-0019) released the webui GPU + ran a
+   parse-time Qwen3-VL-8B serve cleanly.
+3. **WebUI e2e cross-format — synthetic content as `.webp`.** Faithful transcription ("OSPF process ID
+   4173", "VLAN 880 (name: AURORA-MGMT)"); an unscoped `ask` grounded both facts and selected the right
+   doc from the whole vault. (The VLM only ever sees the converted PDF, so #1's matrix + one VLM e2e
+   cover the format/size breadth by construction.)
+4. **HARD-gate honesty — blank image.** A blank `.png` through the webui → the VLM returned an honest
+   "the image is blank" caption (a thin doc, NOT empty/`ParseConfidenceTooLow`); a substantive
+   OSPF/VLAN query against it → `answered=False` (refused, no fabrication).
+5. **GPU-contention guard — CLI under a live webui.** A concurrent CLI `memex ingest` of the blank image
+   correctly raised the dynamic-VRAM-manager `VRAMExhausted` (naming the holder) and **fail-fast** rather
+   than writing a junk doc — the documented webui-on-GPU contention, not a feature bug (run the breadth
+   via the webui's exclusive-GPU mode, or on a free GPU).

@@ -84,12 +84,16 @@ runs the existing scan→VLM transcription**, `engine="image"`. Two user decisio
 ## HARD-gate neutrality is STRUCTURAL
 
 Not "images yield clean text." Image → VLM → markdown flows through the **unchanged** index/grounding
-gate, so the gate posture is identical to any scanned PDF. A **blank/unreadable image** transcribes
-to nothing → `_parse_scan_with_vlm`'s `if not parts: raise ParseConfidenceTooLow(recoverable=True)`
-fires **before `write_document`** → **no junk 0-chunk doc** is ever written → any query against it
-refuses honestly. The VLM cache extends the determinism guarantee to images (a re-parse replays the
-transcription). Parse-stage only ⇒ `/ask`, `summarize`, chat, the bridge, MCP, and their HARD gates
-are byte-untouched.
+gate, so the gate posture is identical to any scanned PDF. An **unreadable image is HARD-gate-safe two
+ways**: (1) if the VLM transcribes nothing, `_parse_scan_with_vlm`'s `if not parts: raise
+ParseConfidenceTooLow(recoverable=True)` fires **before `write_document`** → no 0-chunk doc; (2) **live
+observation (2026-06-05)** — given an all-white image the VLM does NOT return empty, it returns an
+*honest meta-description* ("the image is blank, no content"), so a thin doc IS written — but it carries
+no assertable content, so **every substantive query against it refuses** (verified live: a blank-image
+doc refused an OSPF/VLAN question, `answered=False`). Either way there is **no fabrication** — the
+honest "blank" caption is correct content, not a hallucination. The VLM cache extends the determinism
+guarantee to images (a re-parse replays the transcription). Parse-stage only ⇒ `/ask`, `summarize`,
+chat, the bridge, MCP, and their HARD gates are byte-untouched.
 
 ## Considered Options
 
@@ -141,6 +145,11 @@ are byte-untouched.
   (`convert_image_to_pdf` emits an N-page PDF; the scan route already transcribes every page).
 - **A non-VLM image path** ever becomes worthwhile (e.g. a fast printed-text screenshot OCR) — it
   would be an *additional* route, not a change to this one (images stay VLM-mandatory by default).
+- **A blank/contentless image yields a thin "this image is blank" caption doc** (the VLM's honest
+  meta-response, live 2026-06-05) rather than `ParseConfidenceTooLow`. It is HARD-gate-safe (refuses all
+  substantive queries), but a deterministic post-transcription filter that recognizes a VLM "no content"
+  meta-response and routes it to `ParseConfidenceTooLow` (→ no doc) would keep the vault tidier. Deferred
+  as a refinement (phrase-matching a meta-response is fragile; the current behavior is honest + safe).
 - **Off-list-but-magic-valid extensions** (e.g. a JPEG saved as `.jfif`/`.jpe`) — validation accepts
   by magic but the parse route keys on the fixed `IMAGE_SUFFIXES` set, so such a file misses the image
   branch and falls through to Docling (a clean *typed* parse failure, **not** a crash or a junk doc).
