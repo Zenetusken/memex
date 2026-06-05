@@ -472,7 +472,7 @@ The only thing that talks to the network is the *initial model download* (one-ti
 ## 🧪 Run the tests
 
 ```sh
-uv run pytest                  # ~1641 tests, ~30 seconds, no GPU needed
+uv run pytest                  # ~1697 tests, ~30 seconds, no GPU needed
 uv run pytest tests/unit       # just the pure-function tests
 uv run pytest tests/integration  # full ingest→parse→index→ask flow with faked I/O
 ```
