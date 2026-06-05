@@ -3231,6 +3231,39 @@ def test_ingesting_shows_banner_on_entry_page(client: TestClient) -> None:
     assert "answering is paused" not in client.get("/").text  # gone when not ingesting
 
 
+def test_entry_page_banner_is_self_refreshing(client: TestClient) -> None:
+    # The banner must carry the self-refresh poll so it CLEARS on its own when the ingest finishes
+    # (the lock releases AFTER the done-fragment renders, so a one-shot OOB clear would be premature).
+    client.app.state.ingesting.active = True
+    r = client.get("/")
+    assert 'hx-get="/ingest/banner"' in r.text and 'hx-trigger="every 3s"' in r.text
+
+
+def test_ingest_banner_fragment_reflects_and_clears(client: TestClient) -> None:
+    client.app.state.ingesting.active = True
+    r = client.get("/ingest/banner")
+    assert r.status_code == 200
+    assert "answering is paused" in r.text and 'hx-get="/ingest/banner"' in r.text  # polls itself
+    client.app.state.ingesting.active = False
+    r = client.get("/ingest/banner")
+    assert "answering is paused" not in r.text  # cleared
+    assert "hx-trigger" not in r.text  # trigger-less empty div ⇒ the polling stops
+
+
+def test_ingest_lock_fragment_clears_when_done(client: TestClient) -> None:
+    # The RAG-paused notice a GPU POST got mid-ingest self-refreshes to a "ready" fragment once the
+    # lock releases — so the stale "Still ingesting" notice clears without a manual reload.
+    client.app.state.ingesting.active = True
+    r = client.get("/ingest/lock")
+    assert r.status_code == 200
+    assert "Still ingesting" in r.text and 'hx-get="/ingest/lock"' in r.text  # keeps polling
+    client.app.state.ingesting.active = False
+    r = client.get("/ingest/lock")
+    assert "Still ingesting" not in r.text
+    assert "Ingestion finished" in r.text  # the ready fragment
+    assert "hx-trigger" not in r.text  # no trigger ⇒ polling stops
+
+
 def test_ingesting_keeps_browsing_open(client: TestClient) -> None:
     """Browsing routes touch no GPU and stay available during an ingest."""
     client.app.state.ingesting.active = True

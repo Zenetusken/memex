@@ -1488,6 +1488,23 @@ def create_app() -> FastAPI:
             ctx["resume_cid"] = ingesting.cid
         return templates.TemplateResponse(request, "ingest.html", ctx)
 
+    @app.get("/ingest/banner", response_class=HTMLResponse)
+    async def ingest_banner(request: Request) -> HTMLResponse:
+        """The self-refreshing 'being ingested' banner. While active it polls itself every 3s; once
+        the ingest finishes (`ingesting.active` flips False in `_run_ingest`'s finally — AFTER the
+        done-fragment renders, so a one-shot OOB clear at done would be premature) this returns the
+        trigger-less empty div, so the banner clears on its own with no reload (any open tab)."""
+        return templates.TemplateResponse(request, "_ingesting_banner.html", {})
+
+    @app.get("/ingest/lock", response_class=HTMLResponse)
+    async def ingest_lock(request: Request) -> HTMLResponse:
+        """The self-refresh target for the RAG-paused notice a GPU POST got mid-ingest: re-render
+        the same polling notice while still ingesting, else the trigger-less 'ready' fragment (stops
+        the poll) so the stale 'still ingesting' notice clears itself when the lock releases."""
+        if ingesting.active:
+            return templates.TemplateResponse(request, "_ingesting.html", {})
+        return templates.TemplateResponse(request, "_ask_ready.html", {})
+
     @app.post("/ingest", response_class=HTMLResponse)
     async def ingest_upload(
         request: Request,
