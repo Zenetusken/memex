@@ -3292,6 +3292,32 @@ async def test_ingest_unknown_chunk_count_takes_normal_success(
     assert "no searchable text" not in text
 
 
+def test_ingest_page_resumes_in_flight_progress(client: TestClient) -> None:
+    # B7/B8: returning to GET /ingest while an ingest is in flight resumes its live progress in the
+    # pane, instead of a form-only page that drops the running ingest from view.
+    app = client.app
+    cid = "01HZRESUME0000000000000000"
+    app.state.progress.new(cid, scope_doc_ids=[], scope_source="named")
+    app.state.ingesting.active = True
+    app.state.ingesting.cid = cid
+    try:
+        r = client.get("/ingest")
+    finally:
+        app.state.ingesting.active = False
+        app.state.ingesting.cid = ""
+    assert r.status_code == 200
+    assert f"/ingest/{cid}/status" in r.text  # the pane auto-loads the in-flight progress
+    assert "Resuming" in r.text
+
+
+def test_ingest_page_fresh_when_idle(client: TestClient) -> None:
+    # No in-flight ingest → a normal form-only page (no resume block).
+    r = client.get("/ingest")
+    assert r.status_code == 200
+    assert "Resuming" not in r.text
+    assert 'type="file"' in r.text  # the upload form is present
+
+
 async def test_ingesting_lock_set_then_cleared_after_completion(
     settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:

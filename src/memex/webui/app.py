@@ -165,6 +165,7 @@ class _IngestState:
     def __init__(self) -> None:
         self.active = False
         self.doc_name = ""
+        self.cid = ""  # the in-flight ingest's progress cid, so GET /ingest can resume its live view
 
 
 # Mirrors `vault.store.assign_doc_id`'s output shape: 8-hex prefix
@@ -1238,8 +1239,8 @@ def create_app() -> FastAPI:
                 tmp_path, on_phase=lambda p: progress.set_phase(cid, p), extra_env=serve_env
             )
             if outcome.succeeded and outcome.doc_id is not None and outcome.chunk_count == 0:
-                # Parsed + indexed but ZERO chunks (e.g. an image-only PDF with no extractable text
-                # and the VLM off) — BROWSABLE but NOT searchable/askable. Don't claim "fully
+                # Parsed + indexed but ZERO chunks (e.g. an empty/whitespace body, or a scan whose
+                # VLM transcription came back empty) — BROWSABLE but NOT searchable/askable. Don't claim "fully
                 # consumed / searchable"; surface it honestly + skip enrich (nothing to ground). The
                 # orchestrator was paused by the parse → the finally's reconcile restores it (B12).
                 _set_entry_doc_id(cid, outcome.doc_id)
@@ -1302,6 +1303,7 @@ def create_app() -> FastAPI:
             finally:
                 ingesting.active = False  # leave exclusive-GPU mode → the RAG surfaces resume
                 ingesting.doc_name = ""
+                ingesting.cid = ""
 
     def _set_entry_doc_id(cid: str, doc_id: str) -> None:
         entry = progress.get(cid)
@@ -1379,8 +1381,13 @@ def create_app() -> FastAPI:
 
     @app.get("/ingest", response_class=HTMLResponse)
     async def ingest_page(request: Request) -> HTMLResponse:
-        """The upload page — pick a file, watch the full pipeline run, then open the document."""
-        return templates.TemplateResponse(request, "ingest.html", {})
+        """The upload page — pick a file, watch the full pipeline run, then open the document. If an
+        ingest is already in flight (you navigated away and came back), RESUME its live progress in
+        the pane instead of a form-only page that drops the running ingest from view (B7/B8)."""
+        ctx: dict[str, object] = {}
+        if ingesting.active and ingesting.cid and progress.get(ingesting.cid) is not None:
+            ctx["resume_cid"] = ingesting.cid
+        return templates.TemplateResponse(request, "ingest.html", ctx)
 
     @app.post("/ingest", response_class=HTMLResponse)
     async def ingest_upload(
@@ -1390,9 +1397,11 @@ def create_app() -> FastAPI:
         """Stream an upload to a temp file and start the ingest subprocess chain in a background
         task — returning `_progress.html`, which long-polls `/ingest/{cid}/status` through
         Parsing → Transcribing → Indexing → Enriching until the document is consumed."""
-        # A malformed POST (no `file` field / wrong field name) — the file is OPTIONAL so it reaches
-        # here as None instead of FastAPI raising a raw 422 JSON that HTMX would swap in verbatim.
-        # Render the friendly done-fragment instead (B18).
+        # A missing `file` field / wrong field name reaches here as None (the param is optional) — render
+        # the friendly fragment instead of FastAPI raising a raw 422 JSON that HTMX would swap in
+        # verbatim (B18). NB do NOT add `str` to the union to also catch an empty-filename multipart
+        # part — that makes FastAPI mis-bind REAL files as form strings; that hand-crafted/malformed
+        # case (not a real browser file input) is left as a documented residual.
         if file is None:
             return templates.TemplateResponse(
                 request,
@@ -1445,6 +1454,7 @@ def create_app() -> FastAPI:
             cid = str(ulid.ULID())
             entry = progress.new(cid, scope_doc_ids=[], scope_source="named")
             entry.phase = INGEST_PHASES[0]  # start on "Parsing", not the /ask default phase
+            ingesting.cid = cid  # so GET /ingest can RESUME this in-flight ingest's live view (B7/B8)
             task = asyncio.create_task(_run_ingest(cid, tmp_path))
             progress.attach_task(cid, task)
             scheduled = True  # _run_ingest's finally now owns the lock + temp-file release
@@ -1475,6 +1485,7 @@ def create_app() -> FastAPI:
                 # stuck, and clean any temp file that was created.
                 ingesting.active = False
                 ingesting.doc_name = ""
+                ingesting.cid = ""
                 if tmp_path is not None:
                     shutil.rmtree(tmp_path.parent, ignore_errors=True)
 
