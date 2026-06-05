@@ -113,3 +113,33 @@ false matches 0.64–0.78 (cleanly dropped); the separation isn't perfect — on
 universal.** Caveat: the deck's `Chunk.page` is navigation-grade and can drift from the true PDF page on
 a figure-heavy deck, so the alignment matches by CONTENT (`deck_chunk_id`) and the scoring mapped each
 predicted chunk to its true PDF page by text-overlap; a citation-grade page map is a separate follow-up.
+
+## Amendment (2026-06-05): the three deferred §13 levers — resolutions
+
+Closing the "deferred, each its own arc" list (spec §13). Branch `feat/companion-levers`. All three stay
+HARD-gate-neutral (the alignment is the default-off augment sidecar; keyframe OCR is parse-stage;
+`Chunk.page` is nav metadata).
+
+- **MaViLS asymmetric-jump DP + real `start_s` prior — SHIPPED OPT-IN.** `align_blocks(use_dp=True)` → a
+  pure Viterbi (`_align_dp`): emission = cosine; transition = `-companion_dp_lambda_jump` × jump (forward
+  1× / backward 2× / stay 0); a `companion_dp_time_weight` `start_s` prior; keyframe-PRIMARY chunks are
+  FIXED anchors; null carries the page context. **Default OFF** (`companion_align_dp_enabled`, off ⇒
+  byte-identical to the greedy tie-break). The DP logic is unit-validated; the **corpus win is
+  UNMEASURED** — enabling + tuning `λ_jump` awaits a transcript→slide gold set (the existing 18-frame
+  gold is keyframe→slide). So it ships as a ready, off-by-default lever, not a measured improvement.
+- **Perceptual-hash keyframe-OCR dedup — REJECTED (built then reverted) as fundamentally unviable.** A
+  whole-frame perceptual hash (aHash or dHash, any resolution) cannot separate a DIFFERENT slide that
+  differs by small text (an animation build / one-word bullet → ~1–2 bits) from the SAME slide HELD under
+  a moving webcam/demo overlay (~17–48 bits) — the dangerous case is *closer* than the safe one, so no
+  Hamming threshold works, and the 0.80 keyframe floor does NOT contain a false dedup (slide A's reused
+  text legitimately matches deck page A above the floor → a confidently-wrong page). The only safe dedup
+  compares OCR'd TEXT (needs OCR first, no savings), and the keyframe OCR is already cached (one-time
+  cost). Don't retry a whole-frame-hash dedup for slide frames.
+- **Citation-grade deck page-map — FOUNDATION shipped, wiring deferred.** The `Chunk.page` drift is real
+  but PRESENTATION-ONLY (retrieval is content-addressed via `deck_chunk_id`). The fix is a transient
+  page-boundary marker that rides the body transforms as a ruler then is stripped — measuring per-page
+  spans against the exact chunked body while keeping it byte-identical (zero chunk_id churn). Shipped: the
+  `core/text.py` marker helpers + the `collapse_consecutive_duplicates` exclusion + the golden
+  byte-stability invariants (validated through `_finalize_body` AND reattach+linearize). The
+  route/index/manifest WIRING (record each page's `char_start`; the index round-trip; the chunker) is the
+  remaining follow-on.
