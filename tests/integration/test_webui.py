@@ -3318,6 +3318,68 @@ def test_ingest_page_fresh_when_idle(client: TestClient) -> None:
     assert 'type="file"' in r.text  # the upload form is present
 
 
+async def test_upload_size_limit_middleware_rejects_oversize() -> None:
+    # B11: the ASGI middleware rejects an over-cap Content-Length on POST /ingest WITHOUT calling
+    # the downstream app — so the body never streams to disk (the handler check is too late).
+    from memex.webui.app import _UploadSizeLimitMiddleware
+
+    downstream_called = False
+
+    async def downstream(scope: Any, receive: Any, send: Any) -> None:
+        nonlocal downstream_called
+        downstream_called = True
+
+    sent: list[dict[str, Any]] = []
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: dict[str, Any]) -> None:
+        sent.append(message)
+
+    mw = _UploadSizeLimitMiddleware(downstream, max_bytes=2 * 1024**3)
+    scope: dict[str, Any] = {
+        "type": "http",
+        "method": "POST",
+        "path": "/ingest",
+        "headers": [(b"content-length", str(3 * 1024**3).encode())],
+    }
+    await mw(scope, receive, send)
+
+    assert downstream_called is False  # short-circuited → no disk stream
+    start = next(m for m in sent if m["type"] == "http.response.start")
+    assert start["status"] == 200  # 200 so HTMX swaps it into the pane
+    body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
+    assert b"exceeds the 2 GiB upload limit" in body
+
+
+async def test_upload_size_limit_middleware_passes_normal_and_other_routes() -> None:
+    from memex.webui.app import _UploadSizeLimitMiddleware
+
+    downstream_called = False
+
+    async def downstream(scope: Any, receive: Any, send: Any) -> None:
+        nonlocal downstream_called
+        downstream_called = True
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: dict[str, Any]) -> None:
+        pass
+
+    mw = _UploadSizeLimitMiddleware(downstream, max_bytes=2 * 1024**3)
+    # under-cap /ingest passes through; a non-/ingest route passes regardless of declared size.
+    scopes: list[dict[str, Any]] = [
+        {"type": "http", "method": "POST", "path": "/ingest", "headers": [(b"content-length", b"100")]},
+        {"type": "http", "method": "POST", "path": "/ask", "headers": [(b"content-length", str(9 * 1024**3).encode())]},
+    ]
+    for scope in scopes:
+        downstream_called = False
+        await mw(scope, receive, send)
+        assert downstream_called is True
+
+
 async def test_ingesting_lock_set_then_cleared_after_completion(
     settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:

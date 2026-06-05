@@ -57,6 +57,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from jinja2 import Environment, FileSystemLoader
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from memex.agents.answering import FinalResponse, answer_query
 from memex.agents.bridge import BridgeAnswer, reason_then_ground
@@ -222,6 +223,45 @@ _SOURCE_KINDS: dict[str, tuple[str, str]] = {
 }
 
 logger = structlog.get_logger(__name__)
+
+
+def _content_length(scope: Scope) -> int | None:
+    """The request's Content-Length header as an int, or None if absent/unparseable."""
+    for key, value in scope.get("headers", []):
+        if key == b"content-length":
+            try:
+                return int(value)
+            except ValueError:
+                return None
+    return None
+
+
+class _UploadSizeLimitMiddleware:
+    """Reject an over-cap ``POST /ingest`` by its declared Content-Length BEFORE Starlette streams
+    the whole multipart body to a disk temp file (B11). The handler's ``file.size`` check runs only
+    AFTER the body is already on disk, so a >cap upload would fill the disk first. Best-effort: the
+    header is absent for chunked transfers + can be spoofed, so the in-handler ``file.size`` cap
+    stays as the backstop — this just avoids a disk-fill on an honestly-declared huge upload. The
+    response mirrors the handler's cap fragment (HTTP 200 so HTMX swaps it into the pane)."""
+
+    def __init__(self, app: ASGIApp, *, max_bytes: int) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and scope["method"] == "POST" and scope["path"] == "/ingest":
+            length = _content_length(scope)
+            if length is not None and length > self.max_bytes:
+                logger.warning("ingest.upload_too_large_precheck", content_length=length)
+                response = HTMLResponse(
+                    '<div class="ans-flash ans-flash-error">'
+                    '<div class="ans-eyebrow">Ingest failed</div>'
+                    '<p class="ingest-done-note">The file exceeds the 2 GiB upload limit.</p>'
+                    "</div>"
+                )
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
 
 
 def _active_profile() -> ResourceProfile:
@@ -624,6 +664,8 @@ def create_app() -> FastAPI:
             pass  # registry never set up (e.g. a TestClient app) — nothing resident to release
 
     app = FastAPI(title="Memex", docs_url=None, redoc_url=None, lifespan=_lifespan)
+    # Reject an honestly-oversized upload by Content-Length before its body streams to disk (B11).
+    app.add_middleware(_UploadSizeLimitMiddleware, max_bytes=_MAX_UPLOAD_BYTES)
 
     if _STATIC_DIR.exists():
         app.mount(
