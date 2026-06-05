@@ -1237,7 +1237,18 @@ def create_app() -> FastAPI:
             outcome = await ingest_driver.run_ingest(
                 tmp_path, on_phase=lambda p: progress.set_phase(cid, p), extra_env=serve_env
             )
-            if outcome.succeeded and outcome.doc_id is not None:
+            if outcome.succeeded and outcome.doc_id is not None and outcome.chunk_count == 0:
+                # Parsed + indexed but ZERO chunks (e.g. an image-only PDF with no extractable text
+                # and the VLM off) — BROWSABLE but NOT searchable/askable. Don't claim "fully
+                # consumed / searchable"; surface it honestly + skip enrich (nothing to ground). The
+                # orchestrator was paused by the parse → the finally's reconcile restores it (B12).
+                _set_entry_doc_id(cid, outcome.doc_id)
+                progress.finish(
+                    cid,
+                    error="The document was ingested but no searchable text was extracted — "
+                    "it's browsable, but won't appear in answers.",
+                )
+            elif outcome.succeeded and outcome.doc_id is not None:
                 # Parsed + indexed ⇒ the doc is askable + browsable NOW. Record the link BEFORE
                 # the best-effort enrich, so a failed enrich never discards a usable document
                 # (enrich is HARD-gate-neutral graph discovery; a doc without it still answers).

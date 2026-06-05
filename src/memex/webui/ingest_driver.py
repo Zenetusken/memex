@@ -75,6 +75,7 @@ class IngestOutcome(BaseModel):
     exit_code: int  # the whole chain's exit (parse/index failure ⇒ non-zero even if accepted)
     doc_id: str | None = None
     rejection_reason: str | None = None
+    chunk_count: int | None = None  # chunks indexed (from the `index.done` event); None = unknown
 
     @property
     def succeeded(self) -> bool:
@@ -168,11 +169,12 @@ class _Seen:
 
     doc_id: str | None = None
     accepted: bool = False
+    chunk_count: int | None = None  # from the `index.done` event — chunks indexed for the doc
 
 
 def _make_stderr_sink(on_phase: OnPhase, seen: _Seen) -> Callable[[str], None]:
-    """Build the stderr line handler: map each structlog event → a phase (push to
-    `on_phase`) and capture the `ingest.accepted` doc_id + accepted flag early."""
+    """Build the stderr line handler: map each structlog event → a phase (push to `on_phase`) and
+    capture the `ingest.accepted` doc_id/accepted + the `index.done` chunk count early."""
 
     def sink(line: str) -> None:
         rec = _parse_json_line(line)
@@ -184,6 +186,11 @@ def _make_stderr_sink(on_phase: OnPhase, seen: _Seen) -> Callable[[str], None]:
             did = rec.get("doc_id")
             if isinstance(did, str):
                 seen.doc_id = did
+        elif event == "index.done":
+            # Drives the "0 chunks ⇒ browsable but NOT searchable" status honesty (B12).
+            n = rec.get("chunks")
+            if isinstance(n, int):
+                seen.chunk_count = n
         phase = ingest_phase_for(event, rec.get("page"))
         if phase:
             on_phase(phase)
@@ -236,7 +243,11 @@ async def run_ingest(
         else:
             rejection = f"the ingest process exited with code {exit_code}"
     return IngestOutcome(
-        accepted=accepted, exit_code=exit_code, doc_id=doc_id, rejection_reason=rejection
+        accepted=accepted,
+        exit_code=exit_code,
+        doc_id=doc_id,
+        rejection_reason=rejection,
+        chunk_count=seen.chunk_count,
     )
 
 

@@ -3258,6 +3258,40 @@ def test_ingest_no_file_renders_friendly_fragment(client: TestClient) -> None:
     assert "Ingest failed" in r.text  # the failed branch of _ingest_done.html
 
 
+async def test_ingest_zero_chunk_doc_not_claimed_searchable(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A doc that parsed + indexed but produced 0 chunks (e.g. an image-only PDF, VLM off) is
+    # browsable but NOT searchable — the done-fragment must not claim "fully consumed / searchable"
+    # (B12). chunk_count=0 routes to the honest partial fragment.
+    _patch_ingest(
+        monkeypatch,
+        outcome=IngestOutcome(
+            accepted=True, exit_code=0, doc_id="abcd1234-empty", chunk_count=0
+        ),
+    )
+    text = await _ingest_to_completion(create_app(), content=b"%PDF", filename="blank.pdf")
+    assert "no searchable text" in text
+    assert "/documents/abcd1234-empty" in text  # still browsable
+    assert "fully consumed" not in text  # NOT the success "searchable and browsable" claim
+
+
+async def test_ingest_unknown_chunk_count_takes_normal_success(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # chunk_count=None (event not captured — old subprocess / unusual path) must NOT be gated as
+    # 0-chunk; it takes the normal success path (status quo).
+    _patch_ingest(
+        monkeypatch,
+        outcome=IngestOutcome(
+            accepted=True, exit_code=0, doc_id="abcd1234-ok", chunk_count=None
+        ),
+    )
+    text = await _ingest_to_completion(create_app(), content=b"%PDF", filename="doc.pdf")
+    assert "fully consumed" in text  # the normal success claim
+    assert "no searchable text" not in text
+
+
 async def test_ingesting_lock_set_then_cleared_after_completion(
     settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
