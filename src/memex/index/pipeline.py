@@ -199,9 +199,11 @@ def _exact_page_intervals(
 
     A transient page-boundary marker is inserted at each boundary, the marked body runs the
     identical transforms, and the markers are stripped. Returns the intervals ONLY when the
-    stripped body equals `indexed_body` byte-for-byte — so a transform edge case (or a
-    boundary that doesn't sit on a clean block start) can only fall back to the nav-grade
-    `page_char_counts` path, NEVER churn the content-addressed chunk_ids. `None` ⇒ nav-grade."""
+    stripped body equals `indexed_body` byte-for-byte — so a transform edge case (or a parse-side
+    map that didn't reconstruct, leaving the boundaries off a clean block start) can only fall back
+    to the nav-grade `page_char_counts` path, NEVER churn the content-addressed chunk_ids. `None` ⇒
+    nav-grade. Reaching here at all means the parse round-trip already succeeded (every content page
+    has a `char_start`); the index round-trip then re-validates against the post-transform body."""
     if not boundaries:
         return None
     marked = insert_page_markers_at(plain_body, boundaries)

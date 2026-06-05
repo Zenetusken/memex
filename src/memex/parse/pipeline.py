@@ -1444,9 +1444,16 @@ def _finalize_body_with_page_starts(
     To measure boundaries, a page-boundary marker is inserted before each NON-EMPTY page's content,
     the MARKED body is finalized, and the markers are stripped (they're inert to every `_finalize_body`
     transform + dedup-excluded). SAFETY: char_starts are recorded ONLY when the stripped body equals
-    the canonical `plain` byte-for-byte — if `per_page` doesn't reconstruct the route's exact input, or
-    a real-doc edge case perturbs a transform, the map is EMPTY (the page stays nav-grade, `char_start
-    = -1`). A wiring bug can only lose page precision, never churn content-addressed chunk_ids."""
+    the canonical `plain` byte-for-byte — i.e. when `per_page` (the `"\n\n".join` of its segments)
+    reconstructs the route's exact input. A wiring bug can only lose page precision, never churn
+    content-addressed chunk_ids.
+
+    An EMPTY map (whole-doc nav-grade) is an EXPECTED steady state for some inputs, NOT only a bug:
+    the PyMuPDF + scan/image routes build `conversion.markdown` AS the per-page join, so they always
+    reconstruct; the Docling route's `conversion.markdown` is a WHOLE-DOC `export_markdown_header_aware`
+    serialization that equals the per-page join only after VLM escalation (re-stitched as the join) or
+    on a deck with no multi-header-table / separator divergence — otherwise the round-trip legitimately
+    differs and `parse.page_map.byte_mismatch` fires by design (the doc stays nav-grade, never wrong)."""
     plain = _finalize_body(plain_markdown)
     if not per_page:
         return plain, {}

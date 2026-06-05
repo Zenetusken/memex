@@ -101,6 +101,15 @@ async def test_scan_route_transcribes_all_pages_and_writes_engine_scan(
     body = (vault / "documents" / f"{doc_id}.md").read_text(encoding="utf-8")
     assert "Transcribed handwriting 1." in body  # early page
     assert "Transcribed handwriting 2." in body  # AND the late page (no truncation)
+    # Companion arc-3: the scan route builds the body AS the per-page join, so the page-boundary
+    # round-trip always reconstructs → citation-grade char_start on every (content) page.
+    from memex.vault.store import read_document
+
+    assert all(p.char_start >= 0 for p in result.pages)
+    starts = {p.page: p.char_start for p in result.pages}
+    assert starts[1] == 0
+    doc = await read_document(vault, doc_id)
+    assert doc.body[starts[2] :].startswith("# Page 2")  # page 2's offset lands on its content
 
 
 @pytest.mark.asyncio
