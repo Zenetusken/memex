@@ -1327,12 +1327,14 @@ def create_app() -> FastAPI:
             # serve-vllm.sh, inheriting this env) brings up the CONFIGURED orchestrator, not the
             # serve-script's hardcoded default — else every post-ingest /ask 404s (ADR-0015 / D3).
             serve_env = orchestrator_serve_env(get_settings())
-            silence_timeout_s = get_settings().ingest.silence_timeout_s  # hung-child watchdog
+            ingest_cfg = get_settings().ingest  # hung-child silence watchdog budgets
+            silence_timeout_s = ingest_cfg.silence_timeout_s
             outcome = await ingest_driver.run_ingest(
                 tmp_path,
                 on_phase=lambda p: progress.set_phase(cid, p),
                 extra_env=serve_env,
                 silence_timeout_s=silence_timeout_s,
+                asr_silence_timeout_s=ingest_cfg.asr_silence_timeout_s,
             )
             if outcome.succeeded and outcome.doc_id is not None and outcome.chunk_count == 0:
                 # Parsed + indexed but ZERO chunks (e.g. an empty/whitespace body, or a scan whose
