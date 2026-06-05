@@ -63,8 +63,9 @@ _DEFAULT_SILENCE_TIMEOUT_S = 1800.0
 # A much larger budget for the ASR phase, which is SILENT on both pipes for its whole duration
 # (faster-whisper runs the file through one blocking call with no intermediate log). A multi-hour
 # CPU transcription (the default device) legitimately outruns the normal budget; the normal one
-# would false-kill it AND, since ASR caches only on success, loop forever on the re-transcribe.
-_DEFAULT_ASR_SILENCE_TIMEOUT_S = 14400.0  # ~4h; covers a long CPU transcription
+# would false-kill it AND, since ASR caches only on success, loop forever on the re-transcribe. A
+# 2 GiB low-bitrate AUDIO file can still exceed this on CPU — raise `ingest.asr_silence_timeout_s`.
+_DEFAULT_ASR_SILENCE_TIMEOUT_S = 28800.0  # ~8h; covers a long CPU transcription
 _WATCHDOG_POLL_S = 5.0  # how often the watchdog re-checks the idle gap
 
 

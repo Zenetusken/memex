@@ -303,10 +303,11 @@ class IngestSettings(BaseModel):
     # WHOLE duration (faster-whisper runs the file through one blocking call with no intermediate
     # log). A multi-hour audio/video (ADR-0017 ships 2 GiB video) on the CPU-default ASR can run
     # well past `silence_timeout_s` while working correctly — the normal budget would false-kill it
-    # (and ASR caches only on success, so the re-transcribe would loop). ~4h covers a long CPU
-    # transcription; a still-larger media file can raise this. A genuinely-wedged ASR is still
-    # eventually reaped at this budget.
-    asr_silence_timeout_s: float = Field(default=14400.0, ge=60.0)
+    # (and ASR caches only on success, so the re-transcribe would loop). ~8h covers a long CPU
+    # transcription. CAVEAT: a 2 GiB LOW-BITRATE AUDIO file (e.g. a 128 kbps MP3 ≈ tens of hours of
+    # content) can still exceed this on CPU — raise it for those. A genuinely-wedged ASR is still
+    # eventually reaped at this budget (vs forever if the watchdog were disabled during ASR).
+    asr_silence_timeout_s: float = Field(default=28800.0, ge=60.0)
 
 
 class ParseSettings(BaseModel):
