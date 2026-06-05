@@ -24,7 +24,7 @@ import re
 import shutil
 import tempfile
 import time
-from collections.abc import AsyncGenerator, Mapping
+from collections.abc import AsyncGenerator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -52,7 +52,12 @@ from memex.core.table_linearize import (
     parse_gfm_table,
     table_cell_lines,
 )
-from memex.core.text import IMAGE_PLACEHOLDER_RE, is_page_boundary_marker
+from memex.core.text import (
+    IMAGE_PLACEHOLDER_RE,
+    is_page_boundary_marker,
+    mark_pages_for_measure,
+    measure_and_strip_page_markers,
+)
 from memex.parse.asr_backend import ASRSegment, transcribe_audio
 from memex.parse.asr_cache import ASRTranscriptionCache
 from memex.parse.chart_ocr_backend import (
@@ -1429,6 +1434,29 @@ def _finalize_body(markdown: str) -> str:
     )
 
 
+def _finalize_body_with_page_starts(
+    plain_markdown: str, per_page: Sequence[tuple[int, str]]
+) -> tuple[str, dict[int, int]]:
+    """`_finalize_body(plain_markdown)` PLUS each page's citation-grade `char_start` in the result
+    (companion arc-3). The returned body is ALWAYS `_finalize_body(plain_markdown)` — byte-identical
+    to what the route writes today, so `doc.body` / `_bootstrap_ref` / chunk_ids never change.
+
+    To measure boundaries, a page-boundary marker is inserted before each NON-EMPTY page's content,
+    the MARKED body is finalized, and the markers are stripped (they're inert to every `_finalize_body`
+    transform + dedup-excluded). SAFETY: char_starts are recorded ONLY when the stripped body equals
+    the canonical `plain` byte-for-byte — if `per_page` doesn't reconstruct the route's exact input, or
+    a real-doc edge case perturbs a transform, the map is EMPTY (the page stays nav-grade, `char_start
+    = -1`). A wiring bug can only lose page precision, never churn content-addressed chunk_ids."""
+    plain = _finalize_body(plain_markdown)
+    if not per_page:
+        return plain, {}
+    clean, intervals = measure_and_strip_page_markers(_finalize_body(mark_pages_for_measure(per_page)))
+    if clean != plain:  # the round-trip didn't reproduce the canonical body → keep nav-grade
+        logger.warning("parse.page_map.byte_mismatch", pages=len(per_page))
+        return plain, {}
+    return plain, {page_no: char_start for page_no, char_start, _ in intervals}
+
+
 async def _parse_with_docling(
     vault_path: Path,
     doc_id: str,
@@ -1561,7 +1589,10 @@ async def _parse_with_docling(
     # `[chart-extracted]` blocks are already in place and the GFM tables seen
     # are the post-header-recovery ones). The finalized body is what gets
     # written; thread it to body=/_bootstrap_ref/markdown_bytes below.
-    final_body = _finalize_body(conversion.markdown)
+    # Companion arc-3: also record each page's citation-grade char_start (the body is unchanged).
+    _per_page = [(p.page, p.markdown) for p in conversion.pages if p.markdown]
+    final_body, _page_starts = _finalize_body_with_page_starts(conversion.markdown, _per_page)
+    pages = [pd.model_copy(update={"char_start": _page_starts.get(pd.page, -1)}) for pd in pages]
 
     duration_ms = int((time.monotonic() - start) * 1000)
 
@@ -1659,15 +1690,18 @@ def _assemble_scan_pages(
     page_count: int,
     *,
     engine: Literal["scan", "image"] = "scan",
-) -> tuple[list[PageDecision], list[str]]:
+) -> tuple[list[PageDecision], list[tuple[int, str]]]:
     """PURE: turn the VLM per-page transcription results into ordered `PageDecision`s
     (engine=`engine` — "scan" for a scanned PDF, "image" for a standalone image, ADR-0020)
-    + the non-empty markdown parts to stitch, in reading order. A failed/missing page →
-    confidence 0 with the error in `rationale` (recorded, not silently dropped) and no
-    markdown contribution. Each page's markdown has a whole-page ```markdown fence wrapper
-    stripped (`_strip_markdown_fence_wrapper`)."""
+    + the non-empty `(page_no, markdown)` pairs to stitch, in reading order. A failed/missing
+    page → confidence 0 with the error in `rationale` (recorded, not silently dropped) and no
+    `per_page` contribution. Each page's markdown has a whole-page ```markdown fence wrapper
+    stripped (`_strip_markdown_fence_wrapper`). `per_page` carries the page number (the old
+    `parts` was markdown-only) so the caller can record each page's citation-grade `char_start`
+    via the page-boundary marker round-trip (companion arc-3); the stitch input is
+    `[md for _, md in per_page]`."""
     pages: list[PageDecision] = []
-    parts: list[str] = []
+    per_page: list[tuple[int, str]] = []
     for page_no in range(1, page_count + 1):
         res = results.get(page_no)
         if isinstance(res, DoclingPageOutput):
@@ -1683,7 +1717,7 @@ def _assemble_scan_pages(
                 )
             )
             if page_md:
-                parts.append(page_md)
+                per_page.append((page_no, page_md))
         else:
             err = res if isinstance(res, Exception) else None
             pages.append(
@@ -1695,7 +1729,7 @@ def _assemble_scan_pages(
                     char_count=0,
                 )
             )
-    return pages, parts
+    return pages, per_page
 
 
 async def _parse_scan_with_vlm(
@@ -1741,9 +1775,9 @@ async def _parse_scan_with_vlm(
     finally:
         await vlm_cache.close()
 
-    pages, parts = _assemble_scan_pages(results, page_count, engine=engine)
+    pages, per_page = _assemble_scan_pages(results, page_count, engine=engine)
 
-    if not parts:
+    if not per_page:
         # Nothing transcribed off the whole scan — fail recoverably rather than write an
         # empty doc (HARD-gate-safe: the agent never fabricates from an unreadable scan).
         raise ParseConfidenceTooLow(
@@ -1752,7 +1786,13 @@ async def _parse_scan_with_vlm(
             recoverable=True,
         )
 
-    final_body = _finalize_body("\n\n".join(parts))
+    # Companion arc-3: stitch is `"\n\n".join` of the per-page markdown (byte-identical to the
+    # old `parts` join); the helper records each page's citation-grade char_start off the SAME
+    # input, returning a body identical to `_finalize_body("\n\n".join(...))`.
+    final_body, _page_starts = _finalize_body_with_page_starts(
+        "\n\n".join(seg for _, seg in per_page), per_page
+    )
+    pages = [pd.model_copy(update={"char_start": _page_starts.get(pd.page, -1)}) for pd in pages]
     duration_ms = int((time.monotonic() - start) * 1000)
 
     existing = (
@@ -1790,7 +1830,7 @@ async def _parse_scan_with_vlm(
     log.info(
         "parse.scan.done",
         pages=page_count,
-        transcribed=len(parts),
+        transcribed=len(per_page),
         markdown_bytes=len(final_body.encode("utf-8")),
         duration_ms=duration_ms,
     )
@@ -2307,7 +2347,13 @@ async def _parse_with_pymupdf(vault_path: Path, doc_id: str, source: Path) -> _P
 
     # Table-RAG Phase 1: linearize GFM tables on the PyMuPDF markdown too
     # (engine-agnostic). Thread the finalized body to all consumers below.
-    final_body = _finalize_body(conversion.markdown)
+    # Companion arc-3: also record each page's citation-grade char_start (the body is
+    # unchanged — the helper always returns `_finalize_body(conversion.markdown)`). The
+    # worker keeps `conversion.pages` 1:1 with the `"\n\n".join` that built `conversion.markdown`,
+    # so `_per_page` reconstructs it exactly; the helper's byte-equality guard falls back to
+    # nav-grade (`char_start = -1`) on any mismatch.
+    _per_page = [(p.page, p.markdown) for p in conversion.pages if p.markdown]
+    final_body, _page_starts = _finalize_body_with_page_starts(conversion.markdown, _per_page)
 
     existing = (
         await read_document(vault_path, doc_id)
@@ -2334,6 +2380,7 @@ async def _parse_with_pymupdf(vault_path: Path, doc_id: str, source: Path) -> _P
             confidence=classification.confidence,
             rationale=f"pymupdf:{classification.doc_type}",
             char_count=p.char_count,
+            char_start=_page_starts.get(p.page, -1),
         )
         for p in conversion.pages
     ]

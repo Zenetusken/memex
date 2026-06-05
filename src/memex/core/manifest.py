@@ -47,6 +47,15 @@ class PageDecision(BaseModel):
     across all pages, which the chunker reads as "page mapping unavailable"
     and falls back to section-anchor-only navigation (no regression). Newly
     parsed/re-parsed docs populate it.
+
+    `char_start` is the page's CITATION-GRADE start offset in the FINAL `doc.body`
+    (post-`_finalize_body`), recorded via the page-boundary marker round-trip
+    (companion arc-3). `-1` is the legacy/unknown default: a manifest where ANY
+    page is `-1` keeps the nav-grade `char_count`-derived attribution (drifts on
+    figure-heavy decks); a manifest where EVERY page has `char_start >= 0` lets
+    `index_document` map these boundaries through the chart-reattach/linearize
+    transforms to attribute `Chunk.page` against the exact chunked body. A re-parse
+    upgrades a legacy doc.
     """
 
     page: int
@@ -55,6 +64,7 @@ class PageDecision(BaseModel):
     rationale: str = ""
     duration_ms: int = 0
     char_count: int = 0
+    char_start: int = -1
 
 
 class ChartExtraction(BaseModel):

@@ -377,3 +377,27 @@ def test_chunk_document_default_page_none_when_no_counts() -> None:
     `Chunk.page` is None, byte-identical to pre-attribution chunkers."""
     chunks = chunk_document(_doc("# H\n\nA tiny paragraph."))
     assert all(c.page is None for c in chunks)
+
+
+def test_chunk_document_uses_exact_page_intervals(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Companion arc-3: `exact_page_intervals` (already-measured `(page, start, end)`) attributes
+    `Chunk.page` DIRECTLY, with no char_count→interval derivation."""
+    body = "# H1\n\nFirst page content.\n\n# H2\n\nSecond page content."
+    split = body.index("# H2")
+    intervals = [(1, 0, split), (2, split, len(body))]
+    chunks = chunk_document(_doc(body), exact_page_intervals=intervals)
+    assert chunks
+    assert chunks[0].page == 1
+    # a chunk whose char_start is past the page-2 boundary is attributed to page 2
+    assert {c.page for c in chunks} <= {1, 2}
+    assert any(c.page == 2 for c in chunks)
+
+
+def test_exact_page_intervals_takes_precedence_over_char_counts() -> None:
+    """When BOTH are passed, the exact intervals win (the index path always supplies exact when the
+    manifest is citation-grade) — proven by giving deliberately WRONG char_counts."""
+    body = "# H1\n\nFirst page content.\n\n# H2\n\nSecond page content."
+    split = body.index("# H2")
+    exact = [(7, 0, split), (8, split, len(body))]  # pages renumbered 7/8 to detect which path ran
+    chunks = chunk_document(_doc(body), page_char_counts=[(1, 5), (2, 5)], exact_page_intervals=exact)
+    assert chunks[0].page == 7  # the exact intervals' page numbering, not the char_counts'

@@ -514,6 +514,52 @@ async def test_pymupdf_routes_powerpoint_to_pymupdf(
 
 
 @pytest.mark.asyncio
+async def test_pymupdf_records_citation_grade_page_starts_and_indexes_pages(
+    settings: MemexSettings,
+    fake_pdf: Path,
+    patch_docling: dict[str, list[dict[str, object]]],
+    patch_pymupdf_born_digital: None,
+    patch_index_stores: dict[str, Any],
+) -> None:
+    """Companion arc-3 end-to-end wiring (PyMuPDF route — its fake reconstructs its own markdown,
+    so the parse marker round-trip succeeds). Parse records each page's citation-grade `char_start`
+    in `doc.body`; `index_document` maps those boundaries through the transforms to attribute
+    `Chunk.page`. The on-disk body is unchanged (the helper always returns the canonical body)."""
+    from memex.index.pipeline import index_document
+    from memex.vault.store import read_document
+
+    result = await ingest_file(IngestRequest(source_path=fake_pdf))
+    assert result.accepted and result.doc_id is not None
+    parse_result = await parse_document(result.doc_id)
+    assert parse_result.engine == "pymupdf"
+
+    # PARSE: every page carries a real (>= 0) citation-grade char_start, and the recorded offset
+    # for page 2 lands on page 2's content in the written body (offsets are meaningful, not -1).
+    manifest = await read_manifest(settings.vault_path, result.doc_id)
+    assert manifest is not None and manifest.parse is not None
+    pages = manifest.parse.pages
+    assert len(pages) == 2
+    assert all(p.char_start >= 0 for p in pages)  # citation-grade (not the -1 legacy fallback)
+    doc = await read_document(settings.vault_path, result.doc_id)
+    starts = {p.page: p.char_start for p in pages}
+    assert starts[1] == 0
+    assert doc.body[starts[2] :].startswith("# page 2")
+
+    # INDEX: the exact page intervals drive Chunk.page — populated, monotonic, and a page-2-content
+    # chunk is attributed to page 2.
+    await index_document(result.doc_id)
+    # The fake captures every upsert across BOTH the vector and FTS stores → dedupe by chunk_id
+    # (document order preserved by dict insertion).
+    chunks = list({c.chunk_id: c for c in patch_index_stores["chunks"]}.values())
+    assert chunks and all(c.page is not None for c in chunks)
+    page_seq = [c.page for c in chunks]
+    assert page_seq == sorted(page_seq)  # non-decreasing in document order
+    assert {c.page for c in chunks} == {1, 2}
+    page2_chunks = [c for c in chunks if "page 2" in c.text]
+    assert page2_chunks and all(c.page == 2 for c in page2_chunks)
+
+
+@pytest.mark.asyncio
 async def test_pymupdf_scanner_producer_falls_through_with_force_ocr(
     settings: MemexSettings,
     fake_pdf: Path,

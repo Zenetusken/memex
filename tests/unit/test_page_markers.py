@@ -4,7 +4,9 @@ The marker rides the body transforms (`_finalize_body` at parse; `reattach_chart
 `linearize_gfm_tables` at index) as a ruler, then is stripped. These pin the LOAD-BEARING golden
 invariant — the stripped body is BYTE-IDENTICAL to the same body built without markers, so a re-index
 that derives `Chunk.page` from the measured boundaries never churns content-addressed chunk_ids — plus
-the helper offset math. (The route/index/manifest wiring that consumes these is a follow-on.)
+the helper offset math. The wiring that consumes these (parse records each page's `char_start`;
+`index_document::_exact_page_intervals` maps them through the transforms) is covered by the parse +
+index integration tests; the index-side marker placement golden is pinned here too.
 """
 
 from __future__ import annotations
@@ -94,6 +96,33 @@ def test_insert_page_markers_at_round_trips() -> None:
     assert clean == body
     assert intervals[0][:2] == (1, 0)
     assert clean[intervals[1][1] :].startswith("# Slide 2")
+
+
+def test_insert_page_markers_at_golden_through_index_transforms() -> None:
+    # The EXACT index path (`index_document::_exact_page_intervals`): insert markers at the
+    # parse-recorded boundaries IN THE ON-DISK BODY, run the index transforms on the marked body,
+    # strip → byte-identical to transforming the unmarked body (so chunk_ids stay stable), and the
+    # recovered intervals attribute pages correctly DESPITE the chart block shifting page-2's start.
+    p1 = "# Slide 1\n\n<!-- image -->\n\nIntro bullet."
+    p2 = "# Slide 2\n\n| Col | Val |\n|---|---|\n| x | 9 |"
+    charts = [ChartExtraction(placeholder_index=0, markdown="**Chart** | On 22 | Late 8")]
+
+    def _index(body: str) -> str:
+        return linearize_gfm_tables(reattach_chart_extractions(body, charts))
+
+    # `plain_body` is the on-disk `.md` (content-only, markers absent); boundaries are page char_starts.
+    plain_body = "\n\n".join([p1, p2])
+    boundaries = [(1, 0), (2, plain_body.index("# Slide 2"))]
+    indexed_plain = _index(plain_body)
+
+    marked = insert_page_markers_at(plain_body, boundaries)
+    clean, intervals = measure_and_strip_page_markers(_index(marked))
+    assert clean == indexed_plain  # GOLDEN — the index-side marker rode reattach+linearize inertly
+    assert [p for p, _, _ in intervals] == [1, 2]
+    # Page 2's start moved forward by the re-attached chart block, yet the interval tracks it.
+    assert clean[intervals[1][1] :].startswith("# Slide 2")
+    assert _page_for_offset(intervals, indexed_plain.index("Intro bullet")) == 1
+    assert _page_for_offset(intervals, indexed_plain.index("# Slide 2")) == 2
 
 
 def test_empty_page_yields_zero_width_interval() -> None:

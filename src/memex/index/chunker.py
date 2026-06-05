@@ -481,6 +481,7 @@ def chunk_document(
     doc: VaultDocument,
     *,
     page_char_counts: list[tuple[int, int]] | None = None,
+    exact_page_intervals: list[tuple[int, int, int]] | None = None,
     segment_intervals: list[tuple[int, int, float, float]] | None = None,
 ) -> list[Chunk]:
     """Produce the canonical chunk list for a vault document.
@@ -504,6 +505,14 @@ def chunk_document(
     section-only anchors. HARD-gate-neutral (a derived navigation
     metadata field; never alters retrieval or grounding).
 
+    `exact_page_intervals` (companion arc-3, citation-grade) is the
+    precise alternative: `[(page_no, char_start, char_end), ...]` already
+    measured against THIS body (via the page-boundary marker round-trip
+    in `index_document`), so each chunk's page is read directly without the
+    `char_count`→interval derivation that assumes a uniform 2-char page
+    delimiter and drifts on figure-heavy decks. Takes precedence over
+    `page_char_counts`; same nav-grade / HARD-gate-neutral contract.
+
     `segment_intervals` is the audio analogue (ADR-0017): optional
     `[(char_start, char_end, start_s, end_s), ...]` from `ParseStage.segments`
     — when provided, each chunk's `Chunk.time_range` is set to the GLOBAL
@@ -520,7 +529,14 @@ def chunk_document(
         overlap = OVERLAP_TOKENS
 
     title = doc.frontmatter.title or doc.ref.doc_id
-    intervals = page_intervals(page_char_counts) if page_char_counts else None
+    # `exact_page_intervals` (companion arc-3 citation-grade map) — `(page_no, char_start, char_end)`
+    # measured against THIS exact body — takes precedence over the nav-grade `char_count`-derived
+    # intervals (which assume a uniform 2-char page delimiter and drift on figure-heavy decks).
+    intervals = (
+        exact_page_intervals
+        if exact_page_intervals is not None
+        else (page_intervals(page_char_counts) if page_char_counts else None)
+    )
     # Post-audit perf fix (2026-05-23): compute chart-extracted spans
     # ONCE per document instead of N+1 times (once in
     # `_split_into_sections`, then once per `_heading_path_at` call
