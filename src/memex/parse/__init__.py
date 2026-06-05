@@ -25,6 +25,11 @@ from memex.parse.docling_backend import (
     DoclingUnavailable,
     SandboxLoadFailed,
 )
+from memex.parse.image_convert import (
+    IMAGE_SUFFIXES,
+    ImageConversionError,
+    convert_image_to_pdf,
+)
 from memex.parse.keyframe_ocr import (
     KeyframeOCRError,
     ocr_frames_for_chunks,
@@ -64,6 +69,7 @@ from memex.parse.vlm_cache import VLMTranscriptionCache
 
 __all__ = [
     "AUDIO_SUFFIXES",
+    "IMAGE_SUFFIXES",
     "MEDIA_SUFFIXES",
     "OFFICE_SUFFIXES",
     "VIDEO_SUFFIXES",
@@ -77,6 +83,7 @@ __all__ = [
     "DoclingPageOutput",
     "DoclingTimeout",
     "DoclingUnavailable",
+    "ImageConversionError",
     "KeyframeOCRCache",
     "KeyframeOCRError",
     "OfficeConversionError",
@@ -91,6 +98,7 @@ __all__ = [
     "SandboxStatus",
     "VLMTranscriptionCache",
     "VLMUnavailable",
+    "convert_image_to_pdf",
     "convert_to_pdf",
     "derive_title",
     "enable_network_block",

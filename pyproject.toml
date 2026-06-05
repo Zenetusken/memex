@@ -87,6 +87,10 @@ parse = [
     "docling>=2.0",
     "pymupdf4llm>=1.27,<2",
     "pypdfium2>=4.30",
+    # Standalone image → 1-page-PDF wrapping (ADR-0020, `parse/image_convert.py`).
+    # PIL is already transitive (docling/pymupdf4llm + `parse/pdf_render`); the image
+    # route now depends on it directly, so it's pinned explicitly.
+    "pillow>=10",
     "pyseccomp>=0.1 ; sys_platform == 'linux'",
     # Chart-OCR deps. Required by the default chart-OCR backend
     # (`nvidia/NVIDIA-Nemotron-Parse-v1.2`; see the P3.3-c shootout

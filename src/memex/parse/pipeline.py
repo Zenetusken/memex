@@ -28,7 +28,7 @@ from collections.abc import AsyncGenerator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Final, Literal
 
 import structlog
 import ulid
@@ -73,6 +73,7 @@ from memex.parse.docling_backend import (
 from memex.parse.docling_backend import (
     convert as docling_convert,
 )
+from memex.parse.image_convert import IMAGE_SUFFIXES, convert_image_to_pdf
 from memex.parse.office_convert import OFFICE_SUFFIXES, convert_to_pdf
 from memex.parse.pymupdf_backend import (
     PdfSignals,
@@ -1652,13 +1653,17 @@ def _strip_markdown_fence_wrapper(md: str) -> str:
 
 
 def _assemble_scan_pages(
-    results: Mapping[int, DoclingPageOutput | Exception], page_count: int
+    results: Mapping[int, DoclingPageOutput | Exception],
+    page_count: int,
+    *,
+    engine: Literal["scan", "image"] = "scan",
 ) -> tuple[list[PageDecision], list[str]]:
     """PURE: turn the VLM per-page transcription results into ordered `PageDecision`s
-    (engine="scan") + the non-empty markdown parts to stitch, in reading order. A
-    failed/missing page → confidence 0 with the error in `rationale` (recorded, not
-    silently dropped) and no markdown contribution. Each page's markdown has a
-    whole-page ```markdown fence wrapper stripped (`_strip_markdown_fence_wrapper`)."""
+    (engine=`engine` — "scan" for a scanned PDF, "image" for a standalone image, ADR-0020)
+    + the non-empty markdown parts to stitch, in reading order. A failed/missing page →
+    confidence 0 with the error in `rationale` (recorded, not silently dropped) and no
+    markdown contribution. Each page's markdown has a whole-page ```markdown fence wrapper
+    stripped (`_strip_markdown_fence_wrapper`)."""
     pages: list[PageDecision] = []
     parts: list[str] = []
     for page_no in range(1, page_count + 1):
@@ -1669,9 +1674,9 @@ def _assemble_scan_pages(
             pages.append(
                 PageDecision(
                     page=page_no,
-                    engine="scan",
+                    engine=engine,
                     confidence=1.0,
-                    rationale="VLM scan",
+                    rationale=f"VLM {engine}",
                     char_count=len(page_md),
                 )
             )
@@ -1682,9 +1687,9 @@ def _assemble_scan_pages(
             pages.append(
                 PageDecision(
                     page=page_no,
-                    engine="scan",
+                    engine=engine,
                     confidence=0.0,
-                    rationale=f"VLM scan failed: {err}" if err else "VLM scan: no output",
+                    rationale=f"VLM {engine} failed: {err}" if err else f"VLM {engine}: no output",
                     char_count=0,
                 )
             )
@@ -1696,18 +1701,21 @@ async def _parse_scan_with_vlm(
     doc_id: str,
     source: Path,
     *,
+    engine: Literal["scan", "image"] = "scan",
     refresh_vlm: bool = False,
 ) -> ParseResult:
-    """Parse a scanned / handwritten (image-only) PDF by transcribing EVERY page with
-    the VLM (`convert_pages`), bypassing Docling-OCR — which is printed-text-only and
-    crashed on image-only PDFs. The document-level analogue of the per-page VLM
-    escalation; reuses the same serving + cache + prompt. VLM-gated by the caller
-    (`_parse_pdf` only routes here when `not disable_vlm`). See
-    `docs/specs/scan-vlm-parse.md`."""
+    """Parse an image-only PDF by transcribing EVERY page with the VLM (`convert_pages`),
+    bypassing Docling-OCR — which is printed-text-only and crashed on image-only PDFs. The
+    document-level analogue of the per-page VLM escalation; reuses the same serving + cache +
+    prompt. Two entry points: a scanned/handwritten PDF (`engine="scan"`, gated by the caller —
+    `_parse_pdf` only routes here when `not disable_vlm`) AND a standalone image wrapped into a
+    1-page PDF (`engine="image"`, ADR-0020 — routed UNCONDITIONALLY, the audio-route precedent: an
+    image has no non-VLM extraction path). `engine` tags the `PageDecision`/`ParseResult` so the
+    manifest records which route ran. See `docs/specs/scan-vlm-parse.md` + `docs/specs/image-ingestion.md`."""
     import pypdfium2  # lazy — a [parse] dep, same style as the worker imports
 
     correlation_id = str(ulid.ULID())
-    log = logger.bind(doc_id=doc_id, correlation_id=correlation_id, engine="scan")
+    log = logger.bind(doc_id=doc_id, correlation_id=correlation_id, engine=engine)
     log.info("parse.scan.start", source=str(source))
     start = time.monotonic()
 
@@ -1731,7 +1739,7 @@ async def _parse_scan_with_vlm(
     finally:
         await vlm_cache.close()
 
-    pages, parts = _assemble_scan_pages(results, page_count)
+    pages, parts = _assemble_scan_pages(results, page_count, engine=engine)
 
     if not parts:
         # Nothing transcribed off the whole scan — fail recoverably rather than write an
@@ -1787,7 +1795,7 @@ async def _parse_scan_with_vlm(
     return ParseResult(
         doc_id=doc_id,
         correlation_id=correlation_id,
-        engine="scan",
+        engine=engine,
         pages=pages,
         markdown_bytes=len(final_body.encode("utf-8")),
     )
@@ -2435,6 +2443,27 @@ async def _ensure_converted_pdf(vault_path: Path, doc_id: str, source: Path) -> 
     return converted
 
 
+async def _ensure_converted_image_pdf(vault_path: Path, doc_id: str, source: Path) -> Path:
+    """Return a cached single-page PDF wrapping a standalone image (ADR-0020).
+
+    Mirrors `_ensure_converted_pdf` (the Office precedent): cached at
+    `documents/{doc_id}/converted.pdf` — NOT a `source.*` name, so `_source_file`
+    still resolves the ORIGINAL image (`.png`/`.jpg`/…) as provenance — and reused
+    on re-parse so the PDF bytes (hence the content-addressed VLM cache key) stay
+    byte-stable across runs. `PIL.Image.save(..., "PDF")` stamps a fresh `gmtime()`
+    CreationDate into the PDF Info trailer, so re-converting every parse would churn
+    the VLM cache — exactly the LibreOffice CreationDate problem caching solves.
+    """
+    converted = source.parent / "converted.pdf"
+    if converted.is_file():
+        return converted
+    with tempfile.TemporaryDirectory(prefix="memex-image-") as tmp:
+        produced = await convert_image_to_pdf(source, Path(tmp))
+        shutil.move(str(produced), str(converted))
+    logger.bind(doc_id=doc_id).info("image.converted_cached", path=str(converted))
+    return converted
+
+
 async def parse_document(
     doc_id: str,
     *,
@@ -2455,7 +2484,10 @@ async def parse_document(
     and run through the full PDF pipeline, so their figures + diagrams flow
     through the VLM / chart-OCR passes like any PDF. Audio sources (mp3/wav/…,
     ADR-0017) route to the ASR transcription path (`refresh_asr` busts the
-    cached transcription, mirroring `refresh_vlm`).
+    cached transcription, mirroring `refresh_vlm`). Standalone images
+    (png/jpg/webp/…, ADR-0020) are wrapped into a cached 1-page PDF and run
+    through the scan→VLM route — VLM-mandatory (an image has no non-VLM
+    extraction path, the audio-route precedent), so `disable_vlm` is bypassed.
     """
     settings = get_settings()
     effective_force = force_docling if force_docling is not None else settings.parse.force_docling
@@ -2480,6 +2512,17 @@ async def parse_document(
         source = await _ensure_converted_pdf(settings.vault_path, doc_id, source)
         return await _parse_pdf(
             settings.vault_path, doc_id, source, force_docling=True, refresh_vlm=refresh_vlm
+        )
+
+    # Standalone images (ADR-0020): wrap into a cached 1-page PDF and run the scan→VLM route.
+    # An image is a one-page scan — pypdfium2 (the VLM page rasteriser) is PDF-only. Routing
+    # DIRECT to `_parse_scan_with_vlm` (not `_parse_pdf`) makes the VLM mandatory by construction:
+    # the route never consults `disable_vlm` (the audio-route precedent — an image has no non-VLM
+    # extraction path). `engine="image"` tags the manifest so the route is auditable.
+    if source.suffix.lower() in IMAGE_SUFFIXES:
+        source = await _ensure_converted_image_pdf(settings.vault_path, doc_id, source)
+        return await _parse_scan_with_vlm(
+            settings.vault_path, doc_id, source, engine="image", refresh_vlm=refresh_vlm
         )
 
     if source.suffix.lower() == ".pdf":

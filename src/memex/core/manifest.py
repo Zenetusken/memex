@@ -50,7 +50,7 @@ class PageDecision(BaseModel):
     """
 
     page: int
-    engine: Literal["docling", "vlm", "passthrough", "pymupdf", "scan"]
+    engine: Literal["docling", "vlm", "passthrough", "pymupdf", "scan", "image"]
     confidence: float
     rationale: str = ""
     duration_ms: int = 0
