@@ -52,7 +52,7 @@ from memex.core.table_linearize import (
     parse_gfm_table,
     table_cell_lines,
 )
-from memex.core.text import IMAGE_PLACEHOLDER_RE
+from memex.core.text import IMAGE_PLACEHOLDER_RE, is_page_boundary_marker
 from memex.parse.asr_backend import ASRSegment, transcribe_audio
 from memex.parse.asr_cache import ASRTranscriptionCache
 from memex.parse.chart_ocr_backend import (
@@ -1201,13 +1201,15 @@ def _dedup_is_boxart(text: str) -> bool:
 
 def _dedup_is_excluded(block_lines: list[str]) -> bool:
     """A block kept verbatim but NOT counted toward adjacency and never collapsed: a block whose
-    every non-blank line is the image placeholder marker or a bare PictureClassifier label, or a
-    box-art connector block."""
+    every non-blank line is the image placeholder marker, a bare PictureClassifier label, a
+    citation-grade page-boundary marker (companion arc-3 — so a marker between two cross-page
+    duplicates doesn't prevent their collapse), or a box-art connector block."""
     if _dedup_is_boxart("\n".join(block_lines)):
         return True
     nonblank = [ln.strip() for ln in block_lines if ln.strip()]
     return bool(nonblank) and all(
-        IMAGE_PLACEHOLDER_RE.fullmatch(ln) or _DEDUP_FURNITURE_RE.match(ln) for ln in nonblank
+        IMAGE_PLACEHOLDER_RE.fullmatch(ln) or _DEDUP_FURNITURE_RE.match(ln) or is_page_boundary_marker(ln)
+        for ln in nonblank
     )
 
 

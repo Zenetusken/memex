@@ -154,6 +154,88 @@ def reattach_chart_extractions(body: str, blocks: Sequence[ChartExtraction]) -> 
     return new_body
 
 
+# ----- Citation-grade page-boundary marker scaffold (companion arc-3) ---------
+#
+# `Chunk.page` is recorded from per-page char counts taken BEFORE the body transforms
+# (`_finalize_body` at parse; `reattach_chart_extractions` + `linearize_gfm_tables` at index), so on
+# figure-heavy decks the chunker locates chunks in a body that has since grown → the displayed page
+# drifts (navigation-grade, not citation-grade). The fix is a TRANSIENT marker that RIDES the
+# transforms as a ruler: insert a marker block at each page boundary, run the transforms (the markers
+# are inert to all of them — distinct from `IMAGE_PLACEHOLDER_RE`, and excluded from the
+# `collapse_consecutive_duplicates` adjacency so a cross-page duplicate still collapses), MEASURE the
+# marker positions against the exact body the chunker sees, then STRIP them. The stripped body is
+# BYTE-IDENTICAL to the same body built without markers (the golden invariant → zero chunk_id churn).
+_PAGE_BOUNDARY_FMT: Final[str] = "<!--MEMEX_PAGE_BOUNDARY:{}-->"
+PAGE_BOUNDARY_RE: Final[re.Pattern[str]] = re.compile(r"<!--MEMEX_PAGE_BOUNDARY:(-?\d+)-->")
+
+
+def is_page_boundary_marker(line: str) -> bool:
+    """True iff `line` (stripped) is exactly a page-boundary marker — so
+    `collapse_consecutive_duplicates` can keep a marker block verbatim but NOT count it toward
+    adjacency (else a marker between two cross-page-duplicate blocks would prevent their collapse and
+    break the byte-equality the round-trip depends on)."""
+    return bool(PAGE_BOUNDARY_RE.fullmatch(line.strip()))
+
+
+def mark_pages_for_measure(per_page: Sequence[tuple[int, str]], delimiter: str = "\n\n") -> str:
+    """PARSE side: join `(page_no, markdown)` segments, each preceded by a page-boundary marker block.
+    Pass only NON-empty segments (mirroring the real per-page join's `if markdown` filter). The
+    marker positions after `_finalize_body` give each page's true span in the finalized body."""
+    parts: list[str] = []
+    for page_no, seg in per_page:
+        parts.append(_PAGE_BOUNDARY_FMT.format(page_no))
+        parts.append(seg)
+    return delimiter.join(parts)
+
+
+def insert_page_markers_at(body: str, boundaries: Sequence[tuple[int, int]]) -> str:
+    """INDEX side: insert a `marker\\n\\n` block at each `(page_no, char_start)` offset in `body`
+    (offsets ASCENDING, in `body` coordinates) — placing the ruler at the parse-recorded boundaries
+    before the index transforms run. Each boundary should sit at a page's content start (just after a
+    `\\n\\n` block separator), so the inserted marker becomes its own block."""
+    out: list[str] = []
+    cursor = 0
+    for page_no, start in boundaries:
+        out.append(body[cursor:start])
+        out.append(_PAGE_BOUNDARY_FMT.format(page_no) + "\n\n")
+        cursor = start
+    out.append(body[cursor:])
+    return "".join(out)
+
+
+def measure_and_strip_page_markers(marked: str) -> tuple[str, list[tuple[int, int, int]]]:
+    """Strip every page-boundary marker block from `marked` and return `(clean, intervals)` where
+    `intervals = [(page_no, char_start, char_end)]` is each page's span IN THE CLEAN body. The strip
+    drops each marker line + ONE following blank line (the block separator the marker introduced), so
+    `clean` is byte-identical to the same body built WITHOUT markers — the golden invariant the
+    round-trip relies on for chunk_id stability. Page `i` spans `[start_i, start_{i+1})` (last → end);
+    consecutive markers with no content between (an empty page) yield a zero-width interval."""
+    lines = marked.split("\n")
+    kept: list[str] = []
+    starts: list[tuple[int, int]] = []  # (page_no, char_start in the clean body)
+    kept_chars = 0  # running Σ len(kept lines), to derive char offsets without re-joining
+    i = 0
+    while i < len(lines):
+        m = PAGE_BOUNDARY_RE.fullmatch(lines[i].strip())
+        if m is not None:
+            i += 1
+            if i < len(lines) and not lines[i].strip():
+                i += 1  # drop ONE following blank line (the separator the marker block introduced)
+            # the page's content is the line that will be appended NEXT — its offset in the clean
+            # body is Σ(kept lengths) + the '\n' joins before it (= len(kept)).
+            starts.append((int(m.group(1)), kept_chars + len(kept)))
+            continue
+        kept.append(lines[i])
+        kept_chars += len(lines[i])
+        i += 1
+    clean = "\n".join(kept)
+    intervals: list[tuple[int, int, int]] = []
+    for k, (page_no, start) in enumerate(starts):
+        end = starts[k + 1][1] if k + 1 < len(starts) else len(clean)
+        intervals.append((page_no, start, end))
+    return clean, intervals
+
+
 # ----- Table-RAG linearization helpers (Phase 1) -----------------------------
 #
 # A `[table-rows]...[/table-rows]` block is the markdown-KV linearization of a
