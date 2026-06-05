@@ -1430,3 +1430,9 @@ html { scroll-behavior: smooth; }
   border-left: 2px solid rgb(146 64 14);    /* amber-800 */
   border-radius: 0.25rem;
 }
+
+/* Frictionless document ingestion — the done-fragment (the upload form reuses the
+   ask-page Tailwind utilities; only the result link/note need semantic styling). */
+.ingest-done-note { color: rgb(244 244 245); font-size: 0.9rem; margin: 0.25rem 0 0.5rem; }  /* zinc-100 */
+.ingest-open { color: rgb(96 165 250); font-size: 0.9rem; font-weight: 500; }  /* blue-400 — the action accent as a link */
+.ingest-open:hover { color: rgb(147 197 253); }  /* blue-300 */

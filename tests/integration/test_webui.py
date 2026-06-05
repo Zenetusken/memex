@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +28,7 @@ from memex.core.types import Chunk
 from memex.ingest.pipeline import ingest_markdown_passthrough
 from memex.parse.pdf_render import PDFPreviewError
 from memex.webui.app import create_app
+from memex.webui.ingest_driver import IngestOutcome
 
 
 @pytest.fixture
@@ -2887,3 +2888,190 @@ async def test_ask_renders_companion_chip_for_aligned_transcript_chunk(
     monkeypatch.setattr("memex.webui.app.answer_query", _fake)
     text = await _ask_to_completion(client.app, "what does a VLAN do?")
     assert "↔ slide 12" in text  # the cited transcript chunk's aligned slide
+
+
+# ----- Frictionless document ingestion (upload → pipeline → browsable) -----
+
+
+def _patch_ingest(monkeypatch: pytest.MonkeyPatch, *, outcome: IngestOutcome) -> None:
+    """Patch the ingest_driver subprocess calls with fakes (no real `memex ingest`/`enrich`)."""
+
+    async def _fake_run_ingest(
+        _file_path: Path, *, on_phase: Callable[[str], None], **_kw: object
+    ) -> IngestOutcome:
+        for phase in ("Parsing", "Transcribing · page 1", "Indexing"):
+            on_phase(phase)
+        return outcome
+
+    async def _fake_run_enrich(
+        _doc_id: str, *, on_phase: Callable[[str], None], **_kw: object
+    ) -> int:
+        on_phase("Enriching")
+        return 0
+
+    monkeypatch.setattr("memex.webui.ingest_driver.run_ingest", _fake_run_ingest)
+    monkeypatch.setattr("memex.webui.ingest_driver.run_enrich", _fake_run_enrich)
+
+
+async def _ingest_to_completion(app: Any, *, content: bytes, filename: str) -> str:
+    """POST a file to /ingest, long-poll /ingest/{cid}/status until the done-fragment swaps in
+    (httpx on the shared loop, so the background subprocess-driver task actually runs)."""
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.post(
+            "/ingest", files={"file": (filename, content, "application/octet-stream")}
+        )
+        assert r.status_code == 200, r.text
+        m = re.search(r"/ingest/([^/?\"]+)/status\?v=(\d+)", r.text)
+        assert m is not None, f"POST /ingest did not return a progress fragment: {r.text[:300]}"
+        cid, v = m.group(1), int(m.group(2))
+        text = r.text
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            r = await ac.get(f"/ingest/{cid}/status?v={v}")
+            assert r.status_code == 200
+            text = r.text
+            if 'class="progress"' not in text:
+                return text
+            mv = re.search(r"\?v=(\d+)", text)
+            if mv is not None:
+                v = int(mv.group(1))
+        raise AssertionError(f"ingest did not complete after polling: {text[:300]}")
+
+
+def test_ingest_page_renders_upload_form(client: TestClient) -> None:
+    r = client.get("/ingest")
+    assert r.status_code == 200
+    assert 'type="file"' in r.text and 'name="file"' in r.text
+    assert 'hx-post="/ingest"' in r.text
+    assert 'hx-encoding="multipart/form-data"' in r.text
+
+
+def test_nav_has_add_document_link(client: TestClient) -> None:
+    r = client.get("/")
+    assert 'href="/ingest"' in r.text and "Add document" in r.text
+
+
+def test_ingest_post_returns_progress_fragment(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_ingest(
+        monkeypatch, outcome=IngestOutcome(accepted=True, exit_code=0, doc_id="abcd1234-doc")
+    )
+    r = client.post("/ingest", files={"file": ("note.pdf", b"%PDF-1.4 fake", "application/pdf")})
+    assert r.status_code == 200
+    assert 'class="progress"' in r.text
+    assert "/ingest/" in r.text and "/status?v=" in r.text
+    assert "Parsing" in r.text  # the first ingest step renders
+
+
+def test_ingest_oversize_file_rejected(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("memex.webui.app._MAX_UPLOAD_BYTES", 8)
+    r = client.post(
+        "/ingest", files={"file": ("big.pdf", b"way more than eight bytes", "application/pdf")}
+    )
+    assert r.status_code == 200
+    assert "exceeds the 2 GiB upload limit" in r.text
+    assert 'class="progress"' not in r.text  # no background task started
+
+
+async def test_ingest_full_flow_renders_done_fragment(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_ingest(
+        monkeypatch, outcome=IngestOutcome(accepted=True, exit_code=0, doc_id="abcd1234-newdoc")
+    )
+    text = await _ingest_to_completion(create_app(), content=b"%PDF fake", filename="note.pdf")
+    assert "Ingested" in text
+    assert "/documents/abcd1234-newdoc" in text
+    assert "Open document" in text
+
+
+async def test_ingest_rejection_surfaces_reason(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_ingest(
+        monkeypatch,
+        outcome=IngestOutcome(
+            accepted=False, exit_code=0, doc_id=None, rejection_reason="unsupported file type"
+        ),
+    )
+    text = await _ingest_to_completion(create_app(), content=b"\x00\x01", filename="x.bin")
+    assert "Ingest failed" in text
+    assert "unsupported file type" in text
+
+
+async def test_ingest_partial_doc_surfaces_browsable_link(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Accepted + parsed but the chain exited non-zero (half-doc): browsable, with a warning.
+    _patch_ingest(
+        monkeypatch,
+        outcome=IngestOutcome(
+            accepted=True,
+            exit_code=1,
+            doc_id="abcd1234-half",
+            rejection_reason="the ingest process exited with code 1",
+        ),
+    )
+    text = await _ingest_to_completion(create_app(), content=b"%PDF fake", filename="note.pdf")
+    assert "Partially ingested" in text
+    assert "/documents/abcd1234-half" in text
+
+
+async def test_ingest_streams_upload_bytes_to_subprocess_file(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The real streaming spine (the fakes otherwise ignore the temp file): the bytes the driver
+    # receives on disk must equal the uploaded bytes (right cursor, no truncation).
+    seen: dict[str, bytes] = {}
+
+    async def _capture_ingest(
+        file_path: Path, *, on_phase: Callable[[str], None], **_kw: object
+    ) -> IngestOutcome:
+        seen["content"] = file_path.read_bytes()
+        on_phase("Indexing")
+        return IngestOutcome(accepted=True, exit_code=0, doc_id="abcd1234-streamed")
+
+    async def _ok_enrich(_doc_id: str, *, on_phase: Callable[[str], None], **_kw: object) -> int:
+        return 0
+
+    monkeypatch.setattr("memex.webui.ingest_driver.run_ingest", _capture_ingest)
+    monkeypatch.setattr("memex.webui.ingest_driver.run_enrich", _ok_enrich)
+    payload = b"%PDF-1.7 the actual uploaded bytes \x00\x01\x02 " * 200
+    text = await _ingest_to_completion(create_app(), content=payload, filename="real.pdf")
+    assert "Ingested" in text
+    assert seen["content"] == payload  # streamed to disk intact for the subprocess
+
+
+async def test_ingest_driver_crash_renders_failed(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def _boom(
+        _file_path: Path, *, on_phase: Callable[[str], None], **_kw: object
+    ) -> IngestOutcome:
+        raise RuntimeError("driver exploded")
+
+    monkeypatch.setattr("memex.webui.ingest_driver.run_ingest", _boom)
+    text = await _ingest_to_completion(create_app(), content=b"x", filename="x.pdf")
+    assert "Ingest failed" in text  # the crash is surfaced, not swallowed
+
+
+async def test_ingest_enrich_failure_still_links_browsable_doc(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Enrich is best-effort (graph discovery, HARD-gate-neutral): a RAISING enrich must NOT
+    # discard a parsed+indexed (askable) document — it's presented as success with a live link.
+    async def _ok_ingest(
+        _file_path: Path, *, on_phase: Callable[[str], None], **_kw: object
+    ) -> IngestOutcome:
+        on_phase("Indexing")
+        return IngestOutcome(accepted=True, exit_code=0, doc_id="abcd1234-enrichfail")
+
+    async def _boom_enrich(_doc_id: str, *, on_phase: Callable[[str], None], **_kw: object) -> int:
+        raise RuntimeError("enrich exploded")
+
+    monkeypatch.setattr("memex.webui.ingest_driver.run_ingest", _ok_ingest)
+    monkeypatch.setattr("memex.webui.ingest_driver.run_enrich", _boom_enrich)
+    text = await _ingest_to_completion(create_app(), content=b"%PDF", filename="x.pdf")
+    assert "Ingested" in text  # presented as success, NOT "Ingest failed"
+    assert "/documents/abcd1234-enrichfail" in text  # the browsable link is preserved

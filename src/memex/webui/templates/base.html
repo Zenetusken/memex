@@ -36,6 +36,7 @@
       {% if expert_enabled %}<a href="/expert" class="text-zinc-400 hover:text-zinc-100 text-sm" title="Ungrounded expert analysis (ADR-0013) — reasoning from model knowledge, not a verified vault lookup">Expert</a>{% endif %}
       {% if expert_enabled %}<a href="/bridge" class="text-zinc-400 hover:text-zinc-100 text-sm" title="Reason-then-ground (§11) — reason over your vault, then verify each claim against it">Analysis</a>{% endif %}
       <a href="/documents" class="text-zinc-400 hover:text-zinc-100 text-sm">Documents</a>
+      <a href="/ingest" class="text-zinc-400 hover:text-zinc-100 text-sm" title="Upload a document and run it through the full pipeline — it becomes searchable and browsable">Add document</a>
       <a href="/entity" class="text-zinc-400 hover:text-zinc-100 text-sm">Entities</a>
       <a href="/resources" class="mode-chip ml-auto" title="Co-residence resource mode (ADR-0007) — how the GPU is shared between context window and retrieval">
         <span class="mode-chip-k">mode</span><span class="mode-chip-v" id="mode-chip-v">{{ active_mode_label }}</span>

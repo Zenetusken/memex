@@ -42,6 +42,8 @@ import asyncio
 import mimetypes
 import os
 import re
+import shutil
+import tempfile
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -50,7 +52,7 @@ from typing import Any
 
 import structlog
 import ulid
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -120,14 +122,17 @@ from memex.vault.store import (
     read_document_title,
     write_document,
 )
+from memex.webui import ingest_driver
 from memex.webui.progress import (
     BRIDGE_PHASES,
     EXPERT_PHASES,
+    INGEST_PHASES,
     PHASES,
     SUMMARY_PHASES,
     ProgressRegistry,
     bridge_phase_index,
     expert_phase_index,
+    ingest_phase_view,
     phase_for,
     summary_phase_view,
 )
@@ -142,6 +147,12 @@ from memex.webui.rendering import (
 _HERE = Path(__file__).parent
 _TEMPLATES_DIR = _HERE / "templates"
 _STATIC_DIR = _HERE / "static"
+
+# The upload size ceiling for the frictionless-ingestion route (2 GiB — matches the
+# subprocess MAX_BYTES, ADR-0017). A stdlib pre-spawn check so a doomed upload never
+# starts a subprocess that pauses/restarts the orchestrator. Module-level so a test can
+# monkeypatch it small; the real magic-based validation lives in the ingest subprocess.
+_MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
 
 # Mirrors `vault.store.assign_doc_id`'s output shape: 8-hex prefix
 # optionally followed by `-` and a slug of [a-z0-9-]. Routes reject
@@ -1148,6 +1159,142 @@ def create_app() -> FastAPI:
                 "chunk_refs": chunk_refs,
                 "doc_titles": doc_titles,
             },
+        )
+
+    # ----- Frictionless document ingestion (upload → full pipeline → browsable) -----
+    # The module boundary forbids webui/ from importing parse/index/enrich, so the webui drives
+    # the CLI as a CHILD SUBPROCESS via `webui/ingest_driver.py` (one `memex ingest` per file +
+    # a separate `memex enrich`). Same long-poll progress spine as summarize/ask. The exclusive-
+    # GPU lock (RAG paused) + the GPU release / orchestrator reconcile layer on in later
+    # increments; this is the upload + live-progress + done-fragment spine.
+
+    async def _run_ingest(cid: str, tmp_path: Path) -> None:
+        """Background runner: drive `memex ingest` (then `enrich`) as subprocesses, streaming
+        phases into the registry. Top of a fire-and-forget task — never crash silently; always
+        clean up the temp upload."""
+        try:
+            outcome = await ingest_driver.run_ingest(
+                tmp_path, on_phase=lambda p: progress.set_phase(cid, p)
+            )
+            if outcome.succeeded and outcome.doc_id is not None:
+                # Parsed + indexed ⇒ the doc is askable + browsable NOW. Record the link BEFORE
+                # the best-effort enrich, so a failed enrich never discards a usable document
+                # (enrich is HARD-gate-neutral graph discovery; a doc without it still answers).
+                _set_entry_doc_id(cid, outcome.doc_id)
+                try:
+                    enrich_rc = await ingest_driver.run_enrich(
+                        outcome.doc_id, on_phase=lambda p: progress.set_phase(cid, p)
+                    )
+                    if enrich_rc != 0:
+                        logger.warning(
+                            "ingest.enrich_nonzero", doc_id=outcome.doc_id, code=enrich_rc
+                        )
+                except Exception as e:
+                    logger.warning(
+                        "ingest.enrich_failed", error_type=type(e).__name__, error=str(e)[:200]
+                    )
+                progress.finish(cid)
+            elif outcome.doc_id is not None:
+                # Accepted + parsed but the chain didn't finish cleanly (e.g. an index failure):
+                # browsable but maybe not askable — surface the doc AND the warning.
+                _set_entry_doc_id(cid, outcome.doc_id)
+                progress.finish(
+                    cid,
+                    error=outcome.rejection_reason or "The document was only partially ingested.",
+                )
+            else:
+                progress.finish(
+                    cid, error=outcome.rejection_reason or "The file could not be ingested."
+                )
+        except Exception as e:
+            logger.error("ingest.crashed", error_type=type(e).__name__, error=str(e)[:200])
+            progress.finish(cid, error="An unexpected error occurred while ingesting.")
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+    def _set_entry_doc_id(cid: str, doc_id: str) -> None:
+        entry = progress.get(cid)
+        if entry is not None:
+            entry.doc_id = doc_id
+
+    @app.get("/ingest", response_class=HTMLResponse)
+    async def ingest_page(request: Request) -> HTMLResponse:
+        """The upload page — pick a file, watch the full pipeline run, then open the document."""
+        return templates.TemplateResponse(request, "ingest.html", {})
+
+    @app.post("/ingest", response_class=HTMLResponse)
+    async def ingest_upload(
+        request: Request,
+        file: UploadFile = File(...),  # noqa: B008  # FastAPI File default sentinel
+    ) -> HTMLResponse:
+        """Stream an upload to a temp file and start the ingest subprocess chain in a background
+        task — returning `_progress.html`, which long-polls `/ingest/{cid}/status` through
+        Parsing → Transcribing → Indexing → Enriching until the document is consumed."""
+        # Stdlib size pre-check (pre-spawn): a doomed upload must never spawn a subprocess that
+        # restarts the orchestrator. The real magic-based validation lives in the subprocess.
+        if file.size is not None and file.size > _MAX_UPLOAD_BYTES:
+            return templates.TemplateResponse(
+                request,
+                "_ingest_done.html",
+                {"doc_id": None, "error": "The file exceeds the 2 GiB upload limit."},
+            )
+        # Stream to disk in a thread (never read a 2 GiB upload into RAM, never block the loop).
+        suffix = Path(file.filename or "upload").suffix
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp_path = Path(tmp.name)
+            try:
+                await asyncio.to_thread(shutil.copyfileobj, file.file, tmp)
+            except OSError as e:
+                # No background task owns cleanup yet — unlink here so the temp file can't leak.
+                tmp_path.unlink(missing_ok=True)
+                logger.error("ingest.upload_write_failed", error=str(e)[:200])
+                return templates.TemplateResponse(
+                    request,
+                    "_ingest_done.html",
+                    {"doc_id": None, "error": "Could not save the uploaded file."},
+                )
+        cid = str(ulid.ULID())
+        entry = progress.new(cid, scope_doc_ids=[], scope_source="named")
+        entry.phase = INGEST_PHASES[0]  # start on "Parsing", not the /ask default phase
+        task = asyncio.create_task(_run_ingest(cid, tmp_path))
+        progress.attach_task(cid, task)
+        return templates.TemplateResponse(
+            request,
+            "_progress.html",
+            {
+                "poll_url": f"/ingest/{cid}/status?v=0",
+                "phases": INGEST_PHASES,
+                "active_index": 0,
+                "elapsed": 0,
+                "detail": "",
+            },
+        )
+
+    @app.get("/ingest/{cid}/status", response_class=HTMLResponse)
+    async def ingest_status(request: Request, cid: str = "", v: int = 0) -> HTMLResponse:
+        """Long-poll the in-flight ingest: render `_progress.html` (the live phase) until done,
+        then `_ingest_done.html` (open-document link / rejection / partial warning)."""
+        entry = await progress.wait_for_change(cid, v)
+        if entry is None:
+            return templates.TemplateResponse(request, "_progress_expired.html", {})
+        if not entry.done:
+            active_index, detail = ingest_phase_view(entry.phase)
+            return templates.TemplateResponse(
+                request,
+                "_progress.html",
+                {
+                    "poll_url": f"/ingest/{cid}/status?v={entry.version}",
+                    "phases": INGEST_PHASES,
+                    "active_index": active_index,
+                    "elapsed": entry.phase_elapsed_s(),
+                    "detail": detail,
+                },
+            )
+        progress.evict(cid)
+        return templates.TemplateResponse(
+            request,
+            "_ingest_done.html",
+            {"doc_id": entry.doc_id, "error": entry.error},
         )
 
     # ----- Grounded multi-turn chat (Surface A, docs/specs/grounded-agentic-chat.md) -----
