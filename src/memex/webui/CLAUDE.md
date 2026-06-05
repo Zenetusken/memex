@@ -481,6 +481,17 @@ orchestrator"). Both presentation-only ⇒ HARD-gate-neutral.
 409 rather than queueing — a design change, not a hardening fix; the single-flight `_IngestState`
 lock is the v1 contract).
 
+**Headless / scripted upload (testing):** drive this route WITHOUT a browser via `scripts/webui_ingest.py`
+— `uv run python3 scripts/webui_ingest.py <file> [--url URL] [--json]`. It does a real multipart `POST
+/ingest` and follows the long-poll (`extract_status_url` reads the `_progress.html` `hx-get`; the
+absence of an `/ingest/{cid}/status` poll = terminal → `_ingest_done.html`/expired/busy), printing each
+phase and exiting 0 (ingested/partial) or 1 (failed/rejected/timeout/unreachable). This is the
+supported substitute for the `claude-in-chrome` `file_upload` tool, which deliberately "no longer
+accepts host filesystem paths" (a closed-source Anthropic contract change — needs file CONTENTS via a
+`files` param the current controller doesn't populate; NOT patchable here, NOT a Memex bug). For the
+PURE-PIPELINE case (no web UI at all) use the CLI directly: `uv run memex ingest <file>`. The
+parsers are pinned by `tests/unit/test_webui_ingest_helper.py` (rendered against these real templates).
+
 ## Two inline-edit flows (both HTMX view/edit toggles)
 
 - **Body**: the `edit` button swaps `#md-pane` (`/documents/{id}/edit` → form; `/documents/{id}/review` POST writes through `vault.write_document` with optimistic-CAS conflict handling; `/documents/{id}/body` is the view partial).
