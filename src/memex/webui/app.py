@@ -883,6 +883,7 @@ def create_app() -> FastAPI:
 
     # Serialize live mode switches — two concurrent daemon restarts would race.
     mode_switch_lock = asyncio.Lock()
+    app.state.mode_switch_lock = mode_switch_lock  # exposed (like app.state.ingesting) for tests
 
     def _resources_ctx(
         *, flash: str | None = None, flash_error: bool = False, oob_chip: bool = False

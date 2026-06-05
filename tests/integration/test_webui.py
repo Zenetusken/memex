@@ -2160,6 +2160,23 @@ def test_resources_mode_switch_rejected_during_ingest(
     assert restarts == []  # the switch was rejected BEFORE any daemon restart
 
 
+async def test_ingest_rejected_during_mode_switch(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The REVERSE of the mode-switch-during-ingest guard: an upload started WHILE a resource-mode
+    # switch holds mode_switch_lock (its ~40s daemon restart) is rejected — so the two
+    # GPU-orchestrating ops are mutually exclusive BOTH ways (B4b, the reviewer's catch).
+    app = create_app()
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        async with app.state.mode_switch_lock:  # a mode-switch is mid-flight
+            r = await ac.post(
+                "/ingest",
+                files={"file": ("x.pdf", b"%PDF data", "application/octet-stream")},
+            )
+    assert "resource-mode switch is finishing" in r.text
+    assert app.state.ingesting.active is False  # never entered the exclusive-GPU ingestion mode
+
+
 # ----- Grounded multi-turn chat (Surface A) -----
 
 
