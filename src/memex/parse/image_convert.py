@@ -12,6 +12,11 @@ into the PDF Info trailer, so re-converting every parse would churn the bytes �
 content-addressed VLM cache key (`sha256(pdf_bytes)`) — exactly the LibreOffice CreationDate problem.
 Caching keeps it byte-stable.
 
+A camera/phone photo carries an EXIF Orientation tag that PIL does NOT auto-apply (it leaves the
+pixels as-stored), so the image is run through `ImageOps.exif_transpose` first — otherwise a
+photographed page (a named use case) would transcribe sideways. It is a pixel no-op when there is no
+orientation tag.
+
 Heavy work (PIL decode + save) runs under `asyncio.to_thread`; PIL is lazy-imported inside the
 function so the module stays importable without the [parse] extra (the `office_convert`/`pdf_render`
 discipline).
@@ -50,22 +55,31 @@ class ImageConversionError(MemexError):
 async def convert_image_to_pdf(source: Path, out_dir: Path) -> Path:
     """Render an image file to a single-page PDF at `out_dir/{source.stem}.pdf`.
 
-    The first frame is taken (a multi-page TIFF / animated GIF → page 1, v1). Non-RGB/L modes
-    (RGBA, palette, CMYK, LA) are converted to RGB — a PDF image XObject has no alpha channel.
-    Raises `ImageConversionError` on a corrupt/unreadable/over-large image.
+    The first frame is taken (a multi-page TIFF / animated GIF → page 1, v1). The EXIF Orientation
+    tag is honoured (a phone photo is uprighted). Non-RGB/L modes (RGBA, palette, CMYK, LA) are
+    converted to RGB — a PDF image XObject has no alpha channel. Raises `ImageConversionError` on a
+    corrupt/unreadable/over-large image.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
 
     def _run() -> Path:
-        from PIL import Image  # lazy — a [parse] dep, same discipline as office_convert/pdf_render
+        # lazy — [parse] deps, same discipline as office_convert/pdf_render
+        from PIL import Image, ImageOps
 
         out = out_dir / f"{source.stem}.pdf"
         try:
             with Image.open(source) as im:
                 im.load()  # decode the first frame
+                # Honour the EXIF Orientation tag: PIL leaves pixels AS-STORED, so a phone photo
+                # (orientation 6/8) would otherwise transcribe SIDEWAYS — and "a photographed page"
+                # is a named ADR-0020 use case. `exif_transpose` rotates to the intended upright
+                # orientation and is a pixel no-op (a plain copy) when there's no orientation tag,
+                # so the determinism of the non-EXIF path is unchanged. (`or im` guards the older-PIL
+                # None return; pillow>=10 always returns an image.)
+                upright = ImageOps.exif_transpose(im) or im
                 # A PDF image XObject can't hold an alpha channel; RGBA/palette/CMYK/LA → RGB.
                 # Grayscale "L" and "RGB" save directly.
-                pdf_image = im if im.mode in ("RGB", "L") else im.convert("RGB")
+                pdf_image = upright if upright.mode in ("RGB", "L") else upright.convert("RGB")
                 pdf_image.save(out, "PDF", resolution=_PDF_RESOLUTION_DPI)
         except (OSError, ValueError, Image.DecompressionBombError) as e:
             # UnidentifiedImageError subclasses OSError (corrupt/not-an-image); ValueError = a bad

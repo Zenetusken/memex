@@ -94,6 +94,31 @@ async def test_pdf_page_dimensions_are_native_pixels_halved(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
+async def test_exif_orientation_is_applied(tmp_path: Path) -> None:
+    # A phone photo carries an EXIF Orientation tag PIL does NOT auto-apply — a page shot in
+    # portrait (orientation 6 = rotate 90°) stores LANDSCAPE pixels. The converter must upright it
+    # via exif_transpose, else the VLM transcribes the page sideways. A 200×100 as-stored image with
+    # orientation 6 → a 100×200 upright page (100/2 × 200/2 = 50×100 pt).
+    from PIL import Image
+
+    src = tmp_path / "photo.jpg"
+    im = Image.new("RGB", (200, 100), (10, 20, 30))
+    exif = im.getexif()
+    exif[274] = 6  # 274 = Orientation
+    im.save(src, "JPEG", exif=exif)
+
+    out = await convert_image_to_pdf(src, tmp_path / "out")
+    pdf = pypdfium2.PdfDocument(str(out))
+    try:
+        width_pts, height_pts = pdf[0].get_size()
+    finally:
+        pdf.close()
+    # Uprighted → portrait page (taller than wide), reproducing the displayed orientation.
+    assert width_pts == pytest.approx(100 / 2, abs=1.0)
+    assert height_pts == pytest.approx(200 / 2, abs=1.0)
+
+
+@pytest.mark.asyncio
 async def test_corrupt_image_raises_typed_error(tmp_path: Path) -> None:
     src = tmp_path / "broken.png"
     src.write_bytes(b"\x89PNG\r\n\x1a\n not a real image, truncated garbage")
