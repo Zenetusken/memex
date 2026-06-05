@@ -24,8 +24,10 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import signal
 import sys
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, cast
@@ -52,6 +54,7 @@ class _Process(Protocol):
     """The subset of ``asyncio.subprocess.Process`` the driver uses (so a fake process
     can be injected via the ``spawn`` seam in tests)."""
 
+    pid: int
     stdout: asyncio.StreamReader | None
     stderr: asyncio.StreamReader | None
 
@@ -88,7 +91,23 @@ async def _default_spawn(*args: str, env: dict[str, str]) -> asyncio.subprocess.
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         limit=_PIPE_LIMIT,
+        # Own session/process group, so a cancelled or cut-short ingest can kill the WHOLE tree —
+        # the `memex ingest` child AND the parse-time vLLM / chart-OCR it spawned — not just the
+        # launcher (which would orphan a GPU-holding process). See `_terminate`.
+        start_new_session=True,
     )
+
+
+async def _terminate(proc: _Process) -> None:
+    """SIGKILL an unfinished child's whole process GROUP so a cancelled (webui shutdown) or
+    cut-short (a sink raised mid-drain) ingest never orphans a GPU-holding tree. The child is its
+    own group leader (`start_new_session=True`); `killpg` reaps the parse-time vLLM with it. Every
+    step is guarded — a fake test process (no real pid) or an already-dead group is a clean no-op.
+    `killpg` is synchronous so it lands even while the task is unwinding a `CancelledError`."""
+    with suppress(Exception):
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    with suppress(Exception):
+        await proc.wait()  # reap the zombie (best-effort)
 
 
 def _memex_bin() -> str:
@@ -186,11 +205,17 @@ async def run_ingest(
     proc = await spawn(_memex_bin(), "ingest", str(file_path), env=_build_env(extra_env))
     stdout_lines: list[str] = []
     seen = _Seen()
-    await asyncio.gather(
-        _pump(proc.stderr, _make_stderr_sink(on_phase, seen)),
-        _pump(proc.stdout, stdout_lines.append),
-    )
-    exit_code = await proc.wait()
+    completed = False
+    try:
+        await asyncio.gather(
+            _pump(proc.stderr, _make_stderr_sink(on_phase, seen)),
+            _pump(proc.stdout, stdout_lines.append),
+        )
+        exit_code = await proc.wait()
+        completed = True
+    finally:
+        if not completed:  # cancelled (shutdown) or a sink raised — don't orphan the GPU-holding tree
+            await _terminate(proc)
 
     result = _last_ingest_result(stdout_lines)
     doc_id = (_str(result.get("doc_id")) or None) if result else None
@@ -200,7 +225,16 @@ async def run_ingest(
     accepted = bool(result.get("accepted")) if result else seen.accepted
     rejection = (_str(result.get("rejection_reason")) or None) if result else None
     if rejection is None and exit_code != 0:
-        rejection = f"the ingest process exited with code {exit_code}"
+        # A negative exit code is `-signum` (the child was killed by a signal). The common case on
+        # this 12 GB rig is the OOM killer reaping a parse-time VLM serve — surface that clearly
+        # instead of a cryptic "exited with code -9".
+        if exit_code < 0:
+            rejection = (
+                f"the ingest process was terminated by signal {-exit_code} "
+                "(it may have run out of memory)"
+            )
+        else:
+            rejection = f"the ingest process exited with code {exit_code}"
     return IngestOutcome(
         accepted=accepted, exit_code=exit_code, doc_id=doc_id, rejection_reason=rejection
     )
@@ -225,8 +259,15 @@ async def run_enrich(
             if phase:
                 on_phase(phase)
 
-    await asyncio.gather(_pump(proc.stderr, on_stderr), _pump(proc.stdout, lambda _line: None))
-    return await proc.wait()
+    completed = False
+    try:
+        await asyncio.gather(_pump(proc.stderr, on_stderr), _pump(proc.stdout, lambda _line: None))
+        rc = await proc.wait()
+        completed = True
+        return rc
+    finally:
+        if not completed:  # cancelled / cut short — don't orphan the subprocess tree
+            await _terminate(proc)
 
 
 def _last_ingest_result(stdout_lines: list[str]) -> dict[str, object] | None:

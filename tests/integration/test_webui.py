@@ -2143,6 +2143,23 @@ def test_resources_mode_unknown_flashes_error(client: TestClient) -> None:
     assert "Unknown mode" in r.text
 
 
+def test_resources_mode_switch_rejected_during_ingest(
+    monkeypatch: pytest.MonkeyPatch, client: TestClient
+) -> None:
+    # A mode switch restarts the orchestrator + unloads models — reject it during an ingest so it
+    # can't race the ingest's exclusive-GPU pause (the 3-vLLM mode-switch-during-ingest race, B4).
+    restarts: list[dict[str, Any]] = []
+    _fake_daemon(monkeypatch, restarts)
+    client.app.state.ingesting.active = True
+    try:
+        r = client.post("/resources/mode", data={"mode": "fast"})
+    finally:
+        client.app.state.ingesting.active = False
+    assert r.status_code == 409
+    assert "being ingested" in r.text
+    assert restarts == []  # the switch was rejected BEFORE any daemon restart
+
+
 # ----- Grounded multi-turn chat (Surface A) -----
 
 
@@ -3018,7 +3035,10 @@ async def test_ingest_rejection_surfaces_reason(
 async def test_ingest_partial_doc_surfaces_browsable_link(
     settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Accepted + parsed but the chain exited non-zero (half-doc): browsable, with a warning.
+    # Accepted + parsed (the canonical .md WAS written) but the chain exited non-zero (half-doc):
+    # the doc is genuinely browsable, so surface the link + a warning.
+    (settings.vault_path / "documents").mkdir(parents=True, exist_ok=True)
+    (settings.vault_path / "documents" / "abcd1234-half.md").write_text("# Half doc\n\nbody")
     _patch_ingest(
         monkeypatch,
         outcome=IngestOutcome(
@@ -3031,6 +3051,25 @@ async def test_ingest_partial_doc_surfaces_browsable_link(
     text = await _ingest_to_completion(create_app(), content=b"%PDF fake", filename="note.pdf")
     assert "Partially ingested" in text
     assert "/documents/abcd1234-half" in text
+
+
+async def test_ingest_partial_without_md_renders_failure_no_dead_link(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A doc_id was assigned (ingest.accepted) but parse failed BEFORE writing the .md — don't render
+    # a dead "Open document (browsable)" link that 404s (B10); render a plain failure instead.
+    _patch_ingest(
+        monkeypatch,
+        outcome=IngestOutcome(
+            accepted=True,
+            exit_code=1,
+            doc_id="abcd1234-nomd",
+            rejection_reason="parse failed",
+        ),
+    )
+    text = await _ingest_to_completion(create_app(), content=b"%PDF fake", filename="note.pdf")
+    assert "Ingest failed" in text
+    assert "/documents/abcd1234-nomd" not in text  # no dead browse link
 
 
 async def test_ingest_streams_upload_bytes_to_subprocess_file(

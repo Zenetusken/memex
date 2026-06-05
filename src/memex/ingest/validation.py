@@ -274,6 +274,16 @@ def validate_file(
                 "(raise MEMEX_INGEST__MAX_BYTES to override)"
             ),
         )
+    if size == 0:
+        # An empty file otherwise slips through as "text" (`_looks_like_text(b"")` is True — b""
+        # decodes cleanly with no NUL), producing a junk 0-chunk document with an empty body.
+        return ValidationResult(
+            accepted=False,
+            kind="unknown",
+            mime="application/octet-stream",
+            size_bytes=0,
+            rejection_reason="file is empty",
+        )
 
     kind, mime, has_macros = _detect(path)
     if kind == "unknown":

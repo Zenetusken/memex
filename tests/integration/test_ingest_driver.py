@@ -33,6 +33,7 @@ class _FakeProc:
         stderr: list[dict[str, object] | bytes],
         returncode: int,
     ) -> None:
+        self.pid = 0  # satisfies the _Process protocol; the cleanup path never runs for a fake
         self.stdout: asyncio.StreamReader | None = _reader(stdout)
         self.stderr: asyncio.StreamReader | None = _reader(stderr)
         self._rc = returncode
@@ -96,6 +97,17 @@ async def test_run_ingest_streams_phases_and_extracts_doc_id() -> None:
     assert cap.env["MEMEX_OBSERVABILITY__LOG_JSON"] == "true"  # JSON structlog (parseable)
     assert cap.env["PYTHONUNBUFFERED"] == "1"  # live streaming, not one burst at exit
     assert cap.env["MEMEX_PARSE__DISABLE_VLM"] == "false"  # diagram/scan docs need the VLM
+
+
+async def test_run_ingest_negative_exit_code_reports_signal() -> None:
+    # A negative exit code is `-signum` — the OOM killer reaping the parse-time VLM is the common
+    # case on the 12 GB rig. Surface that clearly instead of a cryptic "exited with code -9".
+    spawn, _cap = _fake_spawn(stdout=[], stderr=[], returncode=-9)
+    outcome = await run_ingest(Path("doc.pdf"), on_phase=lambda _p: None, spawn=spawn)
+    assert not outcome.succeeded
+    assert outcome.rejection_reason is not None
+    assert "signal 9" in outcome.rejection_reason
+    assert "memory" in outcome.rejection_reason
 
 
 async def test_run_ingest_rejected_file_surfaces_reason_no_docid() -> None:
