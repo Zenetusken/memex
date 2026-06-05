@@ -3072,6 +3072,53 @@ async def test_ingest_partial_without_md_renders_failure_no_dead_link(
     assert "/documents/abcd1234-nomd" not in text  # no dead browse link
 
 
+async def test_ingest_reconciles_a_down_orchestrator(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # D3 (the headline fix): if the orchestrator is DOWN after the ingest subprocess (its own
+    # serve-vllm.sh restart failed under GPU contention), _run_ingest must ACTIVELY restart it via
+    # the daemon supervisor — not just passively wait and leave RAG 404ing. Stateful fake: down
+    # until daemon_restart is called, reachable after (mirrors reality).
+    restarts: list[dict[str, Any]] = []
+    state = {"reachable": False}
+
+    async def _status(*_a: object, **_k: object) -> DaemonStatus:
+        return DaemonStatus(
+            pid=1, alive=True, reachable=state["reachable"], base_url="http://t/v1",
+            pid_file="", log_file="",
+        )
+
+    async def _restart(
+        _s: object, *, gpu_fraction: float | None = None, max_model_len: int | None = None
+    ) -> DaemonStatus:
+        restarts.append({"gpu_fraction": gpu_fraction, "max_model_len": max_model_len})
+        state["reachable"] = True  # the active reconcile brought it back
+        return DaemonStatus(
+            pid=2, alive=True, reachable=True, base_url="http://t/v1", pid_file="", log_file=""
+        )
+
+    monkeypatch.setattr("memex.webui.app.daemon_status", _status)
+    monkeypatch.setattr("memex.webui.app.daemon_restart", _restart)
+
+    async def _run_ingest(_fp: Path, *, on_phase: Callable[[str], None], **_kw: object) -> IngestOutcome:
+        on_phase("Indexing")
+        return IngestOutcome(accepted=True, exit_code=0, doc_id="abc12345-doc", rejection_reason=None)
+
+    async def _run_enrich(_d: str, *, on_phase: Callable[[str], None], **_kw: object) -> int:
+        on_phase("Enriching")
+        return 0
+
+    monkeypatch.setattr("memex.webui.ingest_driver.run_ingest", _run_ingest)
+    monkeypatch.setattr("memex.webui.ingest_driver.run_enrich", _run_enrich)
+
+    app = create_app()
+    text = await _ingest_to_completion(app, content=b"%PDF", filename="d.pdf")
+
+    assert "Ingested" in text
+    assert len(restarts) >= 1  # the reconcile ACTIVELY restarted the down orchestrator (not a wait)
+    assert app.state.ingesting.active is False  # lock released; RAG resumes against a live orchestrator
+
+
 async def test_ingest_streams_upload_bytes_to_subprocess_file(
     settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
