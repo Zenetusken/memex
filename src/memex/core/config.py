@@ -425,6 +425,17 @@ class ParseSettings(BaseModel):
     # + normalization (raw stays cached) → NOT in the cache key; a change re-derives without
     # re-transcribe but churns chunk_ids (reindex). 0 = disabled (one block per segment).
     asr_coalesce_seconds: float = Field(default=30.0, ge=0.0, le=300.0)
+    # Keyframe-OCR dedup (ADR-0018 §13, the perceptual-hash lever). The `--use-video` keyframe
+    # route OCRs one frame per transcript chunk; when a slide is HELD on screen, consecutive
+    # frames are visually ~identical and the VLM re-OCRs the same slide. With dedup ON, a frame
+    # within `keyframe_dedup_hamming` (an 8×8 average-hash Hamming distance, 0–64) of the previous
+    # KEPT frame REUSES that frame's OCR text instead of a fresh VLM call — fewer OCR calls, same
+    # alignment (the deduped frames genuinely share a slide). Each chunk still caches under its OWN
+    # `(video,timestamp,model,prompt)` key, so a re-run replays exactly. Conservative default
+    # threshold (near-bit-identical only — a slide CHANGE flips many bits); set
+    # `MEMEX_PARSE__KEYFRAME_DEDUP_ENABLED=false` to OCR every frame.
+    keyframe_dedup_enabled: bool = True
+    keyframe_dedup_hamming: int = Field(default=4, ge=0, le=64)
     # Force Docling routing, bypassing the PyMuPDF pre-filter. The
     # classifier would normally win PyMuPDF on born-digital text-heavy
     # PDFs (Adobe InDesign / Acrobat output / etc.); this flag overrides
