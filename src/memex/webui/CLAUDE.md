@@ -460,6 +460,21 @@ on the re-transcribe). All HARD-gate-neutral (GPU-lifecycle / presentation only)
 `test_ingest_driver.py` / `test_progress.py`. The full live + 62-agent code-review hunt that surfaced
 the backlog is in the `[[ui-ingestion-livetest-2026-06-05]]` memory.
 
+**Live-UI-pass polish (2026-06-05).** Two findings from the thorough live pass, fixed: **(a) the
+"ingesting" banner + the RAG-paused notice now SELF-CLEAR.** They live OUTSIDE the long-poll swap, so
+they used to linger until a manual reload; a one-shot `hx-swap-oob` clear at the done-fragment render
+would be PREMATURE (`ingesting.active` flips False in `_run_ingest`'s `finally` AFTER `progress.finish()`
++ the reconcile, so the 0-chunk/partial paths hold the lock ~40s past "done"). So `_ingesting_banner.html`
+(included by `base.html`) + `_ingesting.html` SELF-REFRESH (the `every 5s` VRAM-panel pattern) — they
+poll `GET /ingest/banner` / `GET /ingest/lock` every 3s while active and swap to a trigger-less fragment
+(empty banner / `_ask_ready.html` "re-run your request") the moment the lock releases, so they clear on
+their own, any tab, every path, no reload. **(b) the end-of-ingest orchestrator restart is now LABELLED:**
+the subprocess restarts the orchestrator it paused for the parse VLM in its own `pause_vllm_for_gpu`
+finally (~40s of silence after indexing), which left the widget on a bare "Indexing"; `ingest_phase_for`
+maps the drained `vllm.restart.start` → "Indexing · restoring the orchestrator" so the eyebrow explains
+the wait on ALL paths (the success path already showed it via the webui-set "Enriching · restoring the
+orchestrator"). Both presentation-only ⇒ HARD-gate-neutral.
+
 **Still deferred (single-user v1):** a multi-upload QUEUE (v1 rejects a 2nd concurrent ingest with a
 409 rather than queueing — a design change, not a hardening fix; the single-flight `_IngestState`
 lock is the v1 contract).
