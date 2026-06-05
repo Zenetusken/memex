@@ -83,7 +83,10 @@ def align_blocks(
 
     `use_dp` (ADR-0018 §13, OPT-IN, default OFF) swaps the greedy argmax+tie-break for a monotonic
     Viterbi (`_align_dp`): an asymmetric forward/backward jump penalty (`lambda_jump`) + a `start_s`
-    time prior (`time_weight`). OFF ⇒ this function is byte-identical to before.
+    time prior (`time_weight`). OFF ⇒ this function is byte-identical to before. NB the DP's
+    below-floor→null is a SOFT (global-optimum) property at the shipped small `lambda_jump`, not the
+    greedy path's hard per-chunk `best < min_score → null` (a large λ could assign a below-floor chunk
+    to preserve context); benign while default-off + small-λ.
 
     `transcript_chunks` MUST be in TIME order (the monotonic tie-break assumes it); `FTSStore`
     `chunks_for_document` returns `char_start` order, which IS time order for a transcript. `t_emb` /
