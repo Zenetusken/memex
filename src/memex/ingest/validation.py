@@ -16,8 +16,16 @@ Audio-bearing VIDEO containers (MP4/M4V/MOV/WebM/MKV — the "class video"
 case, ADR-0017) are accepted via `_detect_video` (a curated `ftyp` VIDEO
 brand set, or the Matroska/WebM EBML magic): the parse route transcribes
 their AUDIO track (the visual track is ignored in v1; the slide content
-comes from the companion PDF via the Phase-2 merge). HEIC/AVIF image
-containers stay rejected (their brands are excluded).
+comes from the companion PDF via the Phase-2 merge).
+
+Standalone image files (PNG/JPEG/WebP/BMP/TIFF/GIF, ADR-0020) are accepted
+by magic via `_detect_image` and routed to the scan→VLM transcription path
+(an image is a one-page scan). The unambiguous binary magics (PNG/JPEG/
+TIFF; WebP via `RIFF`+`WEBP`, distinct from WAV's `RIFF`+`WAVE`) match
+directly; the ASCII-startable ones (BMP `BM`, GIF `GIF8…`) are gated on the
+head NOT looking like text. HEIC/AVIF `ftyp`-box image containers stay
+rejected (their brands stay excluded from `_VIDEO_FTYP_BRANDS`) — they need
+a separate decode dependency, deferred.
 
 Validation is intentionally tight in the formats it recognises; new
 formats arrive with an ADR explaining what they look like and what
@@ -42,6 +50,7 @@ DetectedKind = Literal[
     "text",
     "audio",
     "video",
+    "image",
     "unknown",
 ]
 
@@ -219,6 +228,33 @@ def _detect_audio(head: bytes) -> tuple[DetectedKind, str, bool] | None:
     return None
 
 
+def _detect_image(head: bytes) -> tuple[DetectedKind, str, bool] | None:
+    """Standalone image files (ADR-0020) — accepted by magic, routed to the scan→VLM
+    transcription path (an image is a one-page scan). The unambiguous binary magics match
+    directly: PNG (`\\x89PNG\\r\\n\\x1a\\n`), JPEG (`\\xff\\xd8\\xff`), TIFF (`II*\\x00` LE /
+    `MM\\x00*` BE), and WebP (`RIFF`@0 + `WEBP`@8 — distinct from WAV's `RIFF`+`WAVE`, which
+    `_detect_audio` claims first). The ASCII-STARTABLE magics — BMP (`BM`) and GIF
+    (`GIF87a`/`GIF89a`) — are gated on the head NOT looking like text (a real image is binary),
+    mirroring the audio ASCII-magic rigour, so prose like "BMW" / "GIF is a format" stays text.
+    HEIC/AVIF (`ftyp`-box images) are NOT matched here → stay rejected. Note JPEG's `\\xff\\xd8`
+    is not an MP3/AAC frame sync (`\\xd8` ∉ the sync sets), so `_detect_audio` returns None for it
+    first. Returns `(kind, mime, has_macros=False)`, or None."""
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image", "image/png", False
+    if head.startswith(b"\xff\xd8\xff"):
+        return "image", "image/jpeg", False
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "image", "image/webp", False
+    if head[:4] in (b"II*\x00", b"MM\x00*"):
+        return "image", "image/tiff", False
+    if not _looks_like_text(head):  # the ASCII-startable magics need the binary guard
+        if head[:2] == b"BM":
+            return "image", "image/bmp", False
+        if head[:6] in (b"GIF87a", b"GIF89a"):
+            return "image", "image/gif", False
+    return None
+
+
 def _detect(path: Path) -> tuple[DetectedKind, str, bool]:
     """Return (kind, mime, has_macros). Reads at most 4 KiB."""
     with open(path, "rb") as f:
@@ -241,6 +277,12 @@ def _detect(path: Path) -> tuple[DetectedKind, str, bool]:
     video = _detect_video(head)
     if video is not None:
         return video
+
+    # Standalone image files (ADR-0020) — after audio/video (WAV's RIFF + M4A's ftyp are claimed
+    # first), before the text fallback (a binary image would otherwise miss every branch).
+    image = _detect_image(head)
+    if image is not None:
+        return image
 
     if path.suffix.lower() in {".md", ".markdown"} and _looks_like_text(head):
         return "markdown", "text/markdown", False

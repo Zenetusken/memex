@@ -81,8 +81,9 @@ def test_ogg_opus_accepted(tmp_path: Path) -> None:
 
 
 def test_non_audio_binary_rejected(tmp_path: Path) -> None:
-    # A real binary that is neither a known doc nor audio nor text (PNG magic) → unknown.
-    r = _validate(_write(tmp_path, "image.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 200))
+    # A real binary that is neither a known doc nor audio nor video nor image nor text → unknown.
+    # (PNG/JPEG/etc. are now accepted as `image`, ADR-0020 — use a no-magic binary here.)
+    r = _validate(_write(tmp_path, "blob.bin", b"\xde\xad\xbe\xef" + b"\x00" * 200))
     assert not r.accepted
     assert r.kind == "unknown"
 
