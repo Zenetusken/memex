@@ -451,8 +451,12 @@ tasks — `progress.inflight_tasks(exclude_cid=…)` + `_drain_inflight_rag`, bo
 `unload_all()`, so an answer already running when the ingest started isn't yanked out mid-run). (7)
 **silence watchdog** (`ingest_driver._silence_watchdog` SIGKILLs a hung child that emits no output
 for `ingest.silence_timeout_s` (default 1800s, env `MEMEX_INGEST__SILENCE_TIMEOUT_S`; NOT a total
-timeout) — else the RAG lock never releases; ASR-silence caveat documented in-code). All
-HARD-gate-neutral (GPU-lifecycle / presentation only). Pinned by the new cases in `test_webui.py` /
+timeout) — else the RAG lock never releases. **Phase-aware** (the Inc-7-review B1 fix): the stderr
+sink toggles `_Activity.in_asr` on `asr.transcribe.start`/`.done`, so the watchdog applies a SEPARATE
+generous budget `ingest.asr_silence_timeout_s` (default ~4h, env `MEMEX_INGEST__ASR_SILENCE_TIMEOUT_S`)
+during ASR — which is SILENT for its whole duration (faster-whisper = one blocking call), so the
+normal budget would false-kill legit long media AND, since ASR caches only on success, loop forever
+on the re-transcribe). All HARD-gate-neutral (GPU-lifecycle / presentation only). Pinned by the new cases in `test_webui.py` /
 `test_ingest_driver.py` / `test_progress.py`. The full live + 62-agent code-review hunt that surfaced
 the backlog is in the `[[ui-ingestion-livetest-2026-06-05]]` memory.
 
