@@ -275,11 +275,29 @@ re-`create`; in the `reindex --force` teardown (regenerable — alongside `asr_c
   against the ~0.53 transcript-only floor (NOT 0.82). Clips/labels stay LOCAL.
 - **G1 HARD-gate** — §9: `refusal_cf=1.0` holds with augmentation ON; a measured answer/recall win.
 
-## 13. Out of scope (deferred, each its own arc)
+## 13. Out of scope (deferred, each its own arc) — 2026-06-05 resolutions inline
 
-- **The MaViLS asymmetric-jump DP** (`λ_jump≈0.1`, backward 2×/forward 1×/stay 0; lower for
-  revisit-heavy lectures) + the **real `start_s` time→slide prior** (our edge over MaViLS) — the
-  principled monotonic refinement once v1's argmax is measured.
+- ~~**The MaViLS asymmetric-jump DP** + the **real `start_s` time→slide prior**~~ — **SHIPPED opt-in
+  2026-06-05** (`companion.py::align_blocks(use_dp=True)` → the pure Viterbi `_align_dp`: emission =
+  cosine; transition = `-companion_dp_lambda_jump` × jump, forward 1× / backward 2× / stay 0; a
+  `companion_dp_time_weight` `start_s` prior; keyframe-PRIMARY chunks are FIXED anchors; null carries
+  the page context). **DEFAULT OFF** (`companion_align_dp_enabled`, off ⇒ byte-identical to the greedy
+  tie-break); the DP logic is unit-validated but the **corpus win is unmeasured** — enabling + tuning
+  `λ_jump` awaits a transcript→slide gold set (the keyframe gold is frame→slide, not transcript→slide).
+- ~~**Perceptual-hash keyframe-OCR dedup**~~ (OCR once per held slide) — **BUILT THEN REVERTED 2026-06-05
+  as fundamentally UNVIABLE.** A whole-frame perceptual hash (aHash or dHash, any resolution) cannot
+  separate a DIFFERENT slide that differs by small text (an animation build / one-word bullet → ~1–2
+  bits) from the SAME slide HELD under a moving webcam/demo overlay (~17–48 bits): the dangerous case
+  is *closer* than the safe one, so no Hamming threshold works, and the keyframe floor doesn't contain
+  a false dedup (slide A's text legitimately matches deck page A above the floor → a confidently-wrong
+  page). For screen-recordings with live overlays (the CR350 case) it is both unsafe and useless; the
+  saved cost was a one-time per-lecture OCR pass. **Do not retry a whole-frame-hash dedup.**
+- **Citation-grade deck page-map** (`Chunk.page` drifts navigation-grade on figure-heavy decks because
+  per-page char-counts are recorded before the body transforms) — **FOUNDATION shipped 2026-06-05**
+  (`core/text.py` page-boundary marker scaffold + the `collapse_consecutive_duplicates` exclusion + the
+  golden byte-stability invariants through `_finalize_body` AND reattach+linearize); the route/index/
+  manifest WIRING (record each page's `char_start`, the index round-trip, the chunker) is the remaining
+  follow-on. Presentation-only — retrieval is already correct (content-addressed via `deck_chunk_id`).
 - ~~**Video KEYFRAME-OCR matching**~~ — **IMPLEMENTED 2026-06-04, see §14.** (recovered MaViLS's
   discarded strong signal: +29% on-slide argmax over transcript-only on the Cours 03 gold set.)
 - **Chunk-fusion** (slide+commentary in one chunk) — REJECTED for grounding safety (chunk_id churn +
