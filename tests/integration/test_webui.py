@@ -3415,6 +3415,30 @@ async def test_scan_half_docs_empty_when_no_manifests(tmp_path: Path) -> None:
     assert await _scan_half_docs(tmp_path) == []
 
 
+async def test_scan_half_docs_skips_corrupt_manifest(tmp_path: Path) -> None:
+    # B19 robustness (reviewer finding): one corrupt/unreadable manifest must NOT hide the others —
+    # `read_manifest` raises a pydantic ValidationError on garbage, so without the per-file guard the
+    # whole scan would abort and every other half-doc go unreported.
+    from datetime import datetime
+
+    from memex.core.manifest import IngestStage, Manifest, write_manifest
+    from memex.webui.app import _scan_half_docs
+
+    ts = datetime(2026, 1, 1, tzinfo=UTC)
+    ingest = IngestStage(
+        correlation_id="c1",
+        ingested_at=ts,
+        source_path="/x.pdf",
+        source_size_bytes=10,
+        detected_mime="application/pdf",
+    )
+    await write_manifest(tmp_path, Manifest(doc_id="halfdoc", content_sha256="a", ingest=ingest))
+    # A corrupt manifest sitting right before "halfdoc" in sorted order — it must be skipped, not fatal.
+    (tmp_path / ".memex" / "manifests" / "aaa-corrupt.json").write_text("{ not valid json")
+
+    assert await _scan_half_docs(tmp_path) == ["halfdoc"]  # the corrupt file skipped, half-doc found
+
+
 async def test_ingesting_lock_set_then_cleared_after_completion(
     settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -247,7 +247,9 @@ async def _scan_half_docs(vault_path: Path) -> list[str]:
         return []
     half: list[str] = []
     for manifest_file in sorted(manifests_dir.glob("*.json")):
-        manifest = await read_manifest(vault_path, manifest_file.stem)
+        manifest = None
+        with suppress(Exception):  # one corrupt/unreadable manifest must not hide the others
+            manifest = await read_manifest(vault_path, manifest_file.stem)
         if manifest is not None and manifest.ingest is not None and manifest.index is None:
             half.append(manifest_file.stem)
     return half
@@ -682,7 +684,9 @@ def create_app() -> FastAPI:
                     "startup.half_docs_detected",
                     count=len(half),
                     doc_ids=half[:20],
-                    hint="interrupted ingests (ingested but not indexed) — re-ingest or `memex remove`",
+                    hint="ingested but not indexed (an interrupted ingest, or a deliberate "
+                    "`--ingest-only`/`--no-index`) — run `memex index <doc>` to finish, or "
+                    "`memex remove` to discard",
                 )
         yield
         try:
