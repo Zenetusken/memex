@@ -883,6 +883,7 @@ def create_app() -> FastAPI:
 
     # Serialize live mode switches — two concurrent daemon restarts would race.
     mode_switch_lock = asyncio.Lock()
+    app.state.mode_switch_lock = mode_switch_lock  # exposed (like app.state.ingesting) for tests
 
     def _resources_ctx(
         *, flash: str | None = None, flash_error: bool = False, oob_chip: bool = False
@@ -936,6 +937,20 @@ def create_app() -> FastAPI:
         orchestrator at the mode's util/context window. Serialized; the daemon
         restart blocks ~40 s (the form shows an indicator). Returns the
         `_resources.html` partial (HTMX swap) reflecting the new active profile."""
+        # A mode switch restarts the orchestrator + unloads retrieval models — which would RACE an
+        # in-flight ingest's exclusive-GPU pause (concurrent vLLM restarts → transient multi-vLLM /
+        # OOM / orphaned EngineCore). Reject during ingestion, mirroring the RAG-surface guard.
+        if ingesting.active:
+            return templates.TemplateResponse(
+                request,
+                "_resources.html",
+                _resources_ctx(
+                    flash="A document is being ingested — the resource mode can't change until it "
+                    "finishes (the pipeline is using the GPU exclusively).",
+                    flash_error=True,
+                ),
+                status_code=409,
+            )
         valid = ("auto", "fast", "full", "gpu_only", "manual")
         if mode not in valid:
             return templates.TemplateResponse(
@@ -1227,8 +1242,11 @@ def create_app() -> FastAPI:
                 # the best-effort enrich, so a failed enrich never discards a usable document
                 # (enrich is HARD-gate-neutral graph discovery; a doc without it still answers).
                 _set_entry_doc_id(cid, outcome.doc_id)
-                # Enrich needs the orchestrator UP for citations — the ingest left it mid-restart.
-                await _await_orchestrator_reachable()
+                # Enrich needs the orchestrator UP for citations — the ingest left it paused.
+                # ACTIVELY reconcile it (D3) instead of passively waiting; advance the phase so the
+                # UI doesn't look frozen on "Indexing" during the ~40s restart.
+                progress.set_phase(cid, "Enriching · restoring the orchestrator")
+                await _reconcile_orchestrator()
                 try:
                     enrich_rc = await ingest_driver.run_enrich(
                         outcome.doc_id,
@@ -1244,15 +1262,18 @@ def create_app() -> FastAPI:
                         "ingest.enrich_failed", error_type=type(e).__name__, error=str(e)[:200]
                     )
                 progress.finish(cid)
-            elif outcome.doc_id is not None:
-                # Accepted + parsed but the chain didn't finish cleanly (e.g. an index failure):
-                # browsable but maybe not askable — surface the doc AND the warning.
+            elif outcome.doc_id is not None and _doc_md_exists(outcome.doc_id):
+                # Parsed far enough to write the canonical .md ⇒ genuinely BROWSABLE even though the
+                # chain didn't finish cleanly (e.g. an index hiccup). Surface the doc AND the warning.
                 _set_entry_doc_id(cid, outcome.doc_id)
                 progress.finish(
                     cid,
                     error=outcome.rejection_reason or "The document was only partially ingested.",
                 )
             else:
+                # No doc_id, OR a doc_id whose .md was never written (parse failed before the write)
+                # — nothing browsable to link, so render a plain failure rather than a dead
+                # "Open document (browsable)" link that 404s.
                 progress.finish(
                     cid, error=outcome.rejection_reason or "The file could not be ingested."
                 )
@@ -1261,16 +1282,25 @@ def create_app() -> FastAPI:
             progress.finish(cid, error="An unexpected error occurred while ingesting.")
         finally:
             shutil.rmtree(tmp_path.parent, ignore_errors=True)  # the per-upload temp dir
-            # Don't resume the RAG surfaces until the orchestrator is back (the ingest restarted
-            # it on the way out) — best-effort + bounded, so a stuck orchestrator still releases.
-            await _await_orchestrator_reachable()
-            ingesting.active = False  # leave the exclusive-GPU mode → the RAG surfaces resume
-            ingesting.doc_name = ""
+            # Don't resume the RAG surfaces until the orchestrator is back (the ingest paused it) —
+            # ACTIVELY reconcile (a fast no-op when the success path already restored it). The inner
+            # try/finally GUARANTEES the lock clears even if the reconcile raises, so RAG is never
+            # left permanently paused behind the orchestrator wait.
+            try:
+                await _reconcile_orchestrator()
+            finally:
+                ingesting.active = False  # leave exclusive-GPU mode → the RAG surfaces resume
+                ingesting.doc_name = ""
 
     def _set_entry_doc_id(cid: str, doc_id: str) -> None:
         entry = progress.get(cid)
         if entry is not None:
             entry.doc_id = doc_id
+
+    def _doc_md_exists(doc_id: str) -> bool:
+        """True iff the canonical `.md` was actually written — guards the 'browsable' promise so a
+        parse that failed before the write doesn't render a dead 'Open document' link that 404s."""
+        return (get_settings().vault_path / "documents" / f"{doc_id}.md").exists()
 
     async def _await_orchestrator_reachable(*, timeout_s: float = 150.0) -> None:
         """Poll the orchestrator until it's reachable again — the ingest subprocess pauses it for
@@ -1287,6 +1317,54 @@ def create_app() -> FastAPI:
                     return
             await asyncio.sleep(2.0)
         logger.warning("ingest.orchestrator_unreachable_timeout", timeout_s=timeout_s)
+
+    async def _reconcile_orchestrator() -> None:
+        """ACTIVELY restore the orchestrator after an ingest — the 'D3' reconcile. The ingest
+        subprocess pauses (pkills) the orchestrator and tries to restart it on the way out, but
+        that in-subprocess restart is UNRELIABLE on a daemon-managed rig: the `systemctl` unit is
+        usually absent, and the `serve-vllm.sh` fallback can't fit under the webui's residual VRAM,
+        so it hangs ~245s then leaves the orchestrator DOWN — and every later /ask 404s until a
+        manual `daemon restart`. So don't just WAIT: if it's already reachable (the subprocess's
+        own restart happened to work — e.g. a CPU webui with no contention) we're done; otherwise
+        restart it via the daemon supervisor, which clears any half-started vLLM, brings the
+        CONFIGURED orchestrator back at the current mode's posture, and refreshes the PID file.
+        Skipping the restart when already reachable is also REQUIRED for correctness: the supervisor
+        `stop` is a no-op against a vLLM it doesn't own (no PID file), so restarting over a live
+        stray would refuse on the still-bound port. ASSUMES a LOCAL, daemon-managed orchestrator
+        that the ingest paused — a remote or intentionally-off one stays reachable (the ingest only
+        pkills a LOCAL vLLM), so the fast-path skip leaves it untouched. Best-effort — a failure
+        logs + falls back to a bounded wait and NEVER propagates (the document already landed)."""
+        s = get_settings()
+        try:
+            # Short retry on the reachability probe (not a single shot): the orchestrator was just
+            # paused/restored, and a transient slow `models.list()` (e.g. finishing an in-flight
+            # decode) must NOT trigger an unnecessary restart of a HEALTHY orchestrator.
+            for _ in range(3):
+                if (await daemon_status(s)).reachable:
+                    return  # the subprocess's own restart already worked — nothing to do
+                await asyncio.sleep(1.5)
+            profile = resolve_profile(
+                s.models.co_residence_mode,
+                embedder_device=s.models.embedder_device,
+                reranker_device=s.models.reranker_device,
+            )
+            new_state = await daemon_restart(
+                s,
+                gpu_fraction=profile.orchestrator_gpu_fraction,
+                max_model_len=profile.orchestrator_max_model_len,
+            )
+            if new_state.reachable:
+                logger.info("ingest.orchestrator_reconciled")
+            else:
+                logger.warning("ingest.orchestrator_reconcile_unreachable")
+        except Exception as e:
+            logger.warning(
+                "ingest.orchestrator_reconcile_failed",
+                error_type=type(e).__name__,
+                error=str(e)[:200],
+            )
+            with suppress(Exception):
+                await _await_orchestrator_reachable()
 
     @app.get("/ingest", response_class=HTMLResponse)
     async def ingest_page(request: Request) -> HTMLResponse:
@@ -1305,6 +1383,18 @@ def create_app() -> FastAPI:
         # upload with the same 'answering paused' notice the RAG surfaces show.
         if ingesting.active:
             return templates.TemplateResponse(request, "_ingesting.html", {})
+        # A resource-mode switch also drives the orchestrator + GPU (its ~40s daemon restart) — an
+        # ingest started concurrently would race it (the reverse of the mode-switch-during-ingest
+        # guard). Reject so the two GPU-orchestrating operations are mutually exclusive both ways.
+        if mode_switch_lock.locked():
+            return templates.TemplateResponse(
+                request,
+                "_ingest_done.html",
+                {
+                    "doc_id": None,
+                    "error": "A resource-mode switch is finishing — please retry in a moment.",
+                },
+            )
         # Stdlib size pre-check (pre-spawn): a doomed upload must never spawn a subprocess that
         # restarts the orchestrator. The real magic-based validation lives in the subprocess.
         if file.size is not None and file.size > _MAX_UPLOAD_BYTES:
@@ -1326,7 +1416,9 @@ def create_app() -> FastAPI:
             # Stream to a temp dir UNDER the original filename, so the ingested doc's title is the
             # uploaded name (not a random tmp name). `.name` strips path components (no traversal).
             # Never read a 2 GiB upload into RAM / never block the loop (the copy runs in a thread).
-            safe_name = Path(file.filename or "upload").name or "upload"
+            # Strip NULs (an embedded `\x00` makes `Path.open` raise ValueError → a 500); `.name`
+            # drops any path components (no traversal).
+            safe_name = Path((file.filename or "upload").replace("\x00", "")).name or "upload"
             tmp_path = Path(tempfile.mkdtemp(prefix="memex-upload-")) / safe_name
             with tmp_path.open("wb") as out:
                 await asyncio.to_thread(shutil.copyfileobj, file.file, out)
@@ -1347,7 +1439,9 @@ def create_app() -> FastAPI:
                     "detail": "",
                 },
             )
-        except OSError as e:
+        except (OSError, ValueError) as e:
+            # ValueError covers an embedded NUL / other pathological filename that fails to open —
+            # degrade to the friendly error fragment instead of a 500.
             logger.error("ingest.upload_write_failed", error=str(e)[:200])
             return templates.TemplateResponse(
                 request,

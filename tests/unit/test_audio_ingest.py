@@ -33,6 +33,13 @@ def test_mp3_id3_tag_accepted(tmp_path: Path) -> None:
     assert r.mime == "audio/mpeg"
 
 
+def test_empty_file_rejected(tmp_path: Path) -> None:
+    # A 0-byte upload otherwise slips through as empty "text" → a junk 0-chunk document.
+    r = _validate(_write(tmp_path, "zero.pdf", b""))
+    assert not r.accepted
+    assert r.rejection_reason == "file is empty"
+
+
 def test_mp3_frame_sync_untagged_accepted(tmp_path: Path) -> None:
     r = _validate(_write(tmp_path, "raw.mp3", b"\xff\xfb\x90\x00" + b"\x00" * 200))
     assert r.accepted
