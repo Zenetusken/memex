@@ -11,6 +11,7 @@ import asyncio
 import re
 import tempfile
 from collections.abc import Callable, Iterator
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 
@@ -3204,8 +3205,9 @@ async def test_ingest_enrich_failure_still_links_browsable_doc(
 
 
 def test_ingesting_locks_all_rag_posts(client: TestClient) -> None:
-    """While a document is ingesting, every RAG POST returns the 'answering paused' fragment
-    (the orchestrator is down + the GPU is exclusive — an honest pause beats a 404'd answer)."""
+    """While a document is ingesting, every RAG POST returns the action-pane 'still ingesting'
+    fragment (the orchestrator is down + the GPU is exclusive — an honest pause beats a 404'd
+    answer). The wording is distinct from the global page banner (B20)."""
     client.app.state.ingesting.active = True
     posts: list[tuple[str, dict[str, str]]] = [
         ("/ask", {"question": "x"}),
@@ -3217,7 +3219,7 @@ def test_ingesting_locks_all_rag_posts(client: TestClient) -> None:
     for path, data in posts:
         r = client.post(path, data=data)
         assert r.status_code == 200, f"{path}: {r.status_code}"
-        assert "answering is paused" in r.text, f"{path} did not lock"
+        assert "Still ingesting" in r.text, f"{path} did not lock"
 
 
 def test_ingesting_shows_banner_on_entry_page(client: TestClient) -> None:
@@ -3227,6 +3229,39 @@ def test_ingesting_shows_banner_on_entry_page(client: TestClient) -> None:
     assert "answering is paused" in r.text  # the live jinja global drives the banner
     client.app.state.ingesting.active = False
     assert "answering is paused" not in client.get("/").text  # gone when not ingesting
+
+
+def test_entry_page_banner_is_self_refreshing(client: TestClient) -> None:
+    # The banner must carry the self-refresh poll so it CLEARS on its own when the ingest finishes
+    # (the lock releases AFTER the done-fragment renders, so a one-shot OOB clear would be premature).
+    client.app.state.ingesting.active = True
+    r = client.get("/")
+    assert 'hx-get="/ingest/banner"' in r.text and 'hx-trigger="every 3s"' in r.text
+
+
+def test_ingest_banner_fragment_reflects_and_clears(client: TestClient) -> None:
+    client.app.state.ingesting.active = True
+    r = client.get("/ingest/banner")
+    assert r.status_code == 200
+    assert "answering is paused" in r.text and 'hx-get="/ingest/banner"' in r.text  # polls itself
+    client.app.state.ingesting.active = False
+    r = client.get("/ingest/banner")
+    assert "answering is paused" not in r.text  # cleared
+    assert "hx-trigger" not in r.text  # trigger-less empty div ⇒ the polling stops
+
+
+def test_ingest_lock_fragment_clears_when_done(client: TestClient) -> None:
+    # The RAG-paused notice a GPU POST got mid-ingest self-refreshes to a "ready" fragment once the
+    # lock releases — so the stale "Still ingesting" notice clears without a manual reload.
+    client.app.state.ingesting.active = True
+    r = client.get("/ingest/lock")
+    assert r.status_code == 200
+    assert "Still ingesting" in r.text and 'hx-get="/ingest/lock"' in r.text  # keeps polling
+    client.app.state.ingesting.active = False
+    r = client.get("/ingest/lock")
+    assert "Still ingesting" not in r.text
+    assert "Ingestion finished" in r.text  # the ready fragment
+    assert "hx-trigger" not in r.text  # no trigger ⇒ polling stops
 
 
 def test_ingesting_keeps_browsing_open(client: TestClient) -> None:
@@ -3245,7 +3280,196 @@ def test_ingesting_rejects_concurrent_upload(
     client.app.state.ingesting.active = True  # an ingest is already running
     r = client.post("/ingest", files={"file": ("a.pdf", b"%PDF", "application/pdf")})
     assert r.status_code == 200
-    assert "answering is paused" in r.text  # single-flight: rejected, not a 2nd ingest
+    assert "Still ingesting" in r.text  # single-flight: rejected with the action-pane notice
+
+
+def test_ingest_no_file_renders_friendly_fragment(client: TestClient) -> None:
+    # A malformed POST (no `file` field) must NOT surface FastAPI's raw 422 JSON in the HTMX pane —
+    # the optional file param + a None check render the friendly done-fragment instead (B18).
+    r = client.post("/ingest", data={"notafile": "x"})
+    assert r.status_code == 200
+    assert "No file was provided" in r.text
+    assert "Ingest failed" in r.text  # the failed branch of _ingest_done.html
+
+
+async def test_ingest_zero_chunk_doc_not_claimed_searchable(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A doc that parsed + indexed but produced 0 chunks (e.g. an image-only PDF, VLM off) is
+    # browsable but NOT searchable — the done-fragment must not claim "fully consumed / searchable"
+    # (B12). chunk_count=0 routes to the honest partial fragment.
+    _patch_ingest(
+        monkeypatch,
+        outcome=IngestOutcome(
+            accepted=True, exit_code=0, doc_id="abcd1234-empty", chunk_count=0
+        ),
+    )
+    text = await _ingest_to_completion(create_app(), content=b"%PDF", filename="blank.pdf")
+    assert "no searchable text" in text
+    assert "/documents/abcd1234-empty" in text  # still browsable
+    assert "fully consumed" not in text  # NOT the success "searchable and browsable" claim
+
+
+async def test_ingest_unknown_chunk_count_takes_normal_success(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # chunk_count=None (event not captured — old subprocess / unusual path) must NOT be gated as
+    # 0-chunk; it takes the normal success path (status quo).
+    _patch_ingest(
+        monkeypatch,
+        outcome=IngestOutcome(
+            accepted=True, exit_code=0, doc_id="abcd1234-ok", chunk_count=None
+        ),
+    )
+    text = await _ingest_to_completion(create_app(), content=b"%PDF", filename="doc.pdf")
+    assert "fully consumed" in text  # the normal success claim
+    assert "no searchable text" not in text
+
+
+def test_ingest_page_resumes_in_flight_progress(client: TestClient) -> None:
+    # B7/B8: returning to GET /ingest while an ingest is in flight resumes its live progress in the
+    # pane, instead of a form-only page that drops the running ingest from view.
+    app = client.app
+    cid = "01HZRESUME0000000000000000"
+    app.state.progress.new(cid, scope_doc_ids=[], scope_source="named")
+    app.state.ingesting.active = True
+    app.state.ingesting.cid = cid
+    try:
+        r = client.get("/ingest")
+    finally:
+        app.state.ingesting.active = False
+        app.state.ingesting.cid = ""
+    assert r.status_code == 200
+    assert f"/ingest/{cid}/status" in r.text  # the pane auto-loads the in-flight progress
+    assert "Resuming" in r.text
+
+
+def test_ingest_page_fresh_when_idle(client: TestClient) -> None:
+    # No in-flight ingest → a normal form-only page (no resume block).
+    r = client.get("/ingest")
+    assert r.status_code == 200
+    assert "Resuming" not in r.text
+    assert 'type="file"' in r.text  # the upload form is present
+
+
+async def test_upload_size_limit_middleware_rejects_oversize() -> None:
+    # B11: the ASGI middleware rejects an over-cap Content-Length on POST /ingest WITHOUT calling
+    # the downstream app — so the body never streams to disk (the handler check is too late).
+    from memex.webui.app import _UploadSizeLimitMiddleware
+
+    downstream_called = False
+
+    async def downstream(scope: Any, receive: Any, send: Any) -> None:
+        nonlocal downstream_called
+        downstream_called = True
+
+    sent: list[dict[str, Any]] = []
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: dict[str, Any]) -> None:
+        sent.append(message)
+
+    mw = _UploadSizeLimitMiddleware(downstream, max_bytes=2 * 1024**3)
+    scope: dict[str, Any] = {
+        "type": "http",
+        "method": "POST",
+        "path": "/ingest",
+        "headers": [(b"content-length", str(3 * 1024**3).encode())],
+    }
+    await mw(scope, receive, send)
+
+    assert downstream_called is False  # short-circuited → no disk stream
+    start = next(m for m in sent if m["type"] == "http.response.start")
+    assert start["status"] == 200  # 200 so HTMX swaps it into the pane
+    body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
+    assert b"exceeds the 2 GiB upload limit" in body
+
+
+async def test_upload_size_limit_middleware_passes_normal_and_other_routes() -> None:
+    from memex.webui.app import _UploadSizeLimitMiddleware
+
+    downstream_called = False
+
+    async def downstream(scope: Any, receive: Any, send: Any) -> None:
+        nonlocal downstream_called
+        downstream_called = True
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: dict[str, Any]) -> None:
+        pass
+
+    mw = _UploadSizeLimitMiddleware(downstream, max_bytes=2 * 1024**3)
+    # under-cap /ingest passes through; a non-/ingest route passes regardless of declared size.
+    scopes: list[dict[str, Any]] = [
+        {"type": "http", "method": "POST", "path": "/ingest", "headers": [(b"content-length", b"100")]},
+        {"type": "http", "method": "POST", "path": "/ask", "headers": [(b"content-length", str(9 * 1024**3).encode())]},
+    ]
+    for scope in scopes:
+        downstream_called = False
+        await mw(scope, receive, send)
+        assert downstream_called is True
+
+
+async def test_scan_half_docs_detects_interrupted_ingest(tmp_path: Path) -> None:
+    # B19: the startup scan surfaces interrupted ingests — a manifest with the `ingest` stage but no
+    # `index` (parsed/partial but NOT searchable). Detect-only (the caller logs, never auto-deletes).
+    from datetime import datetime
+
+    from memex.core.manifest import IndexStage, IngestStage, Manifest, write_manifest
+    from memex.webui.app import _scan_half_docs
+
+    ts = datetime(2026, 1, 1, tzinfo=UTC)
+    ingest = IngestStage(
+        correlation_id="c1",
+        ingested_at=ts,
+        source_path="/x.pdf",
+        source_size_bytes=10,
+        detected_mime="application/pdf",
+    )
+    index = IndexStage(
+        correlation_id="c1", indexed_at=ts, embedding_model="m", embedding_dim=8, chunk_count=3
+    )
+    await write_manifest(tmp_path, Manifest(doc_id="halfdoc", content_sha256="a", ingest=ingest))
+    await write_manifest(
+        tmp_path, Manifest(doc_id="fulldoc", content_sha256="b", ingest=ingest, index=index)
+    )
+    await write_manifest(tmp_path, Manifest(doc_id="nostages", content_sha256="c"))
+
+    assert await _scan_half_docs(tmp_path) == ["halfdoc"]  # only the ingested-but-not-indexed one
+
+
+async def test_scan_half_docs_empty_when_no_manifests(tmp_path: Path) -> None:
+    from memex.webui.app import _scan_half_docs
+
+    assert await _scan_half_docs(tmp_path) == []
+
+
+async def test_scan_half_docs_skips_corrupt_manifest(tmp_path: Path) -> None:
+    # B19 robustness (reviewer finding): one corrupt/unreadable manifest must NOT hide the others —
+    # `read_manifest` raises a pydantic ValidationError on garbage, so without the per-file guard the
+    # whole scan would abort and every other half-doc go unreported.
+    from datetime import datetime
+
+    from memex.core.manifest import IngestStage, Manifest, write_manifest
+    from memex.webui.app import _scan_half_docs
+
+    ts = datetime(2026, 1, 1, tzinfo=UTC)
+    ingest = IngestStage(
+        correlation_id="c1",
+        ingested_at=ts,
+        source_path="/x.pdf",
+        source_size_bytes=10,
+        detected_mime="application/pdf",
+    )
+    await write_manifest(tmp_path, Manifest(doc_id="halfdoc", content_sha256="a", ingest=ingest))
+    # A corrupt manifest sitting right before "halfdoc" in sorted order — it must be skipped, not fatal.
+    (tmp_path / ".memex" / "manifests" / "aaa-corrupt.json").write_text("{ not valid json")
+
+    assert await _scan_half_docs(tmp_path) == ["halfdoc"]  # the corrupt file skipped, half-doc found
 
 
 async def test_ingesting_lock_set_then_cleared_after_completion(
@@ -3318,3 +3542,41 @@ async def test_ingest_cleans_up_temp_upload_dir(
     await _ingest_to_completion(create_app(), content=b"%PDF", filename="x.pdf")
     after = set(Path(tempfile.gettempdir()).glob("memex-upload-*"))
     assert after <= before  # no new memex-upload-* dir lingers after completion
+
+
+async def test_ingest_drains_inflight_rag_before_unloading_gpu(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # B18: an ingest must let an ALREADY-in-flight RAG answer finish before it unloads the GPU
+    # models + the subprocess pauses the orchestrator — else the answer is yanked out mid-run.
+    # Prove _drain_inflight_rag awaits the in-flight task BEFORE get_registry().unload_all() runs.
+    _patch_ingest(
+        monkeypatch,
+        outcome=IngestOutcome(accepted=True, exit_code=0, doc_id="abcd1234-doc", chunk_count=5),
+    )
+
+    slow_finished = asyncio.Event()
+    inflight_done_at_unload: list[bool] = []
+
+    class _Reg:
+        async def unload_all(self) -> None:
+            # Record whether the in-flight RAG answer had finished by the time the ingest unloads.
+            inflight_done_at_unload.append(slow_finished.is_set())
+
+    monkeypatch.setattr("memex.webui.app.get_registry", lambda: _Reg())
+
+    app = create_app()
+
+    async def _slow_answer() -> None:
+        await asyncio.sleep(0.1)
+        slow_finished.set()
+
+    # Seed a slow in-flight RAG answer under its OWN cid (started before the ingest).
+    rag_task = asyncio.create_task(_slow_answer())
+    app.state.progress.new("rag-cid", scope_doc_ids=[], scope_source="named")
+    app.state.progress.attach_task("rag-cid", rag_task)
+
+    await _ingest_to_completion(app, content=b"%PDF", filename="x.pdf")
+    await rag_task
+
+    assert inflight_done_at_unload == [True]  # the drain awaited the in-flight answer first

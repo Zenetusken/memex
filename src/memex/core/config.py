@@ -292,6 +292,22 @@ class IngestSettings(BaseModel):
 
     max_bytes: int = Field(default=256 * 1024 * 1024, ge=1024)
     allow_macros: bool = False  # macro-bearing Office docs are rejected by default
+    # The webui ingest-subprocess SILENCE watchdog (webui-driver only — the CLI `memex ingest` path
+    # ignores these): SIGKILL a hung `memex ingest`/`enrich` child that produces NO output for this
+    # long (a wedged GPU / deadlocked VLM serve that escapes the parse workers' own timeouts — else
+    # the webui's RAG lock never releases). NOT a total timeout. Sits above docling's 1200s per-doc
+    # timeout. See `webui/ingest_driver.py`.
+    silence_timeout_s: float = Field(default=1800.0, ge=60.0)
+    # The SEPARATE, generous budget the watchdog applies DURING ASR transcription
+    # (`asr.transcribe.start` → … → `asr.transcribe.done`), which is silent on both pipes for its
+    # WHOLE duration (faster-whisper runs the file through one blocking call with no intermediate
+    # log). A multi-hour audio/video (ADR-0017 ships 2 GiB video) on the CPU-default ASR can run
+    # well past `silence_timeout_s` while working correctly — the normal budget would false-kill it
+    # (and ASR caches only on success, so the re-transcribe would loop). ~8h covers a long CPU
+    # transcription. CAVEAT: a 2 GiB LOW-BITRATE AUDIO file (e.g. a 128 kbps MP3 ≈ tens of hours of
+    # content) can still exceed this on CPU — raise it for those. A genuinely-wedged ASR is still
+    # eventually reaped at this budget (vs forever if the watchdog were disabled during ASR).
+    asr_silence_timeout_s: float = Field(default=28800.0, ge=60.0)
 
 
 class ParseSettings(BaseModel):

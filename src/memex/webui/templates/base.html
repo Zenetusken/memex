@@ -45,9 +45,7 @@
     </div>
   </header>
   <main class="max-w-4xl mx-auto px-6 py-8">
-    {% if ingesting_active() %}
-    <div class="ingesting-banner" role="status">A document is being ingested — answering is paused while the pipeline uses the GPU. You can keep browsing documents you've already added.</div>
-    {% endif %}
+    {% include "_ingesting_banner.html" %}
     {% block content %}{% endblock %}
   </main>
   <footer class="max-w-4xl mx-auto px-6 py-6 text-xs text-zinc-400">

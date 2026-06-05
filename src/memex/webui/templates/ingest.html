@@ -20,7 +20,16 @@
   </div>
 </form>
 
-<section id="ingest-pane" class="mt-8"></section>
+<section id="ingest-pane" class="mt-8">
+  {% if resume_cid %}
+  {# An ingest is already running — you navigated away and came back. Resume its live progress
+     (and its eventual done-fragment) instead of leaving the pane empty. #}
+  <div hx-get="/ingest/{{ resume_cid }}/status?v=0" hx-trigger="load" hx-swap="outerHTML"
+       aria-live="polite">
+    <p class="ans-eyebrow">Resuming the document already being ingested…</p>
+  </div>
+  {% endif %}
+</section>
 
 <h2 class="text-sm font-medium text-zinc-400 mt-8 mb-2">GPU — live</h2>
 {# The exclusive-GPU ingestion mode dedicates the GPU to the pipeline. This reuses the

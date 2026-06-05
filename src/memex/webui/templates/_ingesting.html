@@ -1,4 +1,9 @@
-<div class="ingesting-notice" role="status">
-  <span class="ingesting-dot" aria-hidden="true"></span>
-  <span>A document is being ingested — answering is paused while the pipeline uses the GPU. You can keep browsing documents you've already added; try again when it finishes.</span>
+<div id="ask-lock" hx-get="/ingest/lock" hx-trigger="every 3s" hx-swap="outerHTML" hx-target="this">
+  {# The RAG-paused notice a GPU POST (/ask, summarize, chat, expert, bridge) gets while a document
+     ingests. It self-refreshes: when the ingest finishes (the lock releases), the poll swaps in the
+     trigger-less "ready" fragment, so the stale notice clears without a manual reload. #}
+  <div class="ingesting-notice" role="status">
+    <span class="ingesting-dot" aria-hidden="true"></span>
+    <span>Still ingesting a document — this will work as soon as it finishes (the banner above tracks its progress).</span>
+  </div>
 </div>

@@ -26,9 +26,10 @@ import json
 import os
 import signal
 import sys
+import time
 from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, cast
 
@@ -48,6 +49,24 @@ _MAX_BYTES = 2 * 1024 * 1024 * 1024
 # exceed asyncio's default 64 KiB StreamReader limit and raise ValueError mid-drain. Raise it
 # generously; `_pump` additionally SKIPS an over-limit line rather than crash the drain.
 _PIPE_LIMIT = 1024 * 1024
+
+# Silence-watchdog: a hung child (a wedged GPU, a deadlocked VLM serve that escapes the parse
+# workers' OWN `asyncio.wait_for` timeouts) emits no structlog line for a long stretch — the webui
+# would then wait forever, the RAG lock never releasing (answering permanently paused until a manual
+# restart). The watchdog SIGKILLs the child after `silence_timeout_s` with NO output on EITHER pipe.
+# It is NOT a wall-clock TOTAL timeout (a legit large-doc ingest runs tens of minutes but streams a
+# line per page/section); only true SILENCE trips it. The default sits above docling's own 1200s
+# per-doc timeout (`parse.docling_timeout_s`) + margin. CAVEAT: a long-media ASR transcription is
+# silent for its WHOLE duration (`asr.transcribe.start` → … → `asr.transcribe.done`), so a
+# multi-hour audio/video may legitimately exceed this — raise `ingest.silence_timeout_s` for those.
+_DEFAULT_SILENCE_TIMEOUT_S = 1800.0
+# A much larger budget for the ASR phase, which is SILENT on both pipes for its whole duration
+# (faster-whisper runs the file through one blocking call with no intermediate log). A multi-hour
+# CPU transcription (the default device) legitimately outruns the normal budget; the normal one
+# would false-kill it AND, since ASR caches only on success, loop forever on the re-transcribe. A
+# 2 GiB low-bitrate AUDIO file can still exceed this on CPU — raise `ingest.asr_silence_timeout_s`.
+_DEFAULT_ASR_SILENCE_TIMEOUT_S = 28800.0  # ~8h; covers a long CPU transcription
+_WATCHDOG_POLL_S = 5.0  # how often the watchdog re-checks the idle gap
 
 
 class _Process(Protocol):
@@ -75,6 +94,7 @@ class IngestOutcome(BaseModel):
     exit_code: int  # the whole chain's exit (parse/index failure ⇒ non-zero even if accepted)
     doc_id: str | None = None
     rejection_reason: str | None = None
+    chunk_count: int | None = None  # chunks indexed (from the `index.done` event); None = unknown
 
     @property
     def succeeded(self) -> bool:
@@ -108,6 +128,48 @@ async def _terminate(proc: _Process) -> None:
         os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
     with suppress(Exception):
         await proc.wait()  # reap the zombie (best-effort)
+
+
+@dataclass
+class _Activity:
+    """Tracks the monotonic time of the last line seen on EITHER pipe (so the watchdog measures
+    SILENCE, not total runtime), whether the child is mid-ASR (a legitimately-silent phase that gets
+    a much larger budget — see `asr_timeout_s`), and whether the watchdog fired + on which budget (to
+    report a hang honestly, distinct from an OOM signal-kill)."""
+
+    last: float = field(default_factory=time.monotonic)
+    in_asr: bool = False  # between asr.transcribe.start and .done — silent by construction
+    timed_out: bool = False
+    fired_budget: float = 0.0  # the silence budget that tripped (for the rejection message)
+
+
+def _activity_sink(inner: Callable[[str], None], activity: _Activity) -> Callable[[str], None]:
+    """Wrap a line sink so every line received bumps the watchdog's idle timer before delegating."""
+
+    def wrapped(line: str) -> None:
+        activity.last = time.monotonic()
+        inner(line)
+
+    return wrapped
+
+
+async def _silence_watchdog(
+    proc: _Process, activity: _Activity, *, timeout_s: float, asr_timeout_s: float
+) -> None:
+    """SIGKILL the child if no output lands on either pipe for the active budget (a hang). The budget
+    is `asr_timeout_s` while the child is mid-ASR (`activity.in_asr` — faster-whisper transcribes a
+    whole file silently, so the normal budget would false-kill legit long media) and `timeout_s`
+    otherwise. Loops until it fires OR the caller cancels it (the drain finished). Best-effort:
+    `_terminate` is fully guarded, so this never raises into the drain; the caller cancels it in a
+    `finally`."""
+    while True:
+        await asyncio.sleep(_WATCHDOG_POLL_S)
+        budget = asr_timeout_s if activity.in_asr else timeout_s
+        if time.monotonic() - activity.last >= budget:
+            activity.timed_out = True
+            activity.fired_budget = budget
+            await _terminate(proc)
+            return
 
 
 def _memex_bin() -> str:
@@ -168,11 +230,13 @@ class _Seen:
 
     doc_id: str | None = None
     accepted: bool = False
+    chunk_count: int | None = None  # from the `index.done` event — chunks indexed for the doc
 
 
-def _make_stderr_sink(on_phase: OnPhase, seen: _Seen) -> Callable[[str], None]:
-    """Build the stderr line handler: map each structlog event → a phase (push to
-    `on_phase`) and capture the `ingest.accepted` doc_id + accepted flag early."""
+def _make_stderr_sink(on_phase: OnPhase, seen: _Seen, activity: _Activity) -> Callable[[str], None]:
+    """Build the stderr line handler: map each structlog event → a phase (push to `on_phase`),
+    capture the `ingest.accepted` doc_id/accepted + the `index.done` chunk count early, and toggle
+    `activity.in_asr` across the silent ASR transcription so the watchdog widens its budget there."""
 
     def sink(line: str) -> None:
         rec = _parse_json_line(line)
@@ -184,6 +248,15 @@ def _make_stderr_sink(on_phase: OnPhase, seen: _Seen) -> Callable[[str], None]:
             did = rec.get("doc_id")
             if isinstance(did, str):
                 seen.doc_id = did
+        elif event == "index.done":
+            # Drives the "0 chunks ⇒ browsable but NOT searchable" status honesty (B12).
+            n = rec.get("chunks")
+            if isinstance(n, int):
+                seen.chunk_count = n
+        elif event == "asr.transcribe.start":
+            activity.in_asr = True  # enter the legitimately-silent ASR phase (watchdog widens)
+        elif event == "asr.transcribe.done":
+            activity.in_asr = False
         phase = ingest_phase_for(event, rec.get("page"))
         if phase:
             on_phase(phase)
@@ -197,23 +270,39 @@ async def run_ingest(
     on_phase: OnPhase,
     extra_env: dict[str, str] | None = None,
     spawn: Spawn = _default_spawn,
+    silence_timeout_s: float = _DEFAULT_SILENCE_TIMEOUT_S,
+    asr_silence_timeout_s: float = _DEFAULT_ASR_SILENCE_TIMEOUT_S,
 ) -> IngestOutcome:
     """Run ``memex ingest <file>`` as a child subprocess, streaming its structlog phases
     to ``on_phase`` and returning the verdict. ``extra_env`` (e.g. `orchestrator_serve_env`)
     is merged over the base env so the subprocess's post-parse vLLM restart brings up the
-    configured orchestrator, not the serve-script default (see ROADMAP decision D3)."""
+    configured orchestrator, not the serve-script default (see ROADMAP decision D3).
+    ``silence_timeout_s`` SIGKILLs a hung child that produces no output for that long;
+    ``asr_silence_timeout_s`` is the larger budget applied while the child is mid-ASR (silent by
+    construction — see `_silence_watchdog`)."""
     proc = await spawn(_memex_bin(), "ingest", str(file_path), env=_build_env(extra_env))
     stdout_lines: list[str] = []
     seen = _Seen()
+    activity = _Activity()
     completed = False
+    watchdog = asyncio.create_task(
+        _silence_watchdog(
+            proc, activity, timeout_s=silence_timeout_s, asr_timeout_s=asr_silence_timeout_s
+        )
+    )
     try:
         await asyncio.gather(
-            _pump(proc.stderr, _make_stderr_sink(on_phase, seen)),
-            _pump(proc.stdout, stdout_lines.append),
+            _pump(
+                proc.stderr, _activity_sink(_make_stderr_sink(on_phase, seen, activity), activity)
+            ),
+            _pump(proc.stdout, _activity_sink(stdout_lines.append, activity)),
         )
         exit_code = await proc.wait()
         completed = True
     finally:
+        watchdog.cancel()  # the drain is done (or unwinding) — stop the idle timer either way
+        with suppress(asyncio.CancelledError):
+            await watchdog
         if not completed:  # cancelled (shutdown) or a sink raised — don't orphan the GPU-holding tree
             await _terminate(proc)
 
@@ -225,10 +314,18 @@ async def run_ingest(
     accepted = bool(result.get("accepted")) if result else seen.accepted
     rejection = (_str(result.get("rejection_reason")) or None) if result else None
     if rejection is None and exit_code != 0:
-        # A negative exit code is `-signum` (the child was killed by a signal). The common case on
-        # this 12 GB rig is the OOM killer reaping a parse-time VLM serve — surface that clearly
-        # instead of a cryptic "exited with code -9".
-        if exit_code < 0:
+        # A negative exit code is `-signum` (the child was killed by a signal). Distinguish a
+        # watchdog hang-kill (no output for the active budget) from the OOM killer reaping a
+        # parse-time VLM serve — both arrive as a signal, but the user needs a different mental
+        # model (a hang vs out-of-memory). The hint covers the rare legit case (very long media
+        # that outran even the ASR budget).
+        if activity.timed_out:
+            rejection = (
+                f"the ingest produced no output for {int(activity.fired_budget)}s and was stopped "
+                "(it appears to have hung; very long audio/video may need "
+                "MEMEX_INGEST__ASR_SILENCE_TIMEOUT_S raised)"
+            )
+        elif exit_code < 0:
             rejection = (
                 f"the ingest process was terminated by signal {-exit_code} "
                 "(it may have run out of memory)"
@@ -236,7 +333,11 @@ async def run_ingest(
         else:
             rejection = f"the ingest process exited with code {exit_code}"
     return IngestOutcome(
-        accepted=accepted, exit_code=exit_code, doc_id=doc_id, rejection_reason=rejection
+        accepted=accepted,
+        exit_code=exit_code,
+        doc_id=doc_id,
+        rejection_reason=rejection,
+        chunk_count=seen.chunk_count,
     )
 
 
@@ -246,10 +347,12 @@ async def run_enrich(
     on_phase: OnPhase,
     extra_env: dict[str, str] | None = None,
     spawn: Spawn = _default_spawn,
+    silence_timeout_s: float = _DEFAULT_SILENCE_TIMEOUT_S,
 ) -> int:
     """Run ``memex enrich <doc_id>`` as a child subprocess (entities + citations), streaming
     its phases. Returns the exit code. NB enrich needs the orchestrator UP for citations, so
-    the caller gates the spawn on orchestrator reachability (ROADMAP Inc 4)."""
+    the caller gates the spawn on orchestrator reachability (ROADMAP Inc 4). ``silence_timeout_s``
+    SIGKILLs a hung child (same watchdog as ``run_ingest``)."""
     proc = await spawn(_memex_bin(), "enrich", doc_id, env=_build_env(extra_env))
 
     def on_stderr(line: str) -> None:
@@ -259,13 +362,26 @@ async def run_enrich(
             if phase:
                 on_phase(phase)
 
+    activity = _Activity()
     completed = False
+    # Enrich never runs ASR, so its watchdog uses the normal budget throughout (asr == normal).
+    watchdog = asyncio.create_task(
+        _silence_watchdog(
+            proc, activity, timeout_s=silence_timeout_s, asr_timeout_s=silence_timeout_s
+        )
+    )
     try:
-        await asyncio.gather(_pump(proc.stderr, on_stderr), _pump(proc.stdout, lambda _line: None))
+        await asyncio.gather(
+            _pump(proc.stderr, _activity_sink(on_stderr, activity)),
+            _pump(proc.stdout, _activity_sink(lambda _line: None, activity)),
+        )
         rc = await proc.wait()
         completed = True
         return rc
     finally:
+        watchdog.cancel()
+        with suppress(asyncio.CancelledError):
+            await watchdog
         if not completed:  # cancelled / cut short — don't orphan the subprocess tree
             await _terminate(proc)
 

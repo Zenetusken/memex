@@ -153,6 +153,12 @@ def test_ingest_phase_for_maps_subprocess_events() -> None:
     assert ingest_phase_for("chart_ocr.batch.start") == "Transcribing · chart OCR"
     assert ingest_phase_for("asr.transcribe.start") == "Transcribing · audio"
     assert ingest_phase_for("index.start") == "Indexing"
+    # the subprocess's end-of-ingest orchestrator restart → an eyebrow so "Indexing" doesn't freeze
+    assert ingest_phase_for("vllm.restart.start") == "Indexing · restoring the orchestrator"
+    assert ingest_phase_view("Indexing · restoring the orchestrator") == (
+        2,
+        "restoring the orchestrator",
+    )
     assert ingest_phase_for("enrich.start") == "Enriching"
     # an unknown / non-start event keeps the current phase (unknown → no-op, like phase_for)
     assert ingest_phase_for("vlm.done") == ""
@@ -179,6 +185,50 @@ def test_registry_sweep_evicts_stale_on_new() -> None:
     reg.new("fresh", scope_doc_ids=[], scope_source="named")  # new() sweeps first
     assert reg.get("old") is None
     assert reg.get("fresh") is not None
+
+
+@pytest.mark.asyncio
+async def test_inflight_tasks_excludes_self_and_done() -> None:
+    # B18: an ingest drains the OTHER in-flight RAG answers (not its own cid, not finished ones)
+    # before it unloads the GPU models — so `inflight_tasks(exclude_cid=ingest)` must return exactly
+    # the still-running answers started before it.
+    reg = ProgressRegistry()
+
+    async def _slow() -> None:
+        await asyncio.sleep(0.05)
+
+    async def _instant() -> None:
+        return None
+
+    # An in-flight RAG answer (must be returned).
+    reg.new("rag", scope_doc_ids=[], scope_source="named")
+    rag_task = asyncio.create_task(_slow())
+    reg.attach_task("rag", rag_task)
+    # The ingest's OWN entry/task (excluded by cid).
+    reg.new("ingest", scope_doc_ids=[], scope_source="named")
+    ingest_task = asyncio.create_task(_slow())
+    reg.attach_task("ingest", ingest_task)
+    # A finished answer (excluded by .done()).
+    reg.new("done", scope_doc_ids=[], scope_source="named")
+    done_task = asyncio.create_task(_instant())
+    await done_task
+    reg.attach_task("done", done_task)
+    # An entry with no task at all (never crashes the comprehension).
+    reg.new("notask", scope_doc_ids=[], scope_source="named")
+
+    inflight = reg.inflight_tasks(exclude_cid="ingest")
+    assert inflight == [rag_task]  # only the other still-running answer
+
+    await asyncio.gather(rag_task, ingest_task)  # cleanup
+
+
+@pytest.mark.asyncio
+async def test_inflight_tasks_empty_when_only_self() -> None:
+    reg = ProgressRegistry()
+    reg.new("ingest", scope_doc_ids=[], scope_source="named")
+    reg.attach_task("ingest", asyncio.create_task(asyncio.sleep(0)))
+    assert reg.inflight_tasks(exclude_cid="ingest") == []
+    await reg.get("ingest").task  # type: ignore[union-attr]  # cleanup (entry+task exist)
 
 
 @pytest.mark.asyncio

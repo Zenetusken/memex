@@ -57,6 +57,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from jinja2 import Environment, FileSystemLoader
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from memex.agents.answering import FinalResponse, answer_query
 from memex.agents.bridge import BridgeAnswer, reason_then_ground
@@ -72,7 +73,7 @@ from memex.core.errors import (
     StaleDocumentError,
     VaultIntegrityError,
 )
-from memex.core.manifest import update_manifest
+from memex.core.manifest import read_manifest, update_manifest
 from memex.core.resources import (
     RERANKER_GPU_FLOOR_GB,
     CoResidenceMode,
@@ -165,6 +166,7 @@ class _IngestState:
     def __init__(self) -> None:
         self.active = False
         self.doc_name = ""
+        self.cid = ""  # in-flight ingest's progress cid, so GET /ingest can resume its view
 
 
 # Mirrors `vault.store.assign_doc_id`'s output shape: 8-hex prefix
@@ -221,6 +223,64 @@ _SOURCE_KINDS: dict[str, tuple[str, str]] = {
 }
 
 logger = structlog.get_logger(__name__)
+
+
+def _content_length(scope: Scope) -> int | None:
+    """The request's Content-Length header as an int, or None if absent/unparseable."""
+    for key, value in scope.get("headers", []):
+        if key == b"content-length":
+            try:
+                return int(value)
+            except ValueError:
+                return None
+    return None
+
+
+async def _scan_half_docs(vault_path: Path) -> list[str]:
+    """Return the doc_ids of orphaned HALF-DOCS — interrupted ingests whose manifest has the
+    ``ingest`` stage but no ``index`` (parsed/partial but NOT searchable, e.g. the process died
+    mid-ingest). DETECTION ONLY: the caller LOGS them and NEVER auto-deletes — a heuristic mis-fire
+    must not remove a legit document; the user re-ingests or ``memex remove``s them. The full
+    resume/sweep is out of scope (B19)."""
+    manifests_dir = vault_path / ".memex" / "manifests"
+    if not manifests_dir.exists():
+        return []
+    half: list[str] = []
+    for manifest_file in sorted(manifests_dir.glob("*.json")):
+        manifest = None
+        with suppress(Exception):  # one corrupt/unreadable manifest must not hide the others
+            manifest = await read_manifest(vault_path, manifest_file.stem)
+        if manifest is not None and manifest.ingest is not None and manifest.index is None:
+            half.append(manifest_file.stem)
+    return half
+
+
+class _UploadSizeLimitMiddleware:
+    """Reject an over-cap ``POST /ingest`` by its declared Content-Length BEFORE Starlette streams
+    the whole multipart body to a disk temp file (B11). The handler's ``file.size`` check runs only
+    AFTER the body is already on disk, so a >cap upload would fill the disk first. Best-effort: the
+    header is absent for chunked transfers + can be spoofed, so the in-handler ``file.size`` cap
+    stays as the backstop — this just avoids a disk-fill on an honestly-declared huge upload. The
+    response mirrors the handler's cap fragment (HTTP 200 so HTMX swaps it into the pane)."""
+
+    def __init__(self, app: ASGIApp, *, max_bytes: int) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and scope["method"] == "POST" and scope["path"] == "/ingest":
+            length = _content_length(scope)
+            if length is not None and length > self.max_bytes:
+                logger.warning("ingest.upload_too_large_precheck", content_length=length)
+                response = HTMLResponse(
+                    '<div class="ans-flash ans-flash-error">'
+                    '<div class="ans-eyebrow">Ingest failed</div>'
+                    '<p class="ingest-done-note">The file exceeds the 2 GiB upload limit.</p>'
+                    "</div>"
+                )
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
 
 
 def _active_profile() -> ResourceProfile:
@@ -612,9 +672,22 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def _lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-        """Clean shutdown (dynamic VRAM manager): on exit, release every GPU model this server loaded so
-        its VRAM doesn't linger and contend with the next process's parse / VLM-serve — the proactive fix
-        for the stale-webui-holds-VRAM trap. No-op if the registry was never initialised (a test app)."""
+        """Startup: surface orphaned half-docs left by a previous interrupted ingest (B19 — detect +
+        log, NEVER auto-delete). Shutdown (dynamic VRAM manager): release every GPU model this server
+        loaded so its VRAM doesn't linger + contend with the next process's parse / VLM-serve — the
+        proactive fix for the stale-webui-holds-VRAM trap. No-op if the registry was never
+        initialised (a test app)."""
+        with suppress(Exception):  # a scan failure must never block startup
+            half = await _scan_half_docs(get_settings().vault_path)
+            if half:
+                logger.warning(
+                    "startup.half_docs_detected",
+                    count=len(half),
+                    doc_ids=half[:20],
+                    hint="ingested but not indexed (an interrupted ingest, or a deliberate "
+                    "`--ingest-only`/`--no-index`) — run `memex index <doc>` to finish, or "
+                    "`memex remove` to discard",
+                )
         yield
         try:
             await get_registry().unload_all()
@@ -623,6 +696,8 @@ def create_app() -> FastAPI:
             pass  # registry never set up (e.g. a TestClient app) — nothing resident to release
 
     app = FastAPI(title="Memex", docs_url=None, redoc_url=None, lifespan=_lifespan)
+    # Reject an honestly-oversized upload by Content-Length before its body streams to disk (B11).
+    app.add_middleware(_UploadSizeLimitMiddleware, max_bytes=_MAX_UPLOAD_BYTES)
 
     if _STATIC_DIR.exists():
         app.mount(
@@ -1218,11 +1293,29 @@ def create_app() -> FastAPI:
     # GPU lock (RAG paused) + the GPU release / orchestrator reconcile layer on in later
     # increments; this is the upload + live-progress + done-fragment spine.
 
+    async def _drain_inflight_rag(ingest_cid: str, *, timeout_s: float = 8.0) -> None:
+        """Await any RAG answer tasks still in flight (bounded) before the ingest unloads the GPU
+        models + pauses the orchestrator (B18). Bounded + best-effort: a slow answer past the budget
+        keeps running and then fails gracefully against the paused orchestrator (the prior behaviour)
+        — it never blocks the ingest. `asyncio.wait` WAITS for (does not cancel) the tasks."""
+        tasks = progress.inflight_tasks(exclude_cid=ingest_cid)
+        if not tasks:
+            return
+        logger.info("ingest.draining_inflight_rag", count=len(tasks), timeout_s=timeout_s)
+        with suppress(Exception):
+            await asyncio.wait(tasks, timeout=timeout_s)
+
     async def _run_ingest(cid: str, tmp_path: Path) -> None:
         """Background runner: drive `memex ingest` (then `enrich`) as subprocesses, streaming
         phases into the registry. Top of a fire-and-forget task — never crash silently; always
         clean up the temp upload."""
         try:
+            # Let any RAG answer ALREADY in flight finish (bounded) BEFORE we unload the retrieval
+            # models + the subprocess pauses the orchestrator. The ingest guard is admission-only,
+            # so an answer started before this ingest outlives it and would otherwise be yanked out
+            # mid-run (B18). Best-effort: a slow answer past the budget proceeds anyway — it then
+            # fails gracefully against the paused orchestrator, exactly as before (no new hang).
+            await _drain_inflight_rag(cid)
             # Release the webui's own GPU models (embedder/reranker) so the parse-time VLM serve
             # fits. The lock (set in the route) blocks new RAG reloads; these reload lazily on the
             # next /ask. No-op if nothing's resident (a CPU-only webui or a fresh process).
@@ -1234,10 +1327,27 @@ def create_app() -> FastAPI:
             # serve-vllm.sh, inheriting this env) brings up the CONFIGURED orchestrator, not the
             # serve-script's hardcoded default — else every post-ingest /ask 404s (ADR-0015 / D3).
             serve_env = orchestrator_serve_env(get_settings())
+            ingest_cfg = get_settings().ingest  # hung-child silence watchdog budgets
+            silence_timeout_s = ingest_cfg.silence_timeout_s
             outcome = await ingest_driver.run_ingest(
-                tmp_path, on_phase=lambda p: progress.set_phase(cid, p), extra_env=serve_env
+                tmp_path,
+                on_phase=lambda p: progress.set_phase(cid, p),
+                extra_env=serve_env,
+                silence_timeout_s=silence_timeout_s,
+                asr_silence_timeout_s=ingest_cfg.asr_silence_timeout_s,
             )
-            if outcome.succeeded and outcome.doc_id is not None:
+            if outcome.succeeded and outcome.doc_id is not None and outcome.chunk_count == 0:
+                # Parsed + indexed but ZERO chunks (e.g. an empty/whitespace body, or a scan whose
+                # VLM transcription came back empty) — BROWSABLE but NOT searchable/askable. Don't claim "fully
+                # consumed / searchable"; surface it honestly + skip enrich (nothing to ground). The
+                # orchestrator was paused by the parse → the finally's reconcile restores it (B12).
+                _set_entry_doc_id(cid, outcome.doc_id)
+                progress.finish(
+                    cid,
+                    error="The document was ingested but no searchable text was extracted — "
+                    "it's browsable, but won't appear in answers.",
+                )
+            elif outcome.succeeded and outcome.doc_id is not None:
                 # Parsed + indexed ⇒ the doc is askable + browsable NOW. Record the link BEFORE
                 # the best-effort enrich, so a failed enrich never discards a usable document
                 # (enrich is HARD-gate-neutral graph discovery; a doc without it still answers).
@@ -1252,6 +1362,7 @@ def create_app() -> FastAPI:
                         outcome.doc_id,
                         on_phase=lambda p: progress.set_phase(cid, p),
                         extra_env=serve_env,
+                        silence_timeout_s=silence_timeout_s,
                     )
                     if enrich_rc != 0:
                         logger.warning(
@@ -1291,6 +1402,7 @@ def create_app() -> FastAPI:
             finally:
                 ingesting.active = False  # leave exclusive-GPU mode → the RAG surfaces resume
                 ingesting.doc_name = ""
+                ingesting.cid = ""
 
     def _set_entry_doc_id(cid: str, doc_id: str) -> None:
         entry = progress.get(cid)
@@ -1368,17 +1480,50 @@ def create_app() -> FastAPI:
 
     @app.get("/ingest", response_class=HTMLResponse)
     async def ingest_page(request: Request) -> HTMLResponse:
-        """The upload page — pick a file, watch the full pipeline run, then open the document."""
-        return templates.TemplateResponse(request, "ingest.html", {})
+        """The upload page — pick a file, watch the full pipeline run, then open the document. If an
+        ingest is already in flight (you navigated away and came back), RESUME its live progress in
+        the pane instead of a form-only page that drops the running ingest from view (B7/B8)."""
+        ctx: dict[str, object] = {}
+        if ingesting.active and ingesting.cid and progress.get(ingesting.cid) is not None:
+            ctx["resume_cid"] = ingesting.cid
+        return templates.TemplateResponse(request, "ingest.html", ctx)
+
+    @app.get("/ingest/banner", response_class=HTMLResponse)
+    async def ingest_banner(request: Request) -> HTMLResponse:
+        """The self-refreshing 'being ingested' banner. While active it polls itself every 3s; once
+        the ingest finishes (`ingesting.active` flips False in `_run_ingest`'s finally — AFTER the
+        done-fragment renders, so a one-shot OOB clear at done would be premature) this returns the
+        trigger-less empty div, so the banner clears on its own with no reload (any open tab)."""
+        return templates.TemplateResponse(request, "_ingesting_banner.html", {})
+
+    @app.get("/ingest/lock", response_class=HTMLResponse)
+    async def ingest_lock(request: Request) -> HTMLResponse:
+        """The self-refresh target for the RAG-paused notice a GPU POST got mid-ingest: re-render
+        the same polling notice while still ingesting, else the trigger-less 'ready' fragment (stops
+        the poll) so the stale 'still ingesting' notice clears itself when the lock releases."""
+        if ingesting.active:
+            return templates.TemplateResponse(request, "_ingesting.html", {})
+        return templates.TemplateResponse(request, "_ask_ready.html", {})
 
     @app.post("/ingest", response_class=HTMLResponse)
     async def ingest_upload(
         request: Request,
-        file: UploadFile = File(...),  # noqa: B008  # FastAPI File default sentinel
+        file: UploadFile | None = File(None),  # noqa: B008  # optional → handle a missing field ourselves
     ) -> HTMLResponse:
         """Stream an upload to a temp file and start the ingest subprocess chain in a background
         task — returning `_progress.html`, which long-polls `/ingest/{cid}/status` through
         Parsing → Transcribing → Indexing → Enriching until the document is consumed."""
+        # A missing `file` field / wrong field name reaches here as None (the param is optional) — render
+        # the friendly fragment instead of FastAPI raising a raw 422 JSON that HTMX would swap in
+        # verbatim (B18). NB do NOT add `str` to the union to also catch an empty-filename multipart
+        # part — that makes FastAPI mis-bind REAL files as form strings; that hand-crafted/malformed
+        # case (not a real browser file input) is left as a documented residual.
+        if file is None:
+            return templates.TemplateResponse(
+                request,
+                "_ingest_done.html",
+                {"doc_id": None, "error": "No file was provided — choose a file to upload."},
+            )
         # Single-flight: one ingest at a time (the GPU is exclusive). Reject a 2nd concurrent
         # upload with the same 'answering paused' notice the RAG surfaces show.
         if ingesting.active:
@@ -1425,6 +1570,7 @@ def create_app() -> FastAPI:
             cid = str(ulid.ULID())
             entry = progress.new(cid, scope_doc_ids=[], scope_source="named")
             entry.phase = INGEST_PHASES[0]  # start on "Parsing", not the /ask default phase
+            ingesting.cid = cid  # so GET /ingest can RESUME the in-flight ingest's view (B7/B8)
             task = asyncio.create_task(_run_ingest(cid, tmp_path))
             progress.attach_task(cid, task)
             scheduled = True  # _run_ingest's finally now owns the lock + temp-file release
@@ -1455,6 +1601,7 @@ def create_app() -> FastAPI:
                 # stuck, and clean any temp file that was created.
                 ingesting.active = False
                 ingesting.doc_name = ""
+                ingesting.cid = ""
                 if tmp_path is not None:
                     shutil.rmtree(tmp_path.parent, ignore_errors=True)
 

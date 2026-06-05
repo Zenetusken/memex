@@ -1,0 +1,11 @@
+{% if ingesting_active() %}
+{# Self-refreshing: while a document ingests the banner polls and re-renders itself, so it CLEARS on
+   its own the moment the ingest finishes (the lock releases in `_run_ingest`'s finally, AFTER the
+   done-fragment renders — so a one-shot OOB clear at done would be premature). When inactive the
+   route returns the trigger-less empty div below, which stops the polling. #}
+<div id="ingesting-banner" hx-get="/ingest/banner" hx-trigger="every 3s" hx-swap="outerHTML" hx-target="this">
+  <div class="ingesting-banner" role="status">A document is being ingested — answering is paused while the pipeline uses the GPU. You can keep browsing documents you've already added.</div>
+</div>
+{% else %}
+<div id="ingesting-banner"></div>
+{% endif %}

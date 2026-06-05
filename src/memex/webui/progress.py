@@ -146,6 +146,14 @@ def ingest_phase_for(event: str, page: object = None) -> str:
         return "Transcribing · audio"
     if event == "index.start":
         return "Indexing"
+    if event == "vllm.restart.start":
+        # The ingest subprocess restarts the orchestrator it paused for the parse VLM in its OWN
+        # `pause_vllm_for_gpu` finally — AFTER indexing, before it exits (~40s of silence). Without
+        # this the widget sits on a bare "Indexing" the whole time and looks frozen; the eyebrow
+        # explains the wait. Mirrors the success path's webui-set "Enriching · restoring the
+        # orchestrator" so the label is consistent across paths (incl. 0-chunk/partial, which skip
+        # enrich and would otherwise freeze on "Indexing" until the verdict).
+        return "Indexing · restoring the orchestrator"
     if event == "enrich.start":
         return "Enriching"
     return ""
@@ -253,6 +261,17 @@ class ProgressRegistry:
 
     def get(self, cid: str) -> ProgressEntry | None:
         return self._entries.get(cid)
+
+    def inflight_tasks(self, *, exclude_cid: str) -> list[asyncio.Task[None]]:
+        """The outstanding (not-yet-done) background tasks except the given cid — the in-flight RAG
+        answers an ingest should let finish (bounded) BEFORE it unloads the retrieval models +
+        pauses the orchestrator. The ingest guard is admission-only, so an answer started before the
+        ingest outlives it and would otherwise be yanked out from under mid-run (B18)."""
+        return [
+            entry.task
+            for cid, entry in self._entries.items()
+            if cid != exclude_cid and entry.task is not None and not entry.task.done()
+        ]
 
     def evict(self, cid: str) -> None:
         self._entries.pop(cid, None)

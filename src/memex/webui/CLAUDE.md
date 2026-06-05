@@ -433,10 +433,51 @@ GPU-orchestrating ops can't race (the observed transient-3-vLLM). `ingest/valida
 0-byte/empty uploads (no junk 0-chunk doc); the ingest subprocess runs in its own session/group +
 is SIGKILL-group-reaped on a cancelled task (no orphaned GPU tree); a signal-exit reports
 "terminated by signal N (likely OOM)"; a null-byte filename degrades to the friendly fragment.
-**Still deferred (single-user v1):** in-flight-RAG drain before `unload_all`, a stdout-silence
-watchdog, a lifespan half-doc reconcile, a chunk_count/`fully-consumed` gate, navigate-away progress
-resume, a pre-stream 2 GiB ASGI cap, a multi-upload queue. The full live + 62-agent code-review hunt
-and the fixes are in the `[[ui-ingestion-livetest-2026-06-05]]` memory.
+**Deferred-backlog increments (2026-06-05, branch `fix/webui-ingestion-deferred`, each an
+independently-reviewed + tested commit):** the v1-deferred polish/hardening list above is now
+implemented. (1) **friendly no-file fragment** (`POST /ingest` with no file → a `_ingest_done.html`
+error fragment, not a 422) + **distinct "ingesting" copy** (`_ingesting.html` says "Still ingesting
+a document …", not the same "answering paused" as the lock banner). (2) **0-chunk `fully-consumed`
+gate** (`IngestOutcome.chunk_count` off the `index.done` structlog event → a parsed+indexed doc with
+ZERO chunks is surfaced as BROWSABLE-but-not-searchable, never "fully consumed"; enrich skipped). (3)
+**navigate-away progress resume** (`_IngestState.cid` holds the in-flight ingest's progress cid → a
+`GET /ingest` while one runs resumes its live `_progress.html` instead of a blank pane). (4)
+**pre-stream Content-Length cap** (`_UploadSizeLimitMiddleware`, an ASGI pure-middleware that rejects
+an over-2-GiB `Content-Length` BEFORE the body streams to disk). (5) **half-doc detect on startup**
+(`_scan_half_docs` in the lifespan logs `startup.half_docs_detected` for an `ingest`-but-no-`index`
+manifest — detect+log only, never auto-deletes; per-file `suppress` so one corrupt manifest can't
+hide the rest). (6) **in-flight-RAG drain** (`_run_ingest` awaits the OTHER-cid in-flight answer
+tasks — `progress.inflight_tasks(exclude_cid=…)` + `_drain_inflight_rag`, bounded 8s — BEFORE
+`unload_all()`, so an answer already running when the ingest started isn't yanked out mid-run). (7)
+**silence watchdog** (`ingest_driver._silence_watchdog` SIGKILLs a hung child that emits no output
+for `ingest.silence_timeout_s` (default 1800s, env `MEMEX_INGEST__SILENCE_TIMEOUT_S`; NOT a total
+timeout) — else the RAG lock never releases. **Phase-aware** (the Inc-7-review B1 fix): the stderr
+sink toggles `_Activity.in_asr` on `asr.transcribe.start`/`.done`, so the watchdog applies a SEPARATE
+generous budget `ingest.asr_silence_timeout_s` (default ~8h, env `MEMEX_INGEST__ASR_SILENCE_TIMEOUT_S`)
+during ASR — which is SILENT for its whole duration (faster-whisper = one blocking call), so the
+normal budget would false-kill legit long media AND, since ASR caches only on success, loop forever
+on the re-transcribe). All HARD-gate-neutral (GPU-lifecycle / presentation only). Pinned by the new cases in `test_webui.py` /
+`test_ingest_driver.py` / `test_progress.py`. The full live + 62-agent code-review hunt that surfaced
+the backlog is in the `[[ui-ingestion-livetest-2026-06-05]]` memory.
+
+**Live-UI-pass polish (2026-06-05).** Two findings from the thorough live pass, fixed: **(a) the
+"ingesting" banner + the RAG-paused notice now SELF-CLEAR.** They live OUTSIDE the long-poll swap, so
+they used to linger until a manual reload; a one-shot `hx-swap-oob` clear at the done-fragment render
+would be PREMATURE (`ingesting.active` flips False in `_run_ingest`'s `finally` AFTER `progress.finish()`
++ the reconcile, so the 0-chunk/partial paths hold the lock ~40s past "done"). So `_ingesting_banner.html`
+(included by `base.html`) + `_ingesting.html` SELF-REFRESH (the `every 5s` VRAM-panel pattern) — they
+poll `GET /ingest/banner` / `GET /ingest/lock` every 3s while active and swap to a trigger-less fragment
+(empty banner / `_ask_ready.html` "re-run your request") the moment the lock releases, so they clear on
+their own, any tab, every path, no reload. **(b) the end-of-ingest orchestrator restart is now LABELLED:**
+the subprocess restarts the orchestrator it paused for the parse VLM in its own `pause_vllm_for_gpu`
+finally (~40s of silence after indexing), which left the widget on a bare "Indexing"; `ingest_phase_for`
+maps the drained `vllm.restart.start` → "Indexing · restoring the orchestrator" so the eyebrow explains
+the wait on ALL paths (the success path already showed it via the webui-set "Enriching · restoring the
+orchestrator"). Both presentation-only ⇒ HARD-gate-neutral.
+
+**Still deferred (single-user v1):** a multi-upload QUEUE (v1 rejects a 2nd concurrent ingest with a
+409 rather than queueing — a design change, not a hardening fix; the single-flight `_IngestState`
+lock is the v1 contract).
 
 ## Two inline-edit flows (both HTMX view/edit toggles)
 
