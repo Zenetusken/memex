@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import tempfile
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,7 @@ from memex.agents.answering import (
 )
 from memex.core.config import MemexSettings, set_settings
 from memex.core.types import Chunk
+from memex.daemon.supervisor import DaemonStatus
 from memex.ingest.pipeline import ingest_markdown_passthrough
 from memex.parse.pdf_render import PDFPreviewError
 from memex.webui.app import create_app
@@ -2893,8 +2895,21 @@ async def test_ask_renders_companion_chip_for_aligned_transcript_chunk(
 # ----- Frictionless document ingestion (upload → pipeline → browsable) -----
 
 
+def _patch_daemon_reachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fake daemon_status → reachable, so `_await_orchestrator_reachable` returns at once (no real
+    daemon dependency, no 150s poll)."""
+
+    async def _status(*_a: object, **_k: object) -> DaemonStatus:
+        return DaemonStatus(
+            pid=1, alive=True, reachable=True, base_url="http://t/v1", pid_file="", log_file=""
+        )
+
+    monkeypatch.setattr("memex.webui.app.daemon_status", _status)
+
+
 def _patch_ingest(monkeypatch: pytest.MonkeyPatch, *, outcome: IngestOutcome) -> None:
     """Patch the ingest_driver subprocess calls with fakes (no real `memex ingest`/`enrich`)."""
+    _patch_daemon_reachable(monkeypatch)
 
     async def _fake_run_ingest(
         _file_path: Path, *, on_phase: Callable[[str], None], **_kw: object
@@ -3035,6 +3050,7 @@ async def test_ingest_streams_upload_bytes_to_subprocess_file(
     async def _ok_enrich(_doc_id: str, *, on_phase: Callable[[str], None], **_kw: object) -> int:
         return 0
 
+    _patch_daemon_reachable(monkeypatch)
     monkeypatch.setattr("memex.webui.ingest_driver.run_ingest", _capture_ingest)
     monkeypatch.setattr("memex.webui.ingest_driver.run_enrich", _ok_enrich)
     payload = b"%PDF-1.7 the actual uploaded bytes \x00\x01\x02 " * 200
@@ -3051,6 +3067,7 @@ async def test_ingest_driver_crash_renders_failed(
     ) -> IngestOutcome:
         raise RuntimeError("driver exploded")
 
+    _patch_daemon_reachable(monkeypatch)
     monkeypatch.setattr("memex.webui.ingest_driver.run_ingest", _boom)
     app = create_app()
     text = await _ingest_to_completion(app, content=b"x", filename="x.pdf")
@@ -3072,6 +3089,7 @@ async def test_ingest_enrich_failure_still_links_browsable_doc(
     async def _boom_enrich(_doc_id: str, *, on_phase: Callable[[str], None], **_kw: object) -> int:
         raise RuntimeError("enrich exploded")
 
+    _patch_daemon_reachable(monkeypatch)
     monkeypatch.setattr("memex.webui.ingest_driver.run_ingest", _ok_ingest)
     monkeypatch.setattr("memex.webui.ingest_driver.run_enrich", _boom_enrich)
     text = await _ingest_to_completion(create_app(), content=b"%PDF", filename="x.pdf")
@@ -3153,3 +3171,47 @@ def test_ingesting_lock_released_on_stream_failure(
     with pytest.raises(RuntimeError):
         client.post("/ingest", files={"file": ("a.pdf", b"%PDF", "application/pdf")})
     assert client.app.state.ingesting.active is False  # released by the finally, not stuck
+
+
+# ----- Exclusive-GPU ingestion mode: GPU release + orchestrator serve-env (Inc 4) -----
+
+
+async def test_ingest_injects_orchestrator_serve_env(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The ADR-0015 fix: the subprocess's post-parse vLLM restart must bring up the CONFIGURED
+    # orchestrator (not the serve-script default). Assert the driver receives the serve-env so a
+    # silent post-ingest 404 storm can't regress unnoticed.
+    captured: dict[str, dict[str, str]] = {}
+
+    async def _capture(
+        _fp: Path,
+        *,
+        on_phase: Callable[[str], None],
+        extra_env: dict[str, str] | None = None,
+        **_kw: object,
+    ) -> IngestOutcome:
+        captured["env"] = extra_env or {}
+        return IngestOutcome(accepted=True, exit_code=0, doc_id="abcd1234-env")
+
+    async def _ok_enrich(_d: str, *, on_phase: Callable[[str], None], **_kw: object) -> int:
+        return 0
+
+    _patch_daemon_reachable(monkeypatch)
+    monkeypatch.setattr("memex.webui.ingest_driver.run_ingest", _capture)
+    monkeypatch.setattr("memex.webui.ingest_driver.run_enrich", _ok_enrich)
+    await _ingest_to_completion(create_app(), content=b"%PDF", filename="x.pdf")
+    assert "MEMEX_VLLM_MODEL" in captured["env"]  # the orchestrator serve-env was injected
+
+
+async def test_ingest_cleans_up_temp_upload_dir(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The per-upload temp dir (mkdtemp, named for the original file) must not leak.
+    before = set(Path(tempfile.gettempdir()).glob("memex-upload-*"))
+    _patch_ingest(
+        monkeypatch, outcome=IngestOutcome(accepted=True, exit_code=0, doc_id="abcd1234-clean")
+    )
+    await _ingest_to_completion(create_app(), content=b"%PDF", filename="x.pdf")
+    after = set(Path(tempfile.gettempdir()).glob("memex-upload-*"))
+    assert after <= before  # no new memex-upload-* dir lingers after completion

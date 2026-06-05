@@ -21,4 +21,10 @@
 </form>
 
 <section id="ingest-pane" class="mt-8"></section>
+
+<h2 class="text-sm font-medium text-zinc-400 mt-8 mb-2">GPU — live</h2>
+{# The exclusive-GPU ingestion mode dedicates the GPU to the pipeline. This reuses the
+   /resources VRAM panel (a read-only nvidia-smi + torch probe), self-refreshing every 5s,
+   so the parse/VLM serve is visible holding the card during an ingest. #}
+<div hx-get="/resources/vram" hx-trigger="load" hx-swap="outerHTML"></div>
 {% endblock %}

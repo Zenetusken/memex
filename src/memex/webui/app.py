@@ -45,7 +45,7 @@ import re
 import shutil
 import tempfile
 from collections.abc import AsyncGenerator, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -89,6 +89,7 @@ from memex.core.scope_sets import (
 from memex.core.types import Chunk, CompanionAlignment
 from memex.daemon import restart as daemon_restart
 from memex.daemon import status as daemon_status
+from memex.daemon.supervisor import orchestrator_serve_env
 from memex.index.graph_store import GraphStore
 from memex.index.pipeline import retitle_document
 from memex.models.registry import ModelNotConfigured, get_registry
@@ -1207,17 +1208,32 @@ def create_app() -> FastAPI:
         phases into the registry. Top of a fire-and-forget task — never crash silently; always
         clean up the temp upload."""
         try:
+            # Release the webui's own GPU models (embedder/reranker) so the parse-time VLM serve
+            # fits. The lock (set in the route) blocks new RAG reloads; these reload lazily on the
+            # next /ask. No-op if nothing's resident (a CPU-only webui or a fresh process).
+            try:
+                await get_registry().unload_all()
+            except ModelNotConfigured:
+                pass
+            # Inject the orchestrator serve-env so the subprocess's post-parse vLLM restart (via
+            # serve-vllm.sh, inheriting this env) brings up the CONFIGURED orchestrator, not the
+            # serve-script's hardcoded default — else every post-ingest /ask 404s (ADR-0015 / D3).
+            serve_env = orchestrator_serve_env(get_settings())
             outcome = await ingest_driver.run_ingest(
-                tmp_path, on_phase=lambda p: progress.set_phase(cid, p)
+                tmp_path, on_phase=lambda p: progress.set_phase(cid, p), extra_env=serve_env
             )
             if outcome.succeeded and outcome.doc_id is not None:
                 # Parsed + indexed ⇒ the doc is askable + browsable NOW. Record the link BEFORE
                 # the best-effort enrich, so a failed enrich never discards a usable document
                 # (enrich is HARD-gate-neutral graph discovery; a doc without it still answers).
                 _set_entry_doc_id(cid, outcome.doc_id)
+                # Enrich needs the orchestrator UP for citations — the ingest left it mid-restart.
+                await _await_orchestrator_reachable()
                 try:
                     enrich_rc = await ingest_driver.run_enrich(
-                        outcome.doc_id, on_phase=lambda p: progress.set_phase(cid, p)
+                        outcome.doc_id,
+                        on_phase=lambda p: progress.set_phase(cid, p),
+                        extra_env=serve_env,
                     )
                     if enrich_rc != 0:
                         logger.warning(
@@ -1244,7 +1260,10 @@ def create_app() -> FastAPI:
             logger.error("ingest.crashed", error_type=type(e).__name__, error=str(e)[:200])
             progress.finish(cid, error="An unexpected error occurred while ingesting.")
         finally:
-            tmp_path.unlink(missing_ok=True)
+            shutil.rmtree(tmp_path.parent, ignore_errors=True)  # the per-upload temp dir
+            # Don't resume the RAG surfaces until the orchestrator is back (the ingest restarted
+            # it on the way out) — best-effort + bounded, so a stuck orchestrator still releases.
+            await _await_orchestrator_reachable()
             ingesting.active = False  # leave the exclusive-GPU mode → the RAG surfaces resume
             ingesting.doc_name = ""
 
@@ -1252,6 +1271,22 @@ def create_app() -> FastAPI:
         entry = progress.get(cid)
         if entry is not None:
             entry.doc_id = doc_id
+
+    async def _await_orchestrator_reachable(*, timeout_s: float = 150.0) -> None:
+        """Poll the orchestrator until it's reachable again — the ingest subprocess pauses it for
+        the parse-time VLM serve and restarts it (~30-90s) on the way out. Best-effort + bounded:
+        on timeout, proceed anyway (enrich / the next /ask surfaces a real failure)."""
+        settings = get_settings()
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_s
+        while loop.time() < deadline:
+            with suppress(
+                Exception
+            ):  # transient errors while the orchestrator restarts are expected
+                if (await daemon_status(settings)).reachable:
+                    return
+            await asyncio.sleep(2.0)
+        logger.warning("ingest.orchestrator_unreachable_timeout", timeout_s=timeout_s)
 
     @app.get("/ingest", response_class=HTMLResponse)
     async def ingest_page(request: Request) -> HTMLResponse:
@@ -1288,11 +1323,13 @@ def create_app() -> FastAPI:
         scheduled = False
         tmp_path: Path | None = None
         try:
-            # Stream to disk in a thread (never read a 2 GiB upload into RAM, never block the loop).
-            suffix = Path(file.filename or "upload").suffix
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                tmp_path = Path(tmp.name)
-                await asyncio.to_thread(shutil.copyfileobj, file.file, tmp)
+            # Stream to a temp dir UNDER the original filename, so the ingested doc's title is the
+            # uploaded name (not a random tmp name). `.name` strips path components (no traversal).
+            # Never read a 2 GiB upload into RAM / never block the loop (the copy runs in a thread).
+            safe_name = Path(file.filename or "upload").name or "upload"
+            tmp_path = Path(tempfile.mkdtemp(prefix="memex-upload-")) / safe_name
+            with tmp_path.open("wb") as out:
+                await asyncio.to_thread(shutil.copyfileobj, file.file, out)
             cid = str(ulid.ULID())
             entry = progress.new(cid, scope_doc_ids=[], scope_source="named")
             entry.phase = INGEST_PHASES[0]  # start on "Parsing", not the /ask default phase
@@ -1325,7 +1362,7 @@ def create_app() -> FastAPI:
                 ingesting.active = False
                 ingesting.doc_name = ""
                 if tmp_path is not None:
-                    tmp_path.unlink(missing_ok=True)
+                    shutil.rmtree(tmp_path.parent, ignore_errors=True)
 
     @app.get("/ingest/{cid}/status", response_class=HTMLResponse)
     async def ingest_status(request: Request, cid: str = "", v: int = 0) -> HTMLResponse:
