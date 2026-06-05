@@ -11,6 +11,7 @@ import asyncio
 import re
 import tempfile
 from collections.abc import Callable, Iterator
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 
@@ -3378,6 +3379,40 @@ async def test_upload_size_limit_middleware_passes_normal_and_other_routes() -> 
         downstream_called = False
         await mw(scope, receive, send)
         assert downstream_called is True
+
+
+async def test_scan_half_docs_detects_interrupted_ingest(tmp_path: Path) -> None:
+    # B19: the startup scan surfaces interrupted ingests — a manifest with the `ingest` stage but no
+    # `index` (parsed/partial but NOT searchable). Detect-only (the caller logs, never auto-deletes).
+    from datetime import datetime
+
+    from memex.core.manifest import IndexStage, IngestStage, Manifest, write_manifest
+    from memex.webui.app import _scan_half_docs
+
+    ts = datetime(2026, 1, 1, tzinfo=UTC)
+    ingest = IngestStage(
+        correlation_id="c1",
+        ingested_at=ts,
+        source_path="/x.pdf",
+        source_size_bytes=10,
+        detected_mime="application/pdf",
+    )
+    index = IndexStage(
+        correlation_id="c1", indexed_at=ts, embedding_model="m", embedding_dim=8, chunk_count=3
+    )
+    await write_manifest(tmp_path, Manifest(doc_id="halfdoc", content_sha256="a", ingest=ingest))
+    await write_manifest(
+        tmp_path, Manifest(doc_id="fulldoc", content_sha256="b", ingest=ingest, index=index)
+    )
+    await write_manifest(tmp_path, Manifest(doc_id="nostages", content_sha256="c"))
+
+    assert await _scan_half_docs(tmp_path) == ["halfdoc"]  # only the ingested-but-not-indexed one
+
+
+async def test_scan_half_docs_empty_when_no_manifests(tmp_path: Path) -> None:
+    from memex.webui.app import _scan_half_docs
+
+    assert await _scan_half_docs(tmp_path) == []
 
 
 async def test_ingesting_lock_set_then_cleared_after_completion(

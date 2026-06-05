@@ -73,7 +73,7 @@ from memex.core.errors import (
     StaleDocumentError,
     VaultIntegrityError,
 )
-from memex.core.manifest import update_manifest
+from memex.core.manifest import read_manifest, update_manifest
 from memex.core.resources import (
     RERANKER_GPU_FLOOR_GB,
     CoResidenceMode,
@@ -234,6 +234,23 @@ def _content_length(scope: Scope) -> int | None:
             except ValueError:
                 return None
     return None
+
+
+async def _scan_half_docs(vault_path: Path) -> list[str]:
+    """Return the doc_ids of orphaned HALF-DOCS — interrupted ingests whose manifest has the
+    ``ingest`` stage but no ``index`` (parsed/partial but NOT searchable, e.g. the process died
+    mid-ingest). DETECTION ONLY: the caller LOGS them and NEVER auto-deletes — a heuristic mis-fire
+    must not remove a legit document; the user re-ingests or ``memex remove``s them. The full
+    resume/sweep is out of scope (B19)."""
+    manifests_dir = vault_path / ".memex" / "manifests"
+    if not manifests_dir.exists():
+        return []
+    half: list[str] = []
+    for manifest_file in sorted(manifests_dir.glob("*.json")):
+        manifest = await read_manifest(vault_path, manifest_file.stem)
+        if manifest is not None and manifest.ingest is not None and manifest.index is None:
+            half.append(manifest_file.stem)
+    return half
 
 
 class _UploadSizeLimitMiddleware:
@@ -653,9 +670,20 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def _lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-        """Clean shutdown (dynamic VRAM manager): on exit, release every GPU model this server loaded so
-        its VRAM doesn't linger and contend with the next process's parse / VLM-serve — the proactive fix
-        for the stale-webui-holds-VRAM trap. No-op if the registry was never initialised (a test app)."""
+        """Startup: surface orphaned half-docs left by a previous interrupted ingest (B19 — detect +
+        log, NEVER auto-delete). Shutdown (dynamic VRAM manager): release every GPU model this server
+        loaded so its VRAM doesn't linger + contend with the next process's parse / VLM-serve — the
+        proactive fix for the stale-webui-holds-VRAM trap. No-op if the registry was never
+        initialised (a test app)."""
+        with suppress(Exception):  # a scan failure must never block startup
+            half = await _scan_half_docs(get_settings().vault_path)
+            if half:
+                logger.warning(
+                    "startup.half_docs_detected",
+                    count=len(half),
+                    doc_ids=half[:20],
+                    hint="interrupted ingests (ingested but not indexed) — re-ingest or `memex remove`",
+                )
         yield
         try:
             await get_registry().unload_all()
