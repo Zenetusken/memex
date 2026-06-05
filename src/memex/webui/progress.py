@@ -254,6 +254,17 @@ class ProgressRegistry:
     def get(self, cid: str) -> ProgressEntry | None:
         return self._entries.get(cid)
 
+    def inflight_tasks(self, *, exclude_cid: str) -> list[asyncio.Task[None]]:
+        """The outstanding (not-yet-done) background tasks except the given cid — the in-flight RAG
+        answers an ingest should let finish (bounded) BEFORE it unloads the retrieval models +
+        pauses the orchestrator. The ingest guard is admission-only, so an answer started before the
+        ingest outlives it and would otherwise be yanked out from under mid-run (B18)."""
+        return [
+            entry.task
+            for cid, entry in self._entries.items()
+            if cid != exclude_cid and entry.task is not None and not entry.task.done()
+        ]
+
     def evict(self, cid: str) -> None:
         self._entries.pop(cid, None)
 

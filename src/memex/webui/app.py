@@ -166,7 +166,7 @@ class _IngestState:
     def __init__(self) -> None:
         self.active = False
         self.doc_name = ""
-        self.cid = ""  # the in-flight ingest's progress cid, so GET /ingest can resume its live view
+        self.cid = ""  # in-flight ingest's progress cid, so GET /ingest can resume its view
 
 
 # Mirrors `vault.store.assign_doc_id`'s output shape: 8-hex prefix
@@ -1293,11 +1293,29 @@ def create_app() -> FastAPI:
     # GPU lock (RAG paused) + the GPU release / orchestrator reconcile layer on in later
     # increments; this is the upload + live-progress + done-fragment spine.
 
+    async def _drain_inflight_rag(ingest_cid: str, *, timeout_s: float = 8.0) -> None:
+        """Await any RAG answer tasks still in flight (bounded) before the ingest unloads the GPU
+        models + pauses the orchestrator (B18). Bounded + best-effort: a slow answer past the budget
+        keeps running and then fails gracefully against the paused orchestrator (the prior behaviour)
+        — it never blocks the ingest. `asyncio.wait` WAITS for (does not cancel) the tasks."""
+        tasks = progress.inflight_tasks(exclude_cid=ingest_cid)
+        if not tasks:
+            return
+        logger.info("ingest.draining_inflight_rag", count=len(tasks), timeout_s=timeout_s)
+        with suppress(Exception):
+            await asyncio.wait(tasks, timeout=timeout_s)
+
     async def _run_ingest(cid: str, tmp_path: Path) -> None:
         """Background runner: drive `memex ingest` (then `enrich`) as subprocesses, streaming
         phases into the registry. Top of a fire-and-forget task — never crash silently; always
         clean up the temp upload."""
         try:
+            # Let any RAG answer ALREADY in flight finish (bounded) BEFORE we unload the retrieval
+            # models + the subprocess pauses the orchestrator. The ingest guard is admission-only,
+            # so an answer started before this ingest outlives it and would otherwise be yanked out
+            # mid-run (B18). Best-effort: a slow answer past the budget proceeds anyway — it then
+            # fails gracefully against the paused orchestrator, exactly as before (no new hang).
+            await _drain_inflight_rag(cid)
             # Release the webui's own GPU models (embedder/reranker) so the parse-time VLM serve
             # fits. The lock (set in the route) blocks new RAG reloads; these reload lazily on the
             # next /ask. No-op if nothing's resident (a CPU-only webui or a fresh process).
@@ -1528,7 +1546,7 @@ def create_app() -> FastAPI:
             cid = str(ulid.ULID())
             entry = progress.new(cid, scope_doc_ids=[], scope_source="named")
             entry.phase = INGEST_PHASES[0]  # start on "Parsing", not the /ask default phase
-            ingesting.cid = cid  # so GET /ingest can RESUME this in-flight ingest's live view (B7/B8)
+            ingesting.cid = cid  # so GET /ingest can RESUME the in-flight ingest's view (B7/B8)
             task = asyncio.create_task(_run_ingest(cid, tmp_path))
             progress.attach_task(cid, task)
             scheduled = True  # _run_ingest's finally now owns the lock + temp-file release

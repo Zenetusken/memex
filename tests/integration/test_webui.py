@@ -3509,3 +3509,41 @@ async def test_ingest_cleans_up_temp_upload_dir(
     await _ingest_to_completion(create_app(), content=b"%PDF", filename="x.pdf")
     after = set(Path(tempfile.gettempdir()).glob("memex-upload-*"))
     assert after <= before  # no new memex-upload-* dir lingers after completion
+
+
+async def test_ingest_drains_inflight_rag_before_unloading_gpu(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # B18: an ingest must let an ALREADY-in-flight RAG answer finish before it unloads the GPU
+    # models + the subprocess pauses the orchestrator — else the answer is yanked out mid-run.
+    # Prove _drain_inflight_rag awaits the in-flight task BEFORE get_registry().unload_all() runs.
+    _patch_ingest(
+        monkeypatch,
+        outcome=IngestOutcome(accepted=True, exit_code=0, doc_id="abcd1234-doc", chunk_count=5),
+    )
+
+    slow_finished = asyncio.Event()
+    inflight_done_at_unload: list[bool] = []
+
+    class _Reg:
+        async def unload_all(self) -> None:
+            # Record whether the in-flight RAG answer had finished by the time the ingest unloads.
+            inflight_done_at_unload.append(slow_finished.is_set())
+
+    monkeypatch.setattr("memex.webui.app.get_registry", lambda: _Reg())
+
+    app = create_app()
+
+    async def _slow_answer() -> None:
+        await asyncio.sleep(0.1)
+        slow_finished.set()
+
+    # Seed a slow in-flight RAG answer under its OWN cid (started before the ingest).
+    rag_task = asyncio.create_task(_slow_answer())
+    app.state.progress.new("rag-cid", scope_doc_ids=[], scope_source="named")
+    app.state.progress.attach_task("rag-cid", rag_task)
+
+    await _ingest_to_completion(app, content=b"%PDF", filename="x.pdf")
+    await rag_task
+
+    assert inflight_done_at_unload == [True]  # the drain awaited the in-flight answer first
