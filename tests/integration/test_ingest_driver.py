@@ -11,6 +11,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import pytest
+
 from memex.webui.ingest_driver import Spawn, run_enrich, run_ingest
 
 
@@ -217,3 +219,62 @@ async def test_run_ingest_concurrent_drain_survives_large_interleaved_output() -
     assert outcome.doc_id == "real1234-doc"
     assert outcome.accepted
     assert any(p.startswith("Transcribing · page") for p in phases)
+
+
+async def test_run_ingest_watchdog_kills_silent_hung_child(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A hung child that emits NO output must be SIGKILLed by the SILENCE watchdog — else the webui's
+    # RAG lock would never release (answering permanently paused). Spawn a REAL silent sleeper, give
+    # it a tiny silence budget, and confirm it's signal-killed with the "hung" rejection (distinct
+    # from the OOM-signal message). The fast poll keeps the test sub-second; the outer `wait_for`
+    # fails the test if the watchdog does NOT fire.
+    monkeypatch.setattr("memex.webui.ingest_driver._WATCHDOG_POLL_S", 0.05)
+
+    async def spawn(*_args: str, env: dict[str, str]) -> asyncio.subprocess.Process:
+        return await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-c",
+            "import time; time.sleep(30)",  # no output, sleeps well past the budget
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,  # so _terminate's killpg reaps the whole group
+        )
+
+    outcome = await asyncio.wait_for(
+        run_ingest(Path("hang.pdf"), on_phase=lambda _p: None, spawn=spawn, silence_timeout_s=0.1),
+        timeout=10,
+    )
+    assert not outcome.accepted
+    assert outcome.exit_code < 0  # killed by a signal (SIGKILL from the watchdog)
+    assert "hung" in (outcome.rejection_reason or "")
+
+
+async def test_run_ingest_watchdog_does_not_kill_active_child(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A child that keeps STREAMING output (even slowly) must NOT be killed: every line resets the
+    # idle timer, so an active-but-slow ingest survives a tight silence budget. Three lines spaced
+    # below the budget, then a clean result.
+    monkeypatch.setattr("memex.webui.ingest_driver._WATCHDOG_POLL_S", 0.02)
+    script = (
+        "import sys, json, time\n"
+        "for i in range(3):\n"
+        "    sys.stderr.write(json.dumps({'event': 'vlm.start', 'page': i}) + '\\n')\n"
+        "    sys.stderr.flush(); time.sleep(0.05)\n"
+        "sys.stdout.write(json.dumps({'accepted': True, 'doc_id': 'alive123-doc'}) + '\\n')\n"
+    )
+
+    async def spawn(*_args: str, env: dict[str, str]) -> asyncio.subprocess.Process:
+        return await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-c",
+            script,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
+        )
+
+    outcome = await asyncio.wait_for(
+        run_ingest(Path("slow.pdf"), on_phase=lambda _p: None, spawn=spawn, silence_timeout_s=0.15),
+        timeout=10,
+    )
+    assert outcome.accepted and outcome.doc_id == "alive123-doc"  # streamed → never tripped

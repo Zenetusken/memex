@@ -292,6 +292,12 @@ class IngestSettings(BaseModel):
 
     max_bytes: int = Field(default=256 * 1024 * 1024, ge=1024)
     allow_macros: bool = False  # macro-bearing Office docs are rejected by default
+    # The webui ingest-subprocess SILENCE watchdog: SIGKILL a hung `memex ingest`/`enrich` child
+    # that produces NO output for this long (a wedged GPU / deadlocked VLM serve that escapes the
+    # parse workers' own timeouts — else the RAG lock never releases). NOT a total timeout. Sits
+    # above docling's 1200s per-doc timeout. Raise it for multi-hour audio/video (ASR transcribes
+    # silently for its whole duration). See `webui/ingest_driver.py`.
+    silence_timeout_s: float = Field(default=1800.0, ge=60.0)
 
 
 class ParseSettings(BaseModel):
