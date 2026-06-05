@@ -3204,8 +3204,9 @@ async def test_ingest_enrich_failure_still_links_browsable_doc(
 
 
 def test_ingesting_locks_all_rag_posts(client: TestClient) -> None:
-    """While a document is ingesting, every RAG POST returns the 'answering paused' fragment
-    (the orchestrator is down + the GPU is exclusive — an honest pause beats a 404'd answer)."""
+    """While a document is ingesting, every RAG POST returns the action-pane 'still ingesting'
+    fragment (the orchestrator is down + the GPU is exclusive — an honest pause beats a 404'd
+    answer). The wording is distinct from the global page banner (B20)."""
     client.app.state.ingesting.active = True
     posts: list[tuple[str, dict[str, str]]] = [
         ("/ask", {"question": "x"}),
@@ -3217,7 +3218,7 @@ def test_ingesting_locks_all_rag_posts(client: TestClient) -> None:
     for path, data in posts:
         r = client.post(path, data=data)
         assert r.status_code == 200, f"{path}: {r.status_code}"
-        assert "answering is paused" in r.text, f"{path} did not lock"
+        assert "Still ingesting" in r.text, f"{path} did not lock"
 
 
 def test_ingesting_shows_banner_on_entry_page(client: TestClient) -> None:
@@ -3245,7 +3246,16 @@ def test_ingesting_rejects_concurrent_upload(
     client.app.state.ingesting.active = True  # an ingest is already running
     r = client.post("/ingest", files={"file": ("a.pdf", b"%PDF", "application/pdf")})
     assert r.status_code == 200
-    assert "answering is paused" in r.text  # single-flight: rejected, not a 2nd ingest
+    assert "Still ingesting" in r.text  # single-flight: rejected with the action-pane notice
+
+
+def test_ingest_no_file_renders_friendly_fragment(client: TestClient) -> None:
+    # A malformed POST (no `file` field) must NOT surface FastAPI's raw 422 JSON in the HTMX pane —
+    # the optional file param + a None check render the friendly done-fragment instead (B18).
+    r = client.post("/ingest", data={"notafile": "x"})
+    assert r.status_code == 200
+    assert "No file was provided" in r.text
+    assert "Ingest failed" in r.text  # the failed branch of _ingest_done.html
 
 
 async def test_ingesting_lock_set_then_cleared_after_completion(

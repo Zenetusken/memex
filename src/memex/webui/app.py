@@ -1374,11 +1374,20 @@ def create_app() -> FastAPI:
     @app.post("/ingest", response_class=HTMLResponse)
     async def ingest_upload(
         request: Request,
-        file: UploadFile = File(...),  # noqa: B008  # FastAPI File default sentinel
+        file: UploadFile | None = File(None),  # noqa: B008  # optional → handle a missing field ourselves
     ) -> HTMLResponse:
         """Stream an upload to a temp file and start the ingest subprocess chain in a background
         task — returning `_progress.html`, which long-polls `/ingest/{cid}/status` through
         Parsing → Transcribing → Indexing → Enriching until the document is consumed."""
+        # A malformed POST (no `file` field / wrong field name) — the file is OPTIONAL so it reaches
+        # here as None instead of FastAPI raising a raw 422 JSON that HTMX would swap in verbatim.
+        # Render the friendly done-fragment instead (B18).
+        if file is None:
+            return templates.TemplateResponse(
+                request,
+                "_ingest_done.html",
+                {"doc_id": None, "error": "No file was provided — choose a file to upload."},
+            )
         # Single-flight: one ingest at a time (the GPU is exclusive). Reject a 2nd concurrent
         # upload with the same 'answering paused' notice the RAG surfaces show.
         if ingesting.active:
