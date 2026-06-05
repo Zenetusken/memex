@@ -37,6 +37,7 @@ from memex.core.errors import ConfigurationError
 from memex.core.manifest import (
     ChartExtraction,
     IndexStage,
+    PageDecision,
     now_utc,
     read_manifest,
     update_manifest,
@@ -167,6 +168,22 @@ def _embed_recipe_version() -> str:
     return "v1-gemma-prompts" if native_prompts_enabled() else "v0"
 
 
+def _citation_grade_boundaries(pages: list[PageDecision]) -> list[tuple[int, int]] | None:
+    """Companion arc-3: the `(page_no, char_start)` boundaries for a CITATION-GRADE manifest,
+    else `None` (→ the nav-grade `page_char_counts` path).
+
+    A page that contributed no markdown (`char_count == 0` — a figure-only / empty deck slide) got
+    NO page-boundary marker at parse, so it legitimately carries `char_start == -1` and no chunk is
+    ever attributed to it. We gate on the CONTENT pages only: the parse round-trip is all-or-nothing
+    (every non-empty page gets a `char_start`, or NONE do on a byte mismatch), so "every content page
+    >= 0" exactly distinguishes a citation-grade manifest from a legacy/nav-grade one — WITHOUT a
+    single figure-only slide demoting the whole deck back to nav-grade."""
+    content = [p for p in pages if p.char_count > 0]
+    if content and all(p.char_start >= 0 for p in content):
+        return sorted((p.page, p.char_start) for p in content)
+    return None
+
+
 def _exact_page_intervals(
     plain_body: str,
     indexed_body: str,
@@ -240,9 +257,7 @@ async def index_document(doc_id: str, *, force: bool = False) -> IndexResult:
             segment_intervals = [
                 (s.char_start, s.char_end, s.start_s, s.end_s) for s in prior_manifest.parse.segments
             ]
-        _parse_pages = prior_manifest.parse.pages
-        if _parse_pages and all(p.char_start >= 0 for p in _parse_pages):
-            exact_boundaries = sorted((p.page, p.char_start) for p in _parse_pages)
+        exact_boundaries = _citation_grade_boundaries(prior_manifest.parse.pages)
     # Re-attach the chart-OCR `[chart-extracted]` blocks (from the parse manifest sidecar) at the
     # `<!-- image -->` positions, then re-derive the `[table-rows]` linearization — NEITHER lives
     # in the vault `.md`, which is content-only since audit-10. Both transforms reproduce the SAME

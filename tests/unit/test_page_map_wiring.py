@@ -9,11 +9,17 @@ never churn the content-addressed chunk_ids. These pin both the happy path and t
 
 from __future__ import annotations
 
-from memex.core.manifest import ChartExtraction
+from memex.core.manifest import ChartExtraction, PageDecision
 from memex.core.table_linearize import linearize_gfm_tables
 from memex.core.text import reattach_chart_extractions
-from memex.index.pipeline import _exact_page_intervals
+from memex.index.pipeline import _citation_grade_boundaries, _exact_page_intervals
 from memex.parse.pipeline import _finalize_body, _finalize_body_with_page_starts
+
+
+def _pd(page: int, *, char_count: int, char_start: int) -> PageDecision:
+    return PageDecision(
+        page=page, engine="docling", confidence=1.0, char_count=char_count, char_start=char_start
+    )
 
 # ----- parse side: _finalize_body_with_page_starts -----------------------------------------------
 
@@ -79,3 +85,33 @@ def test_exact_page_intervals_guard_falls_back_on_bad_offset() -> None:
 
 def test_exact_page_intervals_empty_boundaries() -> None:
     assert _exact_page_intervals(_PLAIN_BODY, _INDEXED, [], _CHARTS, doc_id="d") is None
+
+
+# ----- the citation-grade gate: a figure-only slide must NOT demote the whole deck ----------------
+
+
+def test_citation_grade_boundaries_all_content_pages() -> None:
+    pages = [_pd(1, char_count=120, char_start=0), _pd(2, char_count=90, char_start=130)]
+    assert _citation_grade_boundaries(pages) == [(1, 0), (2, 130)]
+
+
+def test_citation_grade_boundaries_figure_only_page_does_not_demote() -> None:
+    # Page 2 is a figure-only slide (no markdown → char_count 0 → char_start -1 by construction).
+    # The deck must STILL be citation-grade for its content pages — the -1 page is just absent.
+    pages = [
+        _pd(1, char_count=120, char_start=0),
+        _pd(2, char_count=0, char_start=-1),  # figure-only / empty slide
+        _pd(3, char_count=90, char_start=200),
+    ]
+    assert _citation_grade_boundaries(pages) == [(1, 0), (3, 200)]
+
+
+def test_citation_grade_boundaries_legacy_manifest_is_navgrade() -> None:
+    # A legacy manifest (parsed before char_start existed) has -1 on a CONTENT page → nav-grade.
+    pages = [_pd(1, char_count=120, char_start=-1), _pd(2, char_count=90, char_start=-1)]
+    assert _citation_grade_boundaries(pages) is None
+
+
+def test_citation_grade_boundaries_no_content_pages_is_navgrade() -> None:
+    # An all-empty manifest (no content anywhere) → nothing to attribute → nav-grade.
+    assert _citation_grade_boundaries([_pd(1, char_count=0, char_start=-1)]) is None
