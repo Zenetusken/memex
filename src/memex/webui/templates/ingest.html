@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Add a document — Memex{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-2">Add a document</h1>
+<p class="text-zinc-400 text-sm mb-6">Upload a PDF, Office document, image, scan, or audio/video file. Memex runs the full pipeline — parsing, figure and audio transcription, indexing, and enrichment — and the document becomes searchable and browsable. While a document ingests, answering pauses (all GPU goes to the pipeline); you can still browse documents you've already added.</p>
+
+<form hx-post="/ingest"
+      hx-target="#ingest-pane"
+      hx-swap="innerHTML"
+      hx-encoding="multipart/form-data"
+      hx-disabled-elt="button[name='go']"
+      class="space-y-3">
+  <input type="file" name="file" required
+         class="w-full p-3 bg-zinc-900 border border-zinc-700 rounded-md text-zinc-100 text-sm focus:outline-none focus:border-blue-600">
+  <div class="flex items-center gap-3">
+    <button type="submit" name="go"
+            class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-md font-medium text-sm transition">
+      Ingest
+    </button>
+  </div>
+</form>
+
+<section id="ingest-pane" class="mt-8"></section>
+
+<h2 class="text-sm font-medium text-zinc-400 mt-8 mb-2">GPU — live</h2>
+{# The exclusive-GPU ingestion mode dedicates the GPU to the pipeline. This reuses the
+   /resources VRAM panel (a read-only nvidia-smi + torch probe), self-refreshing every 5s,
+   so the parse/VLM serve is visible holding the card during an ingest. #}
+<div hx-get="/resources/vram" hx-trigger="load" hx-swap="outerHTML"></div>
+{% endblock %}

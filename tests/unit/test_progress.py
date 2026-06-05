@@ -20,10 +20,13 @@ from langchain_core.callbacks.base import BaseCallbackHandler
 import memex.agents.answering as ans
 from memex.agents.answering import FinalResponse, _NodeProgressHandler, answer_query
 from memex.webui.progress import (
+    INGEST_PHASES,
     PHASES,
     SUMMARY_PHASES,
     ProgressEntry,
     ProgressRegistry,
+    ingest_phase_for,
+    ingest_phase_view,
     phase_for,
     summary_phase_view,
 )
@@ -136,6 +139,37 @@ def test_summary_phase_view_parses_base_and_detail() -> None:
     assert summary_phase_view("Reducing") == (SUMMARY_PHASES.index("Reducing"), "")
     assert summary_phase_view("Reading") == (0, "")
     assert summary_phase_view("Mystery") == (0, "")  # unknown base → step 0
+
+
+def test_ingest_phase_for_maps_subprocess_events() -> None:
+    # parse-engine starts → "Parsing"
+    assert ingest_phase_for("parse.docling.start") == "Parsing"
+    assert ingest_phase_for("parse.pymupdf.start") == "Parsing"
+    assert ingest_phase_for("parse.audio.start") == "Parsing"
+    # the deep AI-read passes fold under "Transcribing", page rides as the eyebrow
+    assert ingest_phase_for("vlm.start", 7) == "Transcribing · page 7"
+    assert ingest_phase_for("vlm.start") == "Transcribing"  # no page bound
+    assert ingest_phase_for("chart_ocr.start") == "Transcribing · chart OCR"
+    assert ingest_phase_for("chart_ocr.batch.start") == "Transcribing · chart OCR"
+    assert ingest_phase_for("asr.transcribe.start") == "Transcribing · audio"
+    assert ingest_phase_for("index.start") == "Indexing"
+    assert ingest_phase_for("enrich.start") == "Enriching"
+    # an unknown / non-start event keeps the current phase (unknown → no-op, like phase_for)
+    assert ingest_phase_for("vlm.done") == ""
+    assert ingest_phase_for("parse.docling.done") == ""
+    assert ingest_phase_for("ingest.accepted") == ""  # handled by the driver, not a phase
+
+
+def test_ingest_phase_view_parses_base_and_detail() -> None:
+    assert ingest_phase_view("Transcribing · page 7") == (
+        INGEST_PHASES.index("Transcribing"),
+        "page 7",
+    )
+    assert ingest_phase_view("Transcribing · chart OCR") == (1, "chart OCR")
+    assert ingest_phase_view("Parsing") == (0, "")
+    assert ingest_phase_view("Indexing") == (INGEST_PHASES.index("Indexing"), "")
+    assert ingest_phase_view("Enriching") == (INGEST_PHASES.index("Enriching"), "")
+    assert ingest_phase_view("Mystery") == (0, "")  # unknown base → step 0
 
 
 def test_registry_sweep_evicts_stale_on_new() -> None:

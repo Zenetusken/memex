@@ -1,0 +1,18 @@
+{% if doc_id and not error %}
+<div class="ans-flash">
+  <div class="ans-eyebrow">Ingested</div>
+  <p class="ingest-done-note">The document has been fully consumed — it's now searchable and browsable.</p>
+  <a href="/documents/{{ doc_id }}" class="ingest-open">Open document →</a>
+</div>
+{% elif doc_id and error %}
+<div class="ans-flash ans-flash-error">
+  <div class="ans-eyebrow">Partially ingested</div>
+  <p class="ingest-done-note">{{ error }}</p>
+  <a href="/documents/{{ doc_id }}" class="ingest-open">Open document (browsable) →</a>
+</div>
+{% else %}
+<div class="ans-flash ans-flash-error">
+  <div class="ans-eyebrow">Ingest failed</div>
+  <p class="ingest-done-note">{{ error or "The file could not be ingested." }}</p>
+</div>
+{% endif %}

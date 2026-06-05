@@ -111,13 +111,66 @@ def bridge_phase_index(label: str) -> int:
         return 0
 
 
+# The ingest pipeline's phases — driven by `webui/ingest_driver.py`, which parses the
+# `memex ingest`/`enrich` subprocess's structlog (stderr) and calls its `on_phase` sink.
+# Like the summarizer, the per-unit deep-read detail (VLM page / chart OCR / audio) rides
+# under "Transcribing" as the eyebrow, so a born-digital text doc (no VLM/chart/ASR) simply
+# skips Transcribing rather than showing a stuck step. "Transcribing" unifies the three
+# AI-read passes: VLM (diagram→text), chart-OCR (chart→table), ASR (audio→text).
+INGEST_PHASES: tuple[str, ...] = ("Parsing", "Transcribing", "Indexing", "Enriching")
+
+# Parse-engine start events that all map to "Parsing".
+_INGEST_PARSE_START_EVENTS: frozenset[str] = frozenset(
+    {
+        "parse.docling.start",
+        "parse.pymupdf.start",
+        "parse.scan.start",
+        "parse.passthrough.start",
+        "parse.audio.start",
+    }
+)
+
+
+def ingest_phase_for(event: str, page: object = None) -> str:
+    """Map a subprocess structlog ``event`` (off the ingest/enrich stderr) → an
+    `INGEST_PHASES` label, optionally with a ``" · detail"`` eyebrow. An unknown event
+    returns ``""`` so the phase is unchanged (mirrors `phase_for`'s unknown→no-op
+    contract — a future/renamed event degrades to "less detail", never a crash)."""
+    if event in _INGEST_PARSE_START_EVENTS:
+        return "Parsing"
+    if event == "vlm.start":
+        return f"Transcribing · page {page}" if page is not None else "Transcribing"
+    if event in ("chart_ocr.start", "chart_ocr.batch.start"):
+        return "Transcribing · chart OCR"
+    if event == "asr.transcribe.start":
+        return "Transcribing · audio"
+    if event == "index.start":
+        return "Indexing"
+    if event == "enrich.start":
+        return "Enriching"
+    return ""
+
+
+def ingest_phase_view(label: str) -> tuple[int, str]:
+    """Split an ingest phase label into ``(active-step index in INGEST_PHASES, eyebrow
+    detail)`` — the analogue of `summary_phase_view`. ``"Transcribing · page 7"`` →
+    ``(1, "page 7")``; an unknown base falls back to step 0."""
+    base, _, detail = label.partition(" · ")
+    try:
+        return INGEST_PHASES.index(base), detail
+    except ValueError:
+        return 0, detail
+
+
 @dataclass
 class ProgressEntry:
     """The live state of one in-flight ``/ask``, keyed by ``correlation_id``."""
 
     scope_doc_ids: list[str]  # always supplied by ProgressRegistry.new()
     scope_source: str
-    question: str = ""  # the original /ask question — carried for the consented A→B escalation (§11)
+    question: str = (
+        ""  # the original /ask question — carried for the consented A→B escalation (§11)
+    )
     phase: str = PHASES[0]
     version: int = 0
     started_at: float = field(default_factory=time.monotonic)
@@ -130,6 +183,10 @@ class ProgressEntry:
     error: str | None = None
     changed: asyncio.Event = field(default_factory=asyncio.Event)
     task: asyncio.Task[None] | None = None
+    # The ingested doc's id (set by the ingest flow on success) — the done-fragment links
+    # to ``/documents/{doc_id}``. The `response` union can't represent an ingest outcome,
+    # so the ingest result rides here instead.
+    doc_id: str | None = None
 
     def phase_elapsed_s(self) -> int:
         """Whole seconds the CURRENT phase has been active (the live timer)."""
