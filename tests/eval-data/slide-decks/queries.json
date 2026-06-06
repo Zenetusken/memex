@@ -321,8 +321,7 @@
       "qid": "slide-decks-30",
       "question": "What programming language must I use to write CUDA kernels \u2014 only C++, or are other options supported?",
       "relevant_chunk_ids": [
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#fe9722a3c6",
-        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#6181e56b66"
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#fe9722a3c6"
       ],
       "should_refuse": false,
       "_expected_answer": "Other options are supported: besides C++/CUDA C, the deck (slide 'GPU Kernels in Python', NVIDIA Warp) states you can write CUDA kernels in 100% Python syntax with runtime JIT compilation.",
@@ -380,5 +379,12 @@
     "refusal_rate_on_counterfactuals": 1.0,
     "hallucinations": 0,
     "note": "CUDA-deck VLM re-process REVERTED to Docling+chart-OCR (no vault backup \u21d2 irreversible). The relevance gate (agents/answering.py::assess_relevance) was once credited with refusing slide-decks-30 as a grounded-but-non-responsive conflation \u2014 but slide-decks-30 was RE-LABELED 2026-06-01 to should_refuse=false: the deck DIRECTLY answers it (the Warp 'GPU Kernels in Python' slide), so refusing it was actually a false-refuse. See that entry's _note. NB borderline counterfactuals are non-deterministic run-to-run (agent BF16/AWQ greedy); refusal_cf=1.0 is a typical-run figure. No _anchor_phrase \u21d2 cite-prec not tracked."
+  },
+  "_baseline_2026_06_06_w6_reanchor": {
+    "answer_eval": "BLOCKED",
+    "gold_chunk_recall_at10_old": 0.056,
+    "gold_chunk_recall_at10_new": 0.889,
+    "n_ans_relabeled": 18,
+    "note": "Post-W6 re-LABEL (multi-chunk, search-method). The answer-eval CRASHED on the known eval-runner ungrounded_reasons-overflow bug (deferred-backlog item: 'Eval runner per-query error handling') so refusal_cf/citation_precision are unavailable this run; recall@10 recovered 0.056->0.889 is the gold-fix proof. 18 ANS re-labeled; the 3 chart-targeted empties (31/32/33) left gold-less by design."
   }
 }

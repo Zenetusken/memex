@@ -151,5 +151,16 @@
     "mean_citation_precision": 0.4,
     "mean_citation_precision_answered_only": 0.25,
     "note": "First baseline over the Office(.pptx)->PDF->VLM-ingested CCNA library (31 decks, this session). 8/8 grounded ANS across 8 decks INCL. ccna-05 diagram-targeted (answered from the VLM-transcribed QoS '## Diagram Description' \u2014 the headline Office->VLM path proven end-to-end); both counterfactuals REFUSE (ccna-09 off-topic empty-retrieval + ccna-10 BGP-route-reflector CCNP near-miss); refusal_cf=1.0, 0 hallucinations. cite-prec is sibling-chunk-DEFLATED: CCNA slide decks restate each concept across many slides, so the agent grounds on a valid sibling chunk rather than the single anchor-resolved one (answers verified correct \u2014 same artifact as scientific-gte pre-multi-chunk-relabel). A multi-chunk relabel would lift cite-prec without touching the HARD gates. Source decks stay LOCAL; only this query set + baseline ship."
+  },
+  "_baseline_2026_06_06_w6_reanchor": {
+    "query_count": 10,
+    "answered": 8,
+    "refused": 2,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "hallucinations": 0,
+    "mean_citation_precision": 0.5,
+    "mean_citation_precision_answered_only": 0.375,
+    "n_runs": 1,
+    "note": "Post-W6 gold-anchor re-baseline: gold re-anchored against the 2026-06-06 V2 covered-22 re-parse (content-addressed chunk_ids churned -> stale gold). refusal_cf held 1.0 (HARD gate intact, 0 counterfactual hallucinations). mean_citation_precision is now measured against the CORRECTED gold. Single run (n_runs=1) -- the greedy 4B is non-deterministic on borderline queries, so treat as a typical-run figure, not a stability claim."
   }
 }

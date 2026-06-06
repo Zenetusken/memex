@@ -307,5 +307,16 @@
     "hallucinations": 0,
     "runs": 5,
     "note": "#256 deterministic artifact->doc re-scope (agents/artifact_scope.py) \u2014 UNCHANGED from the VLM baseline (14/5/refusal_cf=1.0), confirming the re-scope is HARD-gate-neutral here. 4 queries trigger detection: cr350-img-01 ('diagramme de configuration VLAN du commutateur' -> qualifier {configuration,vlan,commutateur}) re-scopes to semaine-4 (+ srwe-module-3 sibling) and ANSWERS; cr350-img-03 ('diagramme d'attaque', {attaque}) re-scopes to semaine-5 (title-distinctive single token) and ANSWERS; cr350-img-02 ('diagramme d'architecture reseau', {architecture,reseau}) is none-spread -> NO scope -> full-corpus ANSWERS; cr350-img-ref-01 (same VLAN-diagram artifact, asks for the Fa0/21 MAC absent from it) re-scopes to semaine-4 and correctly REFUSES. MULTI-RUN (N=5, 2 batch-1 + 3 batch-2): img-01/02/03 answered every run, img-ref-01 refused every run, refusal_cf=1.0 every run, 0 hallucinations. The re-scoped ANS queries do NOT false-refuse (the #1 design risk) and the re-scoped REF holds. Source PDFs stay local."
+  },
+  "_baseline_2026_06_06_w6_reanchor": {
+    "query_count": 19,
+    "answered": 12,
+    "refused": 7,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "hallucinations": 0,
+    "mean_citation_precision": 0.6908,
+    "mean_citation_precision_answered_only": 0.5104,
+    "n_runs": 1,
+    "note": "Post-W6 gold-anchor re-baseline: gold re-anchored against the 2026-06-06 V2 covered-22 re-parse (content-addressed chunk_ids churned -> stale gold). refusal_cf held 1.0 (HARD gate intact, 0 counterfactual hallucinations). mean_citation_precision is now measured against the CORRECTED gold. Single run (n_runs=1) -- the greedy 4B is non-deterministic on borderline queries, so treat as a typical-run figure, not a stability claim."
   }
 }

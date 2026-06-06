@@ -127,5 +127,16 @@
     "mean_citation_precision_answered_only": 0.85,
     "conservative_false_refusals": [],
     "note": "Re-baselined after cours-1 (5795b16a) was re-parsed with the VLM enabled. HARD GATES held: refusal_cf=1.0, 0 hallucinations, 5/5 ANS still answer. Citation-precision steady (0.84 -> 0.85). The legacy queries lacked _anchor_phrase (hardcoded chunk-ids); added distinctive slide phrases + re-resolved via scripts/extend_corpus.py against the rebuilt FTS. NB the VLM re-parse merged the intro chunk: the reseau definition + ARPANET content now co-reside in 5795b16a#a49b400ac0 (french-course-02 and -04 both resolve there)."
+  },
+  "_baseline_2026_06_06_w6_reanchor": {
+    "query_count": 8,
+    "answered": 5,
+    "refused": 3,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "hallucinations": 0,
+    "mean_citation_precision": 0.7357,
+    "mean_citation_precision_answered_only": 0.5771,
+    "n_runs": 1,
+    "note": "Post-W6 gold-anchor re-baseline: gold re-anchored against the 2026-06-06 V2 covered-22 re-parse (content-addressed chunk_ids churned -> stale gold). refusal_cf held 1.0 (HARD gate intact, 0 counterfactual hallucinations). mean_citation_precision is now measured against the CORRECTED gold. Single run (n_runs=1) -- the greedy 4B is non-deterministic on borderline queries, so treat as a typical-run figure, not a stability claim."
   }
 }
