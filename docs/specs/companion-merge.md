@@ -365,6 +365,9 @@ this drift on a re-parsed deck** — validated to correct 51/62 chunks on a real
 re-parsed+reindexed deck carries an accurate `Chunk.page` (a doc on the old nav-grade manifest is
 unchanged until it re-parses).
 
-**Deferred within this lever:** a perceptual-hash dedup (OCR only on slide changes — the current pass
-OCRs one frame per chunk, ~one VLM call each, cached); sampling a couple frames around the midpoint and
-keeping the best match (for transition frames); rolling the keyframe page into the §13 monotonic DP.
+**Deferred within this lever:** sampling a couple frames around the midpoint and keeping the best match
+(for transition frames); folding the keyframe match into the §13 monotonic-DP TRANSITION COST (the DP
+already FIXES keyframe-PRIMARY chunks as anchors — see §13, "monotonic DP + `start_s` prior — SHIPPED
+OPT-IN"). **A perceptual-hash dedup of the keyframe OCR is NOT a viable follow-up — it was BUILT THEN
+REVERTED as fundamentally unviable; see §13 ("Perceptual-hash keyframe-OCR dedup — REJECTED"). Do not
+retry a whole-frame-hash dedup.**
