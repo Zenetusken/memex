@@ -43,7 +43,7 @@ When in doubt, return to those.
 | Vector store | **LanceDB** | Embedded, columnar, fast |
 | Full-text search | **SQLite FTS5** | Already in stdlib; BM25 free |
 | Graph store | **RyuGraph** | Embedded property graph; Cypher; columnar. The maintained Kuzu fork — see ADR-0005 |
-| Analytics | **DuckDB** | Read Parquet/SQLite/LanceDB natively |
+| Table analytics (Table-RAG) | **stdlib `sqlite3`** | Per-doc in-memory text-to-SQL over extracted tables; read-only single-SELECT guard (`docs/specs/table-sql.md`). DuckDB was scaffolded here for native Parquet/SQLite/LanceDB reads but superseded by sqlite3 (no cross-table joins needed) and pruned as an orphaned dep 2026-06-05 |
 | Tracing | **Langfuse** (self-hosted) | Every agent step, traceable and replayable |
 | Logging | **structlog** | Structured JSON logs; Langfuse-compatible |
 | Testing | **pytest + hypothesis** | Unit, property-based, agent evals |

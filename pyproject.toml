@@ -35,7 +35,6 @@ dependencies = [
     # Storage and indexes — see ADR-0005 for the graph store
     "lancedb>=0.30",
     "ryugraph>=25.9",
-    "duckdb>=1.5",
 
     # MCP server SDK — pinned <2 until the breaking transport rework lands
     "mcp>=1.25,<2",
