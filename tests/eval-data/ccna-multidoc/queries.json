@@ -24,8 +24,8 @@
       "_doc_id": "812d8c84-srwe-module-2-2021wef",
       "_anchor_phrase": "source MAC address",
       "relevant_chunk_ids": [
-        "812d8c84-srwe-module-2-2021wef#215c024e79",
-        "812d8c84-srwe-module-2-2021wef#b9e0ccf5fb"
+        "812d8c84-srwe-module-2-2021wef#a5adcc4f4b",
+        "812d8c84-srwe-module-2-2021wef#ef8e2895a1"
       ],
       "should_refuse": false,
       "_expected_answer": "By recording the source MAC address of incoming frames together with the ingress port.",
@@ -37,8 +37,8 @@
       "_doc_id": "cbe4bab8-srwe-module-3-2021",
       "_anchor_phrase": "broadcast domains",
       "relevant_chunk_ids": [
-        "cbe4bab8-srwe-module-3-2021#7f08fabc2e",
-        "cbe4bab8-srwe-module-3-2021#5780842577"
+        "cbe4bab8-srwe-module-3-2021#734efa7c22",
+        "cbe4bab8-srwe-module-3-2021#0d61011e9e"
       ],
       "should_refuse": false,
       "_expected_answer": "Separate broadcast domains (each VLAN is its own broadcast domain / logical network).",
@@ -50,7 +50,7 @@
       "_doc_id": "753a17ed-srwe-module-5-2021",
       "_anchor_phrase": "loop-free topology with a single path",
       "relevant_chunk_ids": [
-        "753a17ed-srwe-module-5-2021#dc2cfd4dc9"
+        "753a17ed-srwe-module-5-2021#84a2af1e8a"
       ],
       "should_refuse": false,
       "_expected_answer": "A loop-free topology with a single active path between any two devices.",
@@ -63,7 +63,7 @@
       "_anchor_phrase": "private IPv4 address",
       "relevant_chunk_ids": [
         "bbef665b-ensa-module-6-2021#db6ee205c2",
-        "bbef665b-ensa-module-6-2021#aefbdfee8c"
+        "bbef665b-ensa-module-6-2021#f440d0391c"
       ],
       "should_refuse": false,
       "_expected_answer": "A public (globally routable) IPv4 address.",
@@ -73,9 +73,9 @@
       "qid": "ccna-05",
       "question": "In the traffic-prioritization diagram, what are the three priority queues?",
       "_doc_id": "1306f455-ensa-module-9-2021",
-      "_anchor_phrase": "High Priority Queue, Medium Priority Queue, and Low Priority Queue",
+      "_anchor_phrase": "Packets are shown as red envelopes, directed into the",
       "relevant_chunk_ids": [
-        "1306f455-ensa-module-9-2021#18c8c70606"
+        "1306f455-ensa-module-9-2021#29c4c65de0"
       ],
       "should_refuse": false,
       "_expected_answer": "High Priority Queue, Medium Priority Queue, and Low Priority Queue.",
@@ -88,7 +88,7 @@
       "_doc_id": "3e8de4e9-ensa-module-1-2021",
       "_anchor_phrase": "Router ID of the sending router",
       "relevant_chunk_ids": [
-        "3e8de4e9-ensa-module-1-2021#9a4cded0af"
+        "3e8de4e9-ensa-module-1-2021#b68ef55f2d"
       ],
       "should_refuse": false,
       "_expected_answer": "The OSPF router ID.",
@@ -100,7 +100,7 @@
       "_doc_id": "1c481d1a-srwe-module-10-2021",
       "_anchor_phrase": "Prevents DHCP starvation and DHCP spoofing attacks",
       "relevant_chunk_ids": [
-        "1c481d1a-srwe-module-10-2021#03ebd15f93"
+        "1c481d1a-srwe-module-10-2021#3b7491aa32"
       ],
       "should_refuse": false,
       "_expected_answer": "DHCP snooping.",
@@ -110,9 +110,9 @@
       "qid": "ccna-08",
       "question": "What configuration command creates a numbered standard IPv4 ACL?",
       "_doc_id": "d401e0bd-ensa-module-5-2021",
-      "_anchor_phrase": "access-list",
+      "_anchor_phrase": "To create a numbered standard ACL, use the access-list command",
       "relevant_chunk_ids": [
-        "d401e0bd-ensa-module-5-2021#51c5b28c92"
+        "d401e0bd-ensa-module-5-2021#1a92565d54"
       ],
       "should_refuse": false,
       "_expected_answer": "The global-config 'access-list {number} {deny|permit} {source} [wildcard]' command.",
@@ -141,7 +141,7 @@
       "_note": "HARD GATE \u2014 in-domain NEAR-MISS (BGP mentioned, route reflectors absent). Tests the agent doesn't fabricate a plausible adjacent answer."
     }
   ],
-  "_resolved_at": "2026-05-26T14:54:54Z",
+  "_resolved_at": "2026-06-06T21:00:57Z",
   "_baseline_2026_05_26_vlm": {
     "query_count": 10,
     "answered": 8,
@@ -150,6 +150,6 @@
     "hallucinations": 0,
     "mean_citation_precision": 0.4,
     "mean_citation_precision_answered_only": 0.25,
-    "note": "First baseline over the Office(.pptx)->PDF->VLM-ingested CCNA library (31 decks, this session). 8/8 grounded ANS across 8 decks INCL. ccna-05 diagram-targeted (answered from the VLM-transcribed QoS '## Diagram Description' — the headline Office->VLM path proven end-to-end); both counterfactuals REFUSE (ccna-09 off-topic empty-retrieval + ccna-10 BGP-route-reflector CCNP near-miss); refusal_cf=1.0, 0 hallucinations. cite-prec is sibling-chunk-DEFLATED: CCNA slide decks restate each concept across many slides, so the agent grounds on a valid sibling chunk rather than the single anchor-resolved one (answers verified correct — same artifact as scientific-gte pre-multi-chunk-relabel). A multi-chunk relabel would lift cite-prec without touching the HARD gates. Source decks stay LOCAL; only this query set + baseline ship."
+    "note": "First baseline over the Office(.pptx)->PDF->VLM-ingested CCNA library (31 decks, this session). 8/8 grounded ANS across 8 decks INCL. ccna-05 diagram-targeted (answered from the VLM-transcribed QoS '## Diagram Description' \u2014 the headline Office->VLM path proven end-to-end); both counterfactuals REFUSE (ccna-09 off-topic empty-retrieval + ccna-10 BGP-route-reflector CCNP near-miss); refusal_cf=1.0, 0 hallucinations. cite-prec is sibling-chunk-DEFLATED: CCNA slide decks restate each concept across many slides, so the agent grounds on a valid sibling chunk rather than the single anchor-resolved one (answers verified correct \u2014 same artifact as scientific-gte pre-multi-chunk-relabel). A multi-chunk relabel would lift cite-prec without touching the HARD gates. Source decks stay LOCAL; only this query set + baseline ship."
   }
 }

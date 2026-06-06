@@ -33,7 +33,7 @@
       "_doc_id": "5c9f3e0e-cr350-cours-3",
       "_anchor_phrase": "Indique le serveur de messagerie responsable d'un domaine",
       "relevant_chunk_ids": [
-        "5c9f3e0e-cr350-cours-3#813a09e508"
+        "5c9f3e0e-cr350-cours-3#8ae4cd0a6b"
       ],
       "should_refuse": false,
       "_expected_answer": "Un enregistrement MX (Mail Exchange Record) indique le serveur de messagerie responsable d'un domaine.",
@@ -46,7 +46,7 @@
       "_doc_id": "7e7cd59e-cr350-semaine-5-attaques-r-seau-et-cha-ne-d-atta",
       "_anchor_phrase": "collecter le maximum d'informations sur une cible sans l'alerter",
       "relevant_chunk_ids": [
-        "7e7cd59e-cr350-semaine-5-attaques-r-seau-et-cha-ne-d-atta#111337b387"
+        "7e7cd59e-cr350-semaine-5-attaques-r-seau-et-cha-ne-d-atta#ab7b1c9bd3"
       ],
       "should_refuse": false,
       "_expected_answer": "La phase de Reconnaissance (phase 1) consiste \u00e0 collecter le maximum d'informations sur une cible sans l'alerter; elle se d\u00e9cline en reconnaissance passive (sans interaction directe) et active (interaction directe avec l'infrastructure).",
@@ -59,7 +59,8 @@
       "_doc_id": "3973498d-cr350-cours-2",
       "_anchor_phrase": "Couche 4 : Transport",
       "relevant_chunk_ids": [
-        "3973498d-cr350-cours-2#1202fde176"
+        "3973498d-cr350-cours-2#e5e43dfa82",
+        "3973498d-cr350-cours-2#4da199c2dc"
       ],
       "should_refuse": false,
       "_expected_answer": "La couche 4 du mod\u00e8le TCP/IP est la couche Transport.",
@@ -85,7 +86,7 @@
       "_doc_id": "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a",
       "_anchor_phrase": "Couvre une petite zone g\u00e9ographique comme une maison",
       "relevant_chunk_ids": [
-        "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a#ea4efb8b58"
+        "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a#78f5c968bc"
       ],
       "should_refuse": false,
       "_expected_answer": "Un LAN (Local Area Network) couvre une petite zone g\u00e9ographique (maison, bureau, \u00e9tage); un WAN (Wide Area Network) couvre de tr\u00e8s vastes zones, d'un pays \u00e0 plusieurs continents.",
@@ -215,9 +216,9 @@
       "qid": "cr350-img-01",
       "question": "Selon le diagramme de configuration VLAN du commutateur, quel port sert de port tronc et vers quels VLAN ?",
       "_doc_id": "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a",
-      "_anchor_phrase": "Connect\u00e9 en tant que port tronc vers les VLAN",
+      "_anchor_phrase": "Le port Fa0/21 du switch est configur\u00e9 comme un trunk",
       "relevant_chunk_ids": [
-        "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a#e8480046ff"
+        "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a#71a85da2b0"
       ],
       "should_refuse": false,
       "_expected_answer": "Le port Fa0/21 est le port tronc, connect\u00e9 aux VLAN 10, 20 et 30.",
@@ -228,9 +229,9 @@
       "qid": "cr350-img-02",
       "question": "D'apr\u00e8s le diagramme d'architecture r\u00e9seau, par quels \u00e9quipements le trafic passe-t-il entre Internet et l'ordinateur A ?",
       "_doc_id": "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a",
-      "_anchor_phrase": "Ce diagramme illustre comment le routeur dirige le trafic",
+      "_anchor_phrase": "dirig\u00e9 par le routeur vers un switch",
       "relevant_chunk_ids": [
-        "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a#01381ad744"
+        "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a#e5ece296f7"
       ],
       "should_refuse": false,
       "_expected_answer": "Le trafic passe d'Internet au routeur, puis au commutateur (switch), avant d'atteindre l'ordinateur A (Internet -> Routeur -> Switch -> Ordinateur A).",
@@ -241,9 +242,9 @@
       "qid": "cr350-img-03",
       "question": "Selon le diagramme d'attaque du cours, quelles techniques l'attaquant combine-t-il pour perturber le r\u00e9assemblage des paquets ?",
       "_doc_id": "7e7cd59e-cr350-semaine-5-attaques-r-seau-et-cha-ne-d-atta",
-      "_anchor_phrase": "fragmentation malveillante pour perturber le r\u00e9assemblage",
+      "_anchor_phrase": "malform\u00e9s afin de perturber le r\u00e9assemblage",
       "relevant_chunk_ids": [
-        "7e7cd59e-cr350-semaine-5-attaques-r-seau-et-cha-ne-d-atta#559db8176d"
+        "7e7cd59e-cr350-semaine-5-attaques-r-seau-et-cha-ne-d-atta#b4b0ff5290"
       ],
       "should_refuse": false,
       "_expected_answer": "L'attaquant falsifie l'adresse IP source (IP spoofing) et utilise une fragmentation malveillante pour perturber le r\u00e9assemblage des paquets.",
@@ -262,7 +263,7 @@
       "_note": "HARD GATE \u2014 image-query counterfactual. The VLAN diagram shows port->VLAN assignments, never MAC addresses. Tests refusal on an absent diagram detail (no fabrication from a transcribed figure)."
     }
   ],
-  "_resolved_at": "2026-05-26T00:54:17Z",
+  "_resolved_at": "2026-06-06T21:01:00Z",
   "_whitelist_note": "Multi-chunk topics carry >1 relevant_chunk_id: any chunk in the OWNING lecture that contains a piece of the literal answer counts. Broadened 2026-05-23 after the baseline eval showed the agent citing valid sibling chunks (correct doc, different chunk) that single-anchor whitelists had excluded.",
   "_baseline_2026_05_23": {
     "run": "vLLM Qwen3-8B-AWQ orchestrator, 10-doc vault",
