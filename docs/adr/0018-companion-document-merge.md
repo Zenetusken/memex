@@ -116,10 +116,10 @@ predicted chunk to its true PDF page by text-overlap; a citation-grade page map 
 
 ## Amendment (2026-06-05): the three deferred §13 levers — resolutions
 
-Closing the "deferred, each its own arc" list (spec §13). **Shipped + merged to main 2026-06-05** (via
-`feat/companion-levers`, 13 commits — DP `70fca71`/`5adbaae`, dedup-revert `8f0ad57`→`aade5d7`, page-map
-`0340eb9`/`6b6bfd9`/`52fb439`, webui page-jump fix `15264ce`). All three stay HARD-gate-neutral (the
-alignment is the default-off augment sidecar; keyframe OCR is parse-stage; `Chunk.page` is nav metadata).
+Closing the "deferred, each its own arc" list (spec §13). **Shipped + merged to main `1aa89d9` 2026-06-05**
+(via `feat/companion-levers`, 14 commits — DP `70fca71`/`5adbaae`, dedup-revert `8f0ad57`→`aade5d7`,
+page-map `0340eb9`/`6b6bfd9`/`52fb439`, webui page-jump fix `15264ce`). All three stay HARD-gate-neutral
+(the alignment is the default-off augment sidecar; keyframe OCR is parse-stage; `Chunk.page` is nav metadata).
 
 - **MaViLS asymmetric-jump DP + real `start_s` prior — SHIPPED OPT-IN.** `align_blocks(use_dp=True)` → a
   pure Viterbi (`_align_dp`): emission = cosine; transition = `-companion_dp_lambda_jump` × jump (forward
