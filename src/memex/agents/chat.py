@@ -35,7 +35,7 @@ from memex.core.conversation_store import ConversationStore
 from memex.core.errors import ConfigurationError, ModelCallError
 from memex.core.types import Conversation, ConversationTurn
 from memex.models.client import complete_structured
-from memex.prompts import render_messages
+from memex.prompts import prompt_tag_for, render_messages
 
 logger = structlog.get_logger(__name__)
 
@@ -106,7 +106,7 @@ async def rewrite_query(conversation: Conversation, user_text: str) -> Standalon
     result, _tokens = await complete_structured(
         prompt=prompt,
         schema=StandaloneQuery,
-        prompt_tag="rewrite_followup@v1",
+        prompt_tag=prompt_tag_for("rewrite_followup"),
     )
     return result
 
@@ -138,7 +138,7 @@ async def _digest(prior_summary: str, turns_to_fold: list[ConversationTurn]) -> 
         result, _tokens = await complete_structured(
             prompt=prompt,
             schema=ConversationDigest,
-            prompt_tag="conversation_digest@v1",
+            prompt_tag=prompt_tag_for("conversation_digest"),
         )
     except ModelCallError:
         # Fail-open WITHOUT bloating: a string of digest failures must not let the

@@ -177,7 +177,7 @@ _Would do, but blocked on curator corpus data, a model/hardware availability, or
   *Unblock:* Out-of-scope roadmap; only if a forms eval category is pursued.  
   *Sources:* ROADMAP.md:255 (Tier 6)
 
-## 📋 Feature backlog (67)
+## 📋 Feature backlog (66)
 
 _Would-do, lower priority — no external blocker, just unscheduled._
 
@@ -186,9 +186,6 @@ _Would-do, lower priority — no external blocker, just unscheduled._
   *Sources:* w6-migration-2026-06-06; eval/scoring.py::citation_precision; eval/runner.py::gold_chunk_recall
 - **Grounding-gate over-refusal — CITATION-class FIXED 2026-06-06; SYNTHESIS-class remains.** The assess (sufficiency) gate over-refused with the answer present (handwritten-04: answer at rank #1, refused "lack specific citations as requested"). **FIXED** via `assess_sufficiency@v2` (citation-floor prompt; branch `fix/assess-sufficiency-citation-floor`): multi-run validated +2 ANS / 0 regressions / refusal_cf=1.0 across two full 12-corpus passes. The candidate that ALSO tightened ("must explicitly state / topic overlap") was net −3 and rejected. **Residual = the SYNTHESIS-class** (cr350-img-01). **INVESTIGATED 2026-06-06 → NO SAFE ADDRESSABLE SPACE, no code written** (see the closed item under 🚫 Decided-against + `synthesis-lever-nogo-2026-06-06`). The strict gate ALREADY grounds pure-(A) co-located joins; the only refusals are reading-(B) premise-joins / false inferences (it correctly killed a 10-K "50x lower cost/token" claim when the chunk said 35x — the hole). Don't reopen as a gate-relaxation.  
   *Sources:* synthesis-lever-nogo-2026-06-06; grounding-gate-overrefusal-2026-06-06; agents/answering.py::assess; prompts/assess_sufficiency/v2.md
-- **prompt_tag auto-derive (kill the version-drift class)** — A hardcoded `prompt_tag="<name>@vN"` in code drifts when `render_prompt` auto-selects a higher on-disk version (found+fixed 3 stale instances 2026-06-06: summarize_section/summarize_reduce/assess_sufficiency, all @v1→@v2). Root-fix: derive the tag from the loaded `PromptSpec.version` (e.g. a loader helper `active_version(name)` or have `complete_structured` accept the spec) so the Langfuse trace label can NEVER lie again.  
-  *Unblock:* small, but touches the prompt-loader/client interface + ~6 call sites → its own change + tests.  
-  *Sources:* grounding-gate-overrefusal-2026-06-06; prompts/loader.py; agents/{answering,document_summarizer}.py; enrich/pipeline.py
 - **Eval runner per-query error handling + verify `ungrounded_reasons` overflow** — `eval/runner.py::run_eval`'s `for q in queries` has NO try/except → one query's `ModelCallError` aborts the WHOLE eval. Surfaced post-W6: a re-chunked CUDA-deck query made the verifier emit a runaway `ungrounded_reasons` string > max_tokens → invalid guided-JSON → the slide-decks eval crashed 3×. Two fixes: (a) catch per-query errors in the runner (record as error/refusal, continue); (b) bound `VerificationResult.ungrounded_reasons` item length harder (it already has a max_length per CLAUDE.md — verify it's enforced on this path).  
   *Unblock:* (a) is a safe eval-only change; (b) needs a check of the verify schema bound vs the live overflow.  
   *Sources:* w6-migration-2026-06-06; eval/runner.py:28; agents/answering.py::verify
@@ -481,7 +478,7 @@ _Tried-and-reverted or explicitly rejected. Recorded so they're not re-proposed 
 - **H4 deck topic-grouping summarizer knob + embedding-based semantic dedup** — H4 DEFERRED + known-infeasible on noisy-heading decks (deck heading_path is junk; needs robust normalization); embedding-based semantic dedup REJECTED (non-deterministic, degrades under VRAM pressure). Residual purely-semantic cross-paragraph overlap accepted with no clean deterministic fix. (deck_granularity_tracker:68/89/92)
 - **Table-under-ranking / margin-bounded table promotion (as a global retrofit)** — NOTE: tracked as a data-gated lever (declined-for-now, evidence-gated), NOT dead — see the data-gated 'cross_encoder under-ranking' entry. Listed here only because one sweeper marked it rejected; declined as a risky global retrofit but revivable with evidence it helps without regressing prose corpora.
 
-## Excluded — deferred-but-since-shipped (14)
+## Excluded — deferred-but-since-shipped (15)
 
 _Surfaced by the sweep but already shipped; kept for traceability, not pending._
 
@@ -499,6 +496,7 @@ _Surfaced by the sweep but already shipped; kept for traceability, not pending._
 - VLM source-image markdown-link strip (_strip_image_links shipped; the comment is a rationale, not a deferral)
 - UI-ingestion v1 hardening backlog Inc 1-7 (B7/B8/B11/B12/B18 etc. MERGED to main 587edaa; only chunk_count gate / half-doc resume / multi-upload queue survive, listed separately)
 - Stack-currency eval-gated swaps — PyMuPDF pre-filter (P1.1) + reranker backend SHIPPED (Granite-8B survives as P2.2)
+- prompt_tag auto-derive — version-drift class KILLED 2026-06-06 (`prompts/loader.py::prompt_tag_for`/`active_version` derive the tag from the loaded spec; all 18 producer sites converted + a source-scan permanence guard test; branch `feat/prompt-tag-auto-derive`)
 
 ## Uncertain — implemented-vs-pending unclear (3)
 

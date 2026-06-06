@@ -81,7 +81,7 @@ from memex.observability.tracing import (
     clear_run_context,
     run_attributes,
 )
-from memex.prompts import render_messages, render_prompt
+from memex.prompts import prompt_tag_for, render_messages, render_prompt
 from memex.retrieve import (
     cross_encoder_rerank,
     hybrid_search,
@@ -1393,7 +1393,7 @@ async def assess(state: AnswerState) -> AnswerStateUpdate:
     sufficiency, tokens = await complete_structured(
         prompt=prompt,
         schema=SufficiencyAssessment,
-        prompt_tag="assess_sufficiency@v2",  # render_prompt auto-selects the highest version (v2 — citation-floor)
+        prompt_tag=prompt_tag_for("assess_sufficiency"),
     )
 
     return {
@@ -1584,7 +1584,7 @@ async def answer(state: AnswerState) -> AnswerStateUpdate:
                 # fits the fast 6,144 window. The summary-cap bump (300→600) fixed
                 # the mid-word "policyEn" cut full mode's richer answers exposed.
                 max_tokens=1800,
-                prompt_tag="answer@v3",
+                prompt_tag=prompt_tag_for("answer"),
             )
         except ModelCallError as e:
             if not _is_context_overflow(e):
@@ -1858,7 +1858,7 @@ async def verify(state: AnswerState) -> AnswerStateUpdate:
     bounded, tokens = await complete_structured(
         prompt=prompt,
         schema=BoundedVerificationResult,
-        prompt_tag="verify_grounding@v2",
+        prompt_tag=prompt_tag_for("verify_grounding"),
     )
 
     # Defensive index-filtering (P3.3 v7 trace, 2026-05-23). The verifier
@@ -2100,7 +2100,7 @@ async def assess_relevance(state: AnswerState) -> AnswerStateUpdate:
     relevance, tokens = await complete_structured(
         prompt=prompt,
         schema=RelevanceAssessment,
-        prompt_tag="assess_relevance@v1",
+        prompt_tag=prompt_tag_for("assess_relevance"),
     )
     log.info("relevance", responsive=relevance.responsive)
     return {

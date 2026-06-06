@@ -851,7 +851,7 @@ async def judge_expert_answer(
     would penalise honest repeated 'grounded' verdicts). Shown the FULL cited chunks."""
     from memex.core.errors import ModelCallError
     from memex.models.client import complete_structured
-    from memex.prompts import render_messages
+    from memex.prompts import prompt_tag_for, render_messages
 
     messages = render_messages(
         "judge_expert_answer", question=question, answer=answer_text, evidence_full=evidence_full
@@ -866,7 +866,7 @@ async def judge_expert_answer(
             presence_penalty=0.0,
             seed=42,
             max_tokens=3072,
-            prompt_tag="judge_expert_answer",
+            prompt_tag=prompt_tag_for("judge_expert_answer"),
         )
     except ModelCallError as e:
         # The judge is REPORTED-only; a judge failure must DEGRADE (no signal), never crash

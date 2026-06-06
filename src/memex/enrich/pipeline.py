@@ -59,7 +59,7 @@ from memex.enrich.ner_otter import extract_chunk_entities, otter_backend_enabled
 from memex.index.chunker import chunk_document
 from memex.index.graph_store import GraphStore
 from memex.models.client import complete_structured
-from memex.prompts import render_prompt
+from memex.prompts import active_version, prompt_tag_for, render_prompt
 from memex.vault.store import (
     VaultDocument,
     list_documents,
@@ -71,13 +71,11 @@ from memex.vault.store import (
 logger = structlog.get_logger(__name__)
 
 _ENTITY_PROMPT_NAME = "extract_entities"
-# v2 adds `{{ passage | truncate(6000) }}` so an oversized chunk (e.g. a big
-# table that escaped the chunker cap, or an un-migrated vault doc) can't blow
-# the entity-extraction context window and fail the whole chunk. See the
-# chunker `MAX_CHUNK_MULTIPLIER` cap, which is the primary fix.
-_ENTITY_PROMPT_VERSION = "v2"
+# The active extract_entities prompt truncates the passage (`{{ passage | truncate(6000) }}`)
+# so an oversized chunk (a big table that escaped the chunker cap, or an un-migrated vault
+# doc) can't blow the entity-extraction context window and fail the whole chunk. See the
+# chunker `MAX_CHUNK_MULTIPLIER` cap, the primary fix.
 _CITATION_PROMPT_NAME = "extract_citations"
-_CITATION_PROMPT_VERSION = "v2"
 # Per-call output budget for entity/citation extraction, kept safely under the
 # 6144 orchestrator model-len: a dense passage prompt runs ~1800-2700 tokens
 # (the `truncate(6000)`-char passage tokenises denser for numeric tables), so
@@ -168,7 +166,7 @@ async def _extract_chunk(chunk: Chunk, title: str) -> tuple[list[Entity], list[C
         prompt=citation_prompt,
         full_schema=CitationList,
         compact_schema=CitationListCompact,
-        prompt_tag=f"{_CITATION_PROMPT_NAME}@{_CITATION_PROMPT_VERSION}",
+        prompt_tag=prompt_tag_for(_CITATION_PROMPT_NAME),
     )
 
     if otter_backend_enabled():
@@ -179,7 +177,7 @@ async def _extract_chunk(chunk: Chunk, title: str) -> tuple[list[Entity], list[C
             prompt=entity_prompt,
             full_schema=EntityList,
             compact_schema=EntityListCompact,
-            prompt_tag=f"{_ENTITY_PROMPT_NAME}@{_ENTITY_PROMPT_VERSION}",
+            prompt_tag=prompt_tag_for(_ENTITY_PROMPT_NAME),
         )
         entity_raw, citation_raw = await asyncio.gather(entity_task, citation_task)
         # `complete_structured` is typed to return the schema instance (the compact
@@ -381,8 +379,8 @@ async def enrich_document(doc_id: str) -> EnrichResult:
             citation_count=len(resolved),
             wikilinks_inserted=wikilinks_inserted,
             prompt_versions={
-                _ENTITY_PROMPT_NAME: _ENTITY_PROMPT_VERSION,
-                _CITATION_PROMPT_NAME: _CITATION_PROMPT_VERSION,
+                _ENTITY_PROMPT_NAME: active_version(_ENTITY_PROMPT_NAME),
+                _CITATION_PROMPT_NAME: active_version(_CITATION_PROMPT_NAME),
             },
             duration_ms=duration_ms,
         ),

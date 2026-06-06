@@ -36,7 +36,7 @@ from pydantic import Field, create_model
 from memex.agents.answering import DraftAnswer, RelevanceAssessment, VerificationResult
 from memex.core.errors import ModelCallError
 from memex.models.client import complete_structured
-from memex.prompts import render_prompt
+from memex.prompts import prompt_tag_for, render_prompt
 
 if TYPE_CHECKING:
     from memex.agents.answering import CitedClaim
@@ -87,7 +87,7 @@ async def ground_claims(
             prompt=prompt,
             schema=bounded_verification(n),
             max_tokens=max_tokens,
-            prompt_tag="verify_grounding@v2",
+            prompt_tag=prompt_tag_for("verify_grounding"),
         )
     except ModelCallError as e:
         # If grounding itself fails, drop the claims (never ship ungrounded).
@@ -167,7 +167,7 @@ async def assess_responsiveness(
         relevance, tokens = await complete_structured(
             prompt=prompt,
             schema=RelevanceAssessment,
-            prompt_tag="assess_relevance@v1",
+            prompt_tag=prompt_tag_for("assess_relevance"),
         )
     except ModelCallError as e:
         logger.warning("relevance.failed", error=str(e)[:160])
