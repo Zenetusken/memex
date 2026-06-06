@@ -146,6 +146,111 @@ async def test_parrot_vague_passes_honesty_but_fails_usefulness(
     assert report.usefulness_floor_pass is False
 
 
+def _patch_sequence(monkeypatch: pytest.MonkeyPatch, answers: list[str]) -> None:
+    """Like `_patch`, but `expert_answer` returns a DIFFERENT answer per call (run), cycling through
+    `answers` (the last repeats if there are more runs) — so a SINGLE case can fire a gate in some
+    runs and not others, exercising the majority-of-N aggregation. `_judge_health_check` only calls
+    the judge, never `expert_answer`, so the counter isn't perturbed."""
+    calls = {"i": 0}
+
+    async def fake_expert_answer(question: str, **_kw: Any) -> ExpertAnswer:
+        a = answers[min(calls["i"], len(answers) - 1)]
+        calls["i"] += 1
+        return _ans(question, a)
+
+    async def fake_fetch(ans: ExpertAnswer) -> tuple[list[dict[str, str]], set[str]]:
+        ef = [{"title": e.title, "chunk_id": e.chunk_id, "full_text": e.snippet} for e in ans.evidence]
+        return ef, {e.chunk_id for e in ans.evidence}
+
+    async def fake_judge(
+        question: str, answer_text: str, evidence_full: list[dict[str, str]], **_kw: Any
+    ) -> ExpertVerifierJudgement:
+        low = answer_text.lower()
+        if "udp" in low or "networking guide reports annual revenue" in low:
+            return ExpertVerifierJudgement(
+                claim_verdicts=[ClaimVerdict(verdict="contradicts_evidence", offending_span=answer_text)]
+            )
+        return ExpertVerifierJudgement(claim_verdicts=[ClaimVerdict(verdict="grounded_in_evidence")])
+
+    monkeypatch.setattr("memex.eval.runner.expert_answer", fake_expert_answer)
+    monkeypatch.setattr("memex.eval.runner._fetch_full_evidence", fake_fetch)
+    monkeypatch.setattr("memex.eval.runner.judge_expert_answer", fake_judge)
+
+
+# The substring trap: `must_not_assert` includes the forbidden phrase, which is a SUBSTRING of the
+# CORRECT phrasing ("rstp's faster…"), so a rare run mints it as a false-positive (the 1-in-22 flake).
+_FORBIDDEN = "stp is faster than rstp"
+
+
+@pytest.mark.asyncio
+async def test_gated_minority_fire_passes_via_majority(
+    settings: MemexSettings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A GATED case (N=5) where the deterministic substring gate fires in only 2/5 runs. MAJORITY-of-N:
+    # 2 is NOT a majority → the case PASSES the hard gate, but `gate_run_stable=False` SURFACES the
+    # flakiness (the runs weren't unanimous) for a human look — exactly the v1.1 intent.
+    _patch_sequence(
+        monkeypatch,
+        [
+            "STP is faster than RSTP in this design.",  # fires
+            "stp is faster than rstp, arguably.",  # fires
+            "OSPF is link-state and EIGRP uses DUAL.",  # clean
+            "RSTP converges quickly; favour open standards.",  # clean
+            "A substantive analysis of the trade-offs.",  # clean
+        ],
+    )
+    qs = _write_corpus(
+        tmp_path,
+        [{"name": "rstp-trap", "question": "gated", "must_not_assert": [_FORBIDDEN], "is_gated": True}],
+    )
+    report = await run_expert_eval(qs, runs_default=1)
+    assert report.vault_contradiction_count == 0  # 2/5 < majority → gate count 0
+    assert report.hard_gates_pass is True
+    assert report.per_case[0].gate_run_stable is False  # surfaced as flaky (not unanimous)
+
+
+@pytest.mark.asyncio
+async def test_gated_majority_fire_still_fails(
+    settings: MemexSettings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 3/5 fire → a MAJORITY → the gate STILL hard-fails (a genuine repeated assertion isn't excused).
+    _patch_sequence(
+        monkeypatch,
+        [
+            "STP is faster than RSTP.",
+            "stp is faster than rstp.",
+            "stp is faster than rstp, indeed.",
+            "OSPF is link-state.",
+            "EIGRP uses DUAL.",
+        ],
+    )
+    qs = _write_corpus(
+        tmp_path,
+        [{"name": "rstp-trap", "question": "gated", "must_not_assert": [_FORBIDDEN], "is_gated": True}],
+    )
+    report = await run_expert_eval(qs, runs_default=1)
+    assert report.vault_contradiction_count == 1  # 3/5 > majority → gate fires
+    assert report.hard_gates_pass is False
+
+
+@pytest.mark.asyncio
+async def test_non_gated_keeps_any_run_fail(
+    settings: MemexSettings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A NON-gated case keeps the strict any-run-fail rule: ONE firing run (1/3) hard-fails — pinning
+    # that the majority rule is scoped to gated cases only.
+    _patch_sequence(
+        monkeypatch,
+        ["STP is faster than RSTP.", "OSPF is link-state.", "EIGRP uses DUAL."],
+    )
+    qs = _write_corpus(
+        tmp_path, [{"name": "plain", "question": "gated", "must_not_assert": [_FORBIDDEN]}]
+    )
+    report = await run_expert_eval(qs, runs_default=3)
+    assert report.vault_contradiction_count == 1  # any-run-fail: 1 firing run → gate fires
+    assert report.hard_gates_pass is False
+
+
 def test_expert_structural_violations_catches_degenerate_and_stripped() -> None:
     good = ExpertAnswer(
         question="Q?", answer="A real substantive answer.",

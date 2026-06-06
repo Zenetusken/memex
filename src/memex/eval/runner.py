@@ -970,6 +970,7 @@ async def run_expert_eval(
     for c in cases:
         n = _GATED_RUNS if c.is_gated else runs_default
         fired_runs: list[bool] = []
+        gate_runs: dict[str, list[int]] = {"vc": [], "ff": [], "st": [], "ood": [], "adv": []}
         vc = ff = st = ood = adv = 0
         coverage_runs: list[float] = []
         ack_runs: list[float] = []
@@ -996,7 +997,11 @@ async def run_expert_eval(
             r_ood = len(ood_doc_attribution_violations(text, is_ood=c.is_ood, evidence_empty=ev_empty))
             r_adv = len(absent_assertion_violations(text, c.must_not_recommend))
             fired_runs.append((r_vc + r_ff + r_st + r_ood + r_adv) > 0)
-            vc, ff, st, ood, adv = max(vc, r_vc), max(ff, r_ff), max(st, r_st), max(ood, r_ood), max(adv, r_adv)
+            gate_runs["vc"].append(r_vc)
+            gate_runs["ff"].append(r_ff)
+            gate_runs["st"].append(r_st)
+            gate_runs["ood"].append(r_ood)
+            gate_runs["adv"].append(r_adv)
             coverage_runs.append(mention_recall(text, c.must_mention))
             ack_runs.append(mention_recall(text, c.acknowledgment_phrases) if c.acknowledgment_phrases else 0.0)
             refused_any = refused_any or unexpected_refusal(text, case_expects_engagement=c.case_expects_engagement)
@@ -1010,6 +1015,28 @@ async def run_expert_eval(
                 notes = f"ood: {len(resp.evidence)} chunks retrieved (relevance not score-gated v1)"
             if i == 0:
                 run0_text, run0_evidence = text, evidence_full
+
+        # Per-gate aggregation across the n runs. GATED cases (the deterministic-substring traps,
+        # run at N=5) use MAJORITY-of-N — a gate counts only when it fired in a STRICT majority of
+        # runs — so a rare 1-or-2-of-5 false-fire (the `stp` ⊂ `rstp` substring trap) is SURFACED via
+        # `gate_run_stable` (the runs weren't unanimous) instead of HARD-FAILING the whole eval. A
+        # genuine assertion that fires in the majority of runs still hard-fails. NON-gated cases keep
+        # any-run-fail (the worst run) — at N=3 they're far less flake-prone. (n==0 → the 0-defaults
+        # above hold.)
+        if gate_runs["vc"]:  # n >= 1: the run loop executed
+            if c.is_gated:
+                thr = n // 2  # strict majority: a gate counts only if it fired in > n//2 runs
+                vc = 1 if sum(1 for x in gate_runs["vc"] if x > 0) > thr else 0
+                ff = 1 if sum(1 for x in gate_runs["ff"] if x > 0) > thr else 0
+                st = 1 if sum(1 for x in gate_runs["st"] if x > 0) > thr else 0
+                ood = 1 if sum(1 for x in gate_runs["ood"] if x > 0) > thr else 0
+                adv = 1 if sum(1 for x in gate_runs["adv"] if x > 0) > thr else 0
+            else:
+                vc = max(gate_runs["vc"])
+                ff = max(gate_runs["ff"])
+                st = max(gate_runs["st"])
+                ood = max(gate_runs["ood"])
+                adv = max(gate_runs["adv"])
 
         judgement = await judge_expert_answer(
             c.question, run0_text, run0_evidence, judge_model=effective_judge
