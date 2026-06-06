@@ -21,7 +21,7 @@
       "qid": "french-course-01",
       "question": "Qui est le charg\u00e9 de cours du CR350 ?",
       "relevant_chunk_ids": [
-        "5795b16a-pdf-cr350-cours-1#9ef0e8b32b"
+        "5795b16a-pdf-cr350-cours-1#54da5e4ebd"
       ],
       "should_refuse": false,
       "_expected_answer": "Charles Tounou (from the title-page slide listing 'Charg\u00e9 de cours : Charles Tounou').",
@@ -33,7 +33,7 @@
       "qid": "french-course-02",
       "question": "Qu'est-ce qu'un r\u00e9seau selon le cours CR350 ?",
       "relevant_chunk_ids": [
-        "5795b16a-pdf-cr350-cours-1#a49b400ac0"
+        "5795b16a-pdf-cr350-cours-1#f64a3fc0ec"
       ],
       "should_refuse": false,
       "_expected_answer": "Une collection d'entit\u00e9s interconnect\u00e9es telles que des ordinateurs, serveurs, mainframes, appareils et autres p\u00e9riph\u00e9riques, capables de communiquer entre eux et de partager des ressources.",
@@ -45,19 +45,19 @@
       "qid": "french-course-03",
       "question": "Quels sont les protocoles s\u00e9curis\u00e9s mentionn\u00e9s dans le cours ?",
       "relevant_chunk_ids": [
-        "5795b16a-pdf-cr350-cours-1#e4fd69f614"
+        "5795b16a-pdf-cr350-cours-1#32bb0255f4"
       ],
       "should_refuse": false,
       "_expected_answer": "FTP s\u00e9curis\u00e9, SSH, HTTPS (listed under 'Contr\u00f4le et s\u00e9curit\u00e9 des flux de donn\u00e9es').",
       "_answer_type": "listing",
       "_note": "Listing query \u2014 the chunk has explicit '- \u26ac FTP s\u00e9curis\u00e9, SSH, HTTPS, etc.' Tests whether the model emits multiple claims from a single list-shaped chunk.",
-      "_anchor_phrase": "FTP s\u00e9curis\u00e9 SSH HTTPS"
+      "_anchor_phrase": "FTP s\u00e9curis\u00e9, SSH, HTTPS, etc."
     },
     {
       "qid": "french-course-04",
       "question": "Pourquoi ARPANET est-il \u00e0 l'origine des probl\u00e8mes de s\u00e9curit\u00e9 d'Internet ?",
       "relevant_chunk_ids": [
-        "5795b16a-pdf-cr350-cours-1#a49b400ac0"
+        "5795b16a-pdf-cr350-cours-1#f64a3fc0ec"
       ],
       "should_refuse": false,
       "_expected_answer": "ARPANET a privil\u00e9gi\u00e9 l'\u00e9tablissement de connexions plut\u00f4t que la protection des donn\u00e9es, cr\u00e9ant des vuln\u00e9rabilit\u00e9s lors du d\u00e9veloppement en r\u00e9seau mondial. Les protocoles cl\u00e9s comme TCP/IP manquaient de robustesse en mati\u00e8re de s\u00e9curit\u00e9.",
@@ -116,7 +116,7 @@
     "conservative_false_refusals": [],
     "note": "Run config: vLLM Qwen/Qwen3-8B-AWQ orchestrator + BAAI/bge-reranker-v2-m3 now loading in bf16 (ADR-0006 intent), restored by the CrossEncoder automodel_args->model_kwargs fix on 2026-05-24. HARD GATES held: refusal_rate_on_counterfactuals=1.0, zero hallucinations (every refusal_correct=False case is a conservative false-refusal on an answerable query, not a wrongly-answered REF). ANS/REF counts identical to the prior (fp32-reranker) baselines. Any citation-precision delta vs the fp32 baseline is a chunk-granularity shift \u2014 the bf16 reranker cites an equally-valid sibling chunk in the SAME correct document \u2014 not a quality regression (verified: doc disambiguation + answer correctness intact)."
   },
-  "_resolved_at": "2026-05-26T00:47:27Z",
+  "_resolved_at": "2026-06-06T21:01:07Z",
   "_baseline_2026_05_25_vlm": {
     "query_count": 8,
     "answered": 5,
@@ -127,5 +127,16 @@
     "mean_citation_precision_answered_only": 0.85,
     "conservative_false_refusals": [],
     "note": "Re-baselined after cours-1 (5795b16a) was re-parsed with the VLM enabled. HARD GATES held: refusal_cf=1.0, 0 hallucinations, 5/5 ANS still answer. Citation-precision steady (0.84 -> 0.85). The legacy queries lacked _anchor_phrase (hardcoded chunk-ids); added distinctive slide phrases + re-resolved via scripts/extend_corpus.py against the rebuilt FTS. NB the VLM re-parse merged the intro chunk: the reseau definition + ARPANET content now co-reside in 5795b16a#a49b400ac0 (french-course-02 and -04 both resolve there)."
+  },
+  "_baseline_2026_06_06_w6_reanchor": {
+    "query_count": 8,
+    "answered": 5,
+    "refused": 3,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "hallucinations": 0,
+    "mean_citation_precision": 0.7357,
+    "mean_citation_precision_answered_only": 0.5771,
+    "n_runs": 1,
+    "note": "Post-W6 gold-anchor re-baseline: gold re-anchored against the 2026-06-06 V2 covered-22 re-parse (content-addressed chunk_ids churned -> stale gold). refusal_cf held 1.0 (HARD gate intact, 0 counterfactual hallucinations). mean_citation_precision is now measured against the CORRECTED gold. Single run (n_runs=1) -- the greedy 4B is non-deterministic on borderline queries, so treat as a typical-run figure, not a stability claim."
   }
 }

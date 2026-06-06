@@ -13,6 +13,13 @@
   "stable": true,
   "_note": "rewrite_followup/v1 on the Qwen3.5-4B orchestrator; embedder pinned (CO_RESIDENCE_MODE=manual). All 10 cases recall=1.0, byte-stable across N=3 — the current rewrite resolves every follow-up's referent (pronoun / possessive / elliptical / cross-deck / cross-lingual / multi-turn topic-return) well enough to surface the gold within k=20. This 1.0 is DISCRIMINATING, not lenient: every case is two-sided-verified so the RAW unresolved follow-up MISSES its gold at k=20 — a rewrite regression that drops a referent falls toward the raw and lowers recall. Gold re-resolved live 2026-06-04 (the 2026-06-01 seed gold had drifted after a re-process; 3 initially-overfit gold sub-chunks were re-resolved to the chunks the model's NATURAL rewrite retrieves, not my term-loaded ideal — the verify-with-the-eval's-own-path lesson)."
  },
+ "_baseline_2026_06_06_w6_reanchor": {
+   "case_count": 10,
+   "k": 20,
+   "n_runs": 1,
+   "mean_recall": 1.0,
+   "_note": "Post-W6 re-anchor: 4 cases whose gold churned in the V2 re-parse were re-labeled (dhcp-messages, fr-ckc-reconnaissance, fr-cours11-email-filtering, xling-ckc-reconnaissance); the other 6 cases (incl. the held nist zerotrust-pep + fr-arp whose chunk survived the re-parse) are unchanged. mean_recall=1.0 (n_runs=1 here) matches the prior 2026-06-04 n=3 baseline -- every follow-up's re-anchored gold is surfaced by the rewrite. Held-doc principle: only genuinely-stale gold was changed (4 over-reached re-labels were reverted to their still-present old gold)."
+ },
  "cases": [
   {
    "name": "dhcp-messages-followup",
@@ -21,7 +28,7 @@
     {"user_text": "What is DHCPv4 used for?", "answer_summary": "DHCPv4 dynamically assigns IPv4 addressing information to hosts on a network."}
    ],
    "follow_up": "what messages does it use?",
-   "relevant_chunk_ids": ["bc6effb8-srwe-module-7-2021#5f88716848", "bc6effb8-srwe-module-7-2021#8a5256a9cb"],
+   "relevant_chunk_ids": ["bc6effb8-srwe-module-7-2021#70a84e10eb", "bc6effb8-srwe-module-7-2021#76f49da7e1"],
    "k": 20
   },
   {
@@ -62,7 +69,7 @@
     {"user_text": "Qu'est-ce que la Cyber Kill Chain présentée dans le cours ?", "answer_summary": "La Cyber Kill Chain est un modèle de Lockheed Martin décrivant en plusieurs phases le déroulement d'une attaque réseau."}
    ],
    "follow_up": "que fait l'attaquant pendant sa première phase ?",
-   "relevant_chunk_ids": ["7e7cd59e-cr350-semaine-5-attaques-r-seau-et-cha-ne-d-atta#9a72aff12e"],
+   "relevant_chunk_ids": ["7e7cd59e-cr350-semaine-5-attaques-r-seau-et-cha-ne-d-atta#85d026f37e"],
    "k": 20
   },
   {
@@ -82,7 +89,7 @@
     {"user_text": "Quelles menaces sont véhiculées par courriel selon le cours 11 ?", "answer_summary": "Le courriel véhicule des menaces comme l'hameçonnage, les pièces jointes malveillantes et les liens vers des sites malveillants."}
    ],
    "follow_up": "comment les filtrer ?",
-   "relevant_chunk_ids": ["7577f688-pdf-cr350-cours11-filtrage-url-antivirus-courrie#682930472f"],
+   "relevant_chunk_ids": ["7577f688-pdf-cr350-cours11-filtrage-url-antivirus-courrie#2103791277", "7577f688-pdf-cr350-cours11-filtrage-url-antivirus-courrie#f28da1f146"],
    "k": 20
   },
   {
@@ -112,7 +119,7 @@
     {"user_text": "What does the CR350 course say about the Cyber Kill Chain?", "answer_summary": "It is Lockheed Martin's multi-phase model describing the stages of a network attack."}
    ],
    "follow_up": "what happens during its first phase?",
-   "relevant_chunk_ids": ["7e7cd59e-cr350-semaine-5-attaques-r-seau-et-cha-ne-d-atta#e5cd668a52"],
+   "relevant_chunk_ids": ["7e7cd59e-cr350-semaine-5-attaques-r-seau-et-cha-ne-d-atta#85d026f37e"],
    "k": 20
   }
  ]

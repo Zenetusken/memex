@@ -12,7 +12,7 @@
   "_created": "2026-05-27",
   "_purpose": "Validate the scan\u2192VLM handwritten path under the answer-quality HARD GATES: refusal_rate_on_counterfactuals == 1.0, zero hallucinations. First handwritten-content corpus; closes the long-standing P2.3 scan-corpus gap.",
   "_source_note": "A CC-BY handwritten C++ note (HumynLabs CS-Notes set; the source PDF stays LOCAL at ~/memex_eval_logs/handwritten/cs-notes-1.pdf - only this query set ships). Image-only PDF (image_area_fraction 0.85, chars_per_page_avg 0) -> ingested with MEMEX_PARSE__DISABLE_VLM=false -> the scan route fired (parse.scan.start/done) -> Qwen3-VL-8B transcribed the page. The scan route strips the whole-page ```markdown fence the VLM wraps its full-page output in (_strip_markdown_fence_wrapper), so the note indexes as real markdown, not a code block (3 chunks; pre-strip it was 4, incl. a junk ```markdown fence chunk that degraded grounding). The transcription preserved 'Bjorne' (the note's handwritten spelling of Bjarne Stroustrup) - answers cite it verbatim.",
-  "_resolved_at": "2026-05-27T22:36:01Z",
+  "_resolved_at": "2026-06-06T21:01:10Z",
   "_baseline_2026_05_27": {
     "stack": "Qwen3-8B-AWQ orchestrator + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3 (cross_encoder, bf16; reranker on CPU for 12 GB co-residence), top_k=5",
     "doc_id": "6cf677b7-cs-notes-1",
@@ -41,7 +41,7 @@
       "_note": "The validated end-to-end fact. Retrieval must find the transcribed handwriting; the answer reflects the note's spelling.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "6cf677b7-cs-notes-1#aad1e762c9"
+        "6cf677b7-cs-notes-1#cd4b5de355"
       ]
     },
     {
@@ -53,7 +53,7 @@
       "_note": "History detail unique to this note.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "6cf677b7-cs-notes-1#aad1e762c9"
+        "6cf677b7-cs-notes-1#cd4b5de355"
       ]
     },
     {
@@ -65,19 +65,19 @@
       "_note": "Tests reading the reasoning clause, not just the label.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "6cf677b7-cs-notes-1#aad1e762c9"
+        "6cf677b7-cs-notes-1#cd4b5de355"
       ]
     },
     {
       "qid": "handwritten-04",
       "question": "Which programming paradigms do the notes say C++ supports?",
-      "_anchor_phrase": "object-oriented, procedural and generic programming",
+      "_anchor_phrase": "supports \"object-oriented\", \"procedural\" and \"generic\" programming",
       "_expected_answer": "C++ supports object-oriented, procedural, and generic programming.",
       "_answer_type": "list",
       "_note": "Multi-item list from the transcribed bullet.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "6cf677b7-cs-notes-1#aad1e762c9"
+        "6cf677b7-cs-notes-1#cd4b5de355"
       ]
     },
     {
@@ -89,7 +89,7 @@
       "_note": "Compiled vs interpreted \u2014 stated explicitly.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "6cf677b7-cs-notes-1#aad1e762c9"
+        "6cf677b7-cs-notes-1#cd4b5de355"
       ]
     },
     {
@@ -101,7 +101,7 @@
       "_note": "Anchors on the transcribed diagram chunk (the VLM rendered the hand-drawn flow as text).",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "6cf677b7-cs-notes-1#b438ce8669"
+        "6cf677b7-cs-notes-1#b008799e72"
       ]
     },
     {
@@ -144,5 +144,16 @@
       "should_refuse": true,
       "relevant_chunk_ids": []
     }
-  ]
+  ],
+  "_baseline_2026_06_06_w6_reanchor": {
+    "query_count": 10,
+    "answered": 5,
+    "refused": 5,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "hallucinations": 0,
+    "mean_citation_precision": 1.0,
+    "mean_citation_precision_answered_only": 1.0,
+    "n_runs": 1,
+    "note": "Post-W6 gold-anchor re-baseline: gold re-anchored against the 2026-06-06 V2 covered-22 re-parse (content-addressed chunk_ids churned -> stale gold). refusal_cf held 1.0 (HARD gate intact, 0 counterfactual hallucinations). mean_citation_precision is now measured against the CORRECTED gold. Single run (n_runs=1) -- the greedy 4B is non-deterministic on borderline queries, so treat as a typical-run figure, not a stability claim."
+  }
 }

@@ -26,8 +26,9 @@
 > NO content loss.** (2) **Docling re-tiering** — premise confirmed via diagnostic but it's a redesign, not a
 > tweak (see Queued).
 >
-> **New follow-ups from the W6 migration (see Feature backlog):** gold-anchor re-baseline for the 7 affected
-> corpora; the grounding-gate over-refusal investigation; the slide-decks verify-JSON-overflow eval-robustness gap.
+> **Follow-ups from the W6 migration:** gold-anchor re-baseline for the 7 affected corpora ✅ DONE 2026-06-06
+> (see "deferred-but-since-shipped"); the grounding-gate over-refusal investigation ✅; the slide-decks
+> verify-JSON-overflow eval-robustness gap (STILL OPEN — re-confirmed by the re-baseline; see the eval-runner item).
 
 ## How to read the categories
 
@@ -177,16 +178,13 @@ _Would do, but blocked on curator corpus data, a model/hardware availability, or
   *Unblock:* Out-of-scope roadmap; only if a forms eval category is pursued.  
   *Sources:* ROADMAP.md:255 (Tier 6)
 
-## 📋 Feature backlog (66)
+## 📋 Feature backlog (65)
 
 _Would-do, lower priority — no external blocker, just unscheduled._
 
-- **W6 gold-anchor re-baseline (7 corpora)** — After the W6 covered-22 re-parse (`w6-migration-2026-06-06`), the `relevant_chunk_ids` gold in ccna-multidoc / cr350-multidoc / cr350-diagrams / french-course / handwritten / slide-decks / chat-multiturn are STALE for the 22 re-parsed docs (content-addressed chunk_ids churned) → their `citation_precision` / `gold_chunk_recall` metrics read low until re-grounded. The ANS/REF + refusal_cf HARD gates are UNAFFECTED (gold-independent).  
-  *Unblock:* Pickable now — for each query, re-map its `_anchor_phrase` to the new chunk containing it (the new `chunk_id`), update `relevant_chunk_ids`. Careful: gold corpora are git-tracked + load-bearing; a mis-map silently corrupts the eval. Verify each re-grounded anchor resolves to a chunk whose text contains the anchor phrase.  
-  *Sources:* w6-migration-2026-06-06; eval/scoring.py::citation_precision; eval/runner.py::gold_chunk_recall
 - **Grounding-gate over-refusal — CITATION-class FIXED 2026-06-06; SYNTHESIS-class remains.** The assess (sufficiency) gate over-refused with the answer present (handwritten-04: answer at rank #1, refused "lack specific citations as requested"). **FIXED** via `assess_sufficiency@v2` (citation-floor prompt; branch `fix/assess-sufficiency-citation-floor`): multi-run validated +2 ANS / 0 regressions / refusal_cf=1.0 across two full 12-corpus passes. The candidate that ALSO tightened ("must explicitly state / topic overlap") was net −3 and rejected. **Residual = the SYNTHESIS-class** (cr350-img-01). **INVESTIGATED 2026-06-06 → NO SAFE ADDRESSABLE SPACE, no code written** (see the closed item under 🚫 Decided-against + `synthesis-lever-nogo-2026-06-06`). The strict gate ALREADY grounds pure-(A) co-located joins; the only refusals are reading-(B) premise-joins / false inferences (it correctly killed a 10-K "50x lower cost/token" claim when the chunk said 35x — the hole). Don't reopen as a gate-relaxation.  
   *Sources:* synthesis-lever-nogo-2026-06-06; grounding-gate-overrefusal-2026-06-06; agents/answering.py::assess; prompts/assess_sufficiency/v2.md
-- **Eval runner per-query error handling + verify `ungrounded_reasons` overflow** — `eval/runner.py::run_eval`'s `for q in queries` has NO try/except → one query's `ModelCallError` aborts the WHOLE eval. Surfaced post-W6: a re-chunked CUDA-deck query made the verifier emit a runaway `ungrounded_reasons` string > max_tokens → invalid guided-JSON → the slide-decks eval crashed 3×. Two fixes: (a) catch per-query errors in the runner (record as error/refusal, continue); (b) bound `VerificationResult.ungrounded_reasons` item length harder (it already has a max_length per CLAUDE.md — verify it's enforced on this path).  
+- **Eval runner per-query error handling + verify `ungrounded_reasons` overflow** — `eval/runner.py::run_eval`'s `for q in queries` has NO try/except → one query's `ModelCallError` aborts the WHOLE eval. Surfaced post-W6: a re-chunked CUDA-deck query made the verifier emit a runaway `ungrounded_reasons` string > max_tokens → invalid guided-JSON → the slide-decks eval crashed 3×. Two fixes: (a) catch per-query errors in the runner (record as error/refusal, continue); (b) bound `VerificationResult.ungrounded_reasons` item length harder (it already has a max_length per CLAUDE.md — verify it's enforced on this path). **RE-CONFIRMED 2026-06-06 by the W6 gold-anchor re-baseline: `memex eval` on slide-decks crashed again with this exact `ModelCallError: Model output did not match the requested schema` — so slide-decks' post-re-anchor baseline is recall-only (0.056→0.889); its answer-eval (refusal_cf / citation_precision) stays BLOCKED until (a) lands. The other 5 answer corpora completed (refusal_cf=1.0).**  
   *Unblock:* (a) is a safe eval-only change; (b) needs a check of the verify schema bound vs the live overflow.  
   *Sources:* w6-migration-2026-06-06; eval/runner.py:28; agents/answering.py::verify
 - **De-hyphenation markdown cleanup** — Low-risk post-process to rejoin end-of-line-hyphenated words to improve embedding + BM25 token matching (verified no rejoin exists in parse/).  
@@ -478,7 +476,7 @@ _Tried-and-reverted or explicitly rejected. Recorded so they're not re-proposed 
 - **H4 deck topic-grouping summarizer knob + embedding-based semantic dedup** — H4 DEFERRED + known-infeasible on noisy-heading decks (deck heading_path is junk; needs robust normalization); embedding-based semantic dedup REJECTED (non-deterministic, degrades under VRAM pressure). Residual purely-semantic cross-paragraph overlap accepted with no clean deterministic fix. (deck_granularity_tracker:68/89/92)
 - **Table-under-ranking / margin-bounded table promotion (as a global retrofit)** — NOTE: tracked as a data-gated lever (declined-for-now, evidence-gated), NOT dead — see the data-gated 'cross_encoder under-ranking' entry. Listed here only because one sweeper marked it rejected; declined as a risky global retrofit but revivable with evidence it helps without regressing prose corpora.
 
-## Excluded — deferred-but-since-shipped (15)
+## Excluded — deferred-but-since-shipped (16)
 
 _Surfaced by the sweep but already shipped; kept for traceability, not pending._
 
@@ -497,6 +495,7 @@ _Surfaced by the sweep but already shipped; kept for traceability, not pending._
 - UI-ingestion v1 hardening backlog Inc 1-7 (B7/B8/B11/B12/B18 etc. MERGED to main 587edaa; only chunk_count gate / half-doc resume / multi-upload queue survive, listed separately)
 - Stack-currency eval-gated swaps — PyMuPDF pre-filter (P1.1) + reranker backend SHIPPED (Granite-8B survives as P2.2)
 - prompt_tag auto-derive — version-drift class KILLED 2026-06-06 (`prompts/loader.py::prompt_tag_for`/`active_version` derive the tag from the loaded spec; all 18 producer sites converted + a source-scan permanence guard test; branch `feat/prompt-tag-auto-derive`)
+- W6 gold-anchor re-baseline (7 corpora) — DONE 2026-06-06 (branch `eval/w6-gold-anchor-rebaseline`): 5 anchor corpora re-resolved (recall 0.205→0.898) + slide-decks/chat-multiturn re-labeled via an adversarial agent workflow (held-doc principle: only genuinely-stale gold changed); `_baseline_2026_06_06_w6_reanchor` recorded; refusal_cf held 1.0 on all 5 measurable answer corpora; chat mean_recall 1.0. ONE residual carried to the eval-runner item: slide-decks answer-eval still BLOCKED by the ungrounded_reasons-overflow crash (recall-only baseline there).
 
 ## Uncertain — implemented-vs-pending unclear (3)
 

@@ -49,8 +49,8 @@
       "_doc_id": "ccd09479-cr350-network-diagrams",
       "_anchor_phrase": "Transaction Subnet",
       "relevant_chunk_ids": [
-        "ccd09479-cr350-network-diagrams#5f4aeda834",
-        "ccd09479-cr350-network-diagrams#512a070330"
+        "ccd09479-cr350-network-diagrams#c9458da23a",
+        "ccd09479-cr350-network-diagrams#d3d3489053"
       ],
       "should_refuse": false,
       "_expected_answer": "Le sous-r\u00e9seau de transaction (Transaction Subnet), pr\u00e9sent dans les architectures three-tier mais pas dans single-tier ou two-tier.",
@@ -61,9 +61,9 @@
       "qid": "cr350-diag-04",
       "question": "Quel logiciel de d\u00e9tection d'intrusion (IDS) est pr\u00e9sent\u00e9 dans le cours ?",
       "_doc_id": "ccd09479-cr350-network-diagrams",
-      "_anchor_phrase": "Snort package manager interface",
+      "_anchor_phrase": "specifically focusing on Snort, which is a popular open-source IDS",
       "relevant_chunk_ids": [
-        "ccd09479-cr350-network-diagrams#e23db89fb1"
+        "ccd09479-cr350-network-diagrams#3b15a0308f"
       ],
       "should_refuse": false,
       "_expected_answer": "Snort (pr\u00e9sent\u00e9 via son interface dans le gestionnaire de paquets pfSense).",
@@ -76,7 +76,7 @@
       "_doc_id": "ccd09479-cr350-network-diagrams",
       "_anchor_phrase": "arping",
       "relevant_chunk_ids": [
-        "ccd09479-cr350-network-diagrams#e23db89fb1"
+        "ccd09479-cr350-network-diagrams#3b15a0308f"
       ],
       "should_refuse": false,
       "_expected_answer": "arping, AutoConfigBackup, bandwidthd et nmap.",
@@ -89,7 +89,7 @@
       "_doc_id": "ccd09479-cr350-network-diagrams",
       "_anchor_phrase": "nmap",
       "relevant_chunk_ids": [
-        "ccd09479-cr350-network-diagrams#e23db89fb1"
+        "ccd09479-cr350-network-diagrams#3b15a0308f"
       ],
       "should_refuse": false,
       "_expected_answer": "Cat\u00e9gorie \u00ab security \u00bb (s\u00e9curit\u00e9), version 1.4.4.1.",
@@ -102,7 +102,7 @@
       "_doc_id": "ccd09479-cr350-network-diagrams",
       "_anchor_phrase": "bandwidthd",
       "relevant_chunk_ids": [
-        "ccd09479-cr350-network-diagrams#e23db89fb1"
+        "ccd09479-cr350-network-diagrams#3b15a0308f"
       ],
       "should_refuse": false,
       "_expected_answer": "Cat\u00e9gorie \u00ab net-mgmt \u00bb (gestion r\u00e9seau).",
@@ -115,7 +115,8 @@
       "_doc_id": "ccd09479-cr350-network-diagrams",
       "_anchor_phrase": "Authentication server (RADIUS)",
       "relevant_chunk_ids": [
-        "ccd09479-cr350-network-diagrams#986cedcdda"
+        "ccd09479-cr350-network-diagrams#9897a68745",
+        "ccd09479-cr350-network-diagrams#4caf37ecef"
       ],
       "should_refuse": false,
       "_expected_answer": "Le client (Client), le commutateur Catalyst ou routeur Cisco (interm\u00e9diaire), et le serveur d'authentification RADIUS.",
@@ -128,7 +129,7 @@
       "_doc_id": "ccd09479-cr350-network-diagrams",
       "_anchor_phrase": "EAPOL-Start",
       "relevant_chunk_ids": [
-        "ccd09479-cr350-network-diagrams#986cedcdda"
+        "ccd09479-cr350-network-diagrams#9897a68745"
       ],
       "should_refuse": false,
       "_expected_answer": "EAPOL-Start, envoy\u00e9 par le client au commutateur Catalyst / routeur Cisco.",
@@ -139,9 +140,9 @@
       "qid": "cr350-diag-10",
       "question": "Quel type de serveur r\u00e9alise l'authentification dans le processus 802.1X ?",
       "_doc_id": "ccd09479-cr350-network-diagrams",
-      "_anchor_phrase": "server responsible for authenticating the client",
+      "_anchor_phrase": "and an Authentication server (RADIUS)",
       "relevant_chunk_ids": [
-        "ccd09479-cr350-network-diagrams#986cedcdda"
+        "ccd09479-cr350-network-diagrams#4caf37ecef"
       ],
       "should_refuse": false,
       "_expected_answer": "Un serveur RADIUS (le serveur d'authentification).",
@@ -154,7 +155,7 @@
       "_doc_id": "ccd09479-cr350-network-diagrams",
       "_anchor_phrase": "EAPOL-Logoff",
       "relevant_chunk_ids": [
-        "ccd09479-cr350-network-diagrams#986cedcdda"
+        "ccd09479-cr350-network-diagrams#9897a68745"
       ],
       "should_refuse": false,
       "_expected_answer": "EAPOL-Logoff, envoy\u00e9 par le client.",
@@ -222,7 +223,7 @@
       "_note": "HARD GATE. Plausible distractor: bandwidthd is described but no measurement value exists."
     }
   ],
-  "_resolved_at": "2026-05-25T21:55:23Z",
+  "_resolved_at": "2026-06-06T21:01:04Z",
   "_baseline_2026_05_25": {
     "run": "vLLM Qwen3-8B-AWQ, 11-doc vault, bf16 reranker, MEMEX_RERANK_BATCH_SIZE=1; VLM escalation @ image_area_threshold=0.20, vlm_transcription_samples=3 (best-of-3 keep-longest), transcriptions CACHED (vlm_cache.sqlite)",
     "query_count": 17,
@@ -248,5 +249,16 @@
     "hallucinations": 0,
     "runs": 5,
     "note": "#256 deterministic artifact\u2192doc re-scope SHIPPED \u2014 closes the cr350-diag-12 cross-doc conflation the relevance-gate baseline left open. The query NAMES 'le diagramme de coupe-feu'; the resolver (agents/artifact_scope.py, regex+BM25, NO LLM) extracts qualifier {coupe,feu} (the data term 'vlan' is structurally excluded \u2014 it precedes 'diagramme de'), resolves it to the firewall lecture 499c900d-cours-6 (which has NO VLAN range), and the re-scope REPLACES the candidate pool there \u2014 removing semaine-4's VLAN chunk before the LLM sees it. So diag-12 refuses BY CONSTRUCTION. MULTI-RUN (N=5, MEMEX_RERANK_BATCH_SIZE=1): 11/11 ANS answered every run, all 6 REF refused every run, cr350-diag-12 answered 0/5, refusal_cf=1.0 every run, 0 hallucinations. Restores the 2026-05-25 baseline (11/6/1.0) the diagram-arm re-process had regressed to 0.833. The other 11 ANS + 5 REF unchanged. Source PDF stays local."
+  },
+  "_baseline_2026_06_06_w6_reanchor": {
+    "query_count": 17,
+    "answered": 11,
+    "refused": 6,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "hallucinations": 0,
+    "mean_citation_precision": 0.3922,
+    "mean_citation_precision_answered_only": 0.0606,
+    "n_runs": 1,
+    "note": "Post-W6 gold-anchor re-baseline: gold re-anchored against the 2026-06-06 V2 covered-22 re-parse (content-addressed chunk_ids churned -> stale gold). refusal_cf held 1.0 (HARD gate intact, 0 counterfactual hallucinations). mean_citation_precision is now measured against the CORRECTED gold. Single run (n_runs=1) -- the greedy 4B is non-deterministic on borderline queries, so treat as a typical-run figure, not a stability claim. Low cite-prec-answered-only reflects single-chunk diagram gold (the agent cites sibling/figure chunks that also contain the answer) -- a known single-chunk-gold strictness, not a regression."
   }
 }
