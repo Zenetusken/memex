@@ -18,10 +18,16 @@
 > half-doc detect, chart-OCR unload, orchestrator reconcile); only half-doc resume/sweep remains, deferred-
 > by-design (auto-acting at startup is unsafe; the manual `memex index <doc>` path exists). (1) **VLM W6**
 > — the V2 prompt (decoration-skip WITHOUT the verbosity-inducing preservation guard) SHIPPED (`c911a80`),
-> validated on the regression site (cr350-diagrams 11/11 ANS, no −1); the **vault-wide re-parse migration**
-> (apply V2 to the other ~37 VLM docs) is deferred — **NOW UNBLOCKED** (the daemon-state root-fix below
-> SHIPPED 2026-06-06, so a CLI re-parse no longer breaks the daemon). (2) **Docling re-tiering** — premise
-> confirmed via diagnostic but it's a redesign, not a tweak (see Queued).
+> validated on the regression site (cr350-diagrams 11/11 ANS, no −1); the **vault-wide re-parse migration
+> RAN 2026-06-06 as a STAGED PARTIAL → DONE** (`w6-migration-2026-06-06`): the **22 eval-covered VLM docs
+> re-parsed to V2 + KEPT**, the **25 unvalidatable HELD on baseline** (deliberate MIXED vault). HARD gate held
+> (refusal_cf=1.0, 0 halluc, ccna +1); 3 stable −1 ANS (2 recoverable gate over-refusals + 1 retrieval miss).
+> **LESSON: re-transcribing a non-deterministic VLM doc churns chunks → retrieval/grounding shift even with
+> NO content loss.** (2) **Docling re-tiering** — premise confirmed via diagnostic but it's a redesign, not a
+> tweak (see Queued).
+>
+> **New follow-ups from the W6 migration (see Feature backlog):** gold-anchor re-baseline for the 7 affected
+> corpora; the grounding-gate over-refusal investigation; the slide-decks verify-JSON-overflow eval-robustness gap.
 
 ## How to read the categories
 
@@ -171,10 +177,19 @@ _Would do, but blocked on curator corpus data, a model/hardware availability, or
   *Unblock:* Out-of-scope roadmap; only if a forms eval category is pursued.  
   *Sources:* ROADMAP.md:255 (Tier 6)
 
-## 📋 Feature backlog (63)
+## 📋 Feature backlog (66)
 
 _Would-do, lower priority — no external blocker, just unscheduled._
 
+- **W6 gold-anchor re-baseline (7 corpora)** — After the W6 covered-22 re-parse (`w6-migration-2026-06-06`), the `relevant_chunk_ids` gold in ccna-multidoc / cr350-multidoc / cr350-diagrams / french-course / handwritten / slide-decks / chat-multiturn are STALE for the 22 re-parsed docs (content-addressed chunk_ids churned) → their `citation_precision` / `gold_chunk_recall` metrics read low until re-grounded. The ANS/REF + refusal_cf HARD gates are UNAFFECTED (gold-independent).  
+  *Unblock:* Pickable now — for each query, re-map its `_anchor_phrase` to the new chunk containing it (the new `chunk_id`), update `relevant_chunk_ids`. Careful: gold corpora are git-tracked + load-bearing; a mis-map silently corrupts the eval. Verify each re-grounded anchor resolves to a chunk whose text contains the anchor phrase.  
+  *Sources:* w6-migration-2026-06-06; eval/scoring.py::citation_precision; eval/runner.py::gold_chunk_recall
+- **Grounding-gate over-refusal (answer present, still refused)** — The /ask sufficiency/grounding gate refuses with the answer chunk in the agent's reranked top-5 (handwritten-04: answer at rank #1, refused "lack specific citations as requested"). A pre-existing gate-strictness issue (surfaced, not caused, by the W6 re-embed). Depresses answer COMPLETENESS with no safety benefit (refusal_cf is a separate intact gate).  
+  *Unblock:* Its OWN scoped task — every candidate node (`assess_sufficiency`/`verify`/`assess_relevance`) is on the HARD-gate path; any prompt-floor loosening MUST be A/B'd multi-run (N≥3) across the counterfactual corpora (borderline gates flip run-to-run). NEVER a side-edit.  
+  *Sources:* grounding-gate-overrefusal-2026-06-06; agents/answering.py (assess_sufficiency/verify/assess_relevance)
+- **Eval runner per-query error handling + verify `ungrounded_reasons` overflow** — `eval/runner.py::run_eval`'s `for q in queries` has NO try/except → one query's `ModelCallError` aborts the WHOLE eval. Surfaced post-W6: a re-chunked CUDA-deck query made the verifier emit a runaway `ungrounded_reasons` string > max_tokens → invalid guided-JSON → the slide-decks eval crashed 3×. Two fixes: (a) catch per-query errors in the runner (record as error/refusal, continue); (b) bound `VerificationResult.ungrounded_reasons` item length harder (it already has a max_length per CLAUDE.md — verify it's enforced on this path).  
+  *Unblock:* (a) is a safe eval-only change; (b) needs a check of the verify schema bound vs the live overflow.  
+  *Sources:* w6-migration-2026-06-06; eval/runner.py:28; agents/answering.py::verify
 - **De-hyphenation markdown cleanup** — Low-risk post-process to rejoin end-of-line-hyphenated words to improve embedding + BM25 token matching (verified no rejoin exists in parse/).  
   *Unblock:* Only worth doing IF parsed output actually shows broken hyphenated words — verify first. Tier 6.  
   *Sources:* ROADMAP.md:248
