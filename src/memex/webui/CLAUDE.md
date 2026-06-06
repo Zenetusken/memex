@@ -426,6 +426,12 @@ at exit) + `MEMEX_INGEST__MAX_BYTES=2GiB` + `MEMEX_PARSE__DISABLE_VLM=false`.
   it doesn't own, so restarting over a live one would refuse on the still-bound port. This also fixes
   the ~150s lock-hold + the "Indexing"-freeze (an interstitial phase). The partial-ingest browse link
   is gated on the canonical `.md` actually existing (no dead 404 when parse failed before the write).
+  **NB the subprocess's own `_vllm_restart` was ROOT-FIXED 2026-06-06** (serve-env injection + PID-write
+  + `subprocess.Popen` spawn — see `src/memex/CLAUDE.md` ADR-0015 bullet): it now serves the configured
+  4B and writes the daemon PID file, so the restarted orchestrator is supervisor-TRACKED (no longer "a
+  stray it doesn't own"). `_reconcile_orchestrator` STAYS as defense-in-depth for the OTHER failure mode
+  this note describes — the subprocess restart HANGING under the webui's residual VRAM (a fit problem,
+  not a tracking one) — and for a truly hand-launched `serve-vllm.sh` with no PID file.
 - **Exclusive-GPU RAG lock:** `_ingest_guard(request)` returns `_ingesting.html` as the FIRST
   statement of every GPU POST (`/ask`, `/documents/{id}/summarize`, `/chat/{id}/turn`, `/expert`,
   `/bridge`) — while the ingest subprocess holds `pause_vllm_for_gpu` the orchestrator is DOWN, so

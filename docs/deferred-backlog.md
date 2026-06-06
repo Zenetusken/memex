@@ -19,9 +19,9 @@
 > by-design (auto-acting at startup is unsafe; the manual `memex index <doc>` path exists). (1) **VLM W6**
 > — the V2 prompt (decoration-skip WITHOUT the verbosity-inducing preservation guard) SHIPPED (`c911a80`),
 > validated on the regression site (cr350-diagrams 11/11 ANS, no −1); the **vault-wide re-parse migration**
-> (apply V2 to the other ~37 VLM docs) is deferred → **BLOCKED on the daemon-state fix below** (a CLI
-> re-parse currently breaks the daemon). (2) **Docling re-tiering** — premise confirmed via diagnostic but
-> it's a redesign, not a tweak (see Queued). **NEW top item:** the daemon-state silent-404 root-fix.
+> (apply V2 to the other ~37 VLM docs) is deferred — **NOW UNBLOCKED** (the daemon-state root-fix below
+> SHIPPED 2026-06-06, so a CLI re-parse no longer breaks the daemon). (2) **Docling re-tiering** — premise
+> confirmed via diagnostic but it's a redesign, not a tweak (see Queued).
 
 ## How to read the categories
 
@@ -31,13 +31,20 @@
 - **🔬 Researched + banked** — has a verdict; waiting on a forcing function.
 - **🚫 Decided-against** — tried-and-reverted or rejected; **NOT pending** — listed only so they're not mistaken for open work.
 
-## 🎯 Queued / next-pickup (2)
+## 🎯 Queued / next-pickup (1)
 
 _Intended soon — the most actionable._
 
-- **🔥 Daemon-state silent-404 after a CLI VLM/chart-OCR parse (ROOT-FIX, HIGH)** — A `memex parse`/`index`/`reindex` with VLM or chart-OCR leaves the orchestrator daemon serving the `serve-vllm.sh` DEFAULT 8B, not the configured 4B → every later `/ask`/eval/chat/summarize 404s "model does not exist"; the stray 8B even blocks `daemon restart` (needs a manual `kill -9` of the EngineCore).  
-  *Unblock:* Pickable now — root cause CONFIRMED: `parse/pipeline.py::_vllm_restart` spawns `serve-vllm.sh` with NO `env=`, so `MEMEX_VLLM_MODEL` is unset → the 8B default. The webui ingest path got the ADR-0015 `orchestrator_serve_env` bridge + `_reconcile_orchestrator`; the CLI restart was never wired to it. Fix = inject the serve-env into `_vllm_restart` + a clean by-port stop-before-spawn so a stray can't block the port. Observed LIVE 2026-06-06; user-flagged.  
-  *Sources:* daemon_state_silent_404_2026_06_06 (full context); parse/pipeline.py::_vllm_restart; daemon/supervisor.py::orchestrator_serve_env; webui/app.py::_reconcile_orchestrator; ADR-0015
+> **✅ DONE 2026-06-06 — Daemon-state silent-404 after a CLI VLM/chart-OCR parse (ROOT-FIX, HIGH).**
+> A `memex parse`/`index`/`reindex` VLM/chart-OCR pass left the orchestrator serving the 8B (→ `/ask`
+> 404s) + an un-killable stray. Root cause = THREE stacked spawn bugs in `parse/pipeline.py::_vllm_restart`
+> (no serve-env → 8B; `nohup` → dead `uv run` leader → orphaned vLLM; `asyncio.create_subprocess_exec` →
+> loop-close SIGKILL → same orphan). Fix: hoisted `orchestrator_serve_env`+PID helpers to
+> `core/model_serving.py`; `_vllm_restart` now injects the serve-env + writes the PID file + spawns via
+> SYNC `subprocess.Popen` (mirrors `start()`). Live-validated (`doctor orchestrator_match=True`, clean
+> `daemon restart`). `stop()` left untouched (its leader-only wait is pre-existing + out of scope).
+> See `daemon_state_silent_404_2026_06_06` + ADR-0015 Amendment (2026-06-06).
+
 - **Docling mode-anchored re-tiering on dense UNNUMBERED docs (step-3b residual)** — Un-flatten the dominant section tier on a dense unnumbered doc (the force-docling'd 10-K) so its real section titles aren't pinned at the H5 cap.  
   *Unblock:* **Premise CONFIRMED 2026-06-06** via a bounded docling diagnostic (10-K p1-30): the buried mode tier IS real section titles (BUSINESS OVERVIEW / PROXY SUMMARY / Corporate Governance Highlights), not table labels (the old `docling_worker.py` comment was wrong). BUT the fix is a REDESIGN, not a tweak: the section tier spans adjacent small-height buckets (8/9/10pt ≈63%) below 10+ rare taller singletons, so it needs **mode-PRIMARY (not size-primary) leveling + a clustering pass + multi-doc over-flatten validation (decks must stay flat)**. A focused session; marginal value (the 10-K's DEFAULT route is PyMuPDF, clean tree).  
   *Sources:* docling_worker.py::_recover_heading_levels; audits/10:169; next_priorities.md

@@ -20,8 +20,10 @@ timeouts, not validation rejections (those happen at ingest).
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import shutil
+import subprocess
 import tempfile
 import time
 from collections.abc import AsyncGenerator, Mapping, Sequence
@@ -46,6 +48,7 @@ from memex.core.manifest import (
     read_manifest,
     update_manifest,
 )
+from memex.core.model_serving import daemon_pid_file, orchestrator_serve_env
 from memex.core.table_linearize import (
     GFM_TABLE_RE,
     is_layout_table,
@@ -754,19 +757,38 @@ async def _vllm_pkill() -> None:
     await proc.wait()  # pkill exits non-zero if no match; we don't care
 
 
-async def _vllm_restart(scripts_dir: Path) -> None:
-    """Bring vLLM back up after the chart-OCR pass.
+async def _vllm_restart(
+    scripts_dir: Path,
+    serve_env: Mapping[str, str],
+    pid_file: Path | None,
+) -> None:
+    """Bring vLLM back up after the chart-OCR / VLM pass.
 
     Tries `systemctl --user start memex-vllm` first (the canonical
     daemon-stack path). If systemctl isn't available OR the unit isn't
     installed, falls back to spawning `scripts/serve-vllm.sh` as a
     detached background process with `nohup`-style redirection.
 
+    `serve_env` is the ADR-0015 orchestrator serve-env bridge
+    (`core/model_serving.orchestrator_serve_env`): the script-fallback arm
+    spawns with `env={**os.environ, **serve_env}` so the restarted vLLM
+    serves the CONFIGURED orchestrator model (`MEMEX_VLLM_MODEL`), NOT
+    `serve-vllm.sh`'s hardcoded 8B default. Without it, a CLI VLM/chart-OCR
+    parse left the daemon serving the wrong model → every later `/ask`
+    404'd "model does not exist" (the silent-404 root bug). When `pid_file`
+    is given, the script arm writes `proc.pid` to it so the restarted vLLM
+    is supervisor-TRACKED — a later `daemon stop`/`restart` finds + kills
+    the right process group (via `_argv_matches_daemon`'s `vllm serve
+    --port` signature) instead of leaving a stray that blocks the port.
+
+    The systemctl arm is left unchanged: systemd doesn't inherit caller
+    env (the unit config owns the model), and it's not the live path on
+    the reference rig (no `memex-vllm.service` unit installed).
+
     Either way, this returns once the START command is issued — caller
     is responsible for waiting on `/v1/models` to come back.
     """
     log = logger.bind(component="chart_ocr.vllm_restart")
-    import shutil
 
     if shutil.which("systemctl") is not None:
         proc = await asyncio.create_subprocess_exec(
@@ -794,15 +816,44 @@ async def _vllm_restart(scripts_dir: Path) -> None:
             "Set MEMEX_SCRIPTS_DIR or restart manually.",
             context={"script": str(script)},
         )
-    proc = await asyncio.create_subprocess_exec(
-        "nohup",
-        str(script),
-        stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.DEVNULL,
-        stdin=asyncio.subprocess.DEVNULL,
-        start_new_session=True,
+    # Spawn IDENTICALLY to `daemon.supervisor.start()` — a SYNC `subprocess.Popen`,
+    # NOT `asyncio.create_subprocess_exec`. This is load-bearing for the daemon's
+    # SURVIVAL, not just its shape: asyncio's subprocess transport calls `_proc.kill()`
+    # on its child when the event loop closes, so an asyncio-spawned detached daemon is
+    # SIGKILLed the moment the CLI's `asyncio.run()` returns — killing the `uv run … vllm
+    # serve` group leader and ORPHANING the vLLM child (a port-blocking stray whose dead
+    # leader makes `daemon stop`'s `os.getpgid(pid)` raise ProcessLookupError → no kill).
+    # A `subprocess.Popen` child is NOT tied to the loop lifecycle, so the written PID
+    # stays alive as the cmdline-identifiable, pgid-killable leader `start()` relies on.
+    # (Earlier `nohup` had the same dead-leader symptom; `start_new_session=True` already
+    # detaches, so nohup was both redundant AND insufficient.) The systemctl arm above
+    # stays async — it's a short `await`ed call, not the long-lived daemon.
+    # Append to the daemon log (mirrors start()), so a failed restart leaves a trace.
+    log_fp = (
+        open(pid_file.with_name("vllm.log"), "ab")  # noqa: ASYNC230 — fd handed to a detached child, not loop-managed I/O
+        if pid_file is not None
+        else None
     )
-    log.info("vllm.restart.via_script", pid=proc.pid)
+    try:
+        proc = subprocess.Popen(  # noqa: S603, ASYNC220 — config-sourced script; detached daemon, loop-independent
+            ["/usr/bin/env", "bash", str(script)],
+            stdout=log_fp if log_fp is not None else subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+            close_fds=True,
+            env={**os.environ, **serve_env},  # ADR-0015: serve the CONFIGURED orchestrator, not the 8B default
+        )
+    finally:
+        if log_fp is not None:
+            log_fp.close()  # the child inherited the fd via fork; don't hold it in the parent
+    if pid_file is not None:
+        # Track the restarted vLLM so a later `daemon stop`/`restart` owns it. `proc.pid`
+        # is the live `uv run … vllm serve` session/group leader (start_new_session=True);
+        # the supervisor identifies it by the durable `vllm serve --port` cmdline signature
+        # and SIGTERMs the whole pgid — exactly the guarantee `supervisor.start()` writes.
+        pid_file.write_text(str(proc.pid), encoding="utf-8")  # match supervisor.start()'s write
+    log.info("vllm.restart.via_script", pid=proc.pid, model=serve_env.get("MEMEX_VLLM_MODEL"))
 
 
 # Bounded restart-retry budget for `pause_vllm_for_gpu` (the dynamic-VRAM-manager reliability fix).
@@ -868,6 +919,12 @@ async def pause_vllm_for_gpu() -> AsyncGenerator[None]:
         # next launch fit). NB: log only — NEVER `raise`/`return` out of this `finally` (B012) — that
         # would suppress a parse-body exception.
         scripts_dir = _detect_scripts_dir()
+        # ADR-0015: inject the configured-orchestrator serve-env so the restarted vLLM
+        # serves `settings.models.orchestrator` (not serve-vllm.sh's hardcoded 8B), and
+        # write the restarted PID to the daemon's file so it stays supervisor-tracked
+        # (a later `daemon stop`/`restart` kills it cleanly instead of a port-blocking stray).
+        serve_env = orchestrator_serve_env(settings)
+        pid_file = daemon_pid_file(settings)
         restarted = False
         for attempt in range(1, _RESTART_ATTEMPTS + 1):
             log.info("vllm.restart.start", attempt=attempt)
@@ -875,7 +932,7 @@ async def pause_vllm_for_gpu() -> AsyncGenerator[None]:
                 if attempt > 1:
                     await _vllm_pkill()  # clear any half-started/stale vLLM before re-issuing
                     await asyncio.sleep(_RESTART_SETTLE_S)  # let the GPU release before re-launch
-                await _vllm_restart(scripts_dir)
+                await _vllm_restart(scripts_dir, serve_env, pid_file)
                 for _ in range(_RESTART_POLL_S):
                     if await _vllm_reachable(base_url, timeout_s=1.0):
                         log.info("vllm.restarted", attempt=attempt)
@@ -899,8 +956,6 @@ def _detect_scripts_dir() -> Path:
     """Best-effort: find the repo's `scripts/` directory for the vLLM
     restart fallback path. Honours `MEMEX_SCRIPTS_DIR` env var first.
     """
-    import os
-
     env = os.environ.get("MEMEX_SCRIPTS_DIR")
     if env:
         return Path(env)

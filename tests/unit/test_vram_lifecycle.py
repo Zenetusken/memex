@@ -37,7 +37,12 @@ class _FakeVllm:
             return True  # the initial was_running probe → so the CM actually pauses
         return self.restart_calls >= self._succeed_after  # reachable only once enough restarts fired
 
-    async def restart(self, _scripts_dir: Path) -> None:
+    async def restart(
+        self,
+        _scripts_dir: Path,
+        _serve_env: dict[str, str] | None = None,
+        _pid_file: Path | None = None,
+    ) -> None:
         self.restart_calls += 1
 
     async def pkill(self) -> None:
@@ -84,6 +89,71 @@ async def test_pause_vllm_finally_preserves_body_exception(monkeypatch: pytest.M
         async with pause_vllm_for_gpu():
             raise ValueError("boom")
     assert fake.restart_calls >= 2  # it did exhaust the bounded retries (didn't hang / didn't swallow)
+
+
+# ── _vllm_restart serve-env injection + PID-write (the ADR-0015 silent-404 root fix) ──────────────────
+class _FakeProc:
+    def __init__(self, pid: int) -> None:
+        self.pid = pid
+
+
+@pytest.mark.asyncio
+async def test_vllm_restart_injects_serve_env_and_writes_pid(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The root fix: the script-fallback arm spawns serve-vllm.sh with the CONFIGURED-orchestrator
+    serve-env (so the restart serves `settings.models.orchestrator`, not the 8B default → no silent
+    404), and writes the spawned PID to the daemon's file (so a later `daemon stop`/`restart` owns it,
+    not a port-blocking stray). Forces the fallback via `shutil.which → None` (systemctl EXISTS on the
+    rig, so without this the script arm never runs)."""
+    from memex.core.config import get_settings
+    from memex.core.model_serving import daemon_pid_file, orchestrator_serve_env
+    from memex.parse import pipeline as P
+
+    script = tmp_path / "serve-vllm.sh"
+    script.write_text("#!/bin/sh\n")  # must exist (else ConfigurationError)
+
+    captured: dict[str, object] = {}
+
+    def _fake_popen(args: object, **kwargs: object) -> _FakeProc:
+        captured["args"] = args
+        captured["env"] = kwargs.get("env")
+        captured["start_new_session"] = kwargs.get("start_new_session")
+        captured["close_fds"] = kwargs.get("close_fds")
+        return _FakeProc(pid=54321)
+
+    monkeypatch.setattr(P.shutil, "which", lambda _name: None)  # force the script fallback
+    # The daemon spawn is a SYNC subprocess.Popen (NOT asyncio.create_subprocess_exec):
+    # asyncio's transport SIGKILLs the child when the CLI's event loop closes, which would
+    # orphan the vLLM the instant `memex index` returns. Fake Popen → no real process.
+    monkeypatch.setattr(P.subprocess, "Popen", _fake_popen)
+
+    settings = get_settings()
+    serve_env = orchestrator_serve_env(settings)
+    pid_file = daemon_pid_file(settings)
+
+    await P._vllm_restart(tmp_path, serve_env, pid_file)
+
+    env = captured["env"]
+    assert isinstance(env, dict)
+    # the configured orchestrator id + the full serve-env triple are exported (the silent-404 fix)
+    assert env["MEMEX_VLLM_MODEL"] == settings.models.orchestrator
+    assert "MEMEX_VLLM_QUANTIZATION" in env  # the quant flag (may be "" for compressed-tensors)
+    assert "MEMEX_VLLM_KV_CACHE_DTYPE" in env
+    assert env["PATH"]  # it's a MERGE over os.environ, not a replacement
+    assert captured["close_fds"] is True  # mirrors supervisor.start()
+    # the restarted PID is tracked in the daemon's file (the stray-cleanup fix)
+    assert pid_file.read_text() == "54321"
+    # the spawn MIRRORS supervisor.start() — `/usr/bin/env bash <script>` in a NEW SESSION
+    # via subprocess.Popen (loop-independent, so it survives the CLI exit). The written PID
+    # stays alive as the `uv run … vllm serve` group leader, identifiable + pgid-killable.
+    spawn_args = captured["args"]
+    assert isinstance(spawn_args, list)
+    assert spawn_args[0] == "/usr/bin/env"
+    assert spawn_args[1] == "bash"
+    assert spawn_args[2] == str(tmp_path / "serve-vllm.sh")
+    assert "nohup" not in spawn_args
+    assert captured["start_new_session"] is True  # detached without nohup
 
 
 # ── boot pre-flight ──────────────────────────────────────────────────────────────────────────────────

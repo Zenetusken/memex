@@ -21,60 +21,16 @@ from pydantic import BaseModel
 from memex.core.config import MemexSettings
 from memex.core.errors import ConfigurationError, MemexError
 
+# The orchestrator serve-env bridge (ADR-0015) + the daemon dir/PID-file location
+# live in `core/model_serving.py` so the parse-time `pause_vllm_for_gpu` restart can
+# reuse them WITHOUT a `parse/ → daemon/` import edge. Re-exported here (the public
+# name `orchestrator_serve_env` stays importable from `daemon.supervisor`).
+from memex.core.model_serving import daemon_dir, daemon_pid_file, orchestrator_serve_env
+
 logger = structlog.get_logger(__name__)
 
 _STOP_GRACE_S = 10.0
 _REACHABILITY_POLL_S = 1.0
-
-
-# --- Orchestrator serve-env bridge ---------------------------------------
-# `scripts/serve-vllm.sh` hardcodes the model (Qwen/Qwen3-8B-AWQ), the
-# `--quantization` flag (awq_marlin), and the KV dtype (fp8_e5m2) as env
-# DEFAULTS, while the client (`models/client.py`) sends
-# `settings.models.orchestrator` as the requested model name. Without
-# exporting the configured model id into the serve env, a config-only model
-# swap silently 404s — the daemon serves the hardcoded 8B while every /ask
-# requests the new id. This bridge makes `settings.models.orchestrator` the
-# single source of truth the daemon actually serves, and maps the quant tier
-# to the matching serve flags.
-_ORCH_QUANT_FLAG: dict[str, str] = {
-    # config quant tier -> the vLLM `--quantization` flag value. EMPTY means
-    # OMIT the flag (compressed-tensors auto-detects; serve-vllm.sh's
-    # single-dash `${VAR-default}` treats an explicit '' as "no flag").
-    "AWQ": "awq_marlin",
-    "GPTQ": "gptq_marlin",
-    "compressed_tensors": "",
-}
-_ORCH_KV_DTYPE: dict[str, str] = {
-    # compressed-tensors W4A16 builds carry fp8 components; vLLM rejects
-    # `fp8_e5m2` KV on an fp8 checkpoint ("fp8_e5m2 kv-cache is not supported
-    # with fp8 checkpoints" — confirmed at 4B cold start), so that tier MUST
-    # use `auto` KV (fp16). AWQ/GPTQ keep the proven fp8_e5m2 default.
-    "AWQ": "fp8_e5m2",
-    "GPTQ": "fp8_e5m2",
-    "compressed_tensors": "auto",
-}
-
-
-def orchestrator_serve_env(settings: MemexSettings) -> dict[str, str]:
-    """The per-model vLLM serve environment `scripts/serve-vllm.sh` reads.
-
-    Maps `settings.models.orchestrator` + `orchestrator_quantization` to the
-    `MEMEX_VLLM_MODEL` / `MEMEX_VLLM_QUANTIZATION` / `MEMEX_VLLM_KV_CACHE_DTYPE`
-    the serve script consumes. `start()` exports these before spawning so the
-    detached child inherits them. Pure + unit-testable (no os.environ mutation
-    here). An unknown quant tier maps to an empty quantization flag (let vLLM
-    auto-detect) + `auto` KV (the safe default). The empty string for
-    `compressed_tensors` is DELIBERATE — it must be SET-to-empty, never
-    unset, so the serve script's `${VAR-default}` omits the flag rather than
-    falling back to awq_marlin.
-    """
-    quant = settings.models.orchestrator_quantization
-    return {
-        "MEMEX_VLLM_MODEL": settings.models.orchestrator,
-        "MEMEX_VLLM_QUANTIZATION": _ORCH_QUANT_FLAG.get(quant, ""),
-        "MEMEX_VLLM_KV_CACHE_DTYPE": _ORCH_KV_DTYPE.get(quant, "auto"),
-    }
 
 
 class DaemonAlreadyRunning(MemexError):
@@ -99,13 +55,11 @@ class DaemonStatus(BaseModel):
 
 
 def _daemon_dir(settings: MemexSettings) -> Path:
-    d = settings.vault_path / ".memex" / "daemon"
-    d.mkdir(parents=True, exist_ok=True, mode=0o700)
-    return d
+    return daemon_dir(settings)  # core helper (perms 0o700) — shared with the parse restart
 
 
 def _pid_file(settings: MemexSettings) -> Path:
-    return _daemon_dir(settings) / "vllm.pid"
+    return daemon_pid_file(settings)  # core helper — the parse restart writes the same file
 
 
 def _log_file(settings: MemexSettings) -> Path:
