@@ -37,12 +37,17 @@ from memex.core.errors import ConfigurationError
 from memex.core.manifest import (
     ChartExtraction,
     IndexStage,
+    PageDecision,
     now_utc,
     read_manifest,
     update_manifest,
 )
 from memex.core.table_linearize import linearize_gfm_tables
-from memex.core.text import reattach_chart_extractions
+from memex.core.text import (
+    insert_page_markers_at,
+    measure_and_strip_page_markers,
+    reattach_chart_extractions,
+)
 from memex.core.types import Chunk
 from memex.index.chunker import chunk_document
 from memex.index.embed_prompts import (
@@ -163,6 +168,53 @@ def _embed_recipe_version() -> str:
     return "v1-gemma-prompts" if native_prompts_enabled() else "v0"
 
 
+def _citation_grade_boundaries(pages: list[PageDecision]) -> list[tuple[int, int]] | None:
+    """Companion arc-3: the `(page_no, char_start)` boundaries for a CITATION-GRADE manifest,
+    else `None` (→ the nav-grade `page_char_counts` path).
+
+    A page that contributed no markdown (`char_count == 0` — a figure-only / empty deck slide) got
+    NO page-boundary marker at parse, so it legitimately carries `char_start == -1` and no chunk is
+    ever attributed to it. We gate on the CONTENT pages only: the parse round-trip is all-or-nothing
+    (every non-empty page gets a `char_start`, or NONE do on a byte mismatch), so "every content page
+    >= 0" exactly distinguishes a citation-grade manifest from a legacy/nav-grade one — WITHOUT a
+    single figure-only slide demoting the whole deck back to nav-grade."""
+    content = [p for p in pages if p.char_count > 0]
+    if content and all(p.char_start >= 0 for p in content):
+        return sorted((p.page, p.char_start) for p in content)
+    return None
+
+
+def _exact_page_intervals(
+    plain_body: str,
+    indexed_body: str,
+    boundaries: list[tuple[int, int]],
+    chart_extractions: list[ChartExtraction],
+    *,
+    doc_id: str,
+) -> list[tuple[int, int, int]] | None:
+    """Companion arc-3: map the parse-recorded per-page `(page_no, char_start)` boundaries
+    (offsets in `plain_body` = the on-disk `.md`) through the SAME index-time body transforms
+    (chart re-attach → GFM linearize) to citation-grade `(page_no, char_start, char_end)`
+    intervals in the INDEXED body the chunker sees.
+
+    A transient page-boundary marker is inserted at each boundary, the marked body runs the
+    identical transforms, and the markers are stripped. Returns the intervals ONLY when the
+    stripped body equals `indexed_body` byte-for-byte — so a transform edge case (or a parse-side
+    map that didn't reconstruct, leaving the boundaries off a clean block start) can only fall back
+    to the nav-grade `page_char_counts` path, NEVER churn the content-addressed chunk_ids. `None` ⇒
+    nav-grade. Reaching here at all means the parse round-trip already succeeded (every content page
+    has a `char_start`); the index round-trip then re-validates against the post-transform body."""
+    if not boundaries:
+        return None
+    marked = insert_page_markers_at(plain_body, boundaries)
+    transformed = linearize_gfm_tables(reattach_chart_extractions(marked, chart_extractions))
+    clean, intervals = measure_and_strip_page_markers(transformed)
+    if clean != indexed_body:
+        logger.warning("index.page_map.byte_mismatch", doc_id=doc_id, pages=len(boundaries))
+        return None
+    return intervals
+
+
 async def index_document(doc_id: str, *, force: bool = False) -> IndexResult:
     """Chunk, embed, and write derived state for one document.
 
@@ -197,6 +249,9 @@ async def index_document(doc_id: str, *, force: bool = False) -> IndexResult:
     page_char_counts: list[tuple[int, int]] | None = None
     segment_intervals: list[tuple[int, int, float, float]] | None = None
     chart_extractions: list[ChartExtraction] = []
+    # Companion arc-3: the parse-recorded per-page char_starts, present (>= 0 on EVERY page) only
+    # for a citation-grade manifest (a newly parsed doc); any legacy `-1` ⇒ stay nav-grade.
+    exact_boundaries: list[tuple[int, int]] | None = None
     if prior_manifest is not None and prior_manifest.parse is not None:
         page_char_counts = [(p.page, p.char_count) for p in prior_manifest.parse.pages]
         chart_extractions = prior_manifest.parse.chart_extractions
@@ -204,6 +259,7 @@ async def index_document(doc_id: str, *, force: bool = False) -> IndexResult:
             segment_intervals = [
                 (s.char_start, s.char_end, s.start_s, s.end_s) for s in prior_manifest.parse.segments
             ]
+        exact_boundaries = _citation_grade_boundaries(prior_manifest.parse.pages)
     # Re-attach the chart-OCR `[chart-extracted]` blocks (from the parse manifest sidecar) at the
     # `<!-- image -->` positions, then re-derive the `[table-rows]` linearization — NEITHER lives
     # in the vault `.md`, which is content-only since audit-10. Both transforms reproduce the SAME
@@ -213,9 +269,24 @@ async def index_document(doc_id: str, *, force: bool = False) -> IndexResult:
     # the chart content for retrieval/answering while the vault file (and the webui raw view) stay
     # clean. Order matches parse time: chart re-attach (the old stitch) THEN table linearization.
     reattached_body = reattach_chart_extractions(doc.body, chart_extractions)
-    indexed_doc = doc.model_copy(update={"body": linearize_gfm_tables(reattached_body)})
+    indexed_body = linearize_gfm_tables(reattached_body)
+    indexed_doc = doc.model_copy(update={"body": indexed_body})
+    # Companion arc-3: when the manifest is citation-grade, map the parse-recorded page boundaries
+    # through these SAME transforms to exact intervals in `indexed_body` (the chunker prefers them
+    # over the nav-grade char-count derivation). The byte-equality guard inside falls back to
+    # nav-grade on any mismatch — so this can only improve page precision, never churn chunk_ids.
+    exact_page_intervals = (
+        _exact_page_intervals(
+            doc.body, indexed_body, exact_boundaries, chart_extractions, doc_id=doc_id
+        )
+        if exact_boundaries is not None
+        else None
+    )
     new_chunks = chunk_document(
-        indexed_doc, page_char_counts=page_char_counts, segment_intervals=segment_intervals
+        indexed_doc,
+        page_char_counts=page_char_counts,
+        exact_page_intervals=exact_page_intervals,
+        segment_intervals=segment_intervals,
     )
     new_by_id = {c.chunk_id: c for c in new_chunks}
     new_ids = set(new_by_id.keys())

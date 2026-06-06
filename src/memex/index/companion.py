@@ -42,9 +42,7 @@ _TIE_EPSILON = 0.02
 _KEYFRAME_TITLE = "slide"
 
 
-def cosine_matrix(
-    t_emb: list[list[float]], p_emb: list[list[float]]
-) -> NDArray[np.float32]:
+def cosine_matrix(t_emb: list[list[float]], p_emb: list[list[float]]) -> NDArray[np.float32]:
     """The `(n_transcript × n_deck)` cosine-similarity matrix. EmbeddingGemma already L2-normalizes, but
     we re-normalize DEFENSIVELY so a fake/un-normalized test input still yields true cosine (dot of unit
     vectors). Either side empty → a correctly-shaped zero matrix."""
@@ -66,6 +64,9 @@ def align_blocks(
     min_score: float,
     epsilon: float = _TIE_EPSILON,
     keyframe_signal: dict[str, tuple[str, int | None, float]] | None = None,
+    use_dp: bool = False,
+    lambda_jump: float = 0.1,
+    time_weight: float = 0.1,
 ) -> tuple[list[AlignmentBlock], int]:
     """PURE MaViLS-style alignment. Each transcript chunk → its best deck page by cosine ARGMAX, NULL
     below `min_score` (an off-slide tangent / no good slide), with a cheap MONOTONIC tie-break: among
@@ -80,15 +81,34 @@ def align_blocks(
     the chunk falls back to the transcript-text argmax below. The keyframe page still advances
     `page_prev`, so a following transcript-fallback chunk tie-breaks forward from it.
 
+    `use_dp` (ADR-0018 §13, OPT-IN, default OFF) swaps the greedy argmax+tie-break for a monotonic
+    Viterbi (`_align_dp`): an asymmetric forward/backward jump penalty (`lambda_jump`) + a `start_s`
+    time prior (`time_weight`). OFF ⇒ this function is byte-identical to before. NB the DP's
+    below-floor→null is a SOFT (global-optimum) property at the shipped small `lambda_jump`, not the
+    greedy path's hard per-chunk `best < min_score → null` (a large λ could assign a below-floor chunk
+    to preserve context); benign while default-off + small-λ.
+
     `transcript_chunks` MUST be in TIME order (the monotonic tie-break assumes it); `FTSStore`
     `chunks_for_document` returns `char_start` order, which IS time order for a transcript. `t_emb` /
     `p_emb` must be parallel to their chunk lists."""
     if len(t_emb) != len(transcript_chunks):
-        raise ValueError(f"t_emb ({len(t_emb)}) must parallel transcript_chunks ({len(transcript_chunks)})")
+        raise ValueError(
+            f"t_emb ({len(t_emb)}) must parallel transcript_chunks ({len(transcript_chunks)})"
+        )
     if len(p_emb) != len(deck_chunks):
         raise ValueError(f"p_emb ({len(p_emb)}) must parallel deck_chunks ({len(deck_chunks)})")
 
     sim = cosine_matrix(t_emb, p_emb)
+    if use_dp:
+        return _align_dp(
+            transcript_chunks,
+            deck_chunks,
+            sim,
+            min_score=min_score,
+            lambda_jump=lambda_jump,
+            time_weight=time_weight,
+            keyframe_signal=keyframe_signal,
+        )
     blocks: list[AlignmentBlock] = []
     null_count = 0
     page_prev: int | None = None  # last assigned non-null page (for the monotonic tie-break)
@@ -110,7 +130,9 @@ def align_blocks(
                 page_prev = kf_deck_page
             continue
         if not deck_chunks:  # nothing to align to → all NULL
-            blocks.append(AlignmentBlock(transcript_chunk_id=tc.chunk_id, time_range=tc.time_range, score=0.0))
+            blocks.append(
+                AlignmentBlock(transcript_chunk_id=tc.chunk_id, time_range=tc.time_range, score=0.0)
+            )
             null_count += 1
             continue
         row = sim[i]
@@ -138,8 +160,12 @@ def align_blocks(
                 and deck_chunks[j].page is not None
                 and (deck_chunks[j].page or 0) >= page_prev
             ]
-            if forward_ties:  # prefer the smallest forward page, breaking further ties by higher score
-                chosen_j = min(forward_ties, key=lambda j: (deck_chunks[j].page or 0, -float(row[j])))
+            if (
+                forward_ties
+            ):  # prefer the smallest forward page, breaking further ties by higher score
+                chosen_j = min(
+                    forward_ties, key=lambda j: (deck_chunks[j].page or 0, -float(row[j]))
+                )
         dc = deck_chunks[chosen_j]
         blocks.append(
             AlignmentBlock(
@@ -153,6 +179,181 @@ def align_blocks(
         if dc.page is not None:
             page_prev = dc.page
 
+    return blocks, null_count
+
+
+def _align_dp(
+    transcript_chunks: list[Chunk],
+    deck_chunks: list[Chunk],
+    sim: NDArray[np.float32],
+    *,
+    min_score: float,
+    lambda_jump: float,
+    time_weight: float,
+    keyframe_signal: dict[str, tuple[str, int | None, float]] | None,
+) -> tuple[list[AlignmentBlock], int]:
+    """§13 monotonic Viterbi (ADR-0018) — the principled refinement of the greedy tie-break. PURE.
+
+    The state after chunk `i` is the LAST ASSIGNED slide page (a context that CARRIES through NULL
+    tangents), or START before the first assignment. At each chunk the path either ASSIGNS a page
+    (emission = the chunk's best cosine to that page MINUS a `time_weight` prior on the gap between
+    the chunk's lecture-time fraction `start_s/T` and the page's deck fraction; transition value =
+    `-lambda_jump ×` jump units, forward 1× / backward 2× / stay 0 — lectures advance, revisits cost
+    more) or is NULL (a flat `min_score` floor; the context is unchanged). A keyframe-PRIMARY chunk is
+    a FIXED anchor: it forces the context to its page (when that page is in the deck) and emits its
+    keyframe block verbatim. A Viterbi backtrace from the best final context yields the globally
+    optimal monotonic-ish path — improving the per-chunk greedy on revisit-heavy / time-coherent runs.
+    """
+    n = len(transcript_chunks)
+    kf = keyframe_signal or {}
+    pages = sorted({c.page for c in deck_chunks if c.page is not None})
+    if n == 0 or not pages:  # nothing to align to (compute_alignment guards this) → all NULL
+        blocks = [
+            AlignmentBlock(transcript_chunk_id=tc.chunk_id, time_range=tc.time_range, score=0.0)
+            for tc in transcript_chunks
+        ]
+        return blocks, n
+
+    pidx = {p: k for k, p in enumerate(pages)}
+    page_count = len(pages)
+    start = page_count  # sentinel "no page yet" context (index page_count)
+    neg = float("-inf")
+
+    # Best cosine + the deck chunk achieving it, per (transcript chunk i, page index k).
+    page_score = [[neg] * page_count for _ in range(n)]
+    page_cid: list[list[str | None]] = [[None] * page_count for _ in range(n)]
+    for j, dc in enumerate(deck_chunks):
+        if dc.page is None:
+            continue
+        k = pidx[dc.page]
+        for i in range(n):
+            s = float(sim[i, j])
+            if s > page_score[i][k]:
+                page_score[i][k] = s
+                page_cid[i][k] = dc.chunk_id
+
+    ends = [tc.time_range[1] for tc in transcript_chunks if tc.time_range is not None]
+    t_total = max(ends) if ends else 0.0
+
+    def _time_penalty(i: int, k: int) -> float:
+        tr = transcript_chunks[i].time_range
+        if tr is None or t_total <= 0.0 or page_count <= 1:
+            return 0.0
+        expected = (tr[0] / t_total) * (page_count - 1)
+        return time_weight * abs(expected - k) / (page_count - 1)
+
+    def _jump(c: int, k: int) -> float:
+        """Transition VALUE added (a non-positive cost). START → any page is free."""
+        if c == start:
+            return 0.0
+        pc, pk = pages[c], pages[k]
+        if pk == pc:
+            return 0.0
+        return -lambda_jump * (1.0 if pk > pc else 2.0)
+
+    def _best_prev(prev_v: list[float], k: int) -> tuple[int, float]:
+        best_c, best_val = start, neg
+        for c in range(page_count + 1):
+            if prev_v[c] == neg:
+                continue
+            val = prev_v[c] + _jump(c, k)
+            if val > best_val:
+                best_val, best_c = val, c
+        return best_c, best_val
+
+    # Viterbi. `bp[i][ctx] = (prev_ctx, (action, k))`; START seeds the pre-first-chunk context.
+    prev_v = [neg] * (page_count + 1)
+    prev_v[start] = 0.0
+    bp: list[list[tuple[int, tuple[str, int]] | None]] = []
+
+    for i, tc in enumerate(transcript_chunks):
+        v = [neg] * (page_count + 1)
+        row_bp: list[tuple[int, tuple[str, int]] | None] = [None] * (page_count + 1)
+        kfe = kf.get(tc.chunk_id)
+        anchor_k = (
+            pidx[kfe[1]] if kfe is not None and kfe[1] is not None and kfe[1] in pidx else None
+        )
+
+        if anchor_k is not None:  # FIXED anchor with a real deck page → force the context
+            best_c, best_val = _best_prev(prev_v, anchor_k)
+            v[anchor_k] = best_val  # forced emission is a constant → omit
+            row_bp[anchor_k] = (best_c, ("anchor", anchor_k))
+        elif (
+            kfe is not None
+        ):  # anchor whose page is unattributed → emit verbatim, carry the context
+            for c in range(page_count + 1):
+                if prev_v[c] != neg and prev_v[c] > v[c]:
+                    v[c] = prev_v[c]
+                    row_bp[c] = (c, ("anchor_noctx", -1))
+        else:
+            for c in range(page_count + 1):  # NULL: carry each context at the flat floor
+                if prev_v[c] == neg:
+                    continue
+                val = prev_v[c] + min_score
+                if val > v[c]:
+                    v[c] = val
+                    row_bp[c] = (c, ("null", -1))
+            for k in range(page_count):  # ASSIGN page k
+                if page_score[i][k] == neg:
+                    continue
+                best_c, best_val = _best_prev(prev_v, k)
+                total = best_val + page_score[i][k] - _time_penalty(i, k)
+                if total > v[k]:
+                    v[k] = total
+                    row_bp[k] = (best_c, ("assign", k))
+        bp.append(row_bp)
+        prev_v = v
+
+    last_ctx = max(range(page_count + 1), key=lambda c: prev_v[c])
+    actions: list[tuple[str, int]] = []
+    ctx = last_ctx
+    for i in range(n - 1, -1, -1):
+        entry = bp[i][ctx]
+        if entry is None:  # unreachable (NULL is always available, so this shouldn't happen)
+            actions.append(("null", -1))
+            continue
+        prev_ctx, action = entry
+        actions.append(action)
+        ctx = prev_ctx
+    actions.reverse()
+
+    blocks: list[AlignmentBlock] = []
+    null_count = 0
+    for i, tc in enumerate(transcript_chunks):
+        kind, k = actions[i]
+        if kind == "assign":
+            blocks.append(
+                AlignmentBlock(
+                    transcript_chunk_id=tc.chunk_id,
+                    time_range=tc.time_range,
+                    deck_chunk_id=page_cid[i][k],
+                    deck_page=pages[k],
+                    score=page_score[i][k],
+                )
+            )
+        elif kind in ("anchor", "anchor_noctx"):
+            kfe = kf[tc.chunk_id]
+            blocks.append(
+                AlignmentBlock(
+                    transcript_chunk_id=tc.chunk_id,
+                    time_range=tc.time_range,
+                    deck_chunk_id=kfe[0],
+                    deck_page=kfe[1],
+                    score=kfe[2],
+                )
+            )
+        else:  # null — record the best (insufficient / un-chosen) cosine for provenance
+            best = max(page_score[i])
+            blocks.append(
+                AlignmentBlock(
+                    transcript_chunk_id=tc.chunk_id,
+                    time_range=tc.time_range,
+                    deck_chunk_id=None,
+                    deck_page=None,
+                    score=best if best != neg else 0.0,
+                )
+            )
+            null_count += 1
     return blocks, null_count
 
 
@@ -285,6 +486,9 @@ async def compute_alignment(
         d_emb,
         min_score=settings.agents.companion_align_min_score,
         keyframe_signal=keyframe_signal or None,
+        use_dp=settings.agents.companion_align_dp_enabled,
+        lambda_jump=settings.agents.companion_dp_lambda_jump,
+        time_weight=settings.agents.companion_dp_time_weight,
     )
     # Inlined recipe string (index/pipeline._embed_recipe_version is private — no cross-module private
     # import); MUST stay in lockstep with it. A `+keyframe` suffix records that the VIDEO-frame signal

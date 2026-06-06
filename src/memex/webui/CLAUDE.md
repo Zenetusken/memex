@@ -303,16 +303,27 @@ chunker attributed its chunk to a source page (`Chunk.page`, populated from the
 parser's per-page `char_count` in the manifest — see `src/memex/CLAUDE.md`). Each
 preview `<img>` gets `id="page-{1-based}"`. An inline `<script>` in `document.html`
 (gated on `has_preview`, vanilla DOM, no vendored deps) does two things: on load it
-reads `?page=N` and `scrollIntoView`s `#page-N` (the cross-page case — a same-tab Ask
-whose cited source click lands on the doc page); and it intercepts same-doc
+reads `?page=N` and scrolls the preview PANE to `#page-N` (the cross-page case — a
+same-tab Ask whose cited source click lands on the doc page); and it intercepts same-doc
 `[data-page]` clicks to scroll the preview + the markdown section + `replaceState`
 the URL (no reload — a same-doc-different-query href would otherwise full-navigate).
 Cross-doc `[data-page]` links navigate normally (the `?page=N` survives → the target
-doc scrolls on load). A markdown-only doc (no `#pdf-pages`) no-ops. Pinned by
-`test_webui.py` (`data-page`/`?page=N`/"· p. N" on the source-link + `id="page-N"` +
-the `scrollPreviewTo` hook present). Existing docs need `memex index <doc> --force`
-(or a re-ingest) to backfill the page attribution — the content-addressed partial
-index skips it on a same-content re-parse; new ingests get it automatically.
+doc scrolls on load). A markdown-only doc (no `#pdf-pages`) no-ops. **`scrollPreviewTo`
+scrolls the PANE directly (`pane.scrollTo` to the page image's pane-relative offset),
+NOT `img.scrollIntoView()` — and the on-load jump is deferred one `requestAnimationFrame`
+(2026-06-05 fix).** `scrollIntoView` also scrolls the window/document, so it LOST to the
+browser's native `#section-slug` hash jump when a citation href carries BOTH `?page=N`
+AND a section hash (the common case — the PDF pane stayed on page 1 while only the
+markdown side took the hash); a pane-local scroll targets a different container than the
+hash, so the two never compete, and the rAF defer makes the pane scroll the final word.
+The click-handler's markdown-section `scrollIntoView` is unchanged (correct for that
+side). Pinned by `test_webui.py` (`data-page`/`?page=N`/"· p. N" on the source-link +
+`id="page-N"` + the `scrollPreviewTo` hook + `pane.scrollTo`/`requestAnimationFrame`
+present). Existing docs need `memex index <doc> --force` (or a re-ingest) to backfill
+the page attribution — the content-addressed partial index skips it on a same-content
+re-parse; new ingests get it automatically. (NB an automated browser-tool CLICK can
+strip the `?page=N` query — a harness privacy guard; a real user's click preserves it,
+verified by direct-navigating to the citation URL.)
 
 ## Live progress (long-poll, `_progress.html` + `webui/progress.py`, 2026-05-27)
 

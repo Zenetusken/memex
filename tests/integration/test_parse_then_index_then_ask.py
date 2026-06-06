@@ -514,6 +514,130 @@ async def test_pymupdf_routes_powerpoint_to_pymupdf(
 
 
 @pytest.mark.asyncio
+async def test_pymupdf_records_citation_grade_page_starts_and_indexes_pages(
+    settings: MemexSettings,
+    fake_pdf: Path,
+    patch_docling: dict[str, list[dict[str, object]]],
+    patch_pymupdf_born_digital: None,
+    patch_index_stores: dict[str, Any],
+) -> None:
+    """Companion arc-3 end-to-end wiring (PyMuPDF route — its fake reconstructs its own markdown,
+    so the parse marker round-trip succeeds). Parse records each page's citation-grade `char_start`
+    in `doc.body`; `index_document` maps those boundaries through the transforms to attribute
+    `Chunk.page`. The on-disk body is unchanged (the helper always returns the canonical body)."""
+    from memex.index.pipeline import index_document
+    from memex.vault.store import read_document
+
+    result = await ingest_file(IngestRequest(source_path=fake_pdf))
+    assert result.accepted and result.doc_id is not None
+    parse_result = await parse_document(result.doc_id)
+    assert parse_result.engine == "pymupdf"
+
+    # PARSE: every page carries a real (>= 0) citation-grade char_start, and the recorded offset
+    # for page 2 lands on page 2's content in the written body (offsets are meaningful, not -1).
+    manifest = await read_manifest(settings.vault_path, result.doc_id)
+    assert manifest is not None and manifest.parse is not None
+    pages = manifest.parse.pages
+    assert len(pages) == 2
+    assert all(p.char_start >= 0 for p in pages)  # citation-grade (not the -1 legacy fallback)
+    doc = await read_document(settings.vault_path, result.doc_id)
+    starts = {p.page: p.char_start for p in pages}
+    assert starts[1] == 0
+    assert doc.body[starts[2] :].startswith("# page 2")
+
+    # INDEX: the exact page intervals drive Chunk.page — populated, monotonic, and a page-2-content
+    # chunk is attributed to page 2.
+    await index_document(result.doc_id)
+    # The fake captures every upsert across BOTH the vector and FTS stores → dedupe by chunk_id
+    # (document order preserved by dict insertion).
+    chunks = list({c.chunk_id: c for c in patch_index_stores["chunks"]}.values())
+    assert chunks and all(c.page is not None for c in chunks)
+    page_seq = [c.page for c in chunks]
+    assert page_seq == sorted(page_seq)  # non-decreasing in document order
+    assert {c.page for c in chunks} == {1, 2}
+    page2_chunks = [c for c in chunks if "page 2" in c.text]
+    assert page2_chunks and all(c.page == 2 for c in page2_chunks)
+
+
+@pytest.mark.asyncio
+async def test_docling_page_aligned_markdown_reaches_citation_grade(
+    settings: MemexSettings, fake_pdf: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Companion arc-3 on the PRIMARY engine. The Docling document-level markdown equals the
+    per-page join ONLY after VLM escalation (re-stitched as the join) or on a deck with no
+    serialization divergence; that shape reaches citation-grade. Fake exactly that shape and
+    assert each content page records `char_start` and the offset lands on its content."""
+    from memex.vault.store import read_document
+
+    p1 = "# Slide 1\n\nIntro content for slide one."
+    p2 = "# Slide 2\n\nSecond slide body text here."
+
+    async def _fake(source: Path, *, timeout_s: int, **_kw: object) -> DoclingConversion:
+        return DoclingConversion(
+            markdown="\n\n".join([p1, p2]),  # the post-escalation / non-divergent shape
+            pages=[
+                DoclingPageOutput(page=1, markdown=p1, confidence=0.95),
+                DoclingPageOutput(page=2, markdown=p2, confidence=0.95),
+            ],
+            docling_version="fake-1.0",
+            figure_count=0,
+            table_count=0,
+            equation_count=0,
+        )
+
+    monkeypatch.setattr("memex.parse.pipeline.docling_convert", _fake)
+    result = await ingest_file(IngestRequest(source_path=fake_pdf))
+    assert result.accepted and result.doc_id is not None
+    parse_result = await parse_document(result.doc_id)
+    assert parse_result.engine == "docling"
+
+    manifest = await read_manifest(settings.vault_path, result.doc_id)
+    assert manifest is not None and manifest.parse is not None
+    pages = manifest.parse.pages
+    assert len(pages) == 2
+    assert all(p.char_start >= 0 for p in pages if p.char_count > 0)  # citation-grade activated
+    doc = await read_document(settings.vault_path, result.doc_id)
+    starts = {p.page: p.char_start for p in pages}
+    assert starts[1] == 0
+    assert doc.body[starts[2] :].startswith("# Slide 2")
+
+
+@pytest.mark.asyncio
+async def test_docling_divergent_markdown_stays_navgrade(
+    settings: MemexSettings, fake_pdf: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The real NON-escalated Docling case: `conversion.markdown` is a whole-doc serialization that
+    does NOT equal the per-page join. The parse round-trip guard must FAIL-SAFE to nav-grade
+    (`char_start == -1` on every page) — never a wrong map, never a body change."""
+    from memex.vault.store import read_document
+
+    async def _fake(source: Path, *, timeout_s: int, **_kw: object) -> DoclingConversion:
+        return DoclingConversion(
+            markdown="# Whole\n\nA doc-level serialization that differs from the page join.",
+            pages=[
+                DoclingPageOutput(page=1, markdown="# A\n\nalpha", confidence=0.95),
+                DoclingPageOutput(page=2, markdown="# B\n\nbeta", confidence=0.95),
+            ],
+            docling_version="fake-1.0",
+            figure_count=0,
+            table_count=0,
+            equation_count=0,
+        )
+
+    monkeypatch.setattr("memex.parse.pipeline.docling_convert", _fake)
+    result = await ingest_file(IngestRequest(source_path=fake_pdf))
+    assert result.accepted and result.doc_id is not None
+    await parse_document(result.doc_id)
+
+    manifest = await read_manifest(settings.vault_path, result.doc_id)
+    assert manifest is not None and manifest.parse is not None
+    assert all(p.char_start == -1 for p in manifest.parse.pages)  # fail-safe nav-grade
+    # The written body is still the canonical finalize of the doc-level markdown (unchanged behavior).
+    doc = await read_document(settings.vault_path, result.doc_id)
+    assert "doc-level serialization that differs" in doc.body
+
+
+@pytest.mark.asyncio
 async def test_pymupdf_scanner_producer_falls_through_with_force_ocr(
     settings: MemexSettings,
     fake_pdf: Path,

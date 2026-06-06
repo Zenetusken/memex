@@ -216,10 +216,23 @@
   if (!pane) return;
   const scrollPreviewTo = (page) => {
     const img = document.getElementById('page-' + page);
-    if (img) img.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (!img) return;
+    // Scroll the PREVIEW PANE itself — NOT img.scrollIntoView(), which also scrolls
+    // the window/document and so LOSES to the browser's native `#section-slug` hash
+    // jump when a citation href carries BOTH `?page=N` AND a section hash (the common
+    // case — the PDF pane stayed on page 1 while only the markdown side took the
+    // hash). A pane-local scrollTop targets a different scroll container than the
+    // hash, so the two never compete.
+    const top = img.getBoundingClientRect().top
+      - pane.getBoundingClientRect().top + pane.scrollTop;
+    pane.scrollTo({ top, behavior: 'smooth' });
   };
   const initial = new URLSearchParams(window.location.search).get('page');
-  if (initial && /^\d+$/.test(initial)) scrollPreviewTo(initial);
+  // Defer one frame so the pane scroll runs AFTER the browser's native hash jump
+  // (and one layout pass), making it the final word on the preview-pane position.
+  if (initial && /^\d+$/.test(initial)) {
+    requestAnimationFrame(() => scrollPreviewTo(initial));
+  }
   const docPath = '/documents/{{ document.ref.doc_id }}';
   document.addEventListener('click', (e) => {
     const a = e.target && e.target.closest && e.target.closest('a[data-page]');

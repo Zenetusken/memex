@@ -722,6 +722,19 @@ class AgentsSettings(BaseModel):
     # per deck: a higher floor falls back MORE (to the safe transcript signal), so the failure mode of a
     # too-high floor is conservative (lost keyframe lift), never a forced wrong slide.
     companion_keyframe_min_score: float = 0.80
+    # §13 monotonic-DP alignment (ADR-0018, the deferred MaViLS asymmetric-jump refinement of the
+    # cheap greedy tie-break). OPT-IN (default OFF) — `align_blocks` runs the BYTE-IDENTICAL greedy
+    # path when off. When ON, a Viterbi over (chunk, slide-page) replaces the per-chunk argmax on the
+    # TRANSCRIPT-FALLBACK path (keyframe-PRIMARY chunks stay FIXED anchors): emission = cosine; a
+    # transition penalty `companion_dp_lambda_jump` makes a backward jump 2× a forward one (lectures
+    # advance, occasionally revisit); a `companion_dp_time_weight` prior nudges a chunk at fraction
+    # t/T of the lecture toward the slide near that fraction of the deck (`start_s` from
+    # `Chunk.time_range`). Below `companion_align_min_score` a chunk stays NULL (a tangent, carries the
+    # page context). UNIT-validated; the corpus win awaits a transcript→slide gold set (gold-set
+    # deferred). `MEMEX_AGENTS__COMPANION_ALIGN_DP_ENABLED=true` + the two weights to tune.
+    companion_align_dp_enabled: bool = False
+    companion_dp_lambda_jump: float = Field(default=0.1, ge=0.0)
+    companion_dp_time_weight: float = Field(default=0.1, ge=0.0)
     # The deterministic numeric-grounding backstop (2026-05-31): a post-verify
     # gate that demotes a grounded claim whose principal LARGE figure is absent
     # from its cited TABLE chunk (a computed aggregate the LLM verifier
