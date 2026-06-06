@@ -21,7 +21,7 @@
     {"user_text": "What is DHCPv4 used for?", "answer_summary": "DHCPv4 dynamically assigns IPv4 addressing information to hosts on a network."}
    ],
    "follow_up": "what messages does it use?",
-   "relevant_chunk_ids": ["bc6effb8-srwe-module-7-2021#5f88716848", "bc6effb8-srwe-module-7-2021#8a5256a9cb"],
+   "relevant_chunk_ids": ["bc6effb8-srwe-module-7-2021#70a84e10eb", "bc6effb8-srwe-module-7-2021#76f49da7e1"],
    "k": 20
   },
   {
@@ -42,7 +42,7 @@
     {"user_text": "And what is DHCP used for?", "answer_summary": "DHCP dynamically assigns IP addressing to hosts."}
    ],
    "follow_up": "going back to spanning tree, what port states does it use?",
-   "relevant_chunk_ids": ["753a17ed-srwe-module-5-2021#7d04c77d4b", "753a17ed-srwe-module-5-2021#0fc424ab58"],
+   "relevant_chunk_ids": ["753a17ed-srwe-module-5-2021#2f0c1ec2d4", "753a17ed-srwe-module-5-2021#0fc424ab58"],
    "k": 20
   },
   {
@@ -62,7 +62,7 @@
     {"user_text": "Qu'est-ce que la Cyber Kill Chain présentée dans le cours ?", "answer_summary": "La Cyber Kill Chain est un modèle de Lockheed Martin décrivant en plusieurs phases le déroulement d'une attaque réseau."}
    ],
    "follow_up": "que fait l'attaquant pendant sa première phase ?",
-   "relevant_chunk_ids": ["7e7cd59e-cr350-semaine-5-attaques-r-seau-et-cha-ne-d-atta#9a72aff12e"],
+   "relevant_chunk_ids": ["7e7cd59e-cr350-semaine-5-attaques-r-seau-et-cha-ne-d-atta#85d026f37e"],
    "k": 20
   },
   {
@@ -72,7 +72,7 @@
     {"user_text": "Qu'est-ce que l'ARP spoofing dans un réseau IPv4 ?", "answer_summary": "L'ARP spoofing est une attaque où l'attaquant falsifie des réponses ARP pour détourner le trafic d'un réseau local IPv4."}
    ],
    "follow_up": "qu'est-ce qui le remplace en IPv6 ?",
-   "relevant_chunk_ids": ["cd5027ef-pdf-cours12-cr350-ipv6-securite#eeddb94453"],
+   "relevant_chunk_ids": ["cd5027ef-pdf-cours12-cr350-ipv6-securite#eeddb94453", "cd5027ef-pdf-cours12-cr350-ipv6-securite#0df361c5c4"],
    "k": 20
   },
   {
@@ -82,7 +82,7 @@
     {"user_text": "Quelles menaces sont véhiculées par courriel selon le cours 11 ?", "answer_summary": "Le courriel véhicule des menaces comme l'hameçonnage, les pièces jointes malveillantes et les liens vers des sites malveillants."}
    ],
    "follow_up": "comment les filtrer ?",
-   "relevant_chunk_ids": ["7577f688-pdf-cr350-cours11-filtrage-url-antivirus-courrie#682930472f"],
+   "relevant_chunk_ids": ["7577f688-pdf-cr350-cours11-filtrage-url-antivirus-courrie#2103791277", "7577f688-pdf-cr350-cours11-filtrage-url-antivirus-courrie#f28da1f146"],
    "k": 20
   },
   {
@@ -92,7 +92,7 @@
     {"user_text": "Qu'est-ce qu'un événement de sécurité et un incident selon le cours 8 ?", "answer_summary": "Un événement de sécurité est une occurrence observable dans un système ou un réseau, qu'un SOC doit pouvoir suivre."}
    ],
    "follow_up": "comment les gérer ?",
-   "relevant_chunk_ids": ["3fc28998-pdf-cours-8-gestion-des-v-nements-de-s-curit#03cb386c6e"],
+   "relevant_chunk_ids": ["3fc28998-pdf-cours-8-gestion-des-v-nements-de-s-curit#65d1968e32"],
    "k": 20
   },
   {
@@ -102,7 +102,7 @@
     {"user_text": "De quoi traite le cours 10 sur la sécurisation des applications ?", "answer_summary": "Le cours 10 traite de la sécurisation des applications, des réseaux et des données, notamment des applications web."}
    ],
    "follow_up": "comment les sécuriser contre les attaques web ?",
-   "relevant_chunk_ids": ["e0dea0b7-pdf-cours-10-s-curiser-les-applications-les-r-se#d482575471"],
+   "relevant_chunk_ids": ["e0dea0b7-pdf-cours-10-s-curiser-les-applications-les-r-se#3a5ef1f8bf", "e0dea0b7-pdf-cours-10-s-curiser-les-applications-les-r-se#d482575471"],
    "k": 20
   },
   {
@@ -112,7 +112,7 @@
     {"user_text": "What does the CR350 course say about the Cyber Kill Chain?", "answer_summary": "It is Lockheed Martin's multi-phase model describing the stages of a network attack."}
    ],
    "follow_up": "what happens during its first phase?",
-   "relevant_chunk_ids": ["7e7cd59e-cr350-semaine-5-attaques-r-seau-et-cha-ne-d-atta#e5cd668a52"],
+   "relevant_chunk_ids": ["7e7cd59e-cr350-semaine-5-attaques-r-seau-et-cha-ne-d-atta#85d026f37e"],
    "k": 20
   }
  ]
