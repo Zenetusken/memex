@@ -1,6 +1,6 @@
 # Deferred backlog — items not yet implemented
 
-**Generated:** 2026-06-05 · **Pending items:** 123 (+ 39 explicitly decided-against).
+**Generated:** 2026-06-05 · **Last reconciled:** 2026-06-06 · **Pending items:** ~121 (+ 39 explicitly decided-against).
 
 > **What this is.** A point-in-time snapshot of every consciously-deferred item across the project,
 > synthesized from a sweep of `docs/ROADMAP.md`, the ADRs, the specs, the agent's memory trackers,
@@ -9,10 +9,19 @@
 > code/ROADMAP before treating any line as fact. The authoritative trackers remain ROADMAP.md (status)
 > and the per-feature ADRs/specs (the *why*). Many entries are granular — some are sub-items of a larger arc.
 
-> **Last reconciled 2026-06-05:** dropped the orphaned `duckdb` dep (pruned) and the entire
-> "audit-2026-05-20 open items" entry — all four of its sub-items (D2 per-doc `_DOC_LOCKS`, #23 vendored
-> Tailwind+HTMX, #27 watcher test driving `_drain_one`, #29 MCP tools return pydantic-not-dict) were
-> verified DONE against current code. Net: this audit is fully closed.
+> **Reconciled 2026-06-05:** dropped the orphaned `duckdb` dep (pruned) and the entire
+> "audit-2026-05-20 open items" entry — all four sub-items (D2 `_DOC_LOCKS`, #23 vendored Tailwind+HTMX,
+> #27 watcher test, #29 MCP returns pydantic) verified DONE.
+>
+> **Reconciled 2026-06-06 — the four "queued" items knocked out:** (3) **eval-expert MAJORITY-of-N** SHIPPED
+> (`fa1342d`, eval-only). (4) **UI-ingestion residuals** — verified ~90% already shipped (chunk_count gate,
+> half-doc detect, chart-OCR unload, orchestrator reconcile); only half-doc resume/sweep remains, deferred-
+> by-design (auto-acting at startup is unsafe; the manual `memex index <doc>` path exists). (1) **VLM W6**
+> — the V2 prompt (decoration-skip WITHOUT the verbosity-inducing preservation guard) SHIPPED (`c911a80`),
+> validated on the regression site (cr350-diagrams 11/11 ANS, no −1); the **vault-wide re-parse migration**
+> (apply V2 to the other ~37 VLM docs) is deferred → **BLOCKED on the daemon-state fix below** (a CLI
+> re-parse currently breaks the daemon). (2) **Docling re-tiering** — premise confirmed via diagnostic but
+> it's a redesign, not a tweak (see Queued). **NEW top item:** the daemon-state silent-404 root-fix.
 
 ## How to read the categories
 
@@ -22,22 +31,16 @@
 - **🔬 Researched + banked** — has a verdict; waiting on a forcing function.
 - **🚫 Decided-against** — tried-and-reverted or rejected; **NOT pending** — listed only so they're not mistaken for open work.
 
-## 🎯 Queued / next-pickup (4)
+## 🎯 Queued / next-pickup (2)
 
 _Intended soon — the most actionable._
 
-- **VLM prompt decorative-narration suppression (audit-10 W6)** — Calm-register VLM prompt to skip decorative-image / editorial-narration noise (~15-25 vault blocks) in diagram transcription.  
-  *Unblock:* Implemented + validated content-safe/gate-safe but FAILED ship bar with a consistent -1 ANS on cr350-diagrams (the 'transcribe every line' preservation guard crowds retrieval). Reverted byte-identical. Own-session: author a less-verbosity-inducing guard validated ANS-neutral across ALL VLM corpora before a vault-wide re-parse. Finding in vlm_backend._PROMPT NB comment.  
-  *Sources:* ROADMAP.md:386/15; audits/10:171; vlm_backend.py:76-82; next_priorities.md; build_status.md
-- **Docling height-leveling on dense UNNUMBERED docs (step-3b residual)** — Un-flatten the dominant section tier on a dense unnumbered doc (force-docling'd 10-K: 415 real section titles pinned at the H5 cap) via frequency/mode-anchored re-tiering.  
-  *Unblock:* The level-cap bounds depth but can't un-flatten; the section-number signal doesn't apply to unnumbered headings; mode-aware re-tiering trades one failure mode for another. Needs a focused session + a multi-doc force-docling A/B. Lower priority (the 10-K's DEFAULT route is PyMuPDF, clean tree).  
-  *Sources:* ROADMAP.md:387/15; audits/10:169; next_priorities.md; build_status.md
-- **eval-expert MAJORITY-of-N gated substring policy (v1.1 must-fix)** — Switch gated substring cases from any-run-fail to MAJORITY-of-N so a rare REAL affirm surfaces via gate_run_stable, not a flaky fail.  
-  *Unblock:* Demonstrated-needed (a 1-in-22 false-fire flipped hard_gates_pass ~21% of runs) but made NON-urgent by the directional-phrasing blocklist fix; documented as the v1.1 refinement. Pickable now.  
-  *Sources:* eval_expert_2026_06_01:25-27
-- **UI-ingestion residual hardening deferrals (chunk_count 'searchable' gate, half-doc lifespan reconcile, V3c lifecycle)** — B6/B12 chunk_count searchable gate; B16/B19 half-doc (ingest-but-no-index) resume/sweep on startup; V3c supervisor.start retry + chart-OCR pre-flight retrieval unload. Detect+log shipped; the resume/sweep ACTION did not.  
-  *Unblock:* Lower-value/larger items deferred from the UI-ingestion livetest + dynamic-VRAM-manager; single-user localhost v1. Note: most of the deferred backlog (B7/B8/B11/B18) MERGED 587edaa — verify each against current code before picking up.  
-  *Sources:* app.py:244; ui_ingestion_livetest_2026_06_05; ui_ingestion_deferred_done_2026_06_05; dynamic_vram_manager_2026_06_04:20
+- **🔥 Daemon-state silent-404 after a CLI VLM/chart-OCR parse (ROOT-FIX, HIGH)** — A `memex parse`/`index`/`reindex` with VLM or chart-OCR leaves the orchestrator daemon serving the `serve-vllm.sh` DEFAULT 8B, not the configured 4B → every later `/ask`/eval/chat/summarize 404s "model does not exist"; the stray 8B even blocks `daemon restart` (needs a manual `kill -9` of the EngineCore).  
+  *Unblock:* Pickable now — root cause CONFIRMED: `parse/pipeline.py::_vllm_restart` spawns `serve-vllm.sh` with NO `env=`, so `MEMEX_VLLM_MODEL` is unset → the 8B default. The webui ingest path got the ADR-0015 `orchestrator_serve_env` bridge + `_reconcile_orchestrator`; the CLI restart was never wired to it. Fix = inject the serve-env into `_vllm_restart` + a clean by-port stop-before-spawn so a stray can't block the port. Observed LIVE 2026-06-06; user-flagged.  
+  *Sources:* daemon_state_silent_404_2026_06_06 (full context); parse/pipeline.py::_vllm_restart; daemon/supervisor.py::orchestrator_serve_env; webui/app.py::_reconcile_orchestrator; ADR-0015
+- **Docling mode-anchored re-tiering on dense UNNUMBERED docs (step-3b residual)** — Un-flatten the dominant section tier on a dense unnumbered doc (the force-docling'd 10-K) so its real section titles aren't pinned at the H5 cap.  
+  *Unblock:* **Premise CONFIRMED 2026-06-06** via a bounded docling diagnostic (10-K p1-30): the buried mode tier IS real section titles (BUSINESS OVERVIEW / PROXY SUMMARY / Corporate Governance Highlights), not table labels (the old `docling_worker.py` comment was wrong). BUT the fix is a REDESIGN, not a tweak: the section tier spans adjacent small-height buckets (8/9/10pt ≈63%) below 10+ rare taller singletons, so it needs **mode-PRIMARY (not size-primary) leveling + a clustering pass + multi-doc over-flatten validation (decks must stay flat)**. A focused session; marginal value (the 10-K's DEFAULT route is PyMuPDF, clean tree).  
+  *Sources:* docling_worker.py::_recover_heading_levels; audits/10:169; next_priorities.md
 
 ## ⛔ Data-gated / blocked (39)
 
