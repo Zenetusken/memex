@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING, Annotated
 import structlog
 from pydantic import Field, create_model
 
-from memex.agents.answering import DraftAnswer, RelevanceAssessment, VerificationResult
+from memex.agents.answering import DraftAnswer, RelevanceAssessment, VerifyIndices
 from memex.core.errors import ModelCallError
 from memex.models.client import complete_structured
 from memex.prompts import prompt_tag_for, render_prompt
@@ -45,18 +45,19 @@ if TYPE_CHECKING:
 logger = structlog.get_logger(__name__)
 
 
-def bounded_verification(n: int) -> type[VerificationResult]:
-    """Per-call `VerificationResult` with the index lists bounded to `n`
-    (mirrors `answering.verify`). xgrammar enforces the list bounds."""
+def bounded_verification(n: int) -> type[VerifyIndices]:
+    """Per-call guided-decode verify schema with the index lists bounded to `n`
+    (mirrors `answering.verify`). Returns the reason-less `VerifyIndices`: the
+    free-text reasons field is kept OFF the decode path because the guided-decode
+    backend doesn't enforce string `max_length`, so a rambling reason truncates the
+    JSON → `ModelCallError` (see `VerifyIndices`). `ground_claims` decides purely by
+    the grounded/ungrounded indices, so dropping reasons is behavior-neutral here
+    (and removes the same latent crash the `/ask` verify node had)."""
     return create_model(
         "VerificationResult",
-        __base__=VerificationResult,
+        __base__=VerifyIndices,
         grounded=(Annotated[list[int], Field(max_length=n)], Field(default_factory=list)),
         ungrounded=(Annotated[list[int], Field(max_length=n)], Field(default_factory=list)),
-        ungrounded_reasons=(
-            Annotated[list[Annotated[str, Field(max_length=250)]], Field(max_length=n)],
-            Field(default_factory=list),
-        ),
     )
 
 

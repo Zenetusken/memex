@@ -64,6 +64,11 @@ class EvalQueryResult(BaseModel):
     citation_precision: float
     refusal_correct: bool
     refusal_reason: str | None = None
+    # Set when `answer_query` RAISED for this query (e.g. a transient ModelCallError).
+    # An errored query is a DISTINCT bucket: excluded from answered/refused/citation/
+    # refusal_cf so a failure never silently inflates a metric (an errored counterfactual
+    # must NOT count as a correct refusal). Surfaced via `EvalReport.error_count`.
+    error: str | None = None
 
 
 class EvalReport(BaseModel):
@@ -77,6 +82,10 @@ class EvalReport(BaseModel):
     query_count: int
     answered_count: int
     refused_count: int
+    # Queries whose `answer_query` RAISED (excluded from every other count + the
+    # citation/refusal metrics). `answered_count + refused_count + error_count ==
+    # query_count`. A non-zero value means the run is INCOMPLETE for those queries.
+    error_count: int = 0
     mean_citation_precision: float
     # Refused queries score 1.0 on `mean_citation_precision` because
     # they cite nothing (no false positives). That inflates the
@@ -121,7 +130,25 @@ async def run_eval(
     refusal_correct_count = 0
 
     for q in queries:
-        response = await answer_query(q.question)
+        try:
+            response = await answer_query(q.question)
+        except Exception as e:  # eval robustness: one query's failure must
+            # NOT abort the whole suite (the slide-decks verify-overflow crash, 2026-06-06).
+            # `asyncio.CancelledError`/`KeyboardInterrupt`/`SystemExit` are BaseException, so
+            # this `except Exception` does not swallow cancellation. The query is recorded as
+            # a DISTINCT error bucket (excluded from every metric), never as a refusal.
+            log.warning("eval.query_error", qid=q.qid, error=str(e)[:200])
+            results.append(
+                EvalQueryResult(
+                    qid=q.qid,
+                    question=q.question,
+                    answered=False,
+                    citation_precision=0.0,
+                    refusal_correct=False,
+                    error=f"{type(e).__name__}: {str(e)[:200]}",
+                )
+            )
+            continue
         cp = citation_precision(
             CitationPrecisionInput(
                 cited_chunk_ids=[c.source_chunk_id for c in response.claims],
@@ -145,16 +172,20 @@ async def run_eval(
         )
 
     finished = datetime.now(UTC)
-    answered_results = [r for r in results if r.answered]
+    # Errored queries are excluded from EVERY metric denominator (a failure must not
+    # masquerade as a refusal/answer). answered + refused + error == query_count.
+    non_error = [r for r in results if r.error is None]
+    answered_results = [r for r in non_error if r.answered]
     report = EvalReport(
         run_id=str(ulid.ULID()),
         started_at=started,
         finished_at=finished,
         query_count=len(results),
         answered_count=len(answered_results),
-        refused_count=sum(1 for r in results if not r.answered),
+        refused_count=sum(1 for r in non_error if not r.answered),
+        error_count=sum(1 for r in results if r.error is not None),
         mean_citation_precision=(
-            sum(r.citation_precision for r in results) / len(results) if results else 0.0
+            sum(r.citation_precision for r in non_error) / len(non_error) if non_error else 0.0
         ),
         mean_citation_precision_answered_only=(
             sum(r.citation_precision for r in answered_results) / len(answered_results)
@@ -169,6 +200,7 @@ async def run_eval(
     log.info(
         "eval.done",
         query_count=report.query_count,
+        error_count=report.error_count,
         mean_citation_precision=report.mean_citation_precision,
         mean_citation_precision_answered_only=report.mean_citation_precision_answered_only,
     )
