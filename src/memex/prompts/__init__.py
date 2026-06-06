@@ -5,6 +5,11 @@ Prompts are code: versioned, tested, evaluated, reviewed. They live as
 model, input/output schema, and eval suite.
 """
 
-from memex.prompts.loader import render_messages, render_prompt
+from memex.prompts.loader import (
+    active_version,
+    prompt_tag_for,
+    render_messages,
+    render_prompt,
+)
 
-__all__ = ["render_messages", "render_prompt"]
+__all__ = ["active_version", "prompt_tag_for", "render_messages", "render_prompt"]

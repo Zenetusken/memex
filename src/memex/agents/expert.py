@@ -31,7 +31,7 @@ from memex.core.config import get_settings
 from memex.core.types import Chunk
 from memex.models.client import complete_reasoning, split_think
 from memex.observability import bind_run_context, clear_run_context
-from memex.prompts import render_messages
+from memex.prompts import prompt_tag_for, render_messages
 from memex.retrieve import (
     cross_encoder_rerank,
     hybrid_search,
@@ -153,7 +153,7 @@ async def reason_over_evidence(
         messages,
         enable_thinking=enable_thinking,
         max_tokens=_ANSWER_MAX_TOKENS,
-        prompt_tag="expert_answer",
+        prompt_tag=prompt_tag_for("expert_answer"),
     )
     logger.info("reason.done", tokens=tokens, chars=len(text))
     return text, reranked, tokens

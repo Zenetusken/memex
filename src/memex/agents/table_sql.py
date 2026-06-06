@@ -38,7 +38,7 @@ import structlog
 from memex.core.text import coerce_number, is_canonical_number_cell
 from memex.core.types import GeneratedSQL, StoredTable, TableQueryResult
 from memex.models.client import complete_structured
-from memex.prompts import render_prompt
+from memex.prompts import prompt_tag_for, render_prompt
 
 logger = structlog.get_logger(__name__)
 
@@ -816,7 +816,7 @@ async def query_doc_tables(question: str, tables: list[StoredTable]) -> TableQue
     generated, _tokens = await complete_structured(
         prompt=prompt,
         schema=GeneratedSQL,
-        prompt_tag="generate_table_sql@v1",
+        prompt_tag=prompt_tag_for("generate_table_sql"),
     )
 
     sql = generated.sql.strip()

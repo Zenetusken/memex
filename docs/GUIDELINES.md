@@ -294,11 +294,12 @@ class DraftAnswer(BaseModel):
 # response_format + Langfuse generation span + bounded-schema
 # construction in one call.
 from memex.models.client import complete_structured
+from memex.prompts import prompt_tag_for
 
 draft, tokens_used = await complete_structured(
     prompt=prompt,
     schema=DraftAnswer,
-    prompt_tag="answer@v1",
+    prompt_tag=prompt_tag_for("answer"),  # NEVER hardcode "answer@v3" — derive it (see Prompt management)
 )
 ```
 
@@ -310,6 +311,7 @@ Prompts are code. They are versioned, tested, evaluated, and reviewed.
 - Frontmatter declares: prompt name, version, role (system/user), target model, input schema (pydantic class name), output schema, eval suite.
 - A `Prompt` class loads, validates inputs, renders via Jinja2, and returns a tagged string for tracing.
 - Every prompt invocation logs `prompt_name@version` to Langfuse. When eval quality regresses, you can pinpoint which prompt change caused it.
+- **Never hardcode the `prompt_tag` string.** `render_prompt`/`render_messages` auto-select the highest on-disk version (and honor `MEMEX_PROMPTS__PIN__<NAME>`), so a literal `prompt_tag="answer@v3"` silently lies the moment a higher `vN` ships or a pin is set. Derive it: `prompt_tag=prompt_tag_for("answer")` (from `memex.prompts`; `active_version(name)` returns the bare version). A source-scan guard test (`tests/unit/test_prompt_tag.py`) fails the build if a `prompt_tag="…@vN"` literal is reintroduced.
 
 Treat prompt edits the way you treat schema migrations: they go in PRs, they get reviewed, and they ship with an eval delta.
 

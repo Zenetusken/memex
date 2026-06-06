@@ -48,7 +48,7 @@ from memex.core.text import claim_grounded_only_by_name
 from memex.core.types import Chunk
 from memex.models.client import complete_structured, split_think
 from memex.observability import bind_run_context, clear_run_context
-from memex.prompts import render_messages
+from memex.prompts import prompt_tag_for, render_messages
 
 logger = structlog.get_logger(__name__)
 
@@ -175,7 +175,7 @@ async def reason_then_ground(
                     ),
                     schema=DraftAnswer,
                     max_tokens=_EXTRACT_MAX_TOKENS,
-                    prompt_tag="extract_claims@v2",
+                    prompt_tag=prompt_tag_for("extract_claims"),
                 )
                 candidates = draft.claims
             except ModelCallError as e:

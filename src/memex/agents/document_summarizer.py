@@ -54,7 +54,7 @@ from memex.index.fts_store import FTSStore
 from memex.index.table_store import TableStore
 from memex.models.client import complete_structured, inference_override
 from memex.observability import bind_run_context, clear_run_context
-from memex.prompts import render_prompt
+from memex.prompts import prompt_tag_for, render_prompt
 
 logger = structlog.get_logger(__name__)
 
@@ -376,7 +376,7 @@ async def _map_section(
             prompt=prompt,
             schema=SectionSummary,
             max_tokens=max_output_tokens,
-            prompt_tag="summarize_section@v2",  # render_prompt auto-selects the highest version (v2)
+            prompt_tag=prompt_tag_for("summarize_section"),
         )
     except ModelCallError as e:
         logger.bind(section=section_title).warning("summarize.section_failed", error=str(e)[:160])
@@ -448,7 +448,7 @@ async def _reduce(
             prompt=prompt,
             schema=DocAbstract,
             max_tokens=min(max_output_tokens, _REDUCE_MAX_TOKENS),
-            prompt_tag="summarize_reduce@v2",  # render_prompt auto-selects the highest version (v2)
+            prompt_tag=prompt_tag_for("summarize_reduce"),
         )
     except ModelCallError as e:
         logger.warning("summarize.reduce_failed", error=str(e)[:160])
@@ -494,7 +494,7 @@ async def _plan_report_structure(
             prompt=prompt,
             schema=ReportStructure,
             max_tokens=_REDUCE_MAX_TOKENS,
-            prompt_tag="summarize_report_plan@v1",
+            prompt_tag=prompt_tag_for("summarize_report_plan"),
         )
     except ModelCallError as e:
         log.warning("report.plan_failed", error=str(e)[:160])
@@ -921,7 +921,7 @@ async def _key_figures_section(
             prompt=prompt,
             schema=SectionSummary,
             max_tokens=max_output_tokens,
-            prompt_tag="summarize_tabular@v1",
+            prompt_tag=prompt_tag_for("summarize_tabular"),
         )
     except ModelCallError as e:
         logger.warning("summarize.tabular_map_failed", error=str(e)[:160])

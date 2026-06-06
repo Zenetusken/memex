@@ -130,6 +130,29 @@ def load_prompt_spec(name: str) -> PromptSpec:
     return PromptSpec(template=post.content, **meta)
 
 
+def active_version(name: str) -> str:
+    """Return the on-disk version actually selected for `name` (e.g. ``"v2"``).
+
+    Pin-aware (reflects ``MEMEX_PROMPTS__PIN__<NAME>``) and reuses the cached
+    ``load_prompt_spec`` — zero extra I/O. The single source of truth for
+    "which version is live", so a hand-maintained version constant can never
+    drift from what actually loads.
+    """
+    return load_prompt_spec(name).version
+
+
+def prompt_tag_for(name: str) -> str:
+    """Return the observability tag ``<name>@<active version>`` for `name`.
+
+    Derived from the loaded spec, so the Langfuse trace label can never lie
+    about which prompt version produced an output — a hardcoded ``name@vN``
+    drifts the moment a higher ``vN`` ships or a pin is set. Pass this as
+    ``prompt_tag=`` to ``complete_structured`` / ``complete_reasoning``.
+    """
+    spec = load_prompt_spec(name)
+    return f"{spec.name}@{spec.version}"
+
+
 def render_prompt(name: str, **kwargs: Any) -> str:
     """Render the active version of `name` with `kwargs`.
 
