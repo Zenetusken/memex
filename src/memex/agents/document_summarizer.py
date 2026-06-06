@@ -376,7 +376,7 @@ async def _map_section(
             prompt=prompt,
             schema=SectionSummary,
             max_tokens=max_output_tokens,
-            prompt_tag="summarize_section@v1",
+            prompt_tag="summarize_section@v2",  # render_prompt auto-selects the highest version (v2)
         )
     except ModelCallError as e:
         logger.bind(section=section_title).warning("summarize.section_failed", error=str(e)[:160])
@@ -448,7 +448,7 @@ async def _reduce(
             prompt=prompt,
             schema=DocAbstract,
             max_tokens=min(max_output_tokens, _REDUCE_MAX_TOKENS),
-            prompt_tag="summarize_reduce@v1",
+            prompt_tag="summarize_reduce@v2",  # render_prompt auto-selects the highest version (v2)
         )
     except ModelCallError as e:
         logger.warning("summarize.reduce_failed", error=str(e)[:160])

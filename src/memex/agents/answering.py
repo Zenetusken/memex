@@ -1393,7 +1393,7 @@ async def assess(state: AnswerState) -> AnswerStateUpdate:
     sufficiency, tokens = await complete_structured(
         prompt=prompt,
         schema=SufficiencyAssessment,
-        prompt_tag="assess_sufficiency@v1",
+        prompt_tag="assess_sufficiency@v2",  # render_prompt auto-selects the highest version (v2 — citation-floor)
     )
 
     return {

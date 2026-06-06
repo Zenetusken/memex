@@ -12,7 +12,7 @@ On-disk layout under `src/memex/prompts/<name>/v<N>.md`:
     name: answer
     version: v1
     role: user
-    target_model: Qwen/Qwen3-8B-AWQ
+    target_model: cyankiwi/Qwen3.5-4B-AWQ-4bit
     ---
     {{ Jinja template body }}
 
