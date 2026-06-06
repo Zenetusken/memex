@@ -74,6 +74,7 @@ from memex.core.errors import (
     VaultIntegrityError,
 )
 from memex.core.manifest import read_manifest, update_manifest
+from memex.core.model_serving import orchestrator_serve_env
 from memex.core.resources import (
     RERANKER_GPU_FLOOR_GB,
     CoResidenceMode,
@@ -90,7 +91,6 @@ from memex.core.scope_sets import (
 from memex.core.types import Chunk, CompanionAlignment
 from memex.daemon import restart as daemon_restart
 from memex.daemon import status as daemon_status
-from memex.daemon.supervisor import orchestrator_serve_env
 from memex.index.graph_store import GraphStore
 from memex.index.pipeline import retitle_document
 from memex.models.registry import ModelNotConfigured, get_registry

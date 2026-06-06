@@ -1,6 +1,6 @@
 """Unit tests for the orchestrator serve-env bridge + the 4B VRAM tier.
 
-The bridge (`daemon/supervisor.orchestrator_serve_env`) maps
+The bridge (`core/model_serving.orchestrator_serve_env`) maps
 `settings.models.orchestrator` + `orchestrator_quantization` to the
 `MEMEX_VLLM_*` serve env `scripts/serve-vllm.sh` reads, so a config-only
 model swap actually changes what the daemon serves — without it the script's
@@ -31,7 +31,7 @@ def test_default_orchestrator_is_the_4b(
 ) -> None:
     """Post-ADR-0015 the committed default IS the unified Qwen3.5-4B → it omits
     the quant flag (compressed-tensors auto-detect) and uses auto KV."""
-    from memex.daemon.supervisor import orchestrator_serve_env
+    from memex.core.model_serving import orchestrator_serve_env
 
     env = orchestrator_serve_env(_settings(monkeypatch, tmp_path))
     assert env["MEMEX_VLLM_MODEL"] == "cyankiwi/Qwen3.5-4B-AWQ-4bit"
@@ -44,7 +44,7 @@ def test_8b_awq_kill_switch_serve_env(
 ) -> None:
     """The 8B kill-switch path maps to the proven awq_marlin + fp8_e5m2 serve —
     byte-identical to the pre-swap serve-vllm.sh defaults (the rollback regression guard)."""
-    from memex.daemon.supervisor import orchestrator_serve_env
+    from memex.core.model_serving import orchestrator_serve_env
 
     env = orchestrator_serve_env(
         _settings(
@@ -64,7 +64,7 @@ def test_compressed_tensors_4b_serve_env(
 ) -> None:
     """The unified Qwen3.5-4B (compressed-tensors) omits the quant flag and uses
     auto KV (it's an fp8 checkpoint that rejects fp8_e5m2 KV)."""
-    from memex.daemon.supervisor import orchestrator_serve_env
+    from memex.core.model_serving import orchestrator_serve_env
 
     env = orchestrator_serve_env(
         _settings(
@@ -86,7 +86,7 @@ def test_compressed_tensors_4b_serve_env(
 
 
 def test_gptq_serve_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    from memex.daemon.supervisor import orchestrator_serve_env
+    from memex.core.model_serving import orchestrator_serve_env
 
     env = orchestrator_serve_env(
         _settings(

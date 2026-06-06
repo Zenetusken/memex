@@ -128,6 +128,42 @@ restore the 17 docs' `.md`/manifests/`vlm_cache` from a pre-attempt backup +
 doc-VLM would re-add it. **Do not retry the 4B as the doc-VLM without a stronger
 result**; revisit only if a 4B-class model's vision measurably matches the 8B-VL.
 
+## Amendment (2026-06-06): the CLI-restart silent-404 gap is closed
+
+The serve-env bridge was wired into `daemon.supervisor.start()`/`restart()` and the
+webui INGEST path, but NOT the CLI parse-time vLLM restart. A `memex parse`/`index`/
+`reindex` whose chart-OCR or VLM-escalation pass entered
+`parse/pipeline.py::pause_vllm_for_gpu` restarted vLLM via `_vllm_restart`, which
+spawned `serve-vllm.sh` with **no serve-env** → the script's hardcoded 8B default
+came up while the client kept requesting the configured 4B → **every later `/ask`
+404'd "model does not exist"**, and the restarted vLLM was an untracked stray that
+blocked `memex daemon restart` (needed a manual `kill -9`).
+
+**Fix:** `orchestrator_serve_env` + the daemon `daemon_dir`/`daemon_pid_file` helpers
+were hoisted from `daemon/supervisor` to **`core/model_serving.py`** (so `parse/` can
+reuse them without a forbidden `parse/ → daemon/` import edge; the supervisor
+re-exports them). `_vllm_restart` now (a) injects the serve-env so the restart serves
+the configured orchestrator, and (b) writes `daemon_pid_file` so the restarted daemon
+is supervisor-TRACKED.
+
+**Two load-bearing spawn lessons** (each independently produced an un-killable orphan):
+
+1. Spawn the script as `["/usr/bin/env","bash",script]` (the `start()` shape), **not
+   `nohup script`** — under `nohup` the `uv run … vllm serve` group leader exited right
+   after spawning the vLLM child, so the written PID was a corpse and `daemon stop`'s
+   `os.getpgid(pid)` raised `ProcessLookupError`, skipping the kill and orphaning the
+   port-blocking vLLM.
+2. Use a SYNC **`subprocess.Popen`**, **not `asyncio.create_subprocess_exec`** —
+   asyncio's subprocess transport calls `_proc.kill()` on its child when the event loop
+   closes, so an asyncio-spawned detached daemon is SIGKILLed the instant the CLI's
+   `asyncio.run()` returns (same dead-leader orphan; `start_new_session` can't save it).
+
+Mirroring `start()`'s `subprocess.Popen` makes the parse-restarted daemon byte-identical
+to a `memex daemon start`ed one. Live-validated: `memex index` → restart serves the 4B
+(`doctor orchestrator_match=True`), the leader survives the CLI exit, and a subsequent
+`memex daemon restart` cleanly takes over (no `pid_reused_clearing_file`, no stray).
+Pinned by `tests/unit/test_vram_lifecycle.py` + `tests/unit/test_orchestrator_serve_env.py`.
+
 ## Revisit When
 
 - The grounded re-baseline regresses on any corpus (a counterfactual flips to
