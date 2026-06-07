@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from memex.core.config import get_settings
 from memex.core.types import Chunk
 from memex.index.fts_store import FTSStore
-from memex.index.graph_store import EntityProfile
+from memex.index.graph_store import EntityProfile, open_graph_for_read
 
 logger = structlog.get_logger(__name__)
 
@@ -59,15 +59,13 @@ async def entity_overview(
     settings = get_settings()
     vault_path = settings.vault_path
 
-    # GRAPH: the profile (identity + mentioning docs + co-occurring). Optional + fail-open.
+    # GRAPH: the profile (identity + mentioning docs + co-occurring). Optional + fail-open:
+    # `open_graph_for_read` returns None when ryugraph is absent OR a concurrent writer holds
+    # the exclusive lock (a brief enrich/index race), so the graph never blocks the entity
+    # view — it falls back to the resolved=False stand-in + whole-corpus FTS passages below.
     profile: EntityProfile | None = None
-    try:
-        from memex.index.graph_store import GraphStore
-
-        store = await GraphStore.open(vault_path)
-    except ImportError as e:
-        log.warning("entity.graph_unavailable", reason=str(e))
-    else:
+    store = await open_graph_for_read(vault_path)
+    if store is not None:
         try:
             profile = await store.entity_profile(
                 name, max_docs=max_docs, max_cooccurring=max_cooccurring

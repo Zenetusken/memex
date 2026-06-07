@@ -91,7 +91,7 @@ from memex.core.scope_sets import (
 from memex.core.types import Chunk, CompanionAlignment
 from memex.daemon import restart as daemon_restart
 from memex.daemon import status as daemon_status
-from memex.index.graph_store import GraphStore
+from memex.index.graph_store import GraphStore, is_graph_lock_error
 from memex.index.pipeline import retitle_document
 from memex.models.registry import ModelNotConfigured, get_registry
 
@@ -1136,6 +1136,13 @@ def create_app() -> FastAPI:
             rstore = await GraphStore.open(settings.vault_path)
         except ImportError as e:
             logger.warning("webui.related_unavailable", doc_id=doc_id, reason=str(e))
+        except RuntimeError as e:
+            # FAIL-OPEN on cross-process lock contention (a concurrent enrich/index holds
+            # ryugraph's exclusive dir lock) — no Related panel beats a 500. Real ryugraph
+            # errors (corruption/schema) still propagate (narrow-except: lock message only).
+            if not is_graph_lock_error(e):
+                raise
+            logger.warning("webui.related_locked", doc_id=doc_id, reason=str(e))
         else:
             try:
                 related = [r.model_dump() for r in await rstore.related_documents(doc_id, limit=8)]
@@ -2396,6 +2403,14 @@ def create_app() -> FastAPI:
             store = await GraphStore.open(settings.vault_path)
         except ImportError as e:
             logger.warning("webui.graph_unavailable", doc_id=doc_id, reason=str(e))
+            graph_available = False
+        except RuntimeError as e:
+            # FAIL-OPEN on cross-process lock contention (a concurrent enrich/index holds
+            # ryugraph's exclusive dir lock) — render the "unavailable" panel, not a 500.
+            # Real ryugraph errors still propagate (narrow-except: lock message only).
+            if not is_graph_lock_error(e):
+                raise
+            logger.warning("webui.graph_locked", doc_id=doc_id, reason=str(e))
             graph_available = False
         else:
             try:

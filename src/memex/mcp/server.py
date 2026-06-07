@@ -215,15 +215,14 @@ async def get_graph_neighbors(doc_id: str, limit: int = 50) -> list[GraphNeighbo
     Returns an empty list if RyuGraph isn't installed; the graph is
     optional for retrieval.
     """
-    from memex.index.graph_store import GraphStore
+    from memex.index.graph_store import open_graph_for_read
 
     settings = get_settings()
     log = logger.bind(tool="get_graph_neighbors", doc_id=doc_id)
     log.info("mcp.tool.start")
-    try:
-        store = await GraphStore.open(settings.vault_path)
-    except ImportError as e:
-        log.warning("mcp.graph_unavailable", reason=str(e))
+    # Fail-open: ryugraph absent OR a concurrent writer holds the exclusive lock → [].
+    store = await open_graph_for_read(settings.vault_path)
+    if store is None:
         return []
     try:
         neighbors = await store.neighbors(doc_id, limit=limit)
@@ -247,15 +246,14 @@ async def related_documents(doc_id: str, limit: int = 10) -> list[RelatedDocumen
 
     Returns an empty list if RyuGraph isn't installed (the graph is optional).
     """
-    from memex.index.graph_store import GraphStore
+    from memex.index.graph_store import open_graph_for_read
 
     settings = get_settings()
     log = logger.bind(tool="related_documents", doc_id=doc_id)
     log.info("mcp.tool.start")
-    try:
-        store = await GraphStore.open(settings.vault_path)
-    except ImportError as e:
-        log.warning("mcp.graph_unavailable", reason=str(e))
+    # Fail-open: ryugraph absent OR a concurrent writer holds the exclusive lock → [].
+    store = await open_graph_for_read(settings.vault_path)
+    if store is None:
         return []
     try:
         related = await store.related_documents(doc_id, limit=limit)
@@ -275,15 +273,14 @@ async def document_citations(doc_id: str) -> DocumentCitations:
     citation-chain following is deferred until the vault holds a citation-linked cluster
     dense enough to traverse. Returns empty lists if RyuGraph isn't installed.
     """
-    from memex.index.graph_store import GraphStore
+    from memex.index.graph_store import open_graph_for_read
 
     settings = get_settings()
     log = logger.bind(tool="document_citations", doc_id=doc_id)
     log.info("mcp.tool.start")
-    try:
-        store = await GraphStore.open(settings.vault_path)
-    except ImportError as e:
-        log.warning("mcp.graph_unavailable", reason=str(e))
+    # Fail-open: ryugraph absent OR a concurrent writer holds the exclusive lock → empty.
+    store = await open_graph_for_read(settings.vault_path)
+    if store is None:
         return DocumentCitations()
     try:
         cites = await store.citations(doc_id)

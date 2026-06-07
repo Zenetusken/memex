@@ -950,3 +950,83 @@ class GraphStore:
         # Yield once to keep the async contract — historically callers
         # may have relied on this being awaitable.
         await asyncio.sleep(0)
+
+
+# ── Cross-process open policy ────────────────────────────────────────────────────────────
+# ryugraph (kuzu fork) takes an EXCLUSIVE lock on the DB directory on ANY open (read_only OR
+# read-write). Cross-process, a held handle makes a concurrent open in another process raise
+# `RuntimeError: IO exception: Could not set lock on file ...`. Empirically root-caused by
+# `scripts/ryugraph_consistency_probe.py` (memory `ryugraph-consistency-probe-2026-06-07`):
+# this is why connection REUSE is precluded, and why a brief reader/writer race (a webui
+# discovery read vs a separate enrich/index/reindex process) needs handling instead of the
+# bare `except ImportError` the call sites used to carry. Readers FAIL-OPEN; writers RETRY
+# (a writer must not silently skip the graph write — that drops a doc's entities).
+
+_WRITE_LOCK_RETRIES = 10
+_WRITE_LOCK_BACKOFF_S = 0.2
+_READ_LOCK_RETRIES = 2
+_READ_LOCK_BACKOFF_S = 0.1
+
+
+def is_graph_lock_error(exc: BaseException) -> bool:
+    """True iff `exc` is ryugraph's cross-process lock-contention error — another process
+    holds the exclusive directory lock. ryugraph wraps it as `RuntimeError: IO exception:
+    Could not set lock on file ...`. Matched by MESSAGE (deliberately narrow): a bare
+    `RuntimeError` also wraps real corruption / WAL-replay / schema errors, which must NOT be
+    swallowed as 'graph busy' (the CLAUDE.md narrow-except rule)."""
+    return isinstance(exc, RuntimeError) and "could not set lock" in str(exc).lower()
+
+
+async def open_graph_for_read(
+    vault_path: Path,
+    *,
+    retries: int = _READ_LOCK_RETRIES,
+    backoff_s: float = _READ_LOCK_BACKOFF_S,
+) -> GraphStore | None:
+    """Open the graph for a READ, FAIL-OPEN to None when it's unavailable — ryugraph not
+    installed (ImportError) OR another process holds the exclusive lock (a brief writer
+    race). A short bounded retry rides out a brief window; persistent contention (e.g. a
+    full `reindex --force`, which holds the lock across the whole rebuild) returns None so
+    the discovery surface degrades gracefully (no Related panel) instead of 500ing. Real
+    ryugraph errors (corruption / schema) PROPAGATE. Callers treat None like 'no graph'."""
+    for attempt in range(retries + 1):
+        try:
+            return await GraphStore.open(vault_path)
+        except ImportError as e:
+            logger.warning("graph.open.unavailable", reason=str(e))
+            return None
+        except RuntimeError as e:
+            if not is_graph_lock_error(e):
+                raise
+            if attempt >= retries:
+                logger.warning("graph.read.locked", reason=str(e), attempts=attempt + 1)
+                return None
+            await asyncio.sleep(backoff_s)
+    return None  # unreachable (the loop always returns or raises) — narrows the return type
+
+
+async def open_graph_for_write(
+    vault_path: Path,
+    *,
+    retries: int = _WRITE_LOCK_RETRIES,
+    backoff_s: float = _WRITE_LOCK_BACKOFF_S,
+) -> GraphStore | None:
+    """Open the graph for a WRITE. Returns None when ryugraph isn't installed (the graph is
+    OPTIONAL — the pipeline degrades gracefully without it). On cross-process lock contention
+    RETRY a bounded number of times (a reader window is brief) then RE-RAISE — a writer must
+    NOT fail-open, because silently skipping the graph write would drop a document's entities
+    (an invisible, lossy partial ingest). Real ryugraph errors PROPAGATE."""
+    for attempt in range(retries + 1):
+        try:
+            return await GraphStore.open(vault_path)
+        except ImportError as e:
+            logger.warning("graph.open.unavailable", reason=str(e), fix="uv sync installs ryugraph")
+            return None
+        except RuntimeError as e:
+            if not is_graph_lock_error(e):
+                raise
+            if attempt >= retries:
+                logger.warning("graph.write.lock_exhausted", reason=str(e), attempts=attempt + 1)
+                raise
+            await asyncio.sleep(backoff_s)
+    raise AssertionError("unreachable")  # the loop always returns or raises

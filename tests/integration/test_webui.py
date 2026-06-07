@@ -1562,6 +1562,69 @@ async def test_document_view_survives_graph_unavailable(
     assert "Related documents" not in r.text  # section omitted, page still renders
 
 
+@pytest.mark.asyncio
+async def test_document_view_fails_open_on_graph_lock_contention(
+    settings: MemexSettings,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A concurrent enrich/index holding ryugraph's exclusive lock makes GraphStore.open
+    raise a lock RuntimeError — the doc view must FAIL OPEN (200, no Related section), not
+    500. (ryugraph is single-process; the discovery GET routes aren't behind the ingest
+    guard, so this race is reachable during a UI ingestion.)"""
+    ref = await ingest_markdown_passthrough("# Solo\n\nLocked graph.\n", source_stem="locked")
+
+    def _lock_boom(vault_path):
+        raise RuntimeError("IO exception: Could not set lock on file : /x/.memex/graph.ryu")
+
+    monkeypatch.setattr("memex.webui.app.GraphStore.open", staticmethod(_lock_boom))
+
+    r = client.get(f"/documents/{ref.doc_id}")
+    assert r.status_code == 200
+    assert "Related documents" not in r.text
+
+
+@pytest.mark.asyncio
+async def test_graph_view_fails_open_on_graph_lock_contention(
+    settings: MemexSettings,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The /graph view fails open to the 'unavailable' panel (200) when the graph dir is
+    locked by a concurrent writer — never a 500."""
+    ref = await ingest_markdown_passthrough("# Solo\n\nLocked.\n", source_stem="locked_graph")
+
+    async def _lock_boom(vault_path):
+        raise RuntimeError("IO exception: Could not set lock on file : /x/.memex/graph.ryu")
+
+    monkeypatch.setattr("memex.webui.app.GraphStore.open", staticmethod(_lock_boom))
+
+    r = client.get(f"/graph/{ref.doc_id}")
+    assert r.status_code == 200
+    assert "graph store unavailable" in r.text
+
+
+@pytest.mark.asyncio
+async def test_document_view_propagates_non_lock_graph_runtime_error(
+    settings: MemexSettings,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A NON-lock ryugraph RuntimeError (corruption/schema) must NOT be swallowed as
+    'graph busy' — it propagates (the narrow-except rule), surfacing as a 500."""
+    ref = await ingest_markdown_passthrough("# Solo\n\nCorrupt.\n", source_stem="corrupt")
+
+    def _corrupt(vault_path):
+        raise RuntimeError("Binder exception: Table Document does not exist")
+
+    monkeypatch.setattr("memex.webui.app.GraphStore.open", staticmethod(_corrupt))
+
+    # TestClient re-raises unhandled server exceptions (raise_server_exceptions=True), so a
+    # real (non-lock) graph error propagates rather than being masked as "no related docs".
+    with pytest.raises(RuntimeError, match="does not exist"):
+        client.get(f"/documents/{ref.doc_id}")
+
+
 # ----- /ask "Related documents" discovery panel (ADR-0011) -----
 
 

@@ -57,7 +57,7 @@ from memex.enrich.entities import (
 )
 from memex.enrich.ner_otter import extract_chunk_entities, otter_backend_enabled
 from memex.index.chunker import chunk_document
-from memex.index.graph_store import GraphStore
+from memex.index.graph_store import GraphStore, open_graph_for_write
 from memex.models.client import complete_structured
 from memex.prompts import active_version, prompt_tag_for, render_prompt
 from memex.vault.store import (
@@ -327,16 +327,13 @@ async def enrich_document(doc_id: str) -> EnrichResult:
     else:
         new_content_sha = doc.ref.content_sha256
 
-    # Write to the graph. We open + close per call so concurrent
-    # enrich runs don't share a connection.
-    try:
-        graph = await GraphStore.open(settings.vault_path)
-    except ImportError:
-        log.warning(
-            "enrich.graph_unavailable",
-            fix="install ryugraph to persist enrich output",
-        )
-        graph = None
+    # Write to the graph. We open + close per call so concurrent enrich runs don't share a
+    # connection. `open_graph_for_write` adds the cross-process lock policy: a brief reader
+    # race (a webui discovery read holding ryugraph's exclusive dir lock) is RETRIED then
+    # re-raised — a writer must not silently skip the write (that would drop this doc's
+    # entities). ryugraph-absent → None (the graph is optional; enrich output still lands in
+    # the vault). The `GraphStore` annotation keeps the class importable as the test seam.
+    graph: GraphStore | None = await open_graph_for_write(settings.vault_path)
 
     if graph is not None:
         try:

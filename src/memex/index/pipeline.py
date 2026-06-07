@@ -56,7 +56,7 @@ from memex.index.embed_prompts import (
     native_prompts_enabled,
 )
 from memex.index.fts_store import FTSStore
-from memex.index.graph_store import GraphStore
+from memex.index.graph_store import GraphStore, open_graph_for_write
 from memex.index.table_store import TableStore, extract_tables
 from memex.index.vector_store import EMBEDDING_DIM, VectorStore
 from memex.models.registry import get_registry
@@ -563,22 +563,15 @@ async def remove_document(doc_id: str) -> None:
 
 
 async def _open_graph(vault_path: Path) -> GraphStore | None:
-    """Open the graph store, returning None if RyuGraph isn't installed.
+    """Open the graph store for WRITING, returning None if RyuGraph isn't installed.
 
-    The agent's citation-graph traversal uses this, but the rest of
-    the pipeline degrades gracefully — vector + FTS retrieval still
-    works without it. The user sees a `graph.open.unavailable` warning
-    and can fix by `uv sync` if they expected the graph to be present.
+    The pipeline (index/retitle/remove) WRITES through this, but degrades gracefully —
+    vector + FTS retrieval still works without the graph. `open_graph_for_write` adds the
+    cross-process lock policy: a brief reader race (a webui discovery read holding the
+    exclusive lock) is RETRIED, then re-raised — a writer must not silently skip the graph
+    write (that would drop a document's entities). ryugraph-absent → None (graph optional).
     """
-    try:
-        return await GraphStore.open(vault_path)
-    except ImportError as e:
-        logger.warning(
-            "graph.open.unavailable",
-            reason=str(e),
-            fix="uv sync ensures ryugraph is installed",
-        )
-        return None
+    return await open_graph_for_write(vault_path)
 
 
 async def reindex_vault(*, force: bool = False) -> ReindexReport:
