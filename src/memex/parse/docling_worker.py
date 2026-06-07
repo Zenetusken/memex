@@ -74,18 +74,16 @@ except ImportError:
 # Docling-path analogue of `pymupdf_worker._heading_size_to_level`.
 
 
-def _recover_heading_levels(doc: Any) -> int:
-    """Re-derive Docling section-header levels from provenance bbox height.
+def bucketed_header_heights(doc: Any) -> list[tuple[Any, float]]:
+    """Collect each Docling `section_header` item paired with its bbox-height BUCKET.
 
-    Ranks the distinct section-header heights **among themselves** (largest
-    → level 1) and writes the level back on each item in place, so the
-    markdown serializer emits the recovered hierarchy. Ranking headers
-    against each other (not against body text) means a slide deck whose
-    titles are all one size stays flat — peers remain peers — rather than
-    mis-promoting a single title slide.
+    The bucket is `max(prov bbox heights)` rounded to the nearest 0.5 pt — absorbs float
+    jitter (11.98 vs 12.03 → same bucket) without merging genuinely distinct tiers, and the
+    `max` over provs resists a short wrapped-line continuation fragment. Items with no
+    `.level` (`TitleItem`, always `#`) or no provenance height are skipped.
 
-    Returns the number of headers re-levelled. `TitleItem` (no `.level`,
-    always `#`) and headers without provenance are left untouched.
+    The SHARED input to `_recover_heading_levels` AND the heading-histogram diagnostic
+    (`scripts/docling_heading_histogram.py`), so both measure EXACTLY the same thing.
     """
     texts: list[Any] = getattr(doc, "texts", None) or []
     headers: list[tuple[Any, float]] = []
@@ -103,11 +101,24 @@ def _recover_heading_levels(doc: Any) -> int:
                 heights.append(float(h))
         if not heights:
             continue
-        # Bucket to nearest 0.5 pt: absorbs float jitter (11.98 vs 12.03)
-        # without merging genuinely distinct heading tiers. `max` over the
-        # provs resists a short wrapped-line continuation fragment.
         headers.append((item, round(max(heights) * 2) / 2))
+    return headers
 
+
+def _recover_heading_levels(doc: Any) -> int:
+    """Re-derive Docling section-header levels from provenance bbox height.
+
+    Ranks the distinct section-header heights **among themselves** (largest
+    → level 1) and writes the level back on each item in place, so the
+    markdown serializer emits the recovered hierarchy. Ranking headers
+    against each other (not against body text) means a slide deck whose
+    titles are all one size stays flat — peers remain peers — rather than
+    mis-promoting a single title slide.
+
+    Returns the number of headers re-levelled. `TitleItem` (no `.level`,
+    always `#`) and headers without provenance are left untouched.
+    """
+    headers = bucketed_header_heights(doc)
     if not headers:
         return 0
 
