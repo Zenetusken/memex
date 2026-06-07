@@ -798,6 +798,42 @@ async def test_compose_dedups_wikilinks_preserving_order() -> None:
     assert final is not None
     # d1#Methods cited twice → deduped to one; order: d1#Methods then d2#Results.
     assert final.wikilinks == ["[[d1#Methods]]", "[[d2#Results]]"]
+    # Per-claim is ALIGNED 1:1 with claims and NOT deduped — the repeat is preserved so each
+    # claim keeps its own source mapping (the whole point vs the flat deduped Sources list).
+    assert final.claim_wikilinks == ["[[d1#Methods]]", "[[d2#Results]]", "[[d1#Methods]]"]
+    assert len(final.claim_wikilinks) == len(final.claims)
+
+
+@pytest.mark.asyncio
+async def test_compose_per_claim_wikilinks_align_to_surviving_partial_grounded() -> None:
+    """On a partial-grounded ship, `claim_wikilinks` aligns with the SURVIVING claims — the
+    dropped (ungrounded) claim contributes no entry, so the list never drifts out of sync."""
+    chunks = [
+        Chunk(chunk_id="c1", document_id="d1", document_title="R", text="a", heading_path=["Intro"]),
+        Chunk(chunk_id="c2", document_id="d2", document_title="S", text="b", heading_path=["Body"]),
+    ]
+    claims = [
+        CitedClaim(claim="kept-0", source_chunk_id="c1", confidence="high"),
+        CitedClaim(claim="dropped-1", source_chunk_id="c2", confidence="high"),
+    ]
+    update = await compose(_compose_state(chunks, claims, grounded=[0]))  # only claim 0 grounded
+    final = update.get("final")
+    assert final is not None
+    assert [c.claim for c in final.claims] == ["kept-0"]
+    assert final.claim_wikilinks == ["[[d1#Intro]]"]  # 1:1 with the surviving claim only
+
+
+@pytest.mark.asyncio
+async def test_compose_emits_no_claim_wikilinks_on_zero_grounded_refusal() -> None:
+    """A zero-grounded result refuses (answered=False) and carries `claim_wikilinks=[]` —
+    a refusal cited nothing (mirrors the flat `wikilinks=[]` refusal contract)."""
+    chunk = Chunk(chunk_id="c1", document_id="d1", document_title="R", text="x", heading_path=["H"])
+    claim = CitedClaim(claim="ungrounded", source_chunk_id="c1", confidence="low")
+    update = await compose(_compose_state([chunk], [claim], grounded=[]))  # nothing grounded
+    final = update.get("final")
+    assert final is not None
+    assert final.answered is False
+    assert final.claim_wikilinks == [] and final.wikilinks == []
 
 
 @pytest.mark.asyncio
