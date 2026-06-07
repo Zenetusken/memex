@@ -289,3 +289,37 @@ async def test_graph_unavailable_fails_open(
     assert overview.profile.suggestions == []  # no graph ⇒ no bridge, never a stray suggestion
     assert fake_fts.corpus_query == "STP"
     assert overview.passages  # still got passages
+
+
+@pytest.mark.asyncio
+async def test_entity_profile_runtime_error_fails_open_to_fts(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ryugraph RuntimeError DURING the entity_profile QUERY (a Cypher-contract / corruption
+    fault, e.g. the ORDER-BY-alias contract) must FAIL OPEN to the whole-corpus FTS fallback —
+    honoring the 'fail-open throughout' docstring — not propagate and 500 the /entity route.
+    The graph OPEN was hardened by the lock-resilience work; this pins the QUERY (audit 2026-06-07)."""
+
+    class _FakeGraph:
+        @classmethod
+        async def open(cls, vault_path: Any) -> _FakeGraph:
+            return cls()
+
+        async def entity_profile(
+            self, name: str, *, max_docs: int, max_cooccurring: int
+        ) -> EntityProfile:
+            raise RuntimeError("Binder exception: ORDER BY expression not in scope after DISTINCT")
+
+        async def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("memex.index.graph_store.GraphStore.open", staticmethod(_FakeGraph.open))
+    fake_fts = _install_fts(monkeypatch)
+
+    from memex.retrieve import entity_overview
+
+    overview = await entity_overview("STP")  # must NOT raise
+    assert overview.profile.resolved is False  # degraded to the unresolved stand-in
+    assert overview.passages_scoped is False  # whole-corpus FTS fallback
+    assert fake_fts.corpus_query == "STP"  # the corpus fallback WAS used
+    assert overview.passages  # still returns text

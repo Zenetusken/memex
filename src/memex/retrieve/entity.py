@@ -70,6 +70,15 @@ async def entity_overview(
             profile = await store.entity_profile(
                 name, max_docs=max_docs, max_cooccurring=max_cooccurring
             )
+        except RuntimeError as e:
+            # Honor the docstring's "fail-open throughout (never raises)" contract: the open
+            # is already fail-open (open_graph_for_read), but a fault DURING the query —
+            # ryugraph wraps a Cypher/schema/corruption error as RuntimeError — would propagate
+            # and 500 the `/entity` route (which deliberately doesn't catch, trusting this).
+            # Degrade to the whole-corpus FTS fallback (profile stays None). Programming bugs
+            # (AttributeError/TypeError) still propagate — only ryugraph's RuntimeError class
+            # is swallowed.
+            log.warning("entity.profile_failed", reason=str(e)[:200])
         finally:
             await store.close()
 

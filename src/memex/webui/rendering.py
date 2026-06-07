@@ -113,7 +113,7 @@ def slugify_heading(text: str) -> str:
     return text
 
 
-def render_body_html(body: str) -> Markup:
+def render_body_html(body: str, *, headings: list[_Heading] | None = None) -> Markup:
     """Render a markdown body for the webui document view.
 
     Pipeline:
@@ -143,7 +143,10 @@ def render_body_html(body: str) -> Markup:
     # deduplicated) keyed by their line-start offset in the ORIGINAL
     # body. A heading line begins exactly at its `#` (the regex anchors
     # `^#` with no leading whitespace), so the match start == line start.
-    slug_by_line_start = {h.start: h.slug for h in _walk_headings(body)}
+    # `headings` may be passed in (by `render_body_and_toc`) to share ONE
+    # walk with `extract_toc`; default None recomputes (standalone callers).
+    walked = _walk_headings(body) if headings is None else headings
+    slug_by_line_start = {h.start: h.slug for h in walked}
 
     parts: list[str] = []
     offset = 0
@@ -345,7 +348,7 @@ def _walk_headings(body: str) -> list[_Heading]:
     return out
 
 
-def extract_toc(body: str) -> list[TocEntry]:
+def extract_toc(body: str, *, headings: list[_Heading] | None = None) -> list[TocEntry]:
     """Build a flat list of TOC entries from `body`'s Markdown
     headings, in document order. Chart-block-aware + slug-deduplicated
     (shares `_walk_headings` with `render_body_html`, so every TOC
@@ -353,6 +356,18 @@ def extract_toc(body: str) -> list[TocEntry]:
 
     Returns `[]` when the body has no navigable headings. Callers
     (`document.html`) hide the TOC when the list is < 3 or > 50 entries
-    (too short to navigate / parse-noise).
+    (too short to navigate / parse-noise). `headings` may be passed in
+    (by `render_body_and_toc`) to share ONE walk with `render_body_html`.
     """
-    return [TocEntry(level=h.level, text=h.text, slug=h.slug) for h in _walk_headings(body)]
+    walked = _walk_headings(body) if headings is None else headings
+    return [TocEntry(level=h.level, text=h.text, slug=h.slug) for h in walked]
+
+
+def render_body_and_toc(body: str) -> tuple[Markup, list[TocEntry]]:
+    """Render the body HTML AND the TOC from a SINGLE heading walk — the document view needs
+    both, and calling `render_body_html` + `extract_toc` separately walks the whole body twice
+    (a full-body regex `finditer` + a `chart_extracted_spans` scan, ×2; on the 650 KB 10-K with
+    501 headings that's a noticeable redundant cost; audit 2026-06-07). Pure CPU → call it via
+    `asyncio.to_thread` from the route so it doesn't block the single-worker event loop."""
+    walked = _walk_headings(body)
+    return render_body_html(body, headings=walked), extract_toc(body, headings=walked)

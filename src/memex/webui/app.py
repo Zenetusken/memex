@@ -118,7 +118,7 @@ from memex.retrieve import (
 from memex.vault.store import (
     VaultDocument,
     hash_bytes,
-    list_documents,
+    list_document_ids,
     make_ref,
     read_document,
     read_document_title,
@@ -140,7 +140,7 @@ from memex.webui.progress import (
 )
 from memex.webui.rendering import (
     clean_heading_text,
-    extract_toc,
+    render_body_and_toc,
     render_body_html,
     render_wikilink,
     slugify_heading,
@@ -1058,21 +1058,20 @@ def create_app() -> FastAPI:
 
     @app.get("/documents", response_class=HTMLResponse)
     async def documents(request: Request) -> HTMLResponse:
-        """List every document in the vault. Each row shows the
-        frontmatter title (read cheaply via `read_document_title` —
-        frontmatter block only, not the full body) with the doc_id +
-        sha as the monospace secondary line."""
+        """List every document in the vault. Each row shows the frontmatter title
+        (read cheaply via `read_document_title` — frontmatter block only) with the
+        doc_id as the monospace secondary line. Uses `list_document_ids` (a bare
+        directory listing) + parallel title reads, NOT `list_documents` — the latter
+        reads + sha256-hashes every full body (the 10-K body is 650 KB), which this
+        listing never needs (audit 2026-06-07: was reading the whole vault twice)."""
         settings = get_settings()
-        docs: list[dict[str, str]] = []
-        async for ref in list_documents(settings.vault_path):
-            title = await _safe_doc_title(settings.vault_path, ref.doc_id)
-            docs.append(
-                {
-                    "doc_id": ref.doc_id,
-                    "title": title,
-                    "content_sha256": ref.content_sha256,
-                }
-            )
+        ids = await list_document_ids(settings.vault_path)
+        titles = await asyncio.gather(
+            *(_safe_doc_title(settings.vault_path, doc_id) for doc_id in ids)
+        )
+        docs: list[dict[str, str]] = [
+            {"doc_id": doc_id, "title": title} for doc_id, title in zip(ids, titles, strict=True)
+        ]
         # Sort by title for a stable, human-scannable listing.
         docs.sort(key=lambda d: d["title"].casefold())
         return templates.TemplateResponse(request, "documents.html", {"documents": docs})
@@ -1153,13 +1152,17 @@ def create_app() -> FastAPI:
                 }
             finally:
                 await rstore.close()
+        # ONE heading walk for both the body HTML and the TOC, off the event loop (pure CPU;
+        # the 10-K body is 650 KB — blocking the single-worker loop would stall concurrent
+        # requests). Audit 2026-06-07: was walking the whole body twice, inline.
+        rendered_body, toc = await asyncio.to_thread(render_body_and_toc, doc.body)
         return templates.TemplateResponse(
             request,
             "document.html",
             {
                 "document": doc,
-                "rendered_body": render_body_html(doc.body),
-                "toc": extract_toc(doc.body),
+                "rendered_body": rendered_body,
+                "toc": toc,
                 "has_source": has_source,
                 "source_kind": source_kind,
                 "has_preview": preview_pdf is not None and preview_pages > 0,
@@ -2494,9 +2497,14 @@ async def _scope_picker_context(
     `list_scope_sets`; we swallow it to an empty list (+ a warning) so a damaged
     file never 500s the Ask page — `memex scope-set list` surfaces it loudly.
     """
-    docs: list[dict[str, str]] = []
-    async for ref in list_documents(vault_path):
-        docs.append({"doc_id": ref.doc_id, "title": await _safe_doc_title(vault_path, ref.doc_id)})
+    # `list_document_ids` (bare dir listing) + parallel title reads — NOT `list_documents`,
+    # which reads + hashes every full body just to derive ids we already get from the stem
+    # (audit 2026-06-07: the scope-picker rendered on the Ask landing read the whole vault).
+    ids = await list_document_ids(vault_path)
+    titles = await asyncio.gather(*(_safe_doc_title(vault_path, doc_id) for doc_id in ids))
+    docs: list[dict[str, str]] = [
+        {"doc_id": doc_id, "title": title} for doc_id, title in zip(ids, titles, strict=True)
+    ]
     docs.sort(key=lambda d: d["title"].lower())
     try:
         saved = await list_scope_sets(vault_path)

@@ -26,6 +26,8 @@ from memex.agents.answering import (
     VerificationResult,
     answer,
     answer_query,
+    assess,
+    assess_relevance,
     compose,
     expand_graph,
     refuse,
@@ -1612,6 +1614,47 @@ async def test_verify_fails_closed_on_model_error(monkeypatch: pytest.MonkeyPatc
     assert isinstance(v, VerificationResult)
     assert v.grounded == []  # zero grounded → route_after_verify → refuse
     assert v.ungrounded == [0, 1]  # all claims treated as ungrounded
+
+
+@pytest.mark.asyncio
+async def test_assess_fails_closed_on_model_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An `assess` `ModelCallError` (the guided-decode free-text `reason` overflow class that
+    crashed verify) must FAIL CLOSED — `sufficient=False` → refuse — and NOT propagate out of
+    `/ask`. The verify node got this guard; assess didn't until the 2026-06-07 audit."""
+
+    async def _raise(**_kw: object) -> tuple[object, int]:
+        raise ModelCallError("guided-decode truncation in assess")
+
+    monkeypatch.setattr("memex.agents.answering.complete_structured", _raise)
+    state = AnswerState(query="q", reranked=[_vchunk("c1", "some content")])
+    out = await assess(state)
+    s = out["sufficiency"]
+    assert isinstance(s, SufficiencyAssessment)
+    assert s.sufficient is False  # fail-closed → route to refuse
+
+
+@pytest.mark.asyncio
+async def test_assess_relevance_fails_open_on_model_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An `assess_relevance` `ModelCallError` must FAIL OPEN — `responsive=True` — because the
+    claims are ALREADY grounded by verify (HARD-gate-safe); a gate failure must never manufacture
+    a refusal of an already-grounded answer. Must not propagate out of `/ask`."""
+
+    async def _raise(**_kw: object) -> tuple[object, int]:
+        raise ModelCallError("guided-decode truncation in assess_relevance")
+
+    monkeypatch.setattr("memex.agents.answering.complete_structured", _raise)
+    state = AnswerState(
+        query="q",
+        draft=DraftAnswer(
+            summary="s", claims=[CitedClaim(claim="a", source_chunk_id="c1", confidence="high")]
+        ),
+        verification=VerificationResult(grounded=[0], ungrounded=[]),
+        reranked=[_vchunk("c1", "content")],
+    )
+    out = await assess_relevance(state)
+    r = out["relevance"]
+    assert isinstance(r, RelevanceAssessment)
+    assert r.responsive is True  # fail-open → ship the already-grounded claims
 
 
 @pytest.mark.asyncio

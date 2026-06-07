@@ -119,27 +119,38 @@ async def serve_summarizer_vllm(model_id: str) -> AsyncGenerator[str]:
     for attempt in range(1, attempts + 1):
         errlog = errlog_path.open("wb")
         log.info("summarizer.vllm.start", attempt=attempt)
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=errlog,
-            stderr=errlog,
-            stdin=asyncio.subprocess.DEVNULL,
-            start_new_session=True,
-            env=env,
-        )
-        # Capture the gid NOW, while the launcher is alive (a failed startup exits it,
-        # after which os.getpgid raises and the EngineCore child would orphan).
-        gid = os.getpgid(proc.pid)
-        ready = False
-        exited = False
-        for _ in range(serve.startup_timeout_s):
-            if await _reachable(f"{base_url}/models"):
-                ready = True
-                break
-            if proc.returncode is not None:
-                exited = True
-                break
-            await asyncio.sleep(1.0)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=errlog,
+                stderr=errlog,
+                stdin=asyncio.subprocess.DEVNULL,
+                start_new_session=True,
+                env=env,
+            )
+            # Capture the gid NOW, while the launcher is alive (a failed startup exits it,
+            # after which os.getpgid raises and the EngineCore child would orphan).
+            gid = os.getpgid(proc.pid)
+            ready = False
+            exited = False
+            for _ in range(serve.startup_timeout_s):
+                if await _reachable(f"{base_url}/models"):
+                    ready = True
+                    break
+                if proc.returncode is not None:
+                    exited = True
+                    break
+                await asyncio.sleep(1.0)
+        except BaseException:
+            # A cancellation/error DURING startup must reap the detached EngineCore — the
+            # post-yield `finally` isn't reached yet and the failed-startup branch below only
+            # runs on a clean not-ready exit (else the ~7 GB process orphans). `errlog.close()`
+            # is idempotent; `_reap` only runs when the process was actually spawned.
+            errlog.close()
+            if proc is not None:
+                await _reap(proc, gid)
+                proc = None
+            raise
         errlog.close()
         if ready:
             break

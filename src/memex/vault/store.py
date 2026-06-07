@@ -21,10 +21,13 @@ from pathlib import Path
 from typing import Any
 
 import frontmatter
+import structlog
 from pydantic import BaseModel, Field
 
 from memex.core.errors import StaleDocumentError, VaultIntegrityError
 from memex.vault._file_lock import cleanup_lock_file, doc_file_lock
+
+logger = structlog.get_logger(__name__)
 
 # Per-`doc_id` write serialisation. `_atomic_write` is atomic at the
 # tempfile-rename level, but two coroutines calling `write_document` on
@@ -305,7 +308,11 @@ async def read_document_title(vault_path: Path, doc_id: str) -> str:
     block = head[: end + 4]
     try:
         meta = frontmatter.loads(block).metadata
-    except Exception:
+    except Exception as e:
+        # Deliberate fail-open (a corrupt-frontmatter doc must not 500 a listing page) — but
+        # make it OBSERVABLE rather than silent, so a broken doc is diagnosable. Mirrors
+        # read_document's authoritative fail-CLOSED (it propagates); the cheap title read fails open.
+        logger.debug("vault.title.unparseable", doc_id=doc_id, error=str(e)[:120])
         return doc_id
     title = meta.get("title")
     return title if isinstance(title, str) and title.strip() else doc_id
@@ -327,6 +334,18 @@ async def list_documents(vault_path: Path) -> AsyncIterator[DocumentRef]:
         # work while hashing every doc (per the async/sync rule in CLAUDE.md).
         stem, sha = await asyncio.to_thread(_read_and_hash, md)
         yield _ref_for(vault_path, stem, sha, None)
+
+
+async def list_document_ids(vault_path: Path) -> list[str]:
+    """Return every document's `doc_id` (the `.md` stem) WITHOUT reading or hashing any
+    body — a single directory listing. `list_documents` reads + sha256-hashes every full
+    body (the 10-K body alone is 650 KB) to populate `content_sha256` for change-detection;
+    callers that only need ids + (cheaply, separately) titles — the webui Documents list and
+    scope-picker — should use THIS to avoid reading the whole vault twice per page render."""
+    root = _docs_root(vault_path)
+    if not root.exists():
+        return []
+    return [md.stem for md in sorted(root.glob("*.md"))]
 
 
 async def create_document(

@@ -157,11 +157,18 @@ def _run_faster_whisper(
         return out
     except (ASRUnavailable, asyncio.CancelledError, KeyboardInterrupt, SystemExit):
         raise
-    except Exception as e:  # third-party ctranslate2/av errors aren't a typed family (cancellation re-raised above)
-        raise ASRTranscriptionError(
-            "faster-whisper transcription failed",
-            context={"source": str(source), "model": model_id, "error": str(e)},
-        ) from e
+    except Exception as e:  # cancellation re-raised above
+        # Only wrap a genuine THIRD-PARTY transcription fault as the domain error; let a
+        # programming bug (TypeError/AttributeError in our body) propagate RAW so it isn't
+        # disguised as "transcription failed" — mirrors keyframe_ocr / vlm_backend's module-check.
+        if type(e).__module__.split(".")[0] in {"ctranslate2", "faster_whisper", "av"} or isinstance(
+            e, OSError
+        ):
+            raise ASRTranscriptionError(
+                "faster-whisper transcription failed",
+                context={"source": str(source), "model": model_id, "error": str(e)},
+            ) from e
+        raise
 
 
 async def _transcribe_faster_whisper(

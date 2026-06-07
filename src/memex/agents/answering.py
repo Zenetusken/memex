@@ -619,6 +619,17 @@ async def retrieve(state: AnswerState) -> AnswerStateUpdate:
     """
     log = logger.bind(node="retrieve")
     log.info("start", query_len=len(state.query))
+    # EXPLICIT doc-scoping (webui doc-picker / scope-set / MCP `scope_doc_ids`) is applied by
+    # the very next node, `resolve_artifact_scope`, which REPLACES the candidate pool with a
+    # docs-scoped `hybrid_search_in_docs`. A full-corpus `hybrid_search` here would be embedded,
+    # searched, and immediately thrown away (audit 2026-06-07: wasted embed + full-corpus search
+    # + a second query-embed downstream on a path users hit deliberately). Short-circuit it; the
+    # scope node populates `candidates`. Only the EXPLICIT scope skips — artifact INFERENCE still
+    # needs the full-corpus pool as its no-confident-resolution fallback. (A scoped query's carry
+    # chunks are discarded by the scope REPLACE either way, so this is final-candidate-identical.)
+    if any(d.strip() for d in state.scope_doc_ids):
+        log.info("skip_full_corpus", reason="explicit_scope", scope_docs=len(state.scope_doc_ids))
+        return {"candidates": [], "nodes_traversed": state.nodes_traversed + 1}
     candidates = await hybrid_search(state.query, k=50)
 
     if state.prior_carry_chunk_ids:
@@ -1419,11 +1430,28 @@ async def assess(state: AnswerState) -> AnswerStateUpdate:
         query=state.query,
         chunks=state.reranked,
     )
-    sufficiency, tokens = await complete_structured(
-        prompt=prompt,
-        schema=SufficiencyAssessment,
-        prompt_tag=prompt_tag_for("assess_sufficiency"),
-    )
+    from memex.core.errors import ModelCallError
+
+    try:
+        sufficiency, tokens = await complete_structured(
+            prompt=prompt,
+            schema=SufficiencyAssessment,
+            prompt_tag=prompt_tag_for("assess_sufficiency"),
+        )
+    except ModelCallError as e:
+        # Defense-in-depth (the 2026-06-06 guided-decode caveat): the free-text `reason`
+        # can ramble past `max_tokens` → truncated JSON → ModelCallError, which would 500
+        # `/ask` (`answer_query` has no top-level catch). The verify node got this guard; the
+        # assess gates didn't. FAIL-CLOSE to insufficient → refuse — mirrors the empty-reranked
+        # short-circuit and is HARD-gate-safe (a gate failure can only refuse, never answer).
+        log.warning("assess.model_error_failclose", error=str(e)[:200])
+        return {
+            "sufficiency": SufficiencyAssessment(
+                sufficient=False,
+                reason="The sufficiency check failed; refusing rather than risk an answer.",
+            ),
+            "nodes_traversed": state.nodes_traversed + 1,
+        }
 
     return {
         "sufficiency": sufficiency,
@@ -2128,11 +2156,27 @@ async def assess_relevance(state: AnswerState) -> AnswerStateUpdate:
         summary=state.draft.summary,
         claims=grounded_claims,
     )
-    relevance, tokens = await complete_structured(
-        prompt=prompt,
-        schema=RelevanceAssessment,
-        prompt_tag=prompt_tag_for("assess_relevance"),
-    )
+    from memex.core.errors import ModelCallError
+
+    try:
+        relevance, tokens = await complete_structured(
+            prompt=prompt,
+            schema=RelevanceAssessment,
+            prompt_tag=prompt_tag_for("assess_relevance"),
+        )
+    except ModelCallError as e:
+        # Defense-in-depth (the same guided-decode free-text overflow as `assess`): a ramble
+        # in `reason` → ModelCallError → would 500 `/ask`. FAIL-OPEN to responsive — the claims
+        # are ALREADY grounded by verify, so shipping them is HARD-gate-safe, and this matches
+        # the gate's conservative default-responsive stance (it only removes clear conflations;
+        # a gate failure must never manufacture a refusal of an already-grounded answer).
+        log.warning("relevance.model_error_failopen", error=str(e)[:200])
+        return {
+            "relevance": RelevanceAssessment(
+                responsive=True, reason="relevance check failed; defaulting responsive"
+            ),
+            "nodes_traversed": state.nodes_traversed + 1,
+        }
     log.info("relevance", responsive=relevance.responsive)
     return {
         "relevance": relevance,
