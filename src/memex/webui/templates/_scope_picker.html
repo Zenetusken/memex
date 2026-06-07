@@ -80,5 +80,12 @@
             hx-post="/scope-sets/suggest"
             hx-target="#scope-picker" hx-swap="outerHTML"
             title="Suggest documents related to the ticked ones">Suggest related</button>
+    {# Clear is ALWAYS shown: the server can't see MANUAL ticks (the /ask form swaps #answer
+       only, never re-rendering this picker), so a count-gated button would hide in the exact
+       stale-scope case it fixes. The POST re-renders the picker empty → unchecks everything. #}
+    <button type="button" class="scope-set-clearbtn"
+            hx-post="/scope-sets/clear"
+            hx-target="#scope-picker" hx-swap="outerHTML"
+            title="Uncheck all documents — clears any leftover scope so the next question searches the whole vault">Clear selection</button>
   </div>
 </details>

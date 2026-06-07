@@ -853,6 +853,41 @@ async def test_scope_set_save_apply_delete_round_trip(
     assert "My Set" not in r.text
 
 
+@pytest.mark.asyncio
+async def test_scope_set_clear_unchecks_all(
+    settings: MemexSettings, client: TestClient
+) -> None:
+    """The stale-scope fix: 'Clear selection' re-renders the picker with NOTHING ticked.
+    (It can't see manual client-side ticks — the /ask form swaps only #answer — so it just
+    rebuilds the picker empty, which unchecks both manual ticks and an applied saved-set.)"""
+    a = await ingest_markdown_passthrough("# A\n\nAlpha.\n", source_stem="alpha doc")
+    b = await ingest_markdown_passthrough("# B\n\nBeta.\n", source_stem="beta doc")
+    # Apply a saved set so the picker comes back with BOTH docs checked.
+    client.post("/scope-sets", data={"set_name": "S", "scope_doc_ids": [a.doc_id, b.doc_id]})
+    r = client.post("/scope-sets/apply", data={"name": "S"})
+    assert f'value="{a.doc_id}" checked>' in r.text and f'value="{b.doc_id}" checked>' in r.text
+
+    # Clear → picker re-renders with NO checked boxes + a flash; the control persists.
+    r = client.post("/scope-sets/clear")
+    assert r.status_code == 200
+    assert " checked>" not in r.text  # nothing ticked anymore (the checkbox-checked rendering)
+    assert "Cleared the document selection" in r.text
+    assert 'hx-post="/scope-sets/clear"' in r.text  # the Clear control survives its own re-render
+
+
+@pytest.mark.asyncio
+async def test_index_doc_picker_has_clear_control(
+    settings: MemexSettings, client: TestClient
+) -> None:
+    """The 'Clear selection' control renders on the landing-page picker — ALWAYS visible
+    (the server can't know about manual ticks, so a count-gated button would hide in the
+    exact stale-scope case it fixes)."""
+    await ingest_markdown_passthrough("# A\n\nAlpha.\n", source_stem="alpha doc")
+    r = client.get("/")
+    assert r.status_code == 200
+    assert 'hx-post="/scope-sets/clear"' in r.text and "Clear selection" in r.text
+
+
 # ----- Scope-set suggestions ("docs related to your selection", ADR-0011) -----
 
 
