@@ -1166,10 +1166,14 @@ async def summarize_document(
         results = await asyncio.gather(*(_guarded(w) for w in work))
 
         # Assemble in reading order, applying the SAME cumulative token-budget + _MAX_SECTIONS
-        # cap the old loop did at each iteration's top — so the KEPT set is identical (the tally
-        # accrues in the same order). Parallel computes every work item, so on a budget-EXCEEDING
-        # doc the overflow sections are computed-then-discarded (more token spend, IDENTICAL
-        # output); the common case (budget not hit) is byte-identical AND parallel.
+        # cap the old loop did at each iteration's top — the tally accrues in the same order, so
+        # the KEPT set is identical on the realistic path (≤ _MAX_SECTIONS sections, budget not
+        # hit): byte-identical output AND parallel. A budget-EXCEEDING doc computes the overflow
+        # sections then discards them (more token spend, identical output). NARROW exception: the
+        # work-list is pre-capped to `remaining` BATCHES while the old loop capped APPENDED
+        # summaries — so a >_MAX_SECTIONS-section doc that also has a transient None-MAP among the
+        # first `remaining` batches can yield slightly FEWER sections than the old loop. Never a
+        # HARD-gate effect (only how many grounded sections a 40+-section summary shows).
         for summary, t in results:
             if tokens_total > token_budget or len(section_summaries) >= _MAX_SECTIONS:
                 log.info("summarize.budget_exhausted", done=len(section_summaries))
