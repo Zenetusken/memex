@@ -217,9 +217,8 @@ _Would-do, lower priority — no external blocker, just unscheduled._
 - **Rich document view (original PDF / clean raw md / rich render)** — Side-by-side or toggled rich document view that the audit-10 parse-stage cleanup was the precursor for.  
   *Unblock:* The cleanup precursor shipped; the rich-view UI itself is the unbuilt payoff.  
   *Sources:* audits/10:7/67-73; ROADMAP.md:380
-- **download-models.py implementation** — The model-download/cache CLI is a stub that prints 'not yet implemented' and exits 1.  
-  *Unblock:* Never implemented; a real impl resolves model ids from MemexSettings.models, downloads via huggingface-cli with hash verification, reports disk usage.  
-  *Sources:* scripts/download-models.py:18
+- **download-models.py implementation** — ✅ DONE 2026-06-07. The stub is now a real model-bootstrap CLI: `resolve_model_targets` reads the configured ids from `MemexSettings` (core: orchestrator/embedder/reranker; gated: VLM/chart-OCR/summarizer/OTTER/ASR — `--all` for the full kit; `reasoner` skipped), fetches each into the HF cache via `huggingface_hub.snapshot_download` (faster-whisper's `download_model` for the ASR CT2 repo — same cache; OTTER's transitive `config.token_encoder` repo fetched too), reports per-model size + total, exits 0/1/2 (all-ok / any-missing-or-failed / setup-error). `--check` verifies the cache offline (`local_files_only`), `--json`/`--only` for scripting. The one online bootstrap step for the air-gap workflow. Live-validated (`--check` 6/6 present on the live config; `--check --all` includes VLM); pinned by `tests/unit/test_download_models.py` (12 tests, faked hub/faster-whisper — no network).  
+  *Sources:* scripts/download-models.py; tests/unit/test_download_models.py
 - **tiktoken-counted chunk tokens** — Swap the chunker's word-count 'tokens' for real tiktoken-counted tokens (current word-count is ~1.3x lower than real transformer tokens).  
   *Unblock:* On the roadmap as a future swap; couple to the P1.6 chunker-size verdict.  
   *Sources:* core/config.py:558-560
