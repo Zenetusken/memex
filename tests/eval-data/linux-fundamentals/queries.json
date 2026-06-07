@@ -1,0 +1,286 @@
+{
+  "_description": "Hand-labelled answer-quality eval corpus for LINUX FUNDAMENTALS \u2014 a NEW DOMAIN for the P0 modern-printed-real-docs extension. 16 born-digital text PDFs from a Dawson College Intro-to-Linux course (the NDG Linux Essentials curriculum: filesystem, permissions, users/groups, text processing, archiving, open-source licensing, getting help). Distinct from the vault's networking-heavy content (CCNA CR350/ENSA/SRWE) and the existing security-standard (NIST) / financial (10-K) / scientific (GTE) / slide-deck corpora \u2014 it exercises real modern-printed academic prose in a domain the vault did not previously cover, so cross-domain retrieval + grounding get genuine signal.",
+  "_doc_id": "<multi-doc: see per-query _doc_id>",
+  "_multi_doc": true,
+  "_doc_ids": {
+    "module-2-operating-systems": "e55ac1e5-module-2-operating-systems",
+    "module-10-working-with-text": "e4ceda5d-module-10-working-with-text",
+    "module-12-computer-hardware": "9f7be128-module-12-understanding-computer-hardware",
+    "module-13-where-data-is-stored": "ae8a4b2d-module-13-where-data-is-stored",
+    "module-14-network-configuration": "33ee1fcd-module-14-network-configuration",
+    "module-15-system-and-user-security": "cf5f911d-module-15-system-and-user-security",
+    "module-16-creating-users-and-groups": "0091b9d6-module-16-creating-users-and-groups",
+    "module-17-ownership-and-permissions": "61dd6510-module-17-ownership-and-permissions",
+    "module-18-special-directories-and-files": "1d0e1ec0-module-18-special-directories-and-files",
+    "ndg-ch03-working-in-linux": "8f0e9a7b-ndg-lev2-ch03",
+    "ndg-ch04-open-source-licensing": "d78b8592-ndg-lev2-ch04-open-source-software-and-licensing",
+    "ndg-ch05-command-line-skills": "807e65ce-ndg-lev2-ch05-command-line-skills",
+    "ndg-ch06-getting-help": "5744cb83-ndg-lev2-ch06-getting-help",
+    "ndg-ch07-navigating-the-filesystem": "c7a039dc-ndg-lev2-ch07-navigating-the-filesystem",
+    "ndg-ch08-managing-files": "6c56a8c8-ndg-lev2-ch08-managing-files-and-directories",
+    "ndg-ch09-archiving-and-compression": "18122ef0-ndg-lev2-ch09-archiving-and-compression"
+  },
+  "_query_count": 18,
+  "_mix": {
+    "ans": 13,
+    "ref": 5,
+    "ref_in_corpus_unanswerable": 1,
+    "ref_out_of_corpus": 2,
+    "ref_confabulation_trap": 2
+  },
+  "_labelling_rule": "ANS queries: `_anchor_phrase` is a distinctive VERBATIM substring from the chunk holding the answer; `scripts/extend_corpus.py resolve` populates `relevant_chunk_ids` via FTS scoped to the per-query `_doc_id` (multi-doc). REF queries: `should_refuse=true`, `relevant_chunk_ids=[]`. Refusals split into in-corpus-unanswerable (topic present, specific answer absent), out-of-corpus (absent from the ENTIRE vault, incl. the CCNA networking docs), and confabulation traps (a fabricated command/protocol that sounds plausible). HARD GATES: refusal_rate_on_counterfactuals == 1.0, zero hallucinations.",
+  "_created": "2026-06-07",
+  "_purpose": "Add a real modern-printed academic corpus in a NEW domain (Linux) so the eval matrix is not networking-monoculture; gives cross-domain signal for the queued P2.x A/Bs (reranker, chunker-size) and tests that the existing corpora's HARD gates hold once a new domain shares the vault.",
+  "_source_note": "Dawson College 'Intro to Linux' (243-815) course materials = the NDG Linux Essentials v2 curriculum, ingested from a local USB key. Born-digital text PDFs (parsed chart-OCR-off \u2014 the docs are text + terminal screenshots, no data charts; 7 module docs were ingested chart-OCR-on but produced 0 chart blocks, so the parse is uniform). Local eval material only; the PDFs are NOT committed (only this query set is). Personal/sensitive folders on the key (Registrar, financial, diplomas) were deliberately excluded; the vault-duplicate CCNA modules on the key were skipped.",
+  "_status": "BASELINED 2026-06-07 \u2014 anchors authored + advisor-reviewed, gold resolved via FTS-scoped anchors, baseline recorded below.",
+  "_baseline_2026_06_07": {
+    "stack": "Qwen3.5-4B-AWQ-4bit orchestrator (vLLM) + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3 (cross_encoder); device PINNED co_residence_mode=manual, embedder+reranker=cuda (reranker order is cpu/cuda-identical, so refusal_cf is device-independent).",
+    "runs": 3,
+    "result_deterministic_across_runs": true,
+    "answered_count": 13,
+    "answerable_count": 13,
+    "refused_count": 5,
+    "counterfactual_count": 5,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "hallucinations": 0,
+    "error_count": 0,
+    "mean_citation_precision": 0.828,
+    "mean_citation_precision_answered_only": 0.762,
+    "per_query_citation_precision": {
+      "linux-fundamentals-01": 1.0, "linux-fundamentals-02": 1.0, "linux-fundamentals-03": 1.0,
+      "linux-fundamentals-04": 0.33, "linux-fundamentals-05": 1.0, "linux-fundamentals-06": 0.40,
+      "linux-fundamentals-07": 0.17, "linux-fundamentals-08": 1.0, "linux-fundamentals-09": 1.0,
+      "linux-fundamentals-10": 1.0, "linux-fundamentals-11": 0.0, "linux-fundamentals-12": 1.0,
+      "linux-fundamentals-13": 1.0
+    },
+    "notes": "HARD GATES HOLD \u2014 refusal_cf=1.0 across N=3 with ZERO hallucinations, 0 errors, 13/13 answerable answered, fully DETERMINISTIC (identical metrics all 3 runs). The load-bearing counterfactual is q18 (in-corpus-unanswerable: gzip ratio \u2014 the topic IS in-vault but the specific value is absent; verified by grep), which refused 3/3 \u2014 proof the gate isn't just lexical no-match (cf. the easy out-of-corpus q14/q17 + fabricated q15/q16). The 4 low-citation-precision ANS queries (q04=0.33/q06=0.40/q07=0.17/q11=0.0) are the documented SINGLE-CHUNK-GOLD SIBLING ARTIFACT, NOT answer failures \u2014 spot-checked LIVE: q11 answered correctly ('hard + symbolic links') citing module-18 BODY chunks (gold anchored the heading); q07 answered correctly+richly (sort + -t/-k/-n) citing module-10 siblings (1 of 6 cites is the gold chunk \u2192 0.17). Gold was NOT re-anchored to chase the metric (overfit-gold avoidance, advisor-confirmed); the defensible signal is answered-correctly 13/13, not cite_prec. Silent-failure-mode queries also spot-checked: q02 (execute=1, exact value) + q13 (/proc list: top,free,mount,unmount) both correct. SHARED-VAULT PERTURBATION CLEARED: after adding these 16 Linux docs, cr350-multidoc + ccna-multidoc still hold refusal_cf=1.0 (0 errors) \u2014 the new domain didn't break the networking corpora's gates. Corpus = 16 born-digital text PDFs, ~378 chunks total.",
+    "spot_checked_live": ["linux-fundamentals-02", "linux-fundamentals-07", "linux-fundamentals-11", "linux-fundamentals-13"]
+  },
+  "queries": [
+    {
+      "qid": "linux-fundamentals-01",
+      "question": "Which Linux command is used to change the permissions on a file or directory?",
+      "_anchor_phrase": "chmod (change mode) command is used to change permissions",
+      "_expected_answer": "The chmod (change mode) command.",
+      "_answer_type": "single_fact",
+      "_doc_id": "61dd6510-module-17-ownership-and-permissions",
+      "_note": "Module 17 \u2014 Ownership and Permissions.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "61dd6510-module-17-ownership-and-permissions#29acd948b1"
+      ]
+    },
+    {
+      "qid": "linux-fundamentals-02",
+      "question": "In the Linux octal permission system, what numeric value is assigned to the execute permission?",
+      "_anchor_phrase": "4 = Read, 2 = Write, 1 = Execute",
+      "_expected_answer": "1 (execute = 1; read = 4, write = 2).",
+      "_answer_type": "single_fact",
+      "_doc_id": "61dd6510-module-17-ownership-and-permissions",
+      "_note": "Module 17 \u2014 octal permission values.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "61dd6510-module-17-ownership-and-permissions#7cdeefcc16"
+      ]
+    },
+    {
+      "qid": "linux-fundamentals-03",
+      "question": "What character does an absolute path in Linux always begin with?",
+      "_anchor_phrase": "always begins with the / character",
+      "_expected_answer": "The / (slash) character \u2014 the root directory.",
+      "_answer_type": "single_fact",
+      "_doc_id": "c7a039dc-ndg-lev2-ch07-navigating-the-filesystem",
+      "_note": "NDG Ch07 \u2014 absolute vs relative paths.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "c7a039dc-ndg-lev2-ch07-navigating-the-filesystem#6a8fbb86f3"
+      ]
+    },
+    {
+      "qid": "linux-fundamentals-04",
+      "question": "In Linux, what does compression do to files?",
+      "_anchor_phrase": "Makes the files smaller by removing redundant information",
+      "_expected_answer": "Compression makes files smaller by removing redundant information (vs archiving, which combines multiple files into one).",
+      "_answer_type": "definitional",
+      "_doc_id": "18122ef0-ndg-lev2-ch09-archiving-and-compression",
+      "_note": "NDG Ch09 \u2014 archiving vs compression.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "18122ef0-ndg-lev2-ch09-archiving-and-compression#3df4743dc6"
+      ]
+    },
+    {
+      "qid": "linux-fundamentals-05",
+      "question": "Which two files store Linux user account and authentication information?",
+      "_anchor_phrase": "stored in the /etc/passwd and /etc/shadow files",
+      "_expected_answer": "/etc/passwd and /etc/shadow.",
+      "_answer_type": "single_fact",
+      "_doc_id": "0091b9d6-module-16-creating-users-and-groups",
+      "_note": "Module 16 \u2014 Creating Users and Groups.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "0091b9d6-module-16-creating-users-and-groups#23e0992b45"
+      ]
+    },
+    {
+      "qid": "linux-fundamentals-06",
+      "question": "What is a man page in Linux?",
+      "_anchor_phrase": "help documents called man pages",
+      "_expected_answer": "A manual page \u2014 a help document describing a command's purpose and its available options.",
+      "_answer_type": "definitional",
+      "_doc_id": "5744cb83-ndg-lev2-ch06-getting-help",
+      "_note": "NDG Ch06 \u2014 Getting Help.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "5744cb83-ndg-lev2-ch06-getting-help#fad68a522f"
+      ]
+    },
+    {
+      "qid": "linux-fundamentals-07",
+      "question": "What does the Linux sort command do?",
+      "_anchor_phrase": "rearrange the lines of files or input in either dictionary or numeric order",
+      "_expected_answer": "It rearranges the lines of files or input in dictionary or numeric order.",
+      "_answer_type": "single_fact",
+      "_doc_id": "e4ceda5d-module-10-working-with-text",
+      "_note": "Module 10 \u2014 Working with Text.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "e4ceda5d-module-10-working-with-text#17be270d9d"
+      ]
+    },
+    {
+      "qid": "linux-fundamentals-08",
+      "question": "According to the course, what is an operating system?",
+      "_anchor_phrase": "manages the hardware and software components that make up the system",
+      "_expected_answer": "Software that runs on a computing device and manages the hardware and software components of the system.",
+      "_answer_type": "definitional",
+      "_doc_id": "e55ac1e5-module-2-operating-systems",
+      "_note": "Module 2 \u2014 Operating Systems.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "e55ac1e5-module-2-operating-systems#a5a3d49613"
+      ]
+    },
+    {
+      "qid": "linux-fundamentals-09",
+      "question": "Instead of logging in as root, what does the course recommend for running commands that require root privileges?",
+      "_anchor_phrase": "recommended to use sudo or su command to execute commands as root",
+      "_expected_answer": "Use the sudo or su command to execute commands as root.",
+      "_answer_type": "single_fact",
+      "_doc_id": "cf5f911d-module-15-system-and-user-security",
+      "_note": "Module 15 \u2014 System and User Security.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "cf5f911d-module-15-system-and-user-security#e6210a6682"
+      ]
+    },
+    {
+      "qid": "linux-fundamentals-10",
+      "question": "Are file and directory names case sensitive in Linux?",
+      "_anchor_phrase": "everything in Linux is case sensitive",
+      "_expected_answer": "Yes \u2014 everything in Linux is case sensitive.",
+      "_answer_type": "single_fact",
+      "_doc_id": "6c56a8c8-ndg-lev2-ch08-managing-files-and-directories",
+      "_note": "NDG Ch08 \u2014 Managing Files and Directories.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "6c56a8c8-ndg-lev2-ch08-managing-files-and-directories#6c438741ef"
+      ]
+    },
+    {
+      "qid": "linux-fundamentals-11",
+      "question": "What are the two kinds of links in Linux?",
+      "_anchor_phrase": "Hard Links and Symbolic Links",
+      "_expected_answer": "Hard links and symbolic (soft) links.",
+      "_answer_type": "listing",
+      "_doc_id": "1d0e1ec0-module-18-special-directories-and-files",
+      "_note": "Module 18 \u2014 Special Directories and Files.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "1d0e1ec0-module-18-special-directories-and-files#dcdcd229da"
+      ]
+    },
+    {
+      "qid": "linux-fundamentals-12",
+      "question": "What does the GNU General Public License version 2 (GPLv2) require regarding source code?",
+      "_anchor_phrase": "source code must be made available to anyone and that anyone can make changes",
+      "_expected_answer": "The source code must be made available to anyone, and anyone can make changes (which must be released under the same license).",
+      "_answer_type": "definitional",
+      "_doc_id": "d78b8592-ndg-lev2-ch04-open-source-software-and-licensing",
+      "_note": "NDG Ch04 \u2014 Open Source Software and Licensing.",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "d78b8592-ndg-lev2-ch04-open-source-software-and-licensing#f4a3ac9b47"
+      ]
+    },
+    {
+      "qid": "linux-fundamentals-13",
+      "question": "Which commands does the course list as reading from the /proc directory?",
+      "_anchor_phrase": "commands that read from /proc include",
+      "_expected_answer": "top, free, mount, and unmount.",
+      "_answer_type": "listing",
+      "_doc_id": "ae8a4b2d-module-13-where-data-is-stored",
+      "_note": "Module 13 \u2014 Where Data is Stored (/proc).",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "ae8a4b2d-module-13-where-data-is-stored#51f14f187b"
+      ]
+    },
+    {
+      "qid": "linux-fundamentals-14",
+      "question": "What is the recommended daily dosage of vitamin D for adults?",
+      "_anchor_phrase": "<none \u2014 out-of-corpus refusal>",
+      "_expected_answer": "REFUSE \u2014 a medical-dosage question, absent from a Linux/networking/finance document vault.",
+      "_answer_type": "counterfactual",
+      "_ref_type": "out_of_corpus",
+      "_note": "Clearly out-of-domain; retrieval should return nothing relevant \u2192 refuse.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "linux-fundamentals-15",
+      "question": "What does the `flibberize` command do in Linux?",
+      "_anchor_phrase": "<none \u2014 fabricated command>",
+      "_expected_answer": "REFUSE \u2014 `flibberize` is not a real Linux command and appears nowhere in the vault (verified: 0 docs).",
+      "_answer_type": "counterfactual",
+      "_ref_type": "confabulation_trap",
+      "_note": "Plausible-sounding fabricated command \u2014 the confabulation trap; must not invent a description.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "linux-fundamentals-16",
+      "question": "Describe the 'Dawson Linux Security Protocol' taught in this course.",
+      "_anchor_phrase": "<none \u2014 fabricated protocol>",
+      "_expected_answer": "REFUSE \u2014 no such named protocol exists in the course material (verified: 0 docs); a plausible-sounding false premise.",
+      "_answer_type": "counterfactual",
+      "_ref_type": "confabulation_trap",
+      "_note": "False-premise / fabricated named entity \u2014 must reject the premise, not confabulate.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "linux-fundamentals-17",
+      "question": "Which country won the 2018 FIFA World Cup?",
+      "_anchor_phrase": "<none \u2014 out-of-corpus refusal>",
+      "_expected_answer": "REFUSE \u2014 a sports-trivia question absent from the entire document vault.",
+      "_answer_type": "counterfactual",
+      "_ref_type": "out_of_corpus",
+      "_note": "Clearly out-of-domain; the model knows the answer from training but must REFUSE (ungrounded).",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "linux-fundamentals-18",
+      "question": "What exact compression ratio does the archiving chapter state that gzip achieves?",
+      "_anchor_phrase": "<none \u2014 in-corpus topic, specific value absent>",
+      "_expected_answer": "REFUSE \u2014 the archiving chapter covers gzip/compression but states no specific compression ratio.",
+      "_answer_type": "counterfactual",
+      "_ref_type": "in_corpus_unanswerable",
+      "_note": "Topic present (NDG Ch09 discusses gzip) but the asked specific (a ratio) is absent \u2192 refuse, don't fabricate a number.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    }
+  ],
+  "_resolved_at": "2026-06-07T23:03:22Z"
+}
