@@ -42,6 +42,31 @@ def _disable_langfuse(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _neutralize_model_placement_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the suite HERMETIC w.r.t. ambient MODEL-PLACEMENT env vars.
+
+    `_isolate_config_toml` neuters the config file, but pydantic-settings reads
+    env vars OVER the TOML — so a device-pinned eval/dev shell (which exports
+    `MEMEX_MODELS__CO_RESIDENCE_MODE=manual` + `..._{RERANKER,EMBEDDER}_DEVICE`,
+    the standard pin for a deterministic GPU eval) silently bled into
+    `MemexSettings()` and changed behaviour. The visible victims were 3 webui
+    `/resources` tests that assume the DEFAULT `auto` mode: the page renders
+    mode-conditionally, so under an active `manual` mode the auto-placement
+    rationale ("Reranker on the GPU"), the apply-to-manual button
+    (`{"mode": "manual"}`), and the header mode chip all differ → AssertionError
+    (a 200-OK page missing the expected string, NOT a crash). Drop these vars so
+    tests see pure product defaults; a test that needs a specific mode still sets
+    it explicitly (its `monkeypatch.setenv`, applied after this autouse fixture,
+    wins). See `tests/integration/test_webui.py` resources tests."""
+    for var in (
+        "MEMEX_MODELS__CO_RESIDENCE_MODE",
+        "MEMEX_MODELS__RERANKER_DEVICE",
+        "MEMEX_MODELS__EMBEDDER_DEVICE",
+    ):
+        monkeypatch.delenv(var, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _disable_pymupdf_prefilter_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """Existing parse tests written before the PyMuPDF pre-filter assume
     Docling runs unconditionally. To keep them deterministic without
