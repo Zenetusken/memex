@@ -165,7 +165,8 @@ class _OtterHandle:
             preds: Any = self._model.predict(batch, threshold=self._threshold)
         if not (isinstance(preds, list) and preds and isinstance(preds[0], list)):
             raise OtterNERUnavailable(
-                "OTTER predict() returned an unexpected shape (expected list[list[dict]])"
+                "OTTER predict() returned an unexpected shape (expected list[list[dict]])",
+                context={"threshold": self._threshold},
             )
         input_ids: Any = batch["token_encoder_inputs"]["input_ids"][0]
         text_norm = " ".join(text.lower().split())

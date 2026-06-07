@@ -23,6 +23,7 @@ import hashlib
 import re
 
 from memex.core.config import IndexSettings, get_settings
+from memex.core.errors import ConfigurationError
 from memex.core.types import Chunk
 from memex.vault.store import VaultDocument
 
@@ -524,7 +525,10 @@ def chunk_document(
         settings = get_settings()
         target = settings.index.chunk_target_tokens
         overlap = settings.index.chunk_overlap_tokens
-    except Exception:
+    except ConfigurationError:
+        # Settings not bootstrapped (a unit test calling the chunker directly) → the module
+        # defaults. Narrowed from a bare `except Exception` so a genuine unexpected error
+        # surfaces instead of silently changing chunk boundaries (which churns chunk_ids).
         target = TARGET_TOKENS
         overlap = OVERLAP_TOKENS
 

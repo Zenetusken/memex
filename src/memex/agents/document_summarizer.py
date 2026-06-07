@@ -1027,6 +1027,10 @@ async def summarize_document(
         summarizer_model = settings.models.summarizer
         if summarizer_model and detail == "report":
             from memex.agents.summarizer_serve import serve_summarizer_vllm
+
+            # Sanctioned `agents/ → parse/` edge (the only one) — the GPU-lifecycle handoff for
+            # this optional, default-OFF summarizer-model swap-in. Lazy + dormant unless
+            # `models.summarizer` is set. Documented in src/memex/CLAUDE.md (Module boundaries).
             from memex.parse.pipeline import pause_vllm_for_gpu
 
             log.info("summarize.swap_in", model=summarizer_model)
