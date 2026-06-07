@@ -17,7 +17,8 @@ tests/eval-data/
 ├── cr350-diagrams/       ← VLM-transcribed network/security DIAGRAMS, CR350 Cours 6 (17 q; 2026-05-25; first corpus to exercise the VLM escalation path)
 ├── ccna-multidoc/        ← CCNA SRWE+ENSA .pptx deck library (8 q; 2026-05-26; Office→PDF + VLM diagrams)
 ├── summary/              ← grounded document-summary eval (memex eval-summary; 2026-05-27)
-└── handwritten/          ← HANDWRITTEN C++ note, cs-notes-1 (10 q; 2026-05-27; first corpus to exercise the scan→VLM parse route)
+├── handwritten/          ← HANDWRITTEN C++ note, cs-notes-1 (10 q; 2026-05-27; first corpus to exercise the scan→VLM parse route)
+└── linux-fundamentals/   ← Linux Essentials course, 16 real born-digital PDFs (18 q; 2026-06-07; NEW DOMAIN — the `modern-printed` real-doc category; refusal_cf=1.0 N=3)
 ```
 
 Each subdirectory holds a `queries.json` (+ optional notes). Source PDFs are
@@ -125,7 +126,7 @@ The `EvalReport` schema lives at `src/memex/eval/runner.py::EvalReport`. `mean_c
 ## What's NOT here yet
 
 - **Parsing evals** (CER / WER / structural F1) — the metrics are implemented in `src/memex/eval/scoring.py` but not wired into `runner.py`. The spec calls these out as Phase 2; they need hand-curated ground-truth markdown per document, which is a deeper labour expense.
-- **Remaining parse-plan categories** — `modern-printed` (a REAL doc; only a synthetic fixture exists) and `historical-scans`. Added 2026-05-25: `nist-zero-trust` (security standard), `scientific-gte` (scientific paper), `technical-guidelines` (technical docs — code/deep-headings), `forms-w9` (IRS Form W-9 — government form). **Added 2026-05-27: `handwritten` (cs-notes-1) — the first corpus to exercise the scan→VLM parse route, closing the handwritten slice of the P2.3 scan gap.** Each remaining one needs a doc in the vault + a `queries.json` here; the repeatable playbook is in [`scripts/extend_corpus.py`](../../scripts/extend_corpus.py) (ingest → init → author anchors → resolve → eval). `historical-scans` still exercises the printed-OCR path none of the current corpora touch.
+- **Remaining parse-plan categories** — `historical-scans` (the printed-OCR path none of the current corpora touch). **`modern-printed` (REAL docs) was CLOSED 2026-06-07 by `linux-fundamentals`** — 16 real born-digital Linux Essentials PDFs (a NEW domain, ingested from a local USB key), replacing the synthetic-fixture-only state. Added 2026-05-25: `nist-zero-trust` (security standard), `scientific-gte` (scientific paper), `technical-guidelines` (technical docs — code/deep-headings), `forms-w9` (IRS Form W-9 — government form). **Added 2026-05-27: `handwritten` (cs-notes-1) — the first corpus to exercise the scan→VLM parse route, closing the handwritten slice of the P2.3 scan gap.** Each remaining one needs a doc in the vault + a `queries.json` here; the repeatable playbook is in [`scripts/extend_corpus.py`](../../scripts/extend_corpus.py) (ingest → init → author anchors → resolve → eval). `historical-scans` still exercises the printed-OCR path none of the current corpora touch.
 - **Counterfactual diversity** — three refusal queries against a single-document corpus is the minimum. A larger corpus would let counterfactuals exercise *retrieval-distractor* refusals (questions that pull near-miss chunks the agent has to recognise as off-topic), not just *empty-retrieval* refusals.
 
 See `docs/eval-corpus-plan.md` for the full multi-category vision and CER/F1 thresholds.
