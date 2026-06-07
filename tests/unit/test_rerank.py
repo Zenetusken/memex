@@ -256,30 +256,31 @@ async def test_rerank_uses_qwen3_when_backend_flagged(
     assert out[1].rerank_score == pytest.approx(0.55, abs=0.05)
 
 
-class _OOMOnceCrossEncoder:
-    """predict() raises a CUDA-OOM RuntimeError at batch_size>1 and succeeds at
-    batch_size==1 — exercises the OOM-retry fallback."""
+class _OOMUntilCrossEncoder:
+    """predict() raises a CUDA-OOM RuntimeError while batch_size exceeds `oom_above`, and
+    succeeds at batch_size <= oom_above — exercises the GEOMETRIC OOM backoff. Records every
+    attempted batch_size so a test can assert the halving sequence + the landing batch."""
 
-    def __init__(self, scores_by_text: dict[str, float]) -> None:
+    def __init__(self, scores_by_text: dict[str, float], *, oom_above: int = 1) -> None:
         self._scores = scores_by_text
+        self._oom_above = oom_above
         self.batch_sizes: list[int] = []
 
     def predict(self, pairs: Any, *, batch_size: int, **kwargs: Any) -> list[float]:
         self.batch_sizes.append(batch_size)
-        if batch_size > 1:
+        if batch_size > self._oom_above:
             raise RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB")
         return [self._scores.get(text, 0.0) for _q, text in pairs]
 
 
 @pytest.mark.asyncio
-async def test_rerank_oom_falls_back_to_batch_1(
+async def test_rerank_oom_backoff_reaches_batch_1(
     settings_cross_encoder: MemexSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A CUDA OOM at the default batch retries ONCE at batch_size=1 (the
-    documented safe floor) instead of crashing the answer path — so the webUI
-    no longer needs a manual MEMEX_RERANK_BATCH_SIZE=1."""
+    """When nothing larger than 1 fits, the geometric backoff HALVES all the way to the
+    floor (8→4→2→1) instead of jumping straight to 1 — and still answers (no crash)."""
     monkeypatch.setenv("MEMEX_RERANK_BATCH_SIZE", "8")
-    fake = _OOMOnceCrossEncoder({"alpha": 0.9, "beta": 0.5})
+    fake = _OOMUntilCrossEncoder({"alpha": 0.9, "beta": 0.5}, oom_above=1)
 
     class _FakeRegistry:
         def use(self, name: str) -> Any:
@@ -288,10 +289,30 @@ async def test_rerank_oom_falls_back_to_batch_1(
     monkeypatch.setattr("memex.retrieve.rerank.get_registry", lambda: _FakeRegistry())
 
     out = await rerank("q", [_chunk("a", "alpha"), _chunk("b", "beta")], top_k=2)
-    # OOM at 8 → empty_cache → retry at 1 (success).
-    assert fake.batch_sizes == [8, 1]
+    assert fake.batch_sizes == [8, 4, 2, 1]  # geometric halving to the floor, not one-shot 8→1
     assert [c.chunk_id for c in out] == ["a", "b"]
     assert out[0].rerank_score == pytest.approx(0.9)
+
+
+@pytest.mark.asyncio
+async def test_rerank_oom_backoff_lands_on_largest_fitting(
+    settings_cross_encoder: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The headline win: an OOM lands on the LARGEST batch that fits (here 2), NOT batch 1 —
+    so a contended rerank recovers most throughput. Scores are batch-independent (correct)."""
+    monkeypatch.setenv("MEMEX_RERANK_BATCH_SIZE", "8")
+    fake = _OOMUntilCrossEncoder({"alpha": 0.9, "beta": 0.5}, oom_above=2)
+
+    class _FakeRegistry:
+        def use(self, name: str) -> Any:
+            return _registry_with(fake)
+
+    monkeypatch.setattr("memex.retrieve.rerank.get_registry", lambda: _FakeRegistry())
+
+    out = await rerank("q", [_chunk("a", "alpha"), _chunk("b", "beta")], top_k=2)
+    assert fake.batch_sizes == [8, 4, 2]  # 8 OOM → 4 OOM → 2 fits; never reaches 1
+    assert [c.chunk_id for c in out] == ["a", "b"]
+    assert out[0].rerank_score == pytest.approx(0.9)  # same scores regardless of the landing batch
 
 
 @pytest.mark.asyncio
