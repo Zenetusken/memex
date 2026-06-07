@@ -439,6 +439,42 @@ async def test_expand_graph_skips_when_retrieval_returned_nothing(
     assert "No relevant content" in (response.refusal_reason or "")
 
 
+@pytest.mark.asyncio
+async def test_expand_graph_fails_open_on_graph_lock_contention(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """A concurrent writer holding ryugraph's exclusive lock makes GraphStore.open raise a
+    lock RuntimeError. `expand_graph` must FAIL OPEN — skip expansion (it's additive →
+    HARD-gate-neutral) rather than propagate the lock error into the /ask graph."""
+    from memex.agents.answering import expand_graph
+    from memex.core.config import MemexSettings, set_settings
+
+    monkeypatch.setenv("MEMEX_VAULT_PATH", str(tmp_path))
+    monkeypatch.setenv("MEMEX_OBSERVABILITY__LANGFUSE_ENABLED", "false")
+    monkeypatch.setenv("MEMEX_AGENTS__GRAPH_EXPANSION_ENABLED", "true")
+    settings = MemexSettings()  # type: ignore[call-arg]
+    set_settings(settings)
+
+    def _lock_open(_vault_path: Any) -> Any:
+        raise RuntimeError("IO exception: Could not set lock on file : /x/.memex/graph.ryu")
+
+    monkeypatch.setattr("memex.index.graph_store.GraphStore.open", _lock_open)
+
+    state = AnswerState(
+        query="q",
+        candidates=[
+            Chunk(chunk_id="primary#a", document_id="primary", document_title="P", text="x")
+        ],
+        graph_expansion_enabled=True,
+    )
+    try:
+        update = await expand_graph(state)  # must NOT raise
+    finally:
+        set_settings(None)
+    # Skipped cleanly: only the node counter advances; no expansion, no propagated error.
+    assert update == {"nodes_traversed": state.nodes_traversed + 1}
+
+
 # ----- AnswerState defaults -----
 
 

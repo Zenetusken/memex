@@ -41,7 +41,7 @@ from memex.eval.runner import (
     run_parse_eval,
     run_summary_eval,
 )
-from memex.index.graph_store import GraphStore
+from memex.index.graph_store import GraphStore, is_graph_lock_error
 from memex.index.pipeline import index_document, reindex_vault, retitle_document
 from memex.ingest.pipeline import (
     IngestRequest,
@@ -1499,8 +1499,6 @@ def link_slides_create(
         # The document-level companion link (read-only discovery; fail-open if the graph is absent).
         linked = False
         try:
-            from memex.index.graph_store import GraphStore
-
             graph = await GraphStore.open(vault_path)
             try:
                 await graph.link_cites(transcript_doc, deck_doc, "companion deck", 1.0)
@@ -1510,6 +1508,11 @@ def link_slides_create(
                 await graph.close()
         except ImportError:
             pass  # ryugraph not installed → the sidecar alignment still stands; no CITES link
+        except RuntimeError as e:
+            # Graph locked by a concurrent writer → skip the best-effort companion CITES link
+            # (the alignment sidecar still stands; `linked` stays False). Real errors propagate.
+            if not is_graph_lock_error(e):
+                raise
 
         aligned = sum(1 for b in alignment.blocks if b.deck_chunk_id is not None)
         return {

@@ -37,12 +37,12 @@ async def related_documents_for_seeds(
     if not seed_ids:
         return []
     exclude = set(seed_ids)  # never suggest a doc already in the seed / citation set
-    try:
-        from memex.index.graph_store import GraphStore
+    # Fail-open: ryugraph absent OR a concurrent writer holds the exclusive lock (a brief
+    # enrich/index race) → None → no suggestions, never a crash. See open_graph_for_read.
+    from memex.index.graph_store import open_graph_for_read
 
-        store = await GraphStore.open(vault_path)
-    except ImportError as e:
-        logger.warning("related.graph_unavailable", reason=str(e))
+    store = await open_graph_for_read(vault_path)
+    if store is None:
         return []
     merged: dict[str, RelatedDocument] = {}
     try:

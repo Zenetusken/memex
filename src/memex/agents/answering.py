@@ -835,10 +835,18 @@ async def _expand_graph_impl(state: AnswerState) -> AnswerStateUpdate:
     log.info("start", source_docs=len(seen_docs))
 
     from memex.core.config import get_settings
-    from memex.index.graph_store import GraphStore
+    from memex.index.graph_store import open_graph_for_read
 
     vault_path = get_settings().vault_path
-    store = await GraphStore.open(vault_path)
+    # Fail-open: ryugraph absent OR a concurrent writer holds the exclusive dir lock → skip
+    # expansion. It's purely ADDITIVE (skipping it is the default-OFF behavior), so a locked
+    # graph degrades to plain retrieval rather than propagating a lock RuntimeError into the
+    # /ask graph — HARD-gate-neutral. (The wrapper above still catches the other expected
+    # failure modes from the rest of this node, e.g. hybrid_search_in_docs.)
+    store = await open_graph_for_read(vault_path)
+    if store is None:
+        log.info("skip", reason="graph_unavailable_or_locked")
+        return {"nodes_traversed": state.nodes_traversed + 1}
 
     neighbor_doc_ids: list[str] = []
     seen_neighbors: set[str] = set()
