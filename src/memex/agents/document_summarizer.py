@@ -388,18 +388,73 @@ async def _map_section(
     return section, tokens
 
 
-def _select_doc_key_points(
-    sections: list[SectionSummary], cap: int
-) -> list[CitedClaim]:
-    """PURE: pick the doc-level headline key-points from the per-section grounded
-    points, distributed ROUND-ROBIN across sections so the `cap` spans many
-    sections instead of being a reading-order prefix dominated by a front-matter
-    section's points (see the call site for the NIST boilerplate motivation).
+# Universal publication-metadata / structural FRONT-MATTER section labels — the DETERMINISTIC
+# encoding of the `summarize_section/v2` prompt's "do NOT extract publication metadata as
+# key_points" enumeration. The 4B does not reliably obey that instruction: live on NIST SP 800-207
+# it emitted key-points from Authority / Reports-on-CST / Acknowledgments / Trademark / Patent /
+# Table-of-Contents / List-of-Tables, and because those sections lead the reading order the flat
+# round-robin filled ALL 12 headline slots with that boilerplate (7/12 metadata, and NONE of the
+# tenets / PE-PA-PEP components / trust algorithm). Same pattern as the verify numeric / name-only
+# backstops: the prompt asks, a deterministic filter enforces. KEEPS Abstract / Executive Summary /
+# Audience / Introduction / every numbered body section as CONTENT (Abstract is a doc's own summary —
+# the single best headline source — so it is deliberately NOT front-matter here).
+_FRONT_MATTER_SECTION_TITLES: frozenset[str] = frozenset(
+    {
+        "authority",
+        "comments",
+        "comments on this publication",
+        "reports on computer systems technology",
+        "acknowledgments",
+        "acknowledgements",
+        "trademark information",
+        "trademarks",
+        "patent disclosure notice",
+        "patent disclosure",
+        "table of contents",
+        "contents",
+        "list of figures",
+        "list of tables",
+        "keywords",
+        "references",
+        "bibliography",
+        "notices",
+        "legal notice",
+        "disclaimer",
+        "copyright",
+        "how to cite this publication",
+        "foreword",
+        "preface",
+        "acronyms",
+        "glossary",
+        "abbreviations",
+    }
+)
 
-    Rank 0 takes `key_points[0]` of each section in reading order, then rank 1
-    takes `key_points[1]` of each, etc., until `cap` is reached or every point
-    is consumed. Deterministic + stable; a single-section doc is unchanged
-    (its points come out in order). HARD-gate-neutral (selection only)."""
+# A leading section number / appendix marker ("1.2 ", "Appendix A— ", "IV. ") to strip before
+# match. The number run must be FOLLOWED by a separator, so a content word starting with a
+# roman-numeral letter ("List", "Contents", "Variations") is never mis-stripped.
+_SECTION_NUMBER_PREFIX_RE = re.compile(
+    r"^(?:appendix\s+[a-z0-9]+|[0-9ivxlc]+(?:\.[0-9]+)*)[\s.):—–-]+", re.IGNORECASE
+)
+
+
+def _normalize_section_title(title: str) -> str:
+    """Lower-case + strip markdown emphasis/heading marks and a leading section number so a
+    title matches the front-matter set by its words ('## **Table of Contents**' / '1.2 Foo')."""
+    t = title.strip().strip("*# ").strip()
+    t = _SECTION_NUMBER_PREFIX_RE.sub("", t)
+    return t.strip("*#:—– .").lower().strip()
+
+
+def _is_front_matter_section(title: str) -> bool:
+    """True if `title` is a universal publication-metadata / structural front-matter label
+    (see `_FRONT_MATTER_SECTION_TITLES`). Used to DEMOTE — never drop — such sections in the
+    doc-level headline selection; their points still appear in the per-section breakdown."""
+    return _normalize_section_title(title) in _FRONT_MATTER_SECTION_TITLES
+
+
+def _round_robin_points(sections: list[SectionSummary], cap: int) -> list[CitedClaim]:
+    """Rank 0 of each section in reading order, then rank 1 of each, … until `cap` or exhausted."""
     out: list[CitedClaim] = []
     rank = 0
     progressed = True
@@ -412,6 +467,32 @@ def _select_doc_key_points(
                 if len(out) >= cap:
                     break
         rank += 1
+    return out
+
+
+def _select_doc_key_points(sections: list[SectionSummary], cap: int) -> list[CitedClaim]:
+    """PURE: pick the doc-level headline key-points from the per-section grounded points,
+    BODY-FIRST round-robin.
+
+    Distribute the `cap` round-robin across CONTENT sections (rank 0 of each in reading order,
+    then rank 1, …) so the headline spans many body sections instead of a front-matter prefix;
+    only if the cap isn't filled do publication-metadata / structural front-matter sections
+    (Authority, Acknowledgments, Trademark, Patent, Table of Contents, …) contribute as a
+    FALLBACK — so an all-front-matter doc still gets a non-empty headline. Deterministic +
+    stable; a doc with no front-matter sections is exactly the old flat round-robin (the
+    existing round-robin/second-rank/single-section tests are unchanged). HARD-gate-neutral
+    (selection only — the per-section breakdown + the abstract are untouched; every point is
+    already grounded).
+
+    Fixes the live NIST SP 800-207 failure where the 4B emitted key-points from the cover /
+    FISMA / trademark / patent / ToC sections (the v2 prompt's 'return zero' is unreliable) and
+    the old flat round-robin filled all 12 headline slots with that boilerplate before reaching
+    the tenets / components / trust algorithm. See `_is_front_matter_section`."""
+    body = [s for s in sections if not _is_front_matter_section(s.section_title)]
+    out = _round_robin_points(body, cap)
+    if len(out) < cap:
+        front = [s for s in sections if _is_front_matter_section(s.section_title)]
+        out.extend(_round_robin_points(front, cap - len(out)))
     return out
 
 
