@@ -452,6 +452,15 @@ class FinalResponse(BaseModel):
     # used_chunks (NOT LLM-emitted). Empty on a refusal (a refusal cited
     # nothing). Surfaces a navigable "Sources" list to MCP/webui/CLI.
     wikilinks: list[str] = []
+    # PER-CLAIM `[[doc_id#section]]` wikilinks, ALIGNED 1:1 with `claims`
+    # (entry i is the source for claims[i]; `""` when its cited chunk can't be
+    # resolved to a section). Derived in `compose` from each grounded claim's
+    # cited chunk — same no-hallucination contract as `wikilinks` (NOT LLM-emitted).
+    # `wikilinks` above stays the DEDUPED Sources list; this preserves the per-claim
+    # source mapping for MCP/CLI consumers (the webui already links each claim's
+    # source via `chunk_refs`). `[]` on refusal. HARD-gate-neutral (derived
+    # post-grounding; never alters answered/claims/refusal).
+    claim_wikilinks: list[str] = []
 
     # Per-section grounded digests for a document SUMMARY (ADR-0008,
     # `agents/document_summarizer.py`). Empty `[]` on the answer path (the
@@ -2248,6 +2257,20 @@ async def compose(state: AnswerState) -> AnswerStateUpdate:
             seen_wikilinks.add(wikilink)
             wikilinks.append(wikilink)
 
+    # Per-claim wikilinks, ALIGNED 1:1 with `surviving_claims` (NOT deduped — preserves the
+    # claim→source mapping for MCP/CLI). Same pure derivation from the grounded cited chunk;
+    # `""` keeps the alignment when a claim's chunk can't be resolved (e.g. a dangling id the
+    # verifier already marked ungrounded would not survive, so this is defensive).
+    chunk_by_id = {c.chunk_id: c for c in used_chunks}
+    claim_wikilinks: list[str] = []
+    for claim in surviving_claims:
+        cited = chunk_by_id.get(claim.source_chunk_id)
+        if cited is None:
+            claim_wikilinks.append("")
+        else:
+            section = cited.heading_path[-1] if cited.heading_path else None
+            claim_wikilinks.append(format_wikilink(cited.document_id, section))
+
     # Summary safety for a PARTIAL-grounded ship: the model's `summary`
     # synthesizes the WHOLE draft, so if verification dropped any claim it may
     # assert the dropped (ungrounded) content. Rebuild the summary from the
@@ -2269,6 +2292,7 @@ async def compose(state: AnswerState) -> AnswerStateUpdate:
         claims=surviving_claims,
         used_chunks=used_chunks,
         wikilinks=wikilinks,
+        claim_wikilinks=claim_wikilinks,
         artifact_scope_doc_ids=state.artifact_scope_doc_ids,
         correlation_id=state.correlation_id,
         tokens_used=state.tokens_used,
