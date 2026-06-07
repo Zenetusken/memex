@@ -6,7 +6,8 @@
 """Local-process model registry — see IMPLEMENTATION-PLAN.md §2.2.
 
 Owns the embedder, reranker, and VLM handles. The orchestrator
-(Qwen3-8B) lives in vLLM out-of-process; we never load it here
+(the configured model — `cyankiwi/Qwen3.5-4B-AWQ-4bit` by default,
+ADR-0015) lives in vLLM out-of-process; we never load it here
 (ADR-0001).
 
 All three resident models are loaded lazily on first use, gated by
@@ -286,8 +287,9 @@ class ModelRegistry:
 
         First call loads the model; subsequent calls are no-ops. The
         embedder, reranker, and VLM all live in this process; the
-        orchestrator (Qwen3-8B per ADR-0001) is *not* a registry
-        resident — it lives in the out-of-process vLLM daemon.
+        orchestrator (the configured model — Qwen3.5-4B by default,
+        ADR-0015) is *not* a registry resident — it lives in the
+        out-of-process vLLM daemon (ADR-0001).
         """
         async with self._locks[name]:
             if name not in self._models:
