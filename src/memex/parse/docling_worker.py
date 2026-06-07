@@ -114,13 +114,19 @@ def _recover_heading_levels(doc: Any) -> int:
     # Distinct buckets, largest first → levels 1..N. The serializer emits `level + 1` hashes,
     # so level 4 → `#####` (H5). CAP at 4 (audit-10 step 3b): a near-continuous height range on
     # a dense doc (the 10-K) otherwise spreads headers across 5 tiers and dumps the many
-    # small-height ones (largely mis-detected table labels) at level 5 → mass-H6. The cap is 4,
-    # not 3, because H1 is reserved for the document TITLE (the `TitleItem`, emitted as `#`), so
-    # section headers get FOUR layers below it (H2–H5); the long tail of tiny heights collapses
-    # onto the H5 cap instead of bottoming out at mass-H6. Deeper NUMBERED structure is recovered
-    # authoritatively from the section number by the engine-agnostic normalizer in
-    # `_finalize_body`, and the monotonic-nesting guard there refines the rest. The residual
-    # over-detection (short non-prose labels tagged as headers) is the deeper W11 problem.
+    # small-height ones at level 5 → mass-H6. The cap is 4, not 3, because H1 is reserved for the
+    # document TITLE (the `TitleItem`, emitted as `#`), so section headers get FOUR layers below it
+    # (H2–H5); the long tail of tiny heights collapses onto the H5 cap instead of bottoming out at
+    # mass-H6. Deeper NUMBERED structure is recovered authoritatively from the section number by the
+    # engine-agnostic normalizer in `_finalize_body`, and the monotonic-nesting guard there refines
+    # the rest.
+    # NB (diagnostic 2026-06-06, CORRECTS an earlier claim here): on a dense UNNUMBERED doc the
+    # small-height tier pinned at the H5 cap is NOT "mis-detected table labels" — it is REAL section
+    # titles (BUSINESS OVERVIEW / PROXY SUMMARY / Corporate Governance Highlights) spanning adjacent
+    # small-height buckets below 10+ rarer taller singletons, so size-primary leveling buries them.
+    # Un-flattening them is a mode-PRIMARY re-tier REDESIGN (clustering pass + multi-doc over-flatten
+    # validation so slide decks stay flat), DEFERRED for marginal value — the 10-K's DEFAULT route is
+    # the clean PyMuPDF tree. See docs/deferred-backlog.md "Docling mode-anchored re-tiering".
     tiers = sorted({bucket for _, bucket in headers}, reverse=True)
     level_of = {bucket: min(i + 1, 4) for i, bucket in enumerate(tiers)}
     for item, bucket in headers:
