@@ -29,6 +29,9 @@
   {# Live GPU-memory panel (auto-refreshing); the partial owns the HTMX self-poll. #}
   {% include "_vram_panel.html" %}
 
+  {# Model-cache panel (static — refreshed only by `memex download-models`). #}
+  {% include "_models_panel.html" %}
+
   <div class="mode-eyebrow-row">
     <span class="mode-eyebrow mode-eyebrow-block">All modes</span>
     <span id="mode-loading" class="htmx-indicator mode-loading">switching… (restarting the orchestrator can take ~40s)</span>

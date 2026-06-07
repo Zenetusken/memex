@@ -2133,6 +2133,46 @@ def test_resources_vram_fragment_auto_refreshes(
     assert 'hx-trigger="every 5s"' in client.get("/resources").text
 
 
+def test_resources_renders_model_cache_panel(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The /resources page also surfaces a STATIC model-cache panel: each configured model's
+    # HF-cache presence + size, with a download-models hint when any is missing. Delegates to
+    # `models.download.model_cache_status` (imported into app), so we fake that view-model.
+    monkeypatch.setattr(
+        "memex.webui.app.model_cache_status",
+        lambda _s: {
+            "configured": [
+                {"name": "orchestrator", "repo_id": "org/orch", "present": True, "size_gb": 4.2},
+                {"name": "embedder", "repo_id": "org/emb", "present": False, "size_gb": 0.0},
+            ],
+            "missing": 1,
+            "action_hint": "Run `memex download-models` (online) to cache the missing model(s).",
+        },
+    )
+    r = client.get("/resources")
+    assert r.status_code == 200
+    assert "Model cache" in r.text
+    assert "1/2 cached" in r.text  # configured len 2 − missing 1
+    assert "orchestrator" in r.text and "org/orch" in r.text and "4.2 GB" in r.text
+    assert "embedder" in r.text and "org/emb" in r.text
+    assert "models-badge-ok" in r.text and "models-badge-missing" in r.text  # colour + label badges
+    assert "cached" in r.text and "missing" in r.text  # the labels (WCAG 1.4.1: never colour alone)
+    assert "download-models" in r.text  # the action hint when a model is missing
+
+
+def test_resources_model_cache_panel_unavailable_fallback(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A cache-probe failure must NEVER 500 /resources — model_cache_status returns None and the
+    # panel shows a clear fallback message instead of a blank/broken figure.
+    monkeypatch.setattr("memex.webui.app.model_cache_status", lambda _s: None)
+    r = client.get("/resources")
+    assert r.status_code == 200
+    assert "Model cache" in r.text  # the panel header still renders
+    assert "Model-cache status unavailable" in r.text  # the fail-safe message
+
+
 def test_resources_table_surfaces_manual_mode(client: TestClient) -> None:
     # `manual` (the escape hatch — pin to the explicit device knobs) is now a selectable table row,
     # even though `all_modes()` excludes it (no fixed profile). Applying it skips the daemon restart.

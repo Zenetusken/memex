@@ -1,0 +1,25 @@
+{# Model-cache panel — each CONFIGURED model's presence + on-disk size in the HF cache.
+   STATIC (the cache changes only when `memex download-models` runs), so unlike the VRAM
+   panel it does NOT auto-refresh. Fail-safe: {% if models %} catches the None probe failure
+   (a status panel must never 500 the page). Badge carries colour AND label (WCAG 1.4.1). #}
+<section class="models-panel">
+  <div class="models-head">
+    <span class="mode-eyebrow">Model cache</span>
+    {% if models %}<span class="models-count">{{ models.configured | length - models.missing }}/{{ models.configured | length }} cached</span>{% endif %}
+  </div>
+  {% if models %}
+  <ul class="models-list">
+    {% for m in models.configured %}
+    <li class="models-item">
+      <span class="models-badge {% if m.present %}models-badge-ok{% else %}models-badge-missing{% endif %}">{{ "cached" if m.present else "missing" }}</span>
+      <span class="models-name">{{ m.name }}</span>
+      <code class="models-repo">{{ m.repo_id }}</code>
+      <span class="models-size tabular">{{ (m.size_gb ~ " GB") if m.present else "—" }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% if models.action_hint %}<p class="models-hint">{{ models.action_hint }}</p>{% endif %}
+  {% else %}
+  <p class="models-hint models-unavailable">Model-cache status unavailable — could not read the Hugging Face cache.</p>
+  {% endif %}
+</section>
