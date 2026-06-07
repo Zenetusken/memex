@@ -1586,6 +1586,36 @@ async def _run_verify(
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("patch_prompt")
+async def test_verify_fails_closed_on_model_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A verify `ModelCallError` (e.g. a guided-decode truncation) must FAIL CLOSED —
+    every claim → ungrounded → `route_after_verify` → refuse — and NOT propagate. The
+    2026-06-06 slide-decks crash was exactly this error escaping the verify node (out
+    of `/ask` + aborting the whole eval suite). HARD-gate-safe: never ships unverified."""
+
+    async def _raise(**_kw: object) -> tuple[object, int]:
+        raise ModelCallError("guided-decode truncation")
+
+    monkeypatch.setattr("memex.agents.answering.complete_structured", _raise)
+    state = AnswerState(
+        query="q",
+        draft=DraftAnswer(
+            summary="s",
+            claims=[
+                CitedClaim(claim="a", source_chunk_id="c1", confidence="high"),
+                CitedClaim(claim="b", source_chunk_id="c1", confidence="high"),
+            ],
+        ),
+        reranked=[_vchunk("c1", "irrelevant")],
+    )
+    out = await verify(state)
+    v = out["verification"]
+    assert isinstance(v, VerificationResult)
+    assert v.grounded == []  # zero grounded → route_after_verify → refuse
+    assert v.ungrounded == [0, 1]  # all claims treated as ungrounded
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_prompt")
 async def test_numeric_backstop_demotes_fabricated_table_aggregate(fake_llm: FakeLLM) -> None:
     """The kill target: a fabricated SUM cited to a table chunk → demoted."""
     v = await _run_verify(
