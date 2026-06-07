@@ -168,6 +168,10 @@ _REPORT_DEDUP_THRESHOLD = 0.7
 # a short abstract) — kept tight so prompt + output clears the fast window.
 _VERIFY_MAX_TOKENS = 768
 _REDUCE_MAX_TOKENS = 1024
+# Per-section MAP+GROUND run concurrently (independent across sections) under this bound,
+# against the shared orchestrator — mirrors `agents/grounding.py::ground_claims_isolated`'s
+# Semaphore(4). The REDUCE phase stays strictly sequential (its rolling `preceding` context).
+_SUMMARIZE_CONCURRENCY = 4
 # Tabular route (ADR-0008): a doc with at least this many well-formed stored tables
 # gets an extra grounded "Key figures" pass over `tables.sqlite`. Table chunks are
 # built up to `_MAX_TABLES_FOR_FIGURES` (then `_bound_section_chunks` keeps only the
@@ -1095,54 +1099,80 @@ async def summarize_document(
                 section_summaries.append(kf)
                 log.info("summarize.key_figures", figures=len(kf.key_points))
 
-        for gi, (title, sec_chunks) in enumerate(groups):
+        # Build the ordered (section, batch) work list. A section larger than one window
+        # is sub-split into batches that EACH fit the smallest (fast) window — so its
+        # content is summarized across multiple MAP calls rather than TRUNCATED to the
+        # first window (no content dropped), every call's input staying mode-independent.
+        # A section that fits is one batch (unchanged); a multi-batch section is suffixed
+        # "(part k)". Cap the list to the remaining section slots so the parallel work is
+        # bounded by _MAX_SECTIONS (matches the old per-iteration cap).
+        work: list[tuple[str, list[Chunk], int, int]] = []  # (title, batch, batch_idx, n_batches)
+        remaining = max(0, _MAX_SECTIONS - len(section_summaries))
+        for title, sec_chunks in groups:
+            batches = _split_section_into_batches(sec_chunks, _MAX_SECTION_INPUT_CHARS)
+            for bi, batch in enumerate(batches):
+                work.append((title, batch, bi, len(batches)))
+            if len(work) >= remaining:
+                break
+        work = work[:remaining]
+
+        async def _process_batch(
+            title: str, batch: list[Chunk], bi: int, n_batches: int
+        ) -> tuple[SectionSummary | None, int]:
+            mapped, t_map = await _map_section(
+                title, batch, instruction, max_output_tokens, map_guidance
+            )
+            if mapped is None:
+                return None, t_map
+            # Snap each MAP-emitted `source_chunk_id` back to a real chunk id from the batch
+            # the model was shown — the model occasionally mangles the long `docid#hash` it was
+            # told to copy verbatim. `_ground_points` grounds by claim CONTENT/index, so a
+            # content-supported point SURVIVES with its id still mangled → its source can't
+            # resolve in `used_chunks` → the webui shows the raw hash. Reuse the answering
+            # agent's deterministic repair BEFORE grounding so verify + the stored ids see the
+            # corrected id. Same problem + fix as `answer` (`repair_claim_chunk_ids`).
+            repaired_points, _ = repair_claim_chunk_ids(mapped.key_points, batch)
+            grounded, t_g = await ground_claims(
+                mapped.digest[:300], repaired_points, batch, max_tokens=_VERIFY_MAX_TOKENS
+            )
+            sec_title = mapped.section_title or title
+            if n_batches > 1:
+                sec_title = f"{sec_title} (part {bi + 1})"
+            summary = SectionSummary(
+                section_title=sec_title, digest=mapped.digest, key_points=grounded
+            )
+            return summary, t_map + t_g
+
+        # Run the per-section MAP+GROUND CONCURRENTLY (independent across sections) under a
+        # bounded semaphore, against the shared orchestrator. `asyncio.gather` preserves the
+        # input order, so assembling below in order yields the SAME section_summaries the old
+        # sequential loop produced — only the wall-clock collapses (the dominant summary cost
+        # on a many-section doc). Audit 2026-06-07.
+        sem = asyncio.Semaphore(_SUMMARIZE_CONCURRENCY)
+        done = 0
+
+        async def _guarded(args: tuple[str, list[Chunk], int, int]) -> tuple[SectionSummary | None, int]:
+            nonlocal done
+            async with sem:
+                result = await _process_batch(*args)
+            done += 1
+            _emit(f"Summarizing · section {done} of {len(work)}")
+            return result
+
+        results = await asyncio.gather(*(_guarded(w) for w in work))
+
+        # Assemble in reading order, applying the SAME cumulative token-budget + _MAX_SECTIONS
+        # cap the old loop did at each iteration's top — so the KEPT set is identical (the tally
+        # accrues in the same order). Parallel computes every work item, so on a budget-EXCEEDING
+        # doc the overflow sections are computed-then-discarded (more token spend, IDENTICAL
+        # output); the common case (budget not hit) is byte-identical AND parallel.
+        for summary, t in results:
             if tokens_total > token_budget or len(section_summaries) >= _MAX_SECTIONS:
                 log.info("summarize.budget_exhausted", done=len(section_summaries))
                 break
-            _emit(f"Summarizing · section {gi + 1} of {len(groups)}")
-            # Sub-split a section larger than one window into batches that EACH fit
-            # the smallest (fast) window — so its content is summarized across multiple
-            # MAP calls rather than TRUNCATED to the first window (no content dropped),
-            # while every call's input stays mode-independent. A section that fits is
-            # one batch (unchanged). Each batch → its own grounded SectionSummary; a
-            # multi-batch section is suffixed "(part k)".
-            batches = _split_section_into_batches(sec_chunks, _MAX_SECTION_INPUT_CHARS)
-            for bi, batch in enumerate(batches):
-                if tokens_total > token_budget or len(section_summaries) >= _MAX_SECTIONS:
-                    log.info("summarize.budget_exhausted", done=len(section_summaries))
-                    break
-                mapped, t_map = await _map_section(
-                    title, batch, instruction, max_output_tokens, map_guidance
-                )
-                tokens_total += t_map
-                if mapped is None:
-                    continue
-                # Snap each MAP-emitted `source_chunk_id` back to a real chunk id from
-                # the batch the model was shown — the 8B model occasionally mangles the
-                # long `docid#hash` it was told to copy verbatim (drops the prefix,
-                # flips a char, corrupts the doc-id; observed live: "d646b8885-…",
-                # "…gte-281#…"). `_ground_points` grounds by claim CONTENT/index, so a
-                # content-supported point SURVIVES with its id still mangled → its
-                # source can't resolve in `used_chunks` → the webui shows the raw hash.
-                # Reuse the answering agent's deterministic repair (exact → suffix →
-                # fuzzy; an unrepairable id is left to dangle); run it BEFORE grounding
-                # so verify + the final stored ids both see the corrected id. Same
-                # problem + fix as `answer` (`repair_claim_chunk_ids`).
-                repaired_points, _ = repair_claim_chunk_ids(mapped.key_points, batch)
-                grounded, t_g = await ground_claims(
-                    mapped.digest[:300], repaired_points, batch, max_tokens=_VERIFY_MAX_TOKENS
-                )
-                tokens_total += t_g
-                sec_title = mapped.section_title or title
-                if len(batches) > 1:
-                    sec_title = f"{sec_title} (part {bi + 1})"
-                section_summaries.append(
-                    SectionSummary(
-                        section_title=sec_title,
-                        digest=mapped.digest,
-                        key_points=grounded,
-                    )
-                )
+            tokens_total += t
+            if summary is not None:
+                section_summaries.append(summary)
 
         # Doc-level key-points = the grounded section points, distributed
         # ROUND-ROBIN across sections (not a reading-order prefix). A document

@@ -619,6 +619,17 @@ async def retrieve(state: AnswerState) -> AnswerStateUpdate:
     """
     log = logger.bind(node="retrieve")
     log.info("start", query_len=len(state.query))
+    # EXPLICIT doc-scoping (webui doc-picker / scope-set / MCP `scope_doc_ids`) is applied by
+    # the very next node, `resolve_artifact_scope`, which REPLACES the candidate pool with a
+    # docs-scoped `hybrid_search_in_docs`. A full-corpus `hybrid_search` here would be embedded,
+    # searched, and immediately thrown away (audit 2026-06-07: wasted embed + full-corpus search
+    # + a second query-embed downstream on a path users hit deliberately). Short-circuit it; the
+    # scope node populates `candidates`. Only the EXPLICIT scope skips — artifact INFERENCE still
+    # needs the full-corpus pool as its no-confident-resolution fallback. (A scoped query's carry
+    # chunks are discarded by the scope REPLACE either way, so this is final-candidate-identical.)
+    if any(d.strip() for d in state.scope_doc_ids):
+        log.info("skip_full_corpus", reason="explicit_scope", scope_docs=len(state.scope_doc_ids))
+        return {"candidates": [], "nodes_traversed": state.nodes_traversed + 1}
     candidates = await hybrid_search(state.query, k=50)
 
     if state.prior_carry_chunk_ids:

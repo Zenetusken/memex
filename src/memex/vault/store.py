@@ -329,6 +329,18 @@ async def list_documents(vault_path: Path) -> AsyncIterator[DocumentRef]:
         yield _ref_for(vault_path, stem, sha, None)
 
 
+async def list_document_ids(vault_path: Path) -> list[str]:
+    """Return every document's `doc_id` (the `.md` stem) WITHOUT reading or hashing any
+    body — a single directory listing. `list_documents` reads + sha256-hashes every full
+    body (the 10-K body alone is 650 KB) to populate `content_sha256` for change-detection;
+    callers that only need ids + (cheaply, separately) titles — the webui Documents list and
+    scope-picker — should use THIS to avoid reading the whole vault twice per page render."""
+    root = _docs_root(vault_path)
+    if not root.exists():
+        return []
+    return [md.stem for md in sorted(root.glob("*.md"))]
+
+
 async def create_document(
     vault_path: Path,
     *,
