@@ -361,9 +361,8 @@ _Would-do, lower priority — no external blocker, just unscheduled._
 - **Deterministic blank-image / blank-audio 'no content' meta-response filter** — Recognize a VLM/ASR honest 'this image is blank' meta-response and route it to ParseConfidenceTooLow (no thin doc).  
   *Unblock:* Current behaviour is honest + HARD-gate-safe (thin doc refuses all queries); phrase-matching a meta-response is fragile. Deferred as a vault-tidiness nicety.  
   *Sources:* ADR-0020 §Revisit; image_ingestion_shipped_2026_06_05:27; next_priorities.md
-- **Per-claim wikilinks** — Emit wikilinks per individual claim instead of a flat deduped FinalResponse.wikilinks 'Sources' list.  
-  *Unblock:* Anti-scope for v1; a possible later refinement.  
-  *Sources:* wikilink-emission.md §Anti-scope
+- **Per-claim wikilinks** — ✅ DONE 2026-06-07 (`feat/per-claim-wikilinks`, merged `d997508`). Added `FinalResponse.claim_wikilinks: list[str]` ALIGNED 1:1 with `claims` (entry i = `[[doc#section]]` for claims[i]'s cited chunk; `""` unresolvable), derived in `compose` from the grounded cited chunks — the SAME no-hallucination contract as `wikilinks` (NOT on the LLM-emitted `CitedClaim` schema). NOT deduped (preserves the per-claim mapping vs the flat deduped Sources list); `[]` on refusal; HARD-gate-neutral. **MCP/CLI payload parity** — the webui already renders per-claim sources BY TITLE via `chunk_refs` (the deliberate "sources by title, not raw `[[..]]`" design), so no webui element was added. Validated: 1791 tests + 3 compose tests + live CLI /ask (aligned 1:1) + live webui /ask e2e (answered panel renders per-claim sources cleanly, no regression, clean console).  
+  *Sources:* src/memex/agents/answering.py (`FinalResponse.claim_wikilinks` + compose derivation); tests/integration/test_answering_with_fakes.py; wikilink-emission.md §Anti-scope
 - **Auto-derived / tag-derived scope sets** — Scope sets auto-derived by tag (e.g. 'all SRWE decks') instead of explicit hand-picked selection.  
   *Unblock:* Anti-scope (a set is an explicit hand-picked selection); tag-derived scoping is a separate future idea.  
   *Sources:* scope-sets.md §Anti-scope
