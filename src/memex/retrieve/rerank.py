@@ -47,6 +47,10 @@ _QWEN3_SYSTEM_PROMPT = (
 _QWEN3_TASK = "Given a web search query, retrieve relevant passages that answer the query"
 
 
+# The geometric-backoff floor: never retry below batch 1 (the always-safe single-pair pass).
+_MIN_RERANK_BATCH = 1
+
+
 def _read_batch_size() -> int:
     # batch_size=8 is the safe default on a 12 GB rig running the bge
     # cross-encoder alongside vLLM-Qwen3-8B-AWQ. Qwen3-Reranker-0.6B
@@ -88,29 +92,35 @@ def _empty_cuda_cache() -> None:
 async def _score_with_oom_fallback(
     reranker: object, pairs: list[tuple[str, str]], batch_size: int
 ) -> Any:
-    """Score `pairs`, retrying ONCE at batch_size=1 on a CUDA OOM.
+    """Score `pairs` with a bounded GEOMETRIC batch-size backoff on a CUDA OOM.
 
     On the 12 GB reference rig the reranker OOMs when an agent (or
     `memex serve web`) is co-resident with vLLM at the default batch 8 — which
     previously forced operators to set `MEMEX_RERANK_BATCH_SIZE=1` by hand or
-    eat a crash mid-answer. Catch the OOM, free the fragmented allocations, and
-    retry at batch 1 (the documented safe floor) so the answer path degrades
-    gracefully. Re-raises if already at batch 1 (can't reduce further) or if the
-    error isn't a CUDA OOM (a real bug should surface, not be swallowed)."""
+    eat a crash mid-answer. On an OOM, free the fragmented allocations and retry
+    at HALF the batch, repeating until it fits or hits the floor — so it lands on
+    the LARGEST batch that fits (e.g. 8→4 ≈ 2× faster than the old one-shot 8→1)
+    rather than collapsing straight to 1. Re-raises once at the floor (can't
+    reduce further) or if the error isn't a CUDA OOM (a real bug must surface,
+    not be swallowed). Correctness-neutral: each attempt re-scores ALL pairs and
+    batch size is compute-grouping only — the scores/order are batch-independent."""
 
     def _run(bs: int) -> Any:
         if isinstance(reranker, Qwen3RerankerHandle):
             return _score_qwen3(reranker, pairs, bs)
         return _score_cross_encoder(reranker, pairs, bs)
 
-    try:
-        return await asyncio.to_thread(_run, batch_size)
-    except RuntimeError as e:
-        if batch_size <= 1 or not _is_cuda_oom(e):
-            raise
-        logger.warning("rerank.oom_fallback", original_batch_size=batch_size, error=str(e)[:160])
-        _empty_cuda_cache()
-        return await asyncio.to_thread(_run, 1)
+    bs = batch_size
+    while True:
+        try:
+            return await asyncio.to_thread(_run, bs)
+        except RuntimeError as e:
+            if bs <= _MIN_RERANK_BATCH or not _is_cuda_oom(e):
+                raise
+            new_bs = max(_MIN_RERANK_BATCH, bs // 2)
+            logger.warning("rerank.oom_backoff", from_batch=bs, to_batch=new_bs, error=str(e)[:160])
+            _empty_cuda_cache()
+            bs = new_bs
 
 
 async def cross_encoder_rerank(

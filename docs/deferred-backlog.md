@@ -187,8 +187,8 @@ _Would-do, lower priority — no external blocker, just unscheduled._
 - **De-hyphenation markdown cleanup** — Low-risk post-process to rejoin end-of-line-hyphenated words to improve embedding + BM25 token matching (verified no rejoin exists in parse/).  
   *Unblock:* Only worth doing IF parsed output actually shows broken hyphenated words — verify first. Tier 6.  
   *Sources:* ROADMAP.md:248
-- **Adaptive batch-size autotune (rerank/VLM OOM-backoff)** — Geometric probe + OOM-backoff to replace the hand-set MEMEX_RERANK_BATCH_SIZE=1 / per-doc VLM batch (mined from DocuFlo).  
-  *Unblock:* Tier 6 roadmap; the rerank-OOM batch-1 fallback shipped as a stopgap — this is the durable replacement.  
+- **Adaptive batch-size autotune (rerank/VLM OOM-backoff)** — ✅ DONE 2026-06-07 (rerank). `retrieve/rerank.py::_score_with_oom_fallback` now does a bounded GEOMETRIC backoff (halve on CUDA-OOM → `_empty_cuda_cache` → retry, floor `_MIN_RERANK_BATCH=1`) so it lands on the LARGEST batch that fits (8→4 ≈ 2× the old one-shot 8→1) instead of collapsing to 1; re-raises at the floor or on a non-OOM error. Correctness-neutral (batch size is compute-grouping only; both backends re-score all pairs each attempt) ⇒ no eval needed. Pinned by `tests/unit/test_rerank.py` (geometric-to-floor / lands-on-largest-fitting / non-OOM-reraise). The VLM "half" is N/A (vLLM-served now — no in-process batching); embedder OOM-backoff is a separate, unrequested path (out of scope).  
+  *Sources:* retrieve/rerank.py; tests/unit/test_rerank.py
   *Sources:* ROADMAP.md:250/401
 - **Coordinate/whitespace-gap borderless-table detection + table-quality confidence gate** — Geometry fallback to recover borderless tables Docling emits as ragged text + a confidence score to gate SQL-vs-linearization (mined from Intellidoc/DocuFlow).  
   *Unblock:* Tier 6; addresses the residual borderless-table answerability gap at the geometry level. The genuinely-borderless-REAL-doc table case is the headline Tier 6 item.  
