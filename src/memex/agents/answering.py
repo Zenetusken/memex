@@ -1419,11 +1419,28 @@ async def assess(state: AnswerState) -> AnswerStateUpdate:
         query=state.query,
         chunks=state.reranked,
     )
-    sufficiency, tokens = await complete_structured(
-        prompt=prompt,
-        schema=SufficiencyAssessment,
-        prompt_tag=prompt_tag_for("assess_sufficiency"),
-    )
+    from memex.core.errors import ModelCallError
+
+    try:
+        sufficiency, tokens = await complete_structured(
+            prompt=prompt,
+            schema=SufficiencyAssessment,
+            prompt_tag=prompt_tag_for("assess_sufficiency"),
+        )
+    except ModelCallError as e:
+        # Defense-in-depth (the 2026-06-06 guided-decode caveat): the free-text `reason`
+        # can ramble past `max_tokens` → truncated JSON → ModelCallError, which would 500
+        # `/ask` (`answer_query` has no top-level catch). The verify node got this guard; the
+        # assess gates didn't. FAIL-CLOSE to insufficient → refuse — mirrors the empty-reranked
+        # short-circuit and is HARD-gate-safe (a gate failure can only refuse, never answer).
+        log.warning("assess.model_error_failclose", error=str(e)[:200])
+        return {
+            "sufficiency": SufficiencyAssessment(
+                sufficient=False,
+                reason="The sufficiency check failed; refusing rather than risk an answer.",
+            ),
+            "nodes_traversed": state.nodes_traversed + 1,
+        }
 
     return {
         "sufficiency": sufficiency,
@@ -2128,11 +2145,27 @@ async def assess_relevance(state: AnswerState) -> AnswerStateUpdate:
         summary=state.draft.summary,
         claims=grounded_claims,
     )
-    relevance, tokens = await complete_structured(
-        prompt=prompt,
-        schema=RelevanceAssessment,
-        prompt_tag=prompt_tag_for("assess_relevance"),
-    )
+    from memex.core.errors import ModelCallError
+
+    try:
+        relevance, tokens = await complete_structured(
+            prompt=prompt,
+            schema=RelevanceAssessment,
+            prompt_tag=prompt_tag_for("assess_relevance"),
+        )
+    except ModelCallError as e:
+        # Defense-in-depth (the same guided-decode free-text overflow as `assess`): a ramble
+        # in `reason` → ModelCallError → would 500 `/ask`. FAIL-OPEN to responsive — the claims
+        # are ALREADY grounded by verify, so shipping them is HARD-gate-safe, and this matches
+        # the gate's conservative default-responsive stance (it only removes clear conflations;
+        # a gate failure must never manufacture a refusal of an already-grounded answer).
+        log.warning("relevance.model_error_failopen", error=str(e)[:200])
+        return {
+            "relevance": RelevanceAssessment(
+                responsive=True, reason="relevance check failed; defaulting responsive"
+            ),
+            "nodes_traversed": state.nodes_traversed + 1,
+        }
     log.info("relevance", responsive=relevance.responsive)
     return {
         "relevance": relevance,

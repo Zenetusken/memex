@@ -326,28 +326,41 @@ async def _serve_vlm_vllm(model_id: str) -> AsyncGenerator[str]:
         ]
         errlog = errlog_path.open("wb")
         log.info("vlm.vllm.start", attempt=attempt, util=round(util, 3))
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=errlog,
-            stderr=errlog,
-            stdin=asyncio.subprocess.DEVNULL,
-            start_new_session=True,
-            env=env,
-        )
-        # Capture the group id NOW, while the launcher is alive — a failed
-        # startup exits the launcher, after which os.getpgid(pid) raises and the
-        # EngineCore child would orphan (holding VRAM → cascade across docs).
-        gid = os.getpgid(proc.pid)
-        ready = False
-        exited = False
-        for _ in range(serve.startup_timeout_s):
-            if await _vlm_vllm_reachable(f"{base_url}/models"):
-                ready = True
-                break
-            if proc.returncode is not None:
-                exited = True
-                break
-            await asyncio.sleep(1.0)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=errlog,
+                stderr=errlog,
+                stdin=asyncio.subprocess.DEVNULL,
+                start_new_session=True,
+                env=env,
+            )
+            # Capture the group id NOW, while the launcher is alive — a failed
+            # startup exits the launcher, after which os.getpgid(pid) raises and the
+            # EngineCore child would orphan (holding VRAM → cascade across docs).
+            gid = os.getpgid(proc.pid)
+            ready = False
+            exited = False
+            for _ in range(serve.startup_timeout_s):
+                if await _vlm_vllm_reachable(f"{base_url}/models"):
+                    ready = True
+                    break
+                if proc.returncode is not None:
+                    exited = True
+                    break
+                await asyncio.sleep(1.0)
+        except BaseException:
+            # A cancellation/error DURING startup (Ctrl-C of a parse/ingest, an eval
+            # timeout) must reap the detached EngineCore: the post-yield `finally` isn't
+            # reached yet, and the failed-startup branch below only runs on a clean
+            # not-ready exit. Without this the ~7 GB EngineCore orphans (VRAM cascade) —
+            # the exact failure this serve path's reaper exists to prevent. `errlog.close()`
+            # is idempotent; `_reap_vlm_vllm` only runs when the process was actually spawned.
+            errlog.close()
+            if proc is not None:
+                await _reap_vlm_vllm(proc, gid)
+                proc = None
+            raise
         errlog.close()
         if ready:
             break
