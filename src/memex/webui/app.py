@@ -18,6 +18,7 @@ Routes:
 - `POST /scope-sets`                    — save the ticked docs as a named set
 - `POST /scope-sets/apply`              — tick a saved set's docs (re-render)
 - `POST /scope-sets/delete`             — delete a saved set (re-render)
+- `POST /scope-sets/clear`              — untick all docs / clear the scope (re-render)
 - `GET  /resources`                     — active co-residence mode + comparison
 - `GET  /documents`                     — document list
 - `GET  /documents/{id}`                — markdown render (with PDF
@@ -837,6 +838,28 @@ def create_app() -> FastAPI:
             flash = {"kind": "error", "text": str(e)}
         ctx = await _scope_picker_context(
             settings.vault_path, checked_ids=[], flash=flash, picker_open=True
+        )
+        return templates.TemplateResponse(request, "_scope_picker.html", ctx)
+
+    @app.post("/scope-sets/clear", response_class=HTMLResponse)
+    async def scope_set_clear(request: Request) -> HTMLResponse:
+        """Clear the document selection — re-render the picker with NOTHING ticked.
+
+        Fixes the stale-scope gotcha: the `/ask` form swaps only `#answer`, so MANUAL ticks
+        (or an applied saved-set) persist invisibly in the picker DOM and silently scope the
+        NEXT question → a confusing-but-correct refusal. This re-renders `_scope_picker.html`
+        with `checked_ids=[]`, unchecking everything (the server can't see the client-side
+        ticks, so it just rebuilds the picker empty). Read-only over `scope_doc_ids` →
+        `resolve_artifact_scope` (narrow-only) ⇒ HARD-gate-neutral: it can only WIDEN the next
+        search back to the whole vault, never add a chunk or relax a gate."""
+        ctx = await _scope_picker_context(
+            get_settings().vault_path,
+            checked_ids=[],
+            flash={
+                "kind": "ok",
+                "text": "Cleared the document selection — the next question searches the whole vault.",
+            },
+            picker_open=True,
         )
         return templates.TemplateResponse(request, "_scope_picker.html", ctx)
 

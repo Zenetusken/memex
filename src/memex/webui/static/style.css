@@ -861,7 +861,8 @@ html { scroll-behavior: smooth; }
 .scope-set-name:focus { border-color: rgb(37 99 235); }  /* blue-600; keyboard ring kept via :focus-visible */
 .scope-set-name::placeholder { color: rgb(161 161 170); }  /* zinc-400 (AA) */
 .scope-set-savebtn,
-.scope-set-suggestbtn {
+.scope-set-suggestbtn,
+.scope-set-clearbtn {
   padding: 0.3rem 0.7rem;
   font-size: 0.75rem;
   white-space: nowrap;
@@ -873,6 +874,8 @@ html { scroll-behavior: smooth; }
 }
 .scope-set-savebtn:hover,
 .scope-set-suggestbtn:hover { background: rgb(37 99 235); color: rgb(255 255 255); border-color: rgb(37 99 235); }
+/* Clear = a neutral RESET (not the additive blue of save/suggest, not the destructive red of delete). */
+.scope-set-clearbtn:hover { background: rgb(63 63 70); color: rgb(244 244 245); border-color: rgb(82 82 91); }
 
 /* Scope-set suggestions (ADR-0011) — graph neighbours of the current selection, tick to add.
    Quiet zinc; reuses the `.related-entity*` "why related" tags + the `.scope-picker-*` rows. */
