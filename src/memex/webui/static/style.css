@@ -1025,6 +1025,40 @@ html { scroll-behavior: smooth; }
 .vram-head { display: flex; align-items: baseline; gap: 0.6rem; }
 .vram-live { font-size: 0.625rem; color: rgb(161 161 170); }   /* zinc-400 — the "auto-refreshing" cue */
 
+/* ── Model-cache panel (download-models) — configured-model HF-cache presence + size (static) ── */
+.models-panel {
+  margin-top: 1.1rem;
+  border: 1px solid rgb(39 39 42);          /* zinc-800 */
+  border-radius: 0.375rem;
+  background: rgb(24 24 27);                /* zinc-900 */
+  padding: 0.8rem 1rem 0.9rem;
+}
+.models-head { display: flex; align-items: baseline; gap: 0.6rem; }
+.models-count { font-size: 0.625rem; color: rgb(161 161 170); }   /* zinc-400 (AA) */
+.models-list { list-style: none; margin: 0.6rem 0 0; padding: 0; display: grid; gap: 0.34rem; }
+.models-item { display: flex; align-items: center; gap: 0.55rem; font-size: 0.8rem; }
+.models-badge {
+  flex: none;
+  font-size: 0.625rem;
+  font-weight: 600;
+  padding: 0.05rem 0.4rem;
+  border-radius: 0.2rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+/* colour + label (WCAG 1.4.1); reuses the established emerald success / red error tiers */
+.models-badge-ok { background: rgb(6 78 59 / 0.45); color: rgb(110 231 183); }   /* emerald-300, as .conf-high */
+.models-badge-missing { background: rgb(69 10 10 / 0.5); color: rgb(252 165 165); }  /* red-300 on a red-950 tint */
+.models-name { color: rgb(212 212 216); }                 /* zinc-300 */
+.models-repo {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  color: rgb(161 161 170);                 /* zinc-400 (AA) */
+}
+.models-size { margin-left: auto; color: rgb(161 161 170); }  /* zinc-400 (AA) */
+.models-hint { margin: 0.75rem 0 0; font-size: 0.8125rem; color: rgb(161 161 170); line-height: 1.5; }  /* zinc-400 */
+.models-unavailable { font-style: italic; }   /* the probe-failed state — signalled without colour (AA) */
+
 /* ── Document summary (ADR-0008) — the Summarize action + per-section panel ── */
 .summary-detail {
   font-size: 0.75rem;

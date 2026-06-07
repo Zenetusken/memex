@@ -1199,6 +1199,48 @@ def register(app: typer.Typer) -> None:
         )
         err.print("[green]✓ upgrade complete[/green]")
 
+    @app.command(name="download-models")
+    def download_models(
+        check: bool = _Option(
+            False, "--check", help="Verify the cache only — no network, no download."
+        ),
+        all_models: bool = _Option(
+            False, "--all", help="Include the gated capability models (the full offline kit)."
+        ),
+        only: list[str] = _Option(  # noqa: B008  # typer Option default sentinel
+            [],
+            "--only",
+            help="Restrict to these model names (repeatable, e.g. --only embedder --only reranker).",
+        ),
+        json_out: bool = _Option(False, "--json", help="Emit the report as JSON."),
+    ) -> None:
+        """Download + cache the configured models — the one online bootstrap step for a
+        local-first / air-gapped install (ADR-0001 / VISION.md Principle 1).
+
+        Runs WITHOUT CUDA — `snapshot_download` fetches each repo into the HF cache without
+        loading it (no torch, no GPU) — so it works on a fresh, GPU-less box; it deliberately
+        skips `bootstrap()`. After this runs once ONLINE the runtime loads every model OFFLINE.
+
+        Exit codes: 0 all present/fetched · 1 missing (--check) or failed · 2 setup error.
+        """
+        from memex.core.config import MemexSettings, set_settings
+        from memex.models.download import format_report, resolve_model_targets, run_download
+
+        settings = MemexSettings()  # type: ignore[call-arg]  # downloads need no CUDA — skip bootstrap
+        set_settings(settings)
+
+        rows, code = run_download(settings, check=check, include_all=all_models, only=only)
+        if only and not rows:
+            known = [t.name for t in resolve_model_targets(settings, include_all=True)]
+            err.print(f"[red]--only matched no models[/red]; known: {known}")
+            raise typer.Exit(code=2)
+        if json_out:
+            total = sum(r.get("size", 0) for r in rows)
+            print(json.dumps({"check": check, "rows": rows, "total_bytes": total}, indent=1, default=str))
+        else:
+            print(format_report(rows, check=check))  # plain print: the report's [OK ]/[ ! ] aren't rich markup
+        raise typer.Exit(code=code)
+
     app.add_typer(daemon_app, name="daemon")
     app.add_typer(serve_app, name="serve")
     app.add_typer(mcp_app, name="mcp")

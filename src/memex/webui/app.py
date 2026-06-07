@@ -93,6 +93,7 @@ from memex.daemon import restart as daemon_restart
 from memex.daemon import status as daemon_status
 from memex.index.graph_store import GraphStore, is_graph_lock_error
 from memex.index.pipeline import retitle_document
+from memex.models.download import model_cache_status
 from memex.models.registry import ModelNotConfigured, get_registry
 
 # webui → parse boundary edge (documented, like webui → daemon / models.registry):
@@ -349,6 +350,16 @@ def _vram_panel(active: ResourceProfile) -> dict[str, object] | None:
         "floor_gb": RERANKER_GPU_FLOOR_GB,
         "rationale": rationale,
     }
+
+
+def _models_panel() -> dict[str, object] | None:
+    """The read-only model-cache view-model for the `/resources` panel: each CONFIGURED
+    model's presence + on-disk size in the HF cache (no network — `local_files_only`). The
+    static sibling of `_vram_panel` (the cache is near-constant between CLI downloads, so this
+    panel does NOT auto-refresh). Returns `None` on a probe failure so the template shows a
+    fallback instead of 500ing the page. Delegates to `models.download.model_cache_status`
+    (the same logic the `download-models` CLI verifies) over the documented webui → models edge."""
+    return model_cache_status(get_settings())
 
 
 async def _apply_mode(mode: CoResidenceMode) -> tuple[ResourceProfile, str]:
@@ -984,6 +995,7 @@ def create_app() -> FastAPI:
             "modes": [*all_modes(free_vram_gb=free), manual],
             "free_vram_gb": round(free, 1) if free is not None else None,
             "vram": _vram_panel(active),  # total/used/free + holder breakdown + auto rationale
+            "models": _models_panel(),  # configured-model HF-cache presence + size (static, no auto-refresh)
             "flash": flash,
             "flash_error": flash_error,
             "oob_chip": oob_chip,
