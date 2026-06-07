@@ -336,6 +336,8 @@ Before a full HARD-gate eval or a build, run the cheapest decisive measurement t
 
 **Record negative results in the repo, not just memory** — a ROADMAP "tried + reverted" entry, a `docs/audits/NN-*.md` measurement, and/or a do-not-re-fix docstring at the code site (e.g. `index/fts_store.py::search`) — so the next contributor doesn't re-walk the dead path. The contextual-retrieval prefix, the GTE embedder swap, and the BM25 lexical arm are all banked this way.
 
+**A change touching an EVAL-GATED path is validated by the REAL eval, not by argument.** The answer / grounding / summarizer paths are regression-gated by `memex eval` / `memex eval-summary` / the HARD-gate corpora. A change there — *even a pure refactor or a "performance-only" rework that looks identical "by construction" and passes a clean code review + green unit tests* — runs the real eval and is confirmed byte-stable against the recorded baseline before it merges. "Looks identical" is a hypothesis; the eval is the measurement (a 2026-06-07 summarizer-concurrency refactor was provably output-identical by construction yet still re-ran `eval-summary` before merge — and the reviewer had already found the "by construction" claim wasn't *unconditional*). Verify subagent / agent-tool findings the same way: re-derive a load-bearing claim against source before acting on or forwarding it. This is the **"Measure, don't assert"** cross-cutting rule in `CLAUDE.md` — its checked-in engineering half.
+
 ---
 
 ## Part IV — Storage and retrieval
