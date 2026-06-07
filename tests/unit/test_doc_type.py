@@ -16,6 +16,7 @@ from memex.agents.document_summarizer import (
     _classify_route,
     _dedup_sentences,
     _group_sections,
+    _is_front_matter_section,
     _pack_sections,
     _rank_tables,
     _render_table,
@@ -289,6 +290,70 @@ def test_select_doc_key_points_single_section_keeps_order() -> None:
     """A single-section doc is unchanged — points come out in their original order."""
     sections = [_ss("Only", ["p1", "p2", "p3"])]
     assert [c.claim for c in _select_doc_key_points(sections, cap=12)] == ["p1", "p2", "p3"]
+
+
+# ── front-matter demotion in the doc-level headline (NIST SP 800-207 metadata-leading fix) ──
+
+
+def test_is_front_matter_section_matches_metadata_labels() -> None:
+    """Universal publication-metadata / structural front-matter labels classify True;
+    the doc's own SUBSTANCE sections (incl. Abstract) classify False. Number/emphasis-robust."""
+    for t in (
+        "Authority",
+        "## **Table of Contents**",
+        "List of Tables",
+        "Patent Disclosure Notice",
+        "Acknowledgments",
+        "Trademark Information",
+        "Reports on Computer Systems Technology",
+        "Keywords",
+        "References",
+        "Appendix A—Acronyms",
+    ):
+        assert _is_front_matter_section(t), t
+    for t in (
+        "Abstract",  # a doc's own summary — the BEST headline source, never front-matter
+        "Audience",
+        "1 Introduction",
+        "2.1 Tenets of Zero Trust",
+        "3 Logical Components of Zero Trust Architecture",
+        "Executive Summary",
+    ):
+        assert not _is_front_matter_section(t), t
+
+
+def test_select_doc_key_points_demotes_front_matter_to_body_first() -> None:
+    """The NIST failure: front-matter sections lead the reading order AND emit points, so the
+    old flat round-robin filled the whole cap with boilerplate. Body-first selection fills the
+    cap from CONTENT sections; front-matter contributes nothing while body can cover the cap."""
+    sections = [
+        _ss("Authority", ["fisma1", "fisma2"]),  # front-matter, first in order
+        _ss("Table of Contents", ["toc1"]),  # front-matter
+        _ss("Abstract", ["zt-paradigm"]),  # CONTENT (kept)
+        _ss("2.1 Tenets of Zero Trust", ["tenet1", "tenet2"]),  # CONTENT
+        _ss("3 Logical Components", ["policy-engine"]),  # CONTENT
+    ]
+    picked = [c.claim for c in _select_doc_key_points(sections, cap=3)]
+    assert picked == ["zt-paradigm", "tenet1", "policy-engine"]  # body only; no fisma/toc
+    assert "fisma1" not in picked and "toc1" not in picked
+
+
+def test_select_doc_key_points_front_matter_fallback_when_body_short() -> None:
+    """Front-matter is DEMOTED, not dropped: when body can't fill the cap it backfills, so the
+    headline is never starved (and an all-front-matter doc still gets a non-empty headline)."""
+    sections = [
+        _ss("Authority", ["fisma1", "fisma2"]),
+        _ss("Abstract", ["zt-paradigm"]),  # only one body point
+    ]
+    picked = [c.claim for c in _select_doc_key_points(sections, cap=12)]
+    assert picked == ["zt-paradigm", "fisma1", "fisma2"]  # body first, then front-matter fallback
+
+
+def test_select_doc_key_points_all_front_matter_still_nonempty() -> None:
+    """A pathological all-front-matter doc must not yield an EMPTY headline (would refuse)."""
+    sections = [_ss("Authority", ["a1"]), _ss("Trademark Information", ["t1"])]
+    picked = [c.claim for c in _select_doc_key_points(sections, cap=12)]
+    assert picked == ["a1", "t1"]
 
 
 # ── cross-paragraph dedup gate (ADR-0010) — drop sentences that repeat earlier content ──
