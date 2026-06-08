@@ -13,6 +13,7 @@ table). This set is the routing signal; it is deliberately SOURCE code, not conf
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Final
 
 CODE_SUFFIXES: Final[frozenset[str]] = frozenset(
@@ -100,3 +101,22 @@ def language_for_suffix(suffix: str) -> str:
     reads sensibly (e.g. a hypothetical ``.zig`` → ``zig``). Pure — no I/O.
     """
     return LANGUAGE_FOR_SUFFIX.get(suffix.lower(), suffix.lower().lstrip("."))
+
+
+def code_language_for_doc(asset_dir: Path) -> str | None:
+    """Detect a code document by its ingested `source.<ext>` file and return its language name.
+
+    The shared code-detection gate for the index + enrich pipelines (Phase 2 symbol-aware
+    chunking). Globs ``asset_dir/source.*`` (the suffix-preserved copy Phase 1's `_copy_source`
+    writes for a `code` kind — markdown-passthrough docs have NO `source.*`, PDFs carry `.pdf`)
+    and returns `language_for_suffix(suffix)` when the suffix ∈ `CODE_SUFFIXES`, else `None`.
+    Lives in `core/` so BOTH `index/` and `enrich/` can import it (webui's `_find_source` /
+    `_is_code_source` are private + in `webui/`, which `index/` cannot import). Touches the
+    filesystem (a single glob) but no models — cheap to call per index/enrich run.
+    """
+    if not asset_dir.is_dir():
+        return None
+    for candidate in sorted(asset_dir.glob("source.*")):
+        if candidate.suffix.lower() in CODE_SUFFIXES:
+            return language_for_suffix(candidate.suffix)
+    return None

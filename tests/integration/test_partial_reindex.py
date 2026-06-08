@@ -882,3 +882,80 @@ async def test_reindex_force_drops_derived_sidecars_keeps_user_data(
     for name in derived:
         assert not (memex / name).exists(), f"{name} (derived) should be dropped on force-reindex"
     assert (memex / "scope_sets.json").exists()  # user data survives a full rebuild
+
+
+# ----- Phase-2 chunking-recipe version (symbol-aware code chunking) -----
+
+
+async def _seed_code_doc(vault_path: Path, body: str, *, stem: str, suffix: str) -> str:
+    """Seed a code doc the way Phase-1 lands one: verbatim `.md` body + a suffix-preserved
+    `source.<ext>` in the asset dir (the signal `code_language_for_doc` keys off)."""
+    ref = await ingest_markdown_passthrough(body, source_stem=stem)
+    asset = vault_path / "documents" / ref.doc_id
+    asset.mkdir(parents=True, exist_ok=True)
+    (asset / f"source{suffix}").write_text(body, encoding="utf-8")
+    return ref.doc_id
+
+
+_RUST_DOC = "pub struct Foo;\n\nimpl Foo {\n    pub fn bar(&self) -> u32 { 1 }\n}\n"
+
+
+@pytest.mark.asyncio
+async def test_rust_doc_records_code_chunking_recipe(
+    settings: MemexSettings, fake_stores: dict[str, Any]
+) -> None:
+    """Indexing a Rust code doc records `chunking_recipe_version == "code-rust-v1"` in the
+    manifest (the Rust symbol grammar ran)."""
+    from memex.index.pipeline import index_document
+
+    doc_id = await _seed_code_doc(settings.vault_path, _RUST_DOC, stem="foo", suffix=".rs")
+    await index_document(doc_id)
+
+    manifest = await read_manifest(settings.vault_path, doc_id)
+    assert manifest is not None and manifest.index is not None
+    assert manifest.index.chunking_recipe_version == "code-rust-v1"
+
+
+@pytest.mark.asyncio
+async def test_prose_doc_records_v0_chunking_recipe(
+    settings: MemexSettings, fake_stores: dict[str, Any]
+) -> None:
+    """A prose doc (no `source.*`) records the back-compat `"v0"` chunking recipe — the gate
+    didn't fire, so the prose path is unchanged."""
+    from memex.index.pipeline import index_document
+
+    doc_id = await _seed_doc("# Prose\n\nA paragraph.\n", source_stem="prose")
+    await index_document(doc_id)
+
+    manifest = await read_manifest(settings.vault_path, doc_id)
+    assert manifest is not None and manifest.index is not None
+    assert manifest.index.chunking_recipe_version == "v0"
+
+
+@pytest.mark.asyncio
+async def test_chunking_recipe_mismatch_forces_full_rechunk(
+    settings: MemexSettings, fake_stores: dict[str, Any]
+) -> None:
+    """A stored chunking recipe that differs from the current one force-rechunks the doc
+    (mirrors the embedding-recipe escape hatch) — so a future grammar/label change re-derives
+    chunk boundaries for exactly the docs that used the old grammar."""
+    from memex.core.manifest import update_manifest
+    from memex.index.pipeline import index_document
+
+    doc_id = await _seed_code_doc(settings.vault_path, _RUST_DOC, stem="foo2", suffix=".rs")
+    await index_document(doc_id)
+    fake_stores["embed_calls"].clear()
+
+    # Simulate a prior index under an OLDER chunking grammar by rewriting the stored recipe.
+    manifest = await read_manifest(settings.vault_path, doc_id)
+    assert manifest is not None and manifest.index is not None
+    stale_index = manifest.index.model_copy(update={"chunking_recipe_version": "code-rust-v0"})
+    await update_manifest(settings.vault_path, doc_id, index=stale_index)
+
+    v2 = await index_document(doc_id)  # NOT passing force=True
+    assert v2.partial is False  # the mismatch forced a full re-chunk
+    assert v2.chunks_added == v2.chunk_count
+    # And the current recipe is recorded back.
+    refreshed = await read_manifest(settings.vault_path, doc_id)
+    assert refreshed is not None and refreshed.index is not None
+    assert refreshed.index.chunking_recipe_version == "code-rust-v1"
