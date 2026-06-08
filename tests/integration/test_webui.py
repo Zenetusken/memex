@@ -28,8 +28,9 @@ from memex.agents.answering import (
 from memex.core.config import MemexSettings, set_settings
 from memex.core.types import Chunk
 from memex.daemon.supervisor import DaemonStatus
-from memex.ingest.pipeline import ingest_markdown_passthrough
+from memex.ingest.pipeline import IngestRequest, ingest_file, ingest_markdown_passthrough
 from memex.parse.pdf_render import PDFPreviewError
+from memex.parse.pipeline import parse_document
 from memex.webui.app import create_app
 from memex.webui.ingest_driver import IngestOutcome
 
@@ -1136,6 +1137,56 @@ def test_document_view_renders_solo_when_no_source(
     assert r.status_code == 200
     assert "pane-solo" in r.text
     assert "pane-split" not in r.text
+
+
+@pytest.mark.asyncio
+async def test_document_view_renders_code_verbatim_without_markdown_transforms(
+    settings: MemexSettings, client: TestClient, tmp_path: Path
+) -> None:
+    """A source-code doc (Phase-1 verbatim ingest → suffix-preserved `source.py`) renders AS
+    CODE: the body is the RAW source with the markdown heading-anchor + `[[wikilink]]`
+    transforms SUPPRESSED, the pane header reads "source · python" (language, not the bare
+    "py" extension), and there's no false-heading TOC sidebar.
+
+    Exercises the REAL detection chain (`_copy_source` → `source.py` → `_find_source` →
+    `_is_code_source`) by ingesting a real `.py` through the Phase-1 ingest+parse passthrough
+    (CPU only, no GPU) — NOT a faked `source.py`, which would pass even if `_copy_source`
+    skipped the code kind. The `# load the config` comment (looks like an H1) and the literal
+    `[[42]]` are the two transform triggers that MUST stay inert for code.
+    """
+    code = "# load the config\nimport os\n\n\ndef main() -> int:\n    return [[42]]\n"
+    src = tmp_path / "app.py"
+    src.write_text(code, encoding="utf-8")
+
+    res = await ingest_file(IngestRequest(source_path=src))
+    assert res.accepted and res.detected_kind == "code"
+    assert res.doc_id is not None
+    parsed = await parse_document(res.doc_id)
+    assert parsed.engine == "passthrough"  # verbatim, not the Docling fallback
+
+    r = client.get(f"/documents/{res.doc_id}")
+    assert r.status_code == 200
+    # Pane header labelled by LANGUAGE.
+    assert "source · python" in r.text
+    # The `# load the config` comment renders LITERALLY in the <pre> …
+    assert "# load the config" in r.text
+    # … but the markdown transforms are SUPPRESSED — no injected heading anchor for it, and
+    # the literal `[[42]]` is NOT rewritten into a wikilink. These two absences ARE the fix
+    # (a prose render of the same body would carry both classes).
+    assert 'class="anchor-target"' not in r.text
+    assert 'class="wikilink"' not in r.text
+    # Code has no PDF preview → single pane; toc=[] → no false-heading sidebar.
+    assert "pane-solo" in r.text
+    assert "pane-split" not in r.text
+
+    # The edit-flow view partial (`cancel` swaps back to it) is ALSO code-aware — a
+    # cancelled edit must re-render code AS code, not snap back to false-heading markdown.
+    # (`document_review`'s save partial shares the identical helper, so this pins the path.)
+    body = client.get(f"/documents/{res.doc_id}/body")
+    assert body.status_code == 200
+    assert "# load the config" in body.text
+    assert 'class="anchor-target"' not in body.text
+    assert 'class="wikilink"' not in body.text
 
 
 @pytest.mark.asyncio
