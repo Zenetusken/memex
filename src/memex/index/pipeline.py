@@ -42,6 +42,7 @@ from memex.core.manifest import (
     read_manifest,
     update_manifest,
 )
+from memex.core.source_types import code_language_for_doc
 from memex.core.table_linearize import linearize_gfm_tables
 from memex.core.text import (
     insert_page_markers_at,
@@ -57,6 +58,7 @@ from memex.index.embed_prompts import (
 )
 from memex.index.fts_store import FTSStore
 from memex.index.graph_store import GraphStore, open_graph_for_write
+from memex.index.rust_symbols import inject_symbol_headings, split_rust_symbols
 from memex.index.table_store import TableStore, extract_tables
 from memex.index.vector_store import EMBEDDING_DIM, VectorStore
 from memex.models.registry import get_registry
@@ -215,6 +217,34 @@ def _exact_page_intervals(
     return intervals
 
 
+def build_chunking_body(
+    doc: VaultDocument,
+    chart_extractions: list[ChartExtraction],
+    *,
+    code_language: str | None,
+) -> tuple[str, str]:
+    """The TRANSIENT body the chunker sees + its `chunking_recipe_version`.
+
+    Runs the index-time transforms that NEVER touch the canonical `.md`: chart re-attach → GFM
+    linearize → (Rust source) symbol-heading injection. Shared by `index_document` AND
+    `enrich.pipeline.enrich_document` so both chunk byte-identical bytes (the #394 MENTIONS-
+    resolution parity). For non-chart / non-table docs the first two transforms are identity;
+    for a Rust code doc the injection adds synthetic `## <symbol>` / `### <Type::method>` ATX
+    headings so the EXISTING section-splitter produces one chunk per symbol with
+    `heading_path = [impl Foo, Foo::bar]`.
+
+    `code_language` is the caller's one-shot `code_language_for_doc(doc.ref.asset_dir)` result
+    (passed in so index+enrich glob once, not twice). Recipe is keyed on the transform ACTUALLY
+    APPLIED: `"code-rust-v1"` iff the Rust grammar ran, else `"v0"` (prose AND non-Rust code,
+    which falls through to the unchanged prose path) — so a future grammar/label change
+    force-rechunks exactly the docs that used that grammar.
+    """
+    body = linearize_gfm_tables(reattach_chart_extractions(doc.body, chart_extractions))
+    if code_language == "rust":
+        return inject_symbol_headings(body, split_rust_symbols(body)), "code-rust-v1"
+    return body, "v0"
+
+
 async def index_document(doc_id: str, *, force: bool = False) -> IndexResult:
     """Chunk, embed, and write derived state for one document.
 
@@ -268,25 +298,33 @@ async def index_document(doc_id: str, *, force: bool = False) -> IndexResult:
     # empty sidecar → re-attach is a no-op on the already-inline blocks). The chunk text thus carries
     # the chart content for retrieval/answering while the vault file (and the webui raw view) stay
     # clean. Order matches parse time: chart re-attach (the old stitch) THEN table linearization.
-    reattached_body = reattach_chart_extractions(doc.body, chart_extractions)
-    indexed_body = linearize_gfm_tables(reattached_body)
+    # Build the TRANSIENT chunker-input body (reattach → linearize → Rust symbol-heading
+    # injection for code). The canonical `.md` (written below) stays clean — `indexed_doc` is a
+    # throwaway copy. `code_language` is globbed ONCE here and reused for the recipe + page gate.
+    code_language = code_language_for_doc(doc.ref.asset_dir)
+    indexed_body, chunking_recipe = build_chunking_body(
+        doc, chart_extractions, code_language=code_language
+    )
     indexed_doc = doc.model_copy(update={"body": indexed_body})
+    is_code = code_language is not None
     # Companion arc-3: when the manifest is citation-grade, map the parse-recorded page boundaries
     # through these SAME transforms to exact intervals in `indexed_body` (the chunker prefers them
     # over the nav-grade char-count derivation). The byte-equality guard inside falls back to
     # nav-grade on any mismatch — so this can only improve page precision, never churn chunk_ids.
+    # Code docs skip page attribution entirely: symbol-heading injection shifts offsets and code
+    # has no PDF preview pane, so `Chunk.page` is meaningless (chunk_id-parity-safe — text-only).
     exact_page_intervals = (
-        _exact_page_intervals(
+        None
+        if is_code or exact_boundaries is None
+        else _exact_page_intervals(
             doc.body, indexed_body, exact_boundaries, chart_extractions, doc_id=doc_id
         )
-        if exact_boundaries is not None
-        else None
     )
     new_chunks = chunk_document(
         indexed_doc,
-        page_char_counts=page_char_counts,
+        page_char_counts=None if is_code else page_char_counts,
         exact_page_intervals=exact_page_intervals,
-        segment_intervals=segment_intervals,
+        segment_intervals=None if is_code else segment_intervals,
     )
     new_by_id = {c.chunk_id: c for c in new_chunks}
     new_ids = set(new_by_id.keys())
@@ -320,6 +358,16 @@ async def index_document(doc_id: str, *, force: bool = False) -> IndexResult:
                     "index.recipe_changed",
                     prior=prior.index.embedding_recipe_version,
                     current=recipe,
+                )
+                force = True
+            # A chunking-recipe change (e.g. the Phase-2 symbol grammar shipping, or a future
+            # grammar/label revision) re-derives chunk BOUNDARIES → different chunk_ids → a full
+            # re-chunk+re-embed. Keyed on the transform actually applied, so prose stays "v0".
+            if prior.index.chunking_recipe_version != chunking_recipe:
+                log.info(
+                    "index.chunking_recipe_changed",
+                    prior=prior.index.chunking_recipe_version,
+                    current=chunking_recipe,
                 )
                 force = True
 
@@ -403,6 +451,7 @@ async def index_document(doc_id: str, *, force: bool = False) -> IndexResult:
             embedding_model=settings.models.embedder,
             embedding_dim=EMBEDDING_DIM,
             embedding_recipe_version=recipe,
+            chunking_recipe_version=chunking_recipe,
             chunk_count=len(new_chunks),
             chunks_added=chunks_added,
             chunks_deleted=chunks_deleted,

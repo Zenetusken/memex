@@ -250,6 +250,52 @@ async def test_enrich_chunks_reattached_body_for_chart_docs(
     assert attested.isdisjoint(clean_ids)  # and none is a stale clean-body id (the pre-fix bug)
 
 
+@pytest.mark.asyncio
+async def test_enrich_chunks_symbol_injected_body_for_code_docs(
+    settings: MemexSettings,
+    fake_graph: _FakeGraphStore,
+    fake_llm: dict[str, Any],
+) -> None:
+    """Phase-2 parity (the #394 guarantee extended to code): enrich must chunk the SAME
+    symbol-heading-injected body `index_document` chunks for a Rust code doc, else a symbol
+    chunk's content-addressed chunk_id diverges and its MENTIONS attestation never resolves in
+    FTS. Both pipelines route through the shared `build_chunking_body`; this pins it end-to-end."""
+    from memex.core.source_types import code_language_for_doc
+    from memex.index.chunker import chunk_document
+    from memex.index.pipeline import build_chunking_body
+    from memex.vault.store import read_document
+
+    # The doc-comment carries the fake_llm's entity spans (Reflexivity / Smith) so the
+    # attestation lands on a real chunk; the code below it forms several symbol chunks.
+    body = (
+        "/// Reflexivity notes by Smith.\n"
+        "pub struct Widget;\n\n"
+        "impl Widget {\n"
+        "    pub fn build(&self) -> u32 { 1 }\n"
+        "    fn label(&self) -> u32 { 2 }\n"
+        "}\n"
+    )
+    ref = await ingest_markdown_passthrough(body, source_stem="widget-enrich")
+    asset = settings.vault_path / "documents" / ref.doc_id
+    asset.mkdir(parents=True, exist_ok=True)
+    (asset / "source.rs").write_text(body, encoding="utf-8")
+
+    await enrich_document(ref.doc_id)
+
+    doc = await read_document(settings.vault_path, ref.doc_id)
+    lang = code_language_for_doc(doc.ref.asset_dir)
+    assert lang == "rust"
+    index_body, _ = build_chunking_body(doc, [], code_language=lang)
+    index_ids = {c.chunk_id for c in chunk_document(doc.model_copy(update={"body": index_body}))}
+    clean_ids = {c.chunk_id for c in chunk_document(doc)}  # the un-injected prose-path chunking
+    assert index_ids != clean_ids  # sanity: symbol injection actually changed the chunking
+
+    attested = {cid for cid in fake_graph.mention_chunk_ids if cid is not None}
+    assert attested, "expected at least one attested MENTIONS chunk_id"
+    assert attested <= index_ids  # enrich chunked the SAME symbol-injected bytes (parity)
+    assert attested.isdisjoint(clean_ids)  # not a stale prose-path id
+
+
 def test_entity_dedupe_merges_by_lowered_name_and_kind() -> None:
     raw = [
         entities_mod.Entity(

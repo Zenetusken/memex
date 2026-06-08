@@ -7,11 +7,14 @@ fallback, so an unmapped code suffix never raises.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from memex.core.source_types import (
     CODE_SUFFIXES,
     LANGUAGE_FOR_SUFFIX,
+    code_language_for_doc,
     language_for_suffix,
 )
 
@@ -56,3 +59,38 @@ def test_every_code_suffix_has_a_nonempty_language() -> None:
 
 def test_language_keys_are_normalized_leading_dot_lowercase() -> None:
     assert all(k.startswith(".") and k == k.lower() for k in LANGUAGE_FOR_SUFFIX)
+
+
+# ----- code_language_for_doc (the index/enrich code-detection gate) -----
+
+
+def test_code_language_for_doc_detects_rust_source(tmp_path: Path) -> None:
+    asset = tmp_path / "documents" / "abc-lib"
+    asset.mkdir(parents=True)
+    (asset / "source.rs").write_text("fn main() {}\n", encoding="utf-8")
+    assert code_language_for_doc(asset) == "rust"
+
+
+def test_code_language_for_doc_returns_language_name_not_extension(tmp_path: Path) -> None:
+    asset = tmp_path / "documents" / "abc-app"
+    asset.mkdir(parents=True)
+    (asset / "source.py").write_text("x = 1\n", encoding="utf-8")
+    assert code_language_for_doc(asset) == "python"
+
+
+def test_code_language_for_doc_none_for_markdown_passthrough(tmp_path: Path) -> None:
+    """A markdown-passthrough doc has NO `source.*` file → the gate returns None (prose path)."""
+    asset = tmp_path / "documents" / "abc-notes"
+    asset.mkdir(parents=True)
+    assert code_language_for_doc(asset) is None
+
+
+def test_code_language_for_doc_none_for_pdf_source(tmp_path: Path) -> None:
+    asset = tmp_path / "documents" / "abc-paper"
+    asset.mkdir(parents=True)
+    (asset / "source.pdf").write_bytes(b"%PDF-1.7\n%%EOF\n")
+    assert code_language_for_doc(asset) is None
+
+
+def test_code_language_for_doc_missing_dir_is_none(tmp_path: Path) -> None:
+    assert code_language_for_doc(tmp_path / "documents" / "does-not-exist") is None

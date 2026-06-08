@@ -163,6 +163,13 @@ class IndexStage(BaseModel):
     # "v0" matches on-disk manifests; a mismatch vs the current recipe
     # auto-forces a full re-embed (see pipeline._embed_recipe_version).
     embedding_recipe_version: str = "v0"
+    # Chunking-recipe tag, keyed on the TRANSFORM actually applied to the chunker-input body
+    # (Phase 2 symbol-aware code chunking): "code-rust-v1" iff the Rust symbol-heading injection
+    # ran, else "v0" (prose AND non-Rust code, which falls through to the prose path). Back-compat
+    # default "v0" matches on-disk manifests; a mismatch vs the current recipe auto-forces a
+    # re-chunk (see pipeline._chunking_recipe_version). Lets a future grammar/label change
+    # force-rechunk exactly the docs that used that grammar.
+    chunking_recipe_version: str = "v0"
     chunk_count: int
     duration_ms: int = 0
     # Incremental re-indexing breakdown. Defaults to 0 so existing

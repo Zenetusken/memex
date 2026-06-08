@@ -34,8 +34,7 @@ from memex.core.manifest import (
     read_manifest,
     update_manifest,
 )
-from memex.core.table_linearize import linearize_gfm_tables
-from memex.core.text import reattach_chart_extractions
+from memex.core.source_types import code_language_for_doc
 from memex.core.types import Chunk
 from memex.enrich.citations import (
     CitationCandidate,
@@ -58,6 +57,7 @@ from memex.enrich.entities import (
 from memex.enrich.ner_otter import extract_chunk_entities, otter_backend_enabled
 from memex.index.chunker import chunk_document
 from memex.index.graph_store import GraphStore, open_graph_for_write
+from memex.index.pipeline import build_chunking_body
 from memex.models.client import complete_structured
 from memex.prompts import active_version, prompt_tag_for, render_prompt
 from memex.vault.store import (
@@ -231,8 +231,12 @@ async def enrich_document(doc_id: str) -> EnrichResult:
     chart_extractions: list[ChartExtraction] = []
     if prior_manifest is not None and prior_manifest.parse is not None:
         chart_extractions = prior_manifest.parse.chart_extractions
-    reattached_body = reattach_chart_extractions(doc.body, chart_extractions)
-    chunking_doc = doc.model_copy(update={"body": linearize_gfm_tables(reattached_body)})
+    # The SHARED transform (the #394 parity guarantee + Phase-2 code parity): identical bytes to
+    # `index_document` so a code doc's symbol-boundary chunk_ids match → MENTIONS attestation
+    # resolves. `doc.body` stays CLEAN for the course-ref + wikilink writes below.
+    code_language = code_language_for_doc(doc.ref.asset_dir)
+    chunking_body, _ = build_chunking_body(doc, chart_extractions, code_language=code_language)
+    chunking_doc = doc.model_copy(update={"body": chunking_body})
     chunks = chunk_document(chunking_doc)
     title = doc.frontmatter.title or doc_id
 
