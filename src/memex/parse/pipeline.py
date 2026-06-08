@@ -49,6 +49,7 @@ from memex.core.manifest import (
     update_manifest,
 )
 from memex.core.model_serving import daemon_pid_file, orchestrator_serve_env
+from memex.core.source_types import CODE_SUFFIXES
 from memex.core.table_linearize import (
     GFM_TABLE_RE,
     is_layout_table,
@@ -593,12 +594,20 @@ def _source_file(vault_path: Path, doc_id: str) -> Path:
     return candidates[0]
 
 
-async def _passthrough_markdown(vault_path: Path, doc_id: str, source: Path) -> ParseResult:
-    """No real parse needed — the source is already markdown.
+async def _passthrough_markdown(
+    vault_path: Path,
+    doc_id: str,
+    source: Path,
+    *,
+    rationale: str = "markdown source",
+    strip_frontmatter: bool = True,
+) -> ParseResult:
+    """No real parse needed — the source is already text (markdown OR source code).
 
-    Read the source, write it as the canonical `{doc_id}.md` (preserving
-    any frontmatter), record a single passthrough PageDecision in the
-    manifest.
+    Read the source, write it as the canonical `{doc_id}.md` VERBATIM, record a single
+    passthrough PageDecision. `strip_frontmatter=False` (source code) keeps the body
+    byte-for-byte (a code file beginning with `---` is never mangled); `rationale`
+    sets the PageDecision note (`engine` stays `"passthrough"` either way).
     """
     log = logger.bind(doc_id=doc_id, engine="passthrough")
     log.info("parse.passthrough.start")
@@ -617,7 +626,7 @@ async def _passthrough_markdown(vault_path: Path, doc_id: str, source: Path) -> 
     doc = VaultDocument(
         ref=canonical.ref if canonical else _bootstrap_ref(vault_path, doc_id, body),
         frontmatter=fm,
-        body=_strip_frontmatter(body),
+        body=_strip_frontmatter(body) if strip_frontmatter else body,
         mtime_ns=0,
     )
     ref = await write_document(vault_path, doc)
@@ -627,7 +636,7 @@ async def _passthrough_markdown(vault_path: Path, doc_id: str, source: Path) -> 
         page=1,
         engine="passthrough",
         confidence=1.0,
-        rationale="markdown source",
+        rationale=rationale,
         char_count=len(doc.body),
     )
     parse_stage = ParseStage(
@@ -2606,6 +2615,20 @@ async def parse_document(
 
     if source.suffix.lower() in {".md", ".markdown"}:
         return await _passthrough_markdown(settings.vault_path, doc_id, source)
+
+    # Source code is a TEXT document — store it VERBATIM (a code passthrough). The Docling
+    # fallback at the end would mangle it (its layout model renders aligned code as a markdown
+    # pipe-table); code has no figures, so no parse is needed. `strip_frontmatter=False` keeps
+    # the body byte-for-byte. Symbol-aware CHUNKING happens transiently at index time (the
+    # codebase-corpus arc, Phase 2), leaving this canonical `.md` content-only (the raw source).
+    if source.suffix.lower() in CODE_SUFFIXES:
+        return await _passthrough_markdown(
+            settings.vault_path,
+            doc_id,
+            source,
+            rationale="source code (verbatim)",
+            strip_frontmatter=False,
+        )
 
     # Audio sources AND audio-bearing video containers (ADR-0017) → the ASR route: transcribe
     # to timestamped Markdown (the video's audio track), then hand to the existing
