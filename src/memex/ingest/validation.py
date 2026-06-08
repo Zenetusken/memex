@@ -40,6 +40,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from memex.core.source_types import CODE_SUFFIXES
+
 DetectedKind = Literal[
     "pdf",
     "docx",
@@ -47,6 +49,7 @@ DetectedKind = Literal[
     "xlsx",
     "html",
     "markdown",
+    "code",
     "text",
     "audio",
     "video",
@@ -286,6 +289,11 @@ def _detect(path: Path) -> tuple[DetectedKind, str, bool]:
 
     if path.suffix.lower() in {".md", ".markdown"} and _looks_like_text(head):
         return "markdown", "text/markdown", False
+    # Source code (a text document ingested VERBATIM) — detected by suffix, gated on the same
+    # text guard. A distinct `code` kind (NOT `text`) so it stays ABSENT from `_EXTENSION_FOR_KIND`
+    # → the ingest preserves the original suffix (`.rs`, not `.txt`), which the parse routing keys on.
+    if path.suffix.lower() in CODE_SUFFIXES and _looks_like_text(head):
+        return "code", "text/plain", False
     if _looks_like_text(head):
         return "text", "text/plain", False
 
