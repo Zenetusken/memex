@@ -58,6 +58,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from jinja2 import Environment, FileSystemLoader
+from markupsafe import Markup
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from memex.agents.answering import FinalResponse, answer_query
@@ -89,6 +90,7 @@ from memex.core.scope_sets import (
     list_scope_sets,
     save_scope_set,
 )
+from memex.core.source_types import CODE_SUFFIXES, language_for_suffix
 from memex.core.types import Chunk, CompanionAlignment
 from memex.daemon import restart as daemon_restart
 from memex.daemon import status as daemon_status
@@ -141,6 +143,7 @@ from memex.webui.progress import (
     summary_phase_view,
 )
 from memex.webui.rendering import (
+    TocEntry,
     clean_heading_text,
     render_body_and_toc,
     render_body_html,
@@ -423,6 +426,16 @@ def _find_source(vault_path: Path, doc_id: str) -> Path | None:
         return None
     candidates = sorted(asset_dir.glob("source.*"))
     return candidates[0] if candidates else None
+
+
+def _is_code_source(source: Path | None) -> bool:
+    """True when the doc's source file is recognized SOURCE code (suffix ∈
+    `CODE_SUFFIXES`). The code-view renders such a body VERBATIM — suppressing
+    the markdown heading-anchor + `[[wikilink]]` transforms that misfire on
+    code (a Python/shell `# comment` reads as an H1; a literal `[[x]]` as a
+    link). Presentation-only: the signal is the Phase-1 verbatim ingest's
+    suffix-preserved `source.<ext>`."""
+    return source is not None and source.suffix.lower() in CODE_SUFFIXES
 
 
 def _find_preview_pdf(vault_path: Path, doc_id: str) -> Path | None:
@@ -1123,8 +1136,12 @@ def create_app() -> FastAPI:
         except VaultIntegrityError as e:
             raise HTTPException(status_code=404, detail=str(e)) from e
         source = _find_source(settings.vault_path, doc_id)
+        is_code = _is_code_source(source)
         if source is not None:
-            source_kind, _ = _kind_for(source)
+            # A code source labels by language name ("source · rust"), overriding
+            # `_kind_for`'s mimetypes-fallback bare extension ("rs"); the code-view
+            # below renders the body verbatim (suppressing the markdown transforms).
+            source_kind = language_for_suffix(source.suffix) if is_code else _kind_for(source)[0]
             has_source = True
         else:
             source_kind = None
@@ -1190,7 +1207,15 @@ def create_app() -> FastAPI:
         # ONE heading walk for both the body HTML and the TOC, off the event loop (pure CPU;
         # the 10-K body is 650 KB — blocking the single-worker loop would stall concurrent
         # requests). Audit 2026-06-07: was walking the whole body twice, inline.
-        rendered_body, toc = await asyncio.to_thread(render_body_and_toc, doc.body)
+        # A code doc renders VERBATIM: `rendered_body=None` makes `_document_body.html` fall
+        # back to the raw (Jinja-autoescaped) `document.body`, suppressing the heading-anchor +
+        # wikilink transforms; `toc=[]` drops the false-heading sidebar. Skips the walk entirely.
+        rendered_body: Markup | None
+        toc: list[TocEntry]
+        if is_code:
+            rendered_body, toc = None, []
+        else:
+            rendered_body, toc = await asyncio.to_thread(render_body_and_toc, doc.body)
         return templates.TemplateResponse(
             request,
             "document.html",
@@ -2226,12 +2251,15 @@ def create_app() -> FastAPI:
             doc = await read_document(settings.vault_path, doc_id)
         except VaultIntegrityError as e:
             raise HTTPException(status_code=404, detail=str(e)) from e
+        # A code doc renders verbatim (rendered_body=None → raw body in the <pre>),
+        # so a cancelled edit re-renders code AS code — same as the detail view.
+        code = _is_code_source(_find_source(settings.vault_path, doc_id))
         return templates.TemplateResponse(
             request,
             "_document_body.html",
             {
                 "document": doc,
-                "rendered_body": render_body_html(doc.body),
+                "rendered_body": None if code else render_body_html(doc.body),
                 "just_saved": None,
             },
         )
@@ -2336,12 +2364,14 @@ def create_app() -> FastAPI:
             new_sha=new_ref.content_sha256[:16],
             new_size=len(body),
         )
+        # A code doc renders verbatim (see document_body / the detail view).
+        code = _is_code_source(_find_source(settings.vault_path, doc_id))
         return templates.TemplateResponse(
             request,
             "_document_body.html",
             {
                 "document": refreshed,
-                "rendered_body": render_body_html(refreshed.body),
+                "rendered_body": None if code else render_body_html(refreshed.body),
                 "just_saved": datetime.now().strftime("%H:%M:%S"),
             },
         )

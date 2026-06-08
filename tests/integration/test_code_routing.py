@@ -57,6 +57,13 @@ async def test_rust_file_ingests_verbatim_not_mangled(
     assert res.doc_id is not None
     assert res.detected_kind == "code"  # the new suffix-detected kind
 
+    # `_copy_source` PRESERVES the original suffix for the `code` kind (it's absent from
+    # `_EXTENSION_FOR_KIND` → falls back to `source.suffix`), so the copied file is
+    # `source.rs`, NOT `source.txt`. This is the contract the webui code-view detection
+    # depends on (`_find_source` globs `source.*`, `_is_code_source` keys off the suffix) —
+    # pin it here so a regression in the copy path surfaces in the ingest test, not only live.
+    assert (settings.vault_path / "documents" / res.doc_id / "source.rs").is_file()
+
     parse = await parse_document(res.doc_id)
     assert parse.engine == "passthrough"  # routed to the verbatim passthrough, NOT Docling
 
