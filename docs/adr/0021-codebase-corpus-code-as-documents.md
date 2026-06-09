@@ -1,6 +1,6 @@
 # ADR-0021: Codebase Corpus — Source Code as Documents
 
-- **Status**: Accepted (Phase 1 + code-view + Phase 2 shipped 2026-06-07; Phases 3–5 planned)
+- **Status**: Accepted — Phases 1–5 shipped + merged to main (Phases 1-2 + code-view 2026-06-07; Phases 3-5 `f0f47bb` 2026-06-09). Lever A (code-only FTS term-query) default-ON; the usage-intent rerank-demotion lever measured double-edged → default-OFF. See the Amendments below.
 - **Date**: 2026-06-07
 - **Deciders**: Memex core team
 - **Tags**: ingest, parse, index, retrieval, eval, doc-type, architecture
