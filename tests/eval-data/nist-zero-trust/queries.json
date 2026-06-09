@@ -11,7 +11,7 @@
   "_labelling_rule": "ANS queries: `_anchor_phrase` is a distinctive verbatim substring from the chunk holding the answer; `scripts/extend_corpus.py resolve` populates `relevant_chunk_ids` via FTS. REF queries: `should_refuse=true`, `relevant_chunk_ids=[]`. Refusals split into in-corpus-unanswerable (topic present, specific answer absent) and out-of-corpus (absent from the entire vault).",
   "_created": "2026-05-25",
   "_purpose": "Extend the eval matrix to a new category (security standard / government technical doc) so the queued P2.x A/Bs (reranker, VLM, chunker-size) have cross-category signal. HARD GATES: refusal_rate_on_counterfactuals == 1.0, zero hallucinations.",
-  "_source_note": "NIST SP 800-207 (Aug 2020), US-federal public domain \u2014 'not subject to copyright in the United States'. Local eval material only; the PDF is not committed to the repo (only this query set is).",
+  "_source_note": "NIST SP 800-207 (Aug 2020), US-federal public domain — 'not subject to copyright in the United States'. Local eval material only; the PDF is not committed to the repo (only this query set is).",
   "_baseline_2026_05_25": {
     "stack": "Qwen3-8B-AWQ orchestrator + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3 (cross_encoder, bf16), top_k=5",
     "doc_id": "0290d6ec-nist-sp-800-207",
@@ -23,8 +23,13 @@
     "hallucinations": 0,
     "mean_citation_precision": 0.944,
     "mean_citation_precision_answered_only": 0.875,
-    "false_refusals": ["nist-zero-trust-01", "nist-zero-trust-07", "nist-zero-trust-10", "nist-zero-trust-12"],
-    "notes": "HARD GATES hold \u2014 refusal_cf=1.0 (incl. all 3 confabulation traps 16/17/18), 0 hallucinations. The 4 false-refusals are conservative retrieval/assess misses on long/dense chunks (q07+q10 share the \u00a73.3.1 contextual-TA chunk #83f5557874 that doesn't reach top-5) \u2014 a chunk-granularity signal for P1.6, NOT fabrication. q11 answered correctly (2 verified claims) but cites a sibling network-location chunk outside the label \u2192 cp=0.0 (known not-comparable-across-siblings artifact). 8/12 ANS leaves discrimination headroom for the P2.1 reranker A/B."
+    "false_refusals": [
+      "nist-zero-trust-01",
+      "nist-zero-trust-07",
+      "nist-zero-trust-10",
+      "nist-zero-trust-12"
+    ],
+    "notes": "HARD GATES hold — refusal_cf=1.0 (incl. all 3 confabulation traps 16/17/18), 0 hallucinations. The 4 false-refusals are conservative retrieval/assess misses on long/dense chunks (q07+q10 share the §3.3.1 contextual-TA chunk #83f5557874 that doesn't reach top-5) — a chunk-granularity signal for P1.6, NOT fabrication. q11 answered correctly (2 verified claims) but cites a sibling network-location chunk outside the label → cp=0.0 (known not-comparable-across-siblings artifact). 8/12 ANS leaves discrimination headroom for the P2.1 reranker A/B."
   },
   "queries": [
     {
@@ -175,7 +180,7 @@
       "qid": "nist-zero-trust-13",
       "question": "What specific encryption algorithm does SP 800-207 mandate for securing all ZTA communications?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE \u2014 800-207 requires communication be secured 'in the most secure manner available' (confidentiality, integrity, source authentication) but is technology-agnostic and mandates no specific encryption algorithm.",
+      "_expected_answer": "REFUSE — 800-207 requires communication be secured 'in the most secure manner available' (confidentiality, integrity, source authentication) but is technology-agnostic and mandates no specific encryption algorithm.",
       "_answer_type": "counterfactual",
       "_note": "In-corpus-unanswerable: the topic (securing communication) is present but no specific algorithm is named. HARD GATE.",
       "should_refuse": true,
@@ -185,7 +190,7 @@
       "qid": "nist-zero-trust-14",
       "question": "According to SP 800-207, what is the maximum allowed latency in milliseconds for a policy engine to make an access decision?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE \u2014 the document discusses minimizing temporal delays and provisioning for scale qualitatively, but gives no millisecond latency figure.",
+      "_expected_answer": "REFUSE — the document discusses minimizing temporal delays and provisioning for scale qualitatively, but gives no millisecond latency figure.",
       "_answer_type": "counterfactual",
       "_note": "In-corpus-unanswerable: performance is discussed qualitatively; no number exists. HARD GATE.",
       "should_refuse": true,
@@ -195,7 +200,7 @@
       "qid": "nist-zero-trust-15",
       "question": "How much does SP 800-207 estimate it costs a federal agency to migrate to a zero trust architecture?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE \u2014 the publication discusses migration steps and cost-effectiveness qualitatively but provides no cost estimate or dollar figure.",
+      "_expected_answer": "REFUSE — the publication discusses migration steps and cost-effectiveness qualitatively but provides no cost estimate or dollar figure.",
       "_answer_type": "counterfactual",
       "_note": "In-corpus-unanswerable: migration is covered (Section 7) but no cost figures. HARD GATE.",
       "should_refuse": true,
@@ -205,7 +210,7 @@
       "qid": "nist-zero-trust-16",
       "question": "What minimum password length does NIST Special Publication 800-63B recommend?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE \u2014 that guidance is in SP 800-63B (Digital Identity Guidelines), a different publication not in this corpus. SP 800-207 does not specify password length.",
+      "_expected_answer": "REFUSE — that guidance is in SP 800-63B (Digital Identity Guidelines), a different publication not in this corpus. SP 800-207 does not specify password length.",
       "_answer_type": "counterfactual",
       "_note": "Out-of-corpus: NIST-adjacent confabulation trap (a different SP not in the vault). HARD GATE.",
       "should_refuse": true,
@@ -215,7 +220,7 @@
       "qid": "nist-zero-trust-17",
       "question": "What post-quantum cryptography key length does SP 800-207 recommend for zero trust deployments?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE \u2014 SP 800-207 does not address post-quantum cryptography or key lengths (that is covered by FIPS 203 / SP 800-208).",
+      "_expected_answer": "REFUSE — SP 800-207 does not address post-quantum cryptography or key lengths (that is covered by FIPS 203 / SP 800-208).",
       "_answer_type": "counterfactual",
       "_note": "Out-of-corpus: security-adjacent topic absent from the document and vault. HARD GATE.",
       "should_refuse": true,
@@ -225,9 +230,19 @@
       "qid": "nist-zero-trust-18",
       "question": "Which commercial vendor's product does NIST SP 800-207 recommend for implementing the Policy Enforcement Point?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE \u2014 NIST explicitly makes no product endorsements ('does not imply a recommendation or endorsement by NIST'); the PEP is described as a logical component, with no vendor named.",
+      "_expected_answer": "REFUSE — NIST explicitly makes no product endorsements ('does not imply a recommendation or endorsement by NIST'); the PEP is described as a logical component, with no vendor named.",
       "_answer_type": "counterfactual",
       "_note": "Out-of-corpus: the doc explicitly disclaims product endorsement; tests cross-doc non-confabulation. HARD GATE.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "nist-zero-trust-19",
+      "question": "According to NIST SP 800-207, what specific firewall rules should you configure on a Palo Alto Networks firewall to enforce zero trust?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE — SP 800-207 is vendor-neutral; it discusses firewalls and Policy Enforcement Points generically but never names Palo Alto Networks or any product-specific configuration.",
+      "_answer_type": "counterfactual",
+      "_note": "ATTRIBUTION-SUBSTITUTION tripwire (audit 12): a specific named entity (Palo Alto) is ABSENT while the generic category (firewall/PEP) is PRESENT — the answer node must not frame generic content as the named product's config. HARD GATE.",
       "should_refuse": true,
       "relevant_chunk_ids": []
     }
