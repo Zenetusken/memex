@@ -1,0 +1,306 @@
+{
+  "_description": "Find-the-code retrieval corpus over a slice of the codex-rs core crate (29 .rs files, ~357 Rust symbol chunks). Built for the Phase-3 BM25-for-code arm-separation measurement (ADR-0021, spec docs/specs/code-chunking.md). Deliberately split into DEFINITION queries (where Phase-2's symbol-as-embed-title lever favours dense) and USAGE/REFERENCE queries (gold chunk is titled by a DIFFERENT symbol, the queried identifier lives in the chunk BODY -> dense's title advantage is neutralised, a lexical body-match can win).",
+  "_doc_id": "<multi-doc: see per-query _doc_id>",
+  "_multi_doc": true,
+  "_doc_ids": {
+    "exec": "39c24fb6-exec",
+    "safety": "b17260e4-safety",
+    "client": "26496b9e-client",
+    "util": "d69b1354-util",
+    "config": "c687868a-config",
+    "is-safe-command": "c95df415-is-safe-command",
+    "codex": "453bd6d4-codex",
+    "exec-linux": "e6de09aa-exec-linux",
+    "models": "709be946-models"
+  },
+  "_query_count": 24,
+  "_mix": {
+    "ans": 20,
+    "ref": 4,
+    "definition": 10,
+    "usage_reference": 10
+  },
+  "_labelling_rule": "ANS queries: `_anchor_phrase` is a distinctive SINGLE-LINE substring (Rust chunk text is whitespace-normalised, so a multi-line anchor won't FTS-match) from the GOLD chunk; `scripts/extend_corpus.py resolve --max-chunks 1` populates `relevant_chunk_ids` via FTS scoped to the per-query `_doc_id`. For USAGE queries the gold is the symbol that USES the queried identifier (its heading is a DIFFERENT symbol). REF queries: `should_refuse=true`, `relevant_chunk_ids=[]` (a non-existent symbol -> no chunk contains it -> bm25-term=0, the lexical true-negative check).",
+  "_created": "2026-06-09",
+  "_purpose": "Phase-3 measure-first: dense vs bm25-phrase vs bm25-term vs union recall@k on code queries (scripts/code_bm25_arm_probe.py). Reusable as the Phase 4-5 find-the-code baseline.",
+  "_target_repo": "~/project/codex/codex-rs/core (slice; source stays local, only the query set + chunk ids ship)",
+  "queries": [
+    {
+      "qid": "ftc-def-execparams",
+      "question": "What fields does the ExecParams struct define?",
+      "_anchor_phrase": "struct ExecParams",
+      "_expected_answer": "The ExecParams struct (exec.rs) with command, cwd, timeout_ms, env fields.",
+      "_answer_type": "definition_pascal_struct",
+      "_doc_id": "39c24fb6-exec",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "39c24fb6-exec#01c227482e"
+      ]
+    },
+    {
+      "qid": "ftc-def-sandboxtype",
+      "question": "What are the variants of the SandboxType enum?",
+      "_anchor_phrase": "enum SandboxType",
+      "_expected_answer": "SandboxType variants (None, MacosSeatbelt, LinuxSeccomp).",
+      "_answer_type": "definition_pascal_enum",
+      "_doc_id": "39c24fb6-exec",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "39c24fb6-exec#43f7261c30"
+      ]
+    },
+    {
+      "qid": "ftc-def-modelclient",
+      "question": "What is the ModelClient struct used for?",
+      "_anchor_phrase": "struct ModelClient",
+      "_expected_answer": "ModelClient (client.rs) wraps the HTTP client + provider config to stream model responses.",
+      "_answer_type": "definition_pascal_struct",
+      "_doc_id": "26496b9e-client",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "26496b9e-client#03246a1f92"
+      ]
+    },
+    {
+      "qid": "ftc-def-assess",
+      "question": "What does the assess_command_safety function do?",
+      "_anchor_phrase": "fn assess_command_safety",
+      "_expected_answer": "assess_command_safety (safety.rs) decides whether a command is auto-approved, needs approval, or is rejected.",
+      "_answer_type": "definition_snake_fn",
+      "_doc_id": "b17260e4-safety",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "b17260e4-safety#49db9fb174"
+      ]
+    },
+    {
+      "qid": "ftc-def-procexec",
+      "question": "How is process_exec_tool_call implemented?",
+      "_anchor_phrase": "fn process_exec_tool_call",
+      "_expected_answer": "process_exec_tool_call (exec.rs) runs a command under the chosen sandbox and captures truncated output.",
+      "_answer_type": "definition_snake_fn",
+      "_doc_id": "39c24fb6-exec",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "39c24fb6-exec#034d7d20da"
+      ]
+    },
+    {
+      "qid": "ftc-def-backoff",
+      "question": "What does the backoff function compute?",
+      "_anchor_phrase": "fn backoff",
+      "_expected_answer": "backoff (util.rs) computes an exponential retry delay.",
+      "_answer_type": "definition_snake_fn",
+      "_doc_id": "d69b1354-util",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "d69b1354-util#a066ebf45b"
+      ]
+    },
+    {
+      "qid": "ftc-def-configload",
+      "question": "How does Config::load_with_overrides work?",
+      "_anchor_phrase": "load_with_overrides",
+      "_expected_answer": "Config::load_with_overrides (config.rs) loads the base config then applies CLI overrides.",
+      "_answer_type": "definition_trait_method",
+      "_doc_id": "c687868a-config",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "c687868a-config#2e89144e1e"
+      ]
+    },
+    {
+      "qid": "ftc-def-timeout",
+      "question": "What is the DEFAULT_TIMEOUT_MS constant set to?",
+      "_anchor_phrase": "const DEFAULT_TIMEOUT_MS",
+      "_expected_answer": "DEFAULT_TIMEOUT_MS (exec.rs) is the default exec timeout in milliseconds.",
+      "_answer_type": "definition_const",
+      "_doc_id": "39c24fb6-exec",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "39c24fb6-exec#4fdf55e777"
+      ]
+    },
+    {
+      "qid": "ftc-def-nl-safe",
+      "question": "How does the agent decide whether a shell command is safe to run without asking for approval?",
+      "_anchor_phrase": "fn assess_command_safety",
+      "_expected_answer": "assess_command_safety (safety.rs) is the decision function (NL-phrased, no identifier named).",
+      "_answer_type": "definition_nl_no_identifier",
+      "_doc_id": "b17260e4-safety",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "b17260e4-safety#49db9fb174"
+      ]
+    },
+    {
+      "qid": "ftc-def-bareident",
+      "question": "is_known_safe_command",
+      "_anchor_phrase": "fn is_known_safe_command",
+      "_expected_answer": "is_known_safe_command (is_safe_command.rs) \u2014 bare-identifier query (arms converge).",
+      "_answer_type": "definition_bare_identifier",
+      "_doc_id": "c95df415-is-safe-command",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "c95df415-is-safe-command#81275aeeed"
+      ]
+    },
+    {
+      "qid": "ftc-use-isknownsafe",
+      "question": "Which function calls is_known_safe_command?",
+      "_anchor_phrase": "fn assess_command_safety",
+      "_expected_answer": "assess_command_safety (safety.rs) calls is_known_safe_command. Gold heading is assess_command_safety, NOT the queried id.",
+      "_answer_type": "usage_reference",
+      "_doc_id": "b17260e4-safety",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "b17260e4-safety#49db9fb174"
+      ]
+    },
+    {
+      "qid": "ftc-use-spawnseatbelt",
+      "question": "Which function invokes spawn_command_under_seatbelt?",
+      "_anchor_phrase": "fn process_exec_tool_call",
+      "_expected_answer": "process_exec_tool_call (exec.rs) invokes spawn_command_under_seatbelt. Gold titled by the caller.",
+      "_answer_type": "usage_reference",
+      "_doc_id": "39c24fb6-exec",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "39c24fb6-exec#034d7d20da"
+      ]
+    },
+    {
+      "qid": "ftc-use-embeddedinstr",
+      "question": "Where is the EMBEDDED_INSTRUCTIONS constant used?",
+      "_anchor_phrase": "user-provided instructions",
+      "_expected_answer": "Config::load_from_base_config_with_overrides (config.rs) reads EMBEDDED_INSTRUCTIONS. Gold titled by the using method.",
+      "_answer_type": "usage_reference",
+      "_doc_id": "c687868a-config",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "c687868a-config#726d0536de"
+      ]
+    },
+    {
+      "qid": "ftc-use-assesspatch",
+      "question": "Which function calls assess_patch_safety before applying a patch?",
+      "_anchor_phrase": "fn apply_patch",
+      "_expected_answer": "apply_patch (codex.rs) calls assess_patch_safety. Gold heading apply_patch, NOT the queried id.",
+      "_answer_type": "usage_reference",
+      "_doc_id": "453bd6d4-codex",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "453bd6d4-codex#87f02bc92c"
+      ]
+    },
+    {
+      "qid": "ftc-use-issafetocall",
+      "question": "Which function uses is_safe_to_call_with_exec?",
+      "_anchor_phrase": "fn is_known_safe_command",
+      "_expected_answer": "is_known_safe_command (is_safe_command.rs) calls is_safe_to_call_with_exec. Gold titled by the caller.",
+      "_answer_type": "usage_reference",
+      "_doc_id": "c95df415-is-safe-command",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "c95df415-is-safe-command#81275aeeed"
+      ]
+    },
+    {
+      "qid": "ftc-use-getplatform",
+      "question": "Where is get_platform_sandbox called?",
+      "_anchor_phrase": "fn assess_patch_safety",
+      "_expected_answer": "assess_patch_safety (safety.rs) calls get_platform_sandbox. Gold titled assess_patch_safety, NOT the queried id.",
+      "_answer_type": "usage_reference",
+      "_doc_id": "b17260e4-safety",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "b17260e4-safety#ee93372aaf"
+      ]
+    },
+    {
+      "qid": "ftc-use-consumetrunc",
+      "question": "Which function calls consume_truncated_output?",
+      "_anchor_phrase": "fn exec_linux",
+      "_expected_answer": "exec_linux (exec_linux.rs) calls consume_truncated_output. Gold titled by the caller.",
+      "_answer_type": "usage_reference",
+      "_doc_id": "e6de09aa-exec-linux",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "e6de09aa-exec-linux#8da83a4c2d"
+      ]
+    },
+    {
+      "qid": "ftc-use-rollout",
+      "question": "Which function creates a RolloutRecorder?",
+      "_anchor_phrase": "fn submission_loop",
+      "_expected_answer": "submission_loop (codex.rs) creates a RolloutRecorder. Gold titled by the caller.",
+      "_answer_type": "usage_reference",
+      "_doc_id": "453bd6d4-codex",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "453bd6d4-codex#7442434277"
+      ]
+    },
+    {
+      "qid": "ftc-use-mcpmgr",
+      "question": "Which struct owns the McpConnectionManager?",
+      "_anchor_phrase": "struct Session",
+      "_expected_answer": "The Session struct (codex.rs) holds an McpConnectionManager field. Gold titled Session, NOT the queried id.",
+      "_answer_type": "usage_reference",
+      "_doc_id": "453bd6d4-codex",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "453bd6d4-codex#8ef0c602c5"
+      ]
+    },
+    {
+      "qid": "ftc-use-convhistory",
+      "question": "Which struct holds the ConversationHistory?",
+      "_anchor_phrase": "struct State",
+      "_expected_answer": "The State struct (codex.rs) holds a ConversationHistory. Gold titled State, NOT the queried id.",
+      "_answer_type": "usage_reference",
+      "_doc_id": "453bd6d4-codex",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "453bd6d4-codex#84ab95ce3d"
+      ]
+    },
+    {
+      "qid": "ftc-cf-frobnicate",
+      "question": "Where is the FrobnicateWidget struct defined?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 no such symbol in codex-rs core.",
+      "_answer_type": "counterfactual_nonexistent_symbol",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "ftc-cf-computetax",
+      "question": "What does the compute_tax_rate function do?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 no such function.",
+      "_answer_type": "counterfactual_nonexistent_symbol",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "ftc-cf-graphql",
+      "question": "How does the GraphQL subscription handler work?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 codex-rs core has no GraphQL.",
+      "_answer_type": "counterfactual_absent_feature",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "ftc-cf-jwt",
+      "question": "Which function calls validate_jwt_token?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE \u2014 no such identifier in the corpus (the lexical true-negative).",
+      "_answer_type": "counterfactual_nonexistent_symbol",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    }
+  ],
+  "_resolved_at": "2026-06-09T15:25:34Z"
+}
