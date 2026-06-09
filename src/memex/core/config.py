@@ -759,6 +759,19 @@ class AgentsSettings(BaseModel):
     # queries keep the unchanged phrase-wrap. Default on (prose HARD-gate-validated, refusal_cf
     # held); `MEMEX_AGENTS__CODE_TERM_QUERY_ENABLED=false` reverts to the phrase-wrap everywhere.
     code_term_query_enabled: bool = True
+    # Usage-intent rerank demotion (2026-06-09, ADR-0021 / audits/14): the answer-stage
+    # complement to Lever A. For a "which function calls X" query (`index/code_query.
+    # detect_usage_intent`), the rerank node DEMOTES X's own definition + X's test chunks below the
+    # top-k cut, so the answer node grounds on the CALLER (the gold) instead of describing X's
+    # definition. Pure reorder ⇒ HARD-gate-safe (verify untouched); fires ONLY on usage-intent code
+    # queries (silent on definition queries + prose). **DEFAULT OFF — measured DOUBLE-EDGED:** on the
+    # 17-query find-the-code usage set it fixed 3 definition-distraction cases but REGRESSED 2
+    # previously-correct ones (a WRONG answer where the demoted definition disambiguated a
+    # similarly-named sibling; a FALSE REFUSAL from over-demotion) — no clean rerank rule separates
+    # "definition-as-distractor" from "definition-as-context" at inference time (audits/14). Kept as
+    # validated, kill-switched opt-in infra for a future reranker/embedder revisit;
+    # `MEMEX_AGENTS__USAGE_INTENT_DEMOTION_ENABLED=true` enables it.
+    usage_intent_demotion_enabled: bool = False
     # Index-time column UNDER-SPLIT recovery (2026-05-31): split a Docling-MERGED
     # table column (a >=2-bold-group header over K>=2 clean number-runs, e.g. the
     # 10-K "Stock Awards ($) Total ($)" / "278,809 342,559") back into K columns
