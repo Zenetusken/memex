@@ -2055,3 +2055,119 @@ async def test_answer_context_overflow_preserves_synthetic_sql_chunk(
     assert result["draft"].summary == "ok"
     # The synthetic chunk survived EVERY attempt (never dropped).
     assert all(synthetic_present), synthetic_present
+
+
+# ---- Usage-intent rerank demotion at the `rerank` node (ADR-0021 / audits/14) ----
+
+
+def _code_chunk(cid: str, heading: str, score: float, text: str = "code body") -> Chunk:
+    return Chunk(
+        chunk_id=cid,
+        document_id="d",
+        document_title="codex-rs",
+        text=text,
+        heading_path=[heading],
+        rerank_score=score,
+    )
+
+
+async def _fake_score_rerank(query: str, candidates: list[Chunk], top_k: int = 10) -> list[Chunk]:
+    """Stand-in cross-encoder: sort by the chunk's preset `rerank_score`, slice to top_k."""
+    return sorted(candidates, key=lambda c: c.rerank_score or 0.0, reverse=True)[:top_k]
+
+
+def _usage_candidates() -> list[Chunk]:
+    # The real mechanism (audits/14): X's definition (0.95) + a test (0.87) outrank the caller (0.68).
+    return [
+        _code_chunk("def", "fn is_known_safe_command", 0.95),
+        Chunk(
+            chunk_id="test",
+            document_id="d",
+            document_title="codex-rs",
+            text="assert!(is_known_safe_command(c))",
+            heading_path=["mod tests", "known_safe_examples"],
+            rerank_score=0.87,
+        ),
+        _code_chunk(
+            "caller", "fn assess_command_safety", 0.68, text="if is_known_safe_command(c) {}"
+        ),
+        _code_chunk("other", "enum AskForApproval", 0.50),
+    ]
+
+
+async def test_rerank_usage_intent_demotes_definition_and_tests_out_of_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A "which function calls X" query demotes X's definition + test chunks below the top_k
+    cut, so the caller surfaces into the answer node's window."""
+    from memex.agents.answering import rerank
+    from memex.core.config import MemexSettings, set_settings
+
+    monkeypatch.setattr("memex.agents.answering.cross_encoder_rerank", _fake_score_rerank)
+    monkeypatch.setenv("MEMEX_RERANK_TOP_K", "2")
+    monkeypatch.setenv("MEMEX_AGENTS__USAGE_INTENT_DEMOTION_ENABLED", "true")  # opt-in (default OFF)
+    set_settings(MemexSettings())
+    try:
+        out = await rerank(
+            AnswerState(
+                query="Which function calls is_known_safe_command?",
+                candidates=_usage_candidates(),
+            )
+        )
+        ids = [c.chunk_id for c in out["reranked"]]
+        # def (top raw score) + test demoted OUT of the top-2 window; the caller surfaces.
+        assert ids == ["caller", "other"]
+        assert "def" not in ids and "test" not in ids
+    finally:
+        monkeypatch.delenv("MEMEX_AGENTS__USAGE_INTENT_DEMOTION_ENABLED", raising=False)
+        set_settings(MemexSettings())
+
+
+async def test_rerank_usage_intent_kill_switch_keeps_plain_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Flag OFF → the rerank node is byte-identical to the plain cross-encoder order."""
+    from memex.agents.answering import rerank
+    from memex.core.config import MemexSettings, set_settings
+
+    monkeypatch.setattr("memex.agents.answering.cross_encoder_rerank", _fake_score_rerank)
+    monkeypatch.setenv("MEMEX_RERANK_TOP_K", "2")
+    monkeypatch.setenv("MEMEX_AGENTS__USAGE_INTENT_DEMOTION_ENABLED", "false")
+    set_settings(MemexSettings())
+    try:
+        out = await rerank(
+            AnswerState(
+                query="Which function calls is_known_safe_command?",
+                candidates=_usage_candidates(),
+            )
+        )
+        # Unfixed order: the definition + test occupy the top-2 window (the bug).
+        assert [c.chunk_id for c in out["reranked"]] == ["def", "test"]
+    finally:
+        monkeypatch.delenv("MEMEX_AGENTS__USAGE_INTENT_DEMOTION_ENABLED", raising=False)
+        set_settings(MemexSettings())
+
+
+async def test_rerank_definition_query_is_untouched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Even with the lever ENABLED, a DEFINITION query ("what does X do") does not fire the
+    detector → plain order; the definition rightly stays at the top of the window."""
+    from memex.agents.answering import rerank
+    from memex.core.config import MemexSettings, set_settings
+
+    monkeypatch.setattr("memex.agents.answering.cross_encoder_rerank", _fake_score_rerank)
+    monkeypatch.setenv("MEMEX_RERANK_TOP_K", "2")
+    monkeypatch.setenv("MEMEX_AGENTS__USAGE_INTENT_DEMOTION_ENABLED", "true")  # opt-in (default OFF)
+    set_settings(MemexSettings())
+    try:
+        out = await rerank(
+            AnswerState(
+                query="What does the is_known_safe_command function do?",
+                candidates=_usage_candidates(),
+            )
+        )
+        assert [c.chunk_id for c in out["reranked"]] == ["def", "test"]
+    finally:
+        monkeypatch.delenv("MEMEX_AGENTS__USAGE_INTENT_DEMOTION_ENABLED", raising=False)
+        set_settings(MemexSettings())

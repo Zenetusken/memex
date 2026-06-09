@@ -88,14 +88,53 @@ dimension"). N=2: **all 3 prose counterfactuals refused both runs (`refusal_cf`=
 byte-stable vs the pre-ingest baseline. Adding code did NOT make a prose counterfactual answerable; the
 Lever A × code interaction is safe.
 
+## The usage-class answer gap — root-caused + a measured DOUBLE-EDGED lever (2026-06-09)
+
+The spot-check residual above was investigated end-to-end (the user: "get to the bottom of the gap and
+remedy this"). **Root cause (probe-validated, MAIN vault, device-pinned):** two stacked mechanisms.
+(1) **Rerank cutoff** — the cross-encoder (bge-reranker-v2-m3) is a TOPICAL scorer, so for "which function
+calls X" it ranks the chunks containing X most prominently — X's own **definition** (#1, ~0.95) and its
+**test** chunks (#2–#5) — above the real **caller**, which mentions X once at the call site; across the 17
+usage queries the gold caller reranks to #6 (out of the top-5) in exactly the 2 worst cases. (2)
+**Answer-LLM distraction** — even with the caller forced to #1, the answer LLM still describes X's
+definition whenever a definition chunk of X is anywhere in its visible top-k window (answer/v5's
+subject-presence is satisfied by the definition); remove the definition + tests from the window and it
+answers the caller correctly.
+
+**The remedy (built, then measured at scale):** a **usage-intent rerank-demotion** lever
+(`index/code_query.detect_usage_intent` + `reorder_for_usage_intent`, wired into the `rerank` node) that,
+for a "which/where … calls/uses/… X" query, demotes X's definition + test chunks below the top-k cut so
+the answer node grounds on the caller. Pure reorder ⇒ HARD-gate-safe by construction; the detector fires
+on 17/17 usage queries, 0/16 definition + 0/6 big-function (validated on all 47). The 2-query probe
+(isknownsafe, unifieddiff) confirmed the fix.
+
+**But the full 17-query, N=2, text-verified measurement found it DOUBLE-EDGED — net +3 / −2:**
+
+| flag-OFF → flag-ON | queries | verdict |
+|---|---|---|
+| genuinely wrong → correct | isknownsafe, unifieddiff, issafetocall | **+3 real fixes** (LLM was describing the definition) |
+| correct → **wrong answer** | convhistory | **−1 regression** (demoting the `ConversationHistory` definition removed the disambiguating context → the LLM picked the similarly-named distractor `ChatWidget`/`ConversationHistoryWidget`) |
+| correct → **false refusal** | applyhunks | **−1 regression** (demoting the def + 13 test chunks over-stripped context; gold stayed at #2 but the LLM refused) |
+| already-correct sibling (no change) | getplatform, rollout | GOLD_CITED false-negatives, not failures |
+| correct → correct | the other 10 | unchanged |
+
+The root finding: **demoting X's definition is double-edged — a distractor when the LLM anchors on it
+(def@top, caller buried), but NECESSARY CONTEXT when a similarly-named sibling needs disambiguating or the
+subject needs anchoring.** No clean rerank rule separates the two at inference time (a "demote-def-only-
+if-#1" gate spares convhistory but applyhunks's def IS at #1; not demoting tests re-breaks isknownsafe).
+Introducing a NEW false-refusal + wrong-answer to fix 3 distraction cases is a bad trade by the project's
+"over-refusal is a first-class failure" standard.
+
+**Disposition (user-chosen): SHIP DEFAULT-OFF, keep the infra.** `usage_intent_demotion_enabled` defaults
+**False**; the validated, kill-switched code + unit/integration tests stay as opt-in infra
+(`MEMEX_AGENTS__USAGE_INTENT_DEMOTION_ENABLED=true`) for a future reranker/embedder revisit (a sharper
+reranker that ranks the caller above the definition would moot the whole lever). The default product is
+byte-identical to the pre-lever baseline. ADR-0021 (usage-intent-demotion amendment).
+
 ## Residuals + next
 
-- **The usage-class answer-stage gap (the headline next-frontier).** Lever A puts the usage gold in the
-  pool, but the reranker + answer LLM still often prefer the title-matching DEFINITION, so "which function
-  calls X" is sometimes answered "X is defined here and does Y" (wrong) — ~1–2 of 8 usage queries
-  spot-checked. The fix is an ANSWER-stage lever (a usage-vs-definition disambiguation at rerank/answer,
-  or query-intent detection for "calls/uses X" → prefer non-title-match chunks), NOT a retrieval one.
-  Measure it properly (an answer-correctness eval, not just `answered`+`cp`) before building.
+- **The usage-class answer gap is root-caused but UNFIXED by default** (above) — the obvious rerank remedy
+  is double-edged; recorded as a measured partial. A future sharper reranker is the clean revisit path.
 - `ftc-big-runmain` — a borderline relevance false-refusal on an orchestration entry point (1/39).
   Recorded; the same class as the prose synthesis/relevance residuals, deferred.
 - Enrich (the MENTIONS graph over code) was NOT run — the find-the-code eval doesn't use it; code-entity

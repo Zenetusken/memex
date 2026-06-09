@@ -157,7 +157,8 @@ prose + `v0`), `test_partial_reindex.py` (recipe record + force-on-mismatch), `t
   answer-correctness spot-check (N=8, usage-weighted) found 6/8 correct but **2 usage-class answers
   wrong/partial** — the answer stage prefers the title-matching DEFINITION over the usage gold (`memex
   eval` scores answered/cp, not answer text). So retrieval + the HARD gate are validated; answer
-  correctness has a usage-class gap — the **next-frontier answer-stage lever** (audit-14 §Residuals). The
+  correctness has a usage-class gap — now root-caused; the rerank remedy is DOUBLE-EDGED → shipped
+  DEFAULT-OFF (see the usage-class-answer-gap bullet below + audit-14). The
   shared-vault prose gates HELD with code present (`refusal_cf`=1.0 on the 3 detector-triggering prose
   counterfactuals — the Lever A × `model_provider_info.rs`-openai interaction is safe). **Truncation
   measured-benign:** 5/6 big-function probes (incl. the 2 largest, 4912/4647 chars) answer despite
@@ -169,6 +170,21 @@ prose + `v0`), `test_partial_reindex.py` (recipe record + force-on-mismatch), `t
   doc and the second `retitle` silently overwrites the first's path. Pre-check
   `#distinct(sha256, stem) == #files`; if short, fold the repo-relative path into the hashed identity
   or accept+log the merges deliberately.
+- **The usage-class answer gap — root-caused, a rerank lever measured DOUBLE-EDGED, shipped DEFAULT-OFF
+  (2026-06-09, `docs/audits/14`, ADR-0021 amendment).** The audit-14 spot-check residual ("which function
+  calls X" answered by describing X's DEFINITION) was investigated. Root cause: the cross-encoder ranks
+  X's definition + tests above the caller, AND the answer LLM describes the definition whenever a
+  definition chunk of X is in its visible top-k window. The remedy — a **usage-intent rerank-demotion**
+  lever (`index/code_query.detect_usage_intent` + `reorder_for_usage_intent` → the `rerank` node; demote
+  X's def + tests below the top-k cut for a "which/where … calls/uses X" query; HARD-gate-safe pure
+  reorder; detector validated 17/17 usage, 0/16 def, 0/6 big-fn) — was measured on all 17 usage queries
+  (N=2, text-verified): **net +3 / −2** — fixes 3 definition-distraction cases (isknownsafe, unifieddiff,
+  issafetocall) but REGRESSES 2 previously-correct ones (convhistory → WRONG answer, the demoted definition
+  was disambiguating a similarly-named sibling; applyhunks → FALSE REFUSAL, over-demotion). Demoting the
+  definition is double-edged (distractor vs necessary context); no clean rerank rule. **Shipped DEFAULT-OFF**
+  (`usage_intent_demotion_enabled=False`, kill-switch `MEMEX_AGENTS__USAGE_INTENT_DEMOTION_ENABLED=true`):
+  validated opt-in infra + tests kept; the default product is byte-identical to the pre-lever baseline. The
+  clean revisit path is a sharper reranker, not a cleverer demotion heuristic.
 
 ## References
 

@@ -1029,6 +1029,12 @@ async def rerank(state: AnswerState) -> AnswerStateUpdate:
     """
     import os
 
+    from memex.index.code_query import (
+        detect_usage_intent,
+        reorder_for_usage_intent,
+        usage_intent_demotion_enabled,
+    )
+
     log = logger.bind(node="rerank")
     log.info("start", candidate_count=len(state.candidates))
     # `top_k` is the count of reranked chunks the answer prompt grounds against.
@@ -1043,7 +1049,28 @@ async def rerank(state: AnswerState) -> AnswerStateUpdate:
     env_top_k = os.environ.get("MEMEX_RERANK_TOP_K")
     top_k = _resolve_rerank_top_k(env_top_k)
     log.info("top_k_resolved", top_k=top_k, source="env" if env_top_k is not None else "mode")
-    reranked = await cross_encoder_rerank(state.query, state.candidates, top_k=top_k)
+    # Usage-intent rerank demotion (ADR-0021 / audits/14), OPT-IN / DEFAULT-OFF (measured
+    # double-edged — fixes 3 definition-distraction cases but regresses 2 where the definition is
+    # needed CONTEXT): for a "which function calls X" query, rerank the FULL pool, demote X's own
+    # definition + X's test chunks below the top_k cut, then slice — so the answer node grounds on
+    # the CALLER (the gold), not X's definition. The cross-encoder scores ALL candidates regardless
+    # of `top_k`, so reranking the whole pool is free. Pure reorder ⇒ HARD-gate-safe (verify
+    # untouched); with the flag OFF (the default) `usage_symbol` is None → the plain call below
+    # runs, byte-identical to the pre-lever behaviour.
+    usage_symbol = detect_usage_intent(state.query) if usage_intent_demotion_enabled() else None
+    if usage_symbol:
+        full = await cross_encoder_rerank(state.query, state.candidates, top_k=len(state.candidates))
+        reranked = reorder_for_usage_intent(full, usage_symbol)[:top_k]
+        win_before = {c.chunk_id for c in full[:top_k]}
+        win_after = {c.chunk_id for c in reranked}
+        log.info(
+            "usage_intent_demotion",
+            symbol=usage_symbol,
+            pool=len(full),
+            demoted_from_window=len(win_before - win_after),
+        )
+    else:
+        reranked = await cross_encoder_rerank(state.query, state.candidates, top_k=top_k)
     log.info("done", reranked_count=len(reranked))
     return {
         "reranked": reranked,

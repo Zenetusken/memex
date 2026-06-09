@@ -13,13 +13,31 @@ import pytest
 
 from memex.core.config import MemexSettings, set_settings
 from memex.core.errors import ConfigurationError
+from memex.core.types import Chunk
 from memex.index import code_query
 from memex.index.code_query import (
+    _chunk_defines_symbol,
+    _is_test_chunk,
     build_code_term_match,
     code_term_query_enabled,
+    detect_usage_intent,
+    last_ident,
     query_has_code_identifier,
+    reorder_for_usage_intent,
+    usage_intent_demotion_enabled,
 )
 from memex.index.fts_store import _fts_match_expr
+
+
+def _chunk(heading_path: list[str], chunk_id: str = "d#1", text: str = "body") -> Chunk:
+    return Chunk(
+        chunk_id=chunk_id,
+        document_id="d",
+        document_title="exec/src/lib.rs",
+        text=text,
+        heading_path=heading_path,
+    )
+
 
 # ---------------------------------------------------------------------------
 # query_has_code_identifier — the per-query gate
@@ -156,3 +174,164 @@ def test_match_expr_term_query_falls_back_to_phrase_when_no_identifier() -> None
 def test_match_expr_empty_query_is_none() -> None:
     assert _fts_match_expr("   ", term_query=True) is None
     assert _fts_match_expr("", term_query=False) is None
+
+
+# ===========================================================================
+# Usage-intent rerank demotion (ADR-0021 / docs/audits/14)
+# ===========================================================================
+
+# detect_usage_intent — fires on "which <noun> <verb> X" / "where is X <verb>", returns X.
+# These are the real find-the-code usage queries (the data the detector was designed against).
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("Which function calls is_known_safe_command?", "is_known_safe_command"),
+        ("Which function invokes spawn_command_under_seatbelt?", "spawn_command_under_seatbelt"),
+        ("Where is the EMBEDDED_INSTRUCTIONS constant used?", "EMBEDDED_INSTRUCTIONS"),
+        ("Which function uses is_safe_to_call_with_exec?", "is_safe_to_call_with_exec"),
+        ("Where is get_platform_sandbox called?", "get_platform_sandbox"),  # past-tense verb
+        ("Which function creates a RolloutRecorder?", "RolloutRecorder"),
+        ("Which struct owns the McpConnectionManager?", "McpConnectionManager"),
+        ("Which struct holds the ConversationHistory?", "ConversationHistory"),
+        ("Which enum wraps a verified ApplyPatchAction?", "ApplyPatchAction"),
+        ("Which method uses ansi_escape_line to format command output?", "ansi_escape_line"),
+    ],
+)
+def test_usage_intent_fires_and_extracts_symbol(query: str, expected: str) -> None:
+    assert detect_usage_intent(query) == expected
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        # Definition intent — X's OWN definition IS the answer → must stay silent.
+        "What does the assess_command_safety function do?",
+        "What fields does the ExecParams struct define?",
+        "What are the variants of the SandboxType enum?",
+        "How is process_exec_tool_call implemented?",
+        "What is the ModelClient struct used for?",  # "used" present, but "What …" = definition
+        "How does Config::load_with_overrides work?",
+        "What is the DEFAULT_TIMEOUT_MS constant set to?",
+        # Big-function (definition intent) queries.
+        "What does the run_main function in the exec crate do?",
+        "How does ProgramSpec::check validate a command invocation?",
+        # A counterfactual phrased as definition — silent (and would be a no-op anyway).
+        "Where is the FrobnicateWidget struct defined?",  # 'defined' is NOT a usage verb
+        # Pure prose — no code identifier, no usage frame.
+        "How does the agent decide whether a shell command is safe to run?",
+        "is_known_safe_command",  # bare identifier, no interrogative frame
+    ],
+)
+def test_usage_intent_silent_on_definition_and_prose(query: str) -> None:
+    assert detect_usage_intent(query) is None
+
+
+def test_usage_intent_fires_harmlessly_on_counterfactual_usage_phrasing() -> None:
+    """A "which function calls <nonexistent>" counterfactual fires + extracts the absent symbol.
+    Harmless: no chunk defines it, so `reorder_for_usage_intent` demotes nothing (the HARD gate
+    still refuses on an empty grounded set)."""
+    assert detect_usage_intent("Which function calls validate_jwt_token?") == "validate_jwt_token"
+
+
+# last_ident — recover the bare symbol name from an injected `## <kind> <name>` heading.
+
+
+@pytest.mark.parametrize(
+    ("heading", "expected"),
+    [
+        ("fn is_known_safe_command", "is_known_safe_command"),
+        ("struct Session", "Session"),
+        ("enum AskForApproval", "AskForApproval"),
+        ("Session::client", "client"),  # method: strip the Type:: prefix
+        ("mod tests", "tests"),
+        ("const EMBEDDED_INSTRUCTIONS", "EMBEDDED_INSTRUCTIONS"),
+        ("tests::bash_lc_safe_examples", "bash_lc_safe_examples"),
+    ],
+)
+def test_last_ident(heading: str, expected: str) -> None:
+    assert last_ident(heading) == expected
+
+
+# _chunk_defines_symbol — only the chunk whose OWN deepest symbol IS X.
+
+
+def test_chunk_defines_symbol_true_for_definition() -> None:
+    assert _chunk_defines_symbol(_chunk(["fn is_known_safe_command"]), "is_known_safe_command")
+
+
+def test_chunk_defines_symbol_false_for_caller() -> None:
+    # The caller's heading is the CALLER's symbol, not X → never demoted.
+    assert not _chunk_defines_symbol(_chunk(["fn assess_command_safety"]), "is_known_safe_command")
+
+
+def test_chunk_defines_symbol_false_when_x_is_only_an_ancestor() -> None:
+    # A method living under a parent named like X is NOT X's definition.
+    assert not _chunk_defines_symbol(_chunk(["impl Foo", "fn bar"]), "Foo")
+
+
+# _is_test_chunk — Rust test markers; precise (no false positive on attest_/contest).
+
+
+@pytest.mark.parametrize(
+    ("heading_path", "is_test"),
+    [
+        (["mod tests", "known_safe_examples"], True),
+        (["tests::bash_lc_safe_examples"], True),
+        (["fn test_unified_diff"], True),
+        (["impl Foo", "tests", "case_one"], True),
+        (["fn assess_command_safety"], False),
+        (["fn attest_signature"], False),  # 'attest' merely CONTAINS 'test' — not a test
+        (["struct ContestEntry"], False),
+    ],
+)
+def test_is_test_chunk(heading_path: list[str], is_test: bool) -> None:
+    assert _is_test_chunk(_chunk(heading_path)) is is_test
+
+
+# reorder_for_usage_intent — stable 2-tier demotion (def-of-X + tests to the bottom).
+
+
+def test_reorder_demotes_definition_and_tests_to_bottom_preserving_order() -> None:
+    other = _chunk(["enum AskForApproval"], "other")
+    defn = _chunk(["fn is_known_safe_command"], "def")
+    test = _chunk(["tests::ex"], "test")
+    caller = _chunk(["fn assess_command_safety"], "caller")
+    # input order: def, test, other, caller
+    out = reorder_for_usage_intent([defn, test, other, caller], "is_known_safe_command")
+    assert [c.chunk_id for c in out] == ["other", "caller", "def", "test"]
+
+
+def test_reorder_is_noop_when_nothing_matches() -> None:
+    # No chunk defines the (absent) symbol and none are tests → order is byte-identical.
+    a = _chunk(["fn alpha"], "a")
+    b = _chunk(["fn beta"], "b")
+    out = reorder_for_usage_intent([a, b], "nonexistent_symbol")
+    assert [c.chunk_id for c in out] == ["a", "b"]
+
+
+# usage_intent_demotion_enabled — default on, kill-switch, fail-open.
+
+
+def test_usage_intent_flag_default_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Default OFF (measured double-edged, audits/14) — opt-in only.
+    monkeypatch.delenv("MEMEX_AGENTS__USAGE_INTENT_DEMOTION_ENABLED", raising=False)
+    set_settings(MemexSettings())
+    assert usage_intent_demotion_enabled() is False
+
+
+def test_usage_intent_flag_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MEMEX_AGENTS__USAGE_INTENT_DEMOTION_ENABLED", "true")
+    set_settings(MemexSettings())
+    assert usage_intent_demotion_enabled() is True
+    monkeypatch.delenv("MEMEX_AGENTS__USAGE_INTENT_DEMOTION_ENABLED", raising=False)
+    set_settings(MemexSettings())
+
+
+def test_usage_intent_flag_fails_open_to_false(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _boom() -> object:
+        raise ConfigurationError("no settings")
+
+    monkeypatch.setattr(code_query, "get_settings", _boom)
+    assert usage_intent_demotion_enabled() is False

@@ -158,3 +158,34 @@ the 8 detector-triggering prose queries (3 of them counterfactuals) through `/as
 byte-identical, `refusal_cf`=1.0 held. Kill-switch `MEMEX_AGENTS__CODE_TERM_QUERY_ENABLED=false`. Spec
 `docs/specs/code-chunking.md` §"Phase 3 BUILD"; audit `docs/audits/13`. Phases 4–5 (full codex-rs corpus
 + `gold_chunk_recall@k` baseline) remain.
+
+## Amendment (2026-06-09): the usage-class answer gap — a measured DOUBLE-EDGED rerank lever, default-OFF
+
+Phases 4–5 (`docs/audits/14`) validated retrieval + the HARD gate on code but found an ANSWER-stage gap:
+"which function calls X" is sometimes answered by describing X's own DEFINITION (the title-matching chunk)
+instead of the caller (the gold). **Root-caused (probe-validated):** the cross-encoder ranks X's
+definition + test chunks above the caller, AND the answer LLM describes the definition whenever a
+definition chunk of X is in its visible top-k window (removing it from the window recovers the caller
+answer).
+
+**Built + measured the remedy:** a **usage-intent rerank-demotion** lever (the answer-stage complement to
+Lever A) — `index/code_query.detect_usage_intent` (fires on "which/where … calls/uses/owns/… X", silent on
+"what does X do" / definition queries; validated 17/17 usage, 0/16 def, 0/6 big-fn on the find-the-code
+set) + `reorder_for_usage_intent` (demote X's definition + test chunks below the top-k cut), wired into
+`agents/answering.py::rerank`. Pure reorder ⇒ HARD-gate-safe by construction.
+
+**Verdict: DOUBLE-EDGED — net +3 / −2 (17-query, N=2, text-verified).** It fixes 3 genuine
+definition-distraction cases (isknownsafe, unifieddiff, issafetocall) but REGRESSES 2 previously-correct
+ones — a WRONG answer (convhistory: demoting the definition removed the context disambiguating
+`ConversationHistory` from the similarly-named `ConversationHistoryWidget`) and a FALSE REFUSAL
+(applyhunks: over-demotion). **Demoting X's definition is a distractor when the LLM anchors on it but
+NECESSARY CONTEXT when a similarly-named sibling or the subject needs anchoring; no clean rerank rule
+separates the two at inference time.** Introducing a new false-refusal to fix distraction cases is a bad
+trade by the "over-refusal is a first-class failure" principle (ADR-0022).
+
+**Decision: ship DEFAULT-OFF, keep the validated infra.** `AgentsSettings.usage_intent_demotion_enabled`
+defaults False; the code + kill-switch + unit/integration tests stay as opt-in infra
+(`MEMEX_AGENTS__USAGE_INTENT_DEMOTION_ENABLED=true`). The default product is byte-identical to the
+pre-lever baseline. **Revisit when** a sharper reranker/embedder ranks the caller above the definition
+(which would moot the lever) — that, not a cleverer demotion heuristic, is the clean fix. Audit
+`docs/audits/14` §"usage-class answer gap"; spec `docs/specs/code-chunking.md`.
