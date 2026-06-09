@@ -40,6 +40,8 @@ Seven categories, each exercising a distinct part of the pipeline.
 
 Total v1 corpus: **~125 documents**. Big enough for meaningful statistics, small enough to ground-truth by hand in a few weeks.
 
+**Source code (added 2026-06-07, ADR-0021).** Source code is a distinct corpus class that sits *outside* the seven parse-fidelity categories above: it ingests **verbatim** (the canonical `.md` is the literal file — there is no CER/character-accuracy question), so its bar is **retrieval precision**, not parsing accuracy. The metric is `gold_chunk_recall@k` (`eval/scoring.py`) over find-the-code queries (where is `X` defined / what does `fn Y` do / which module handles `Z`) plus counterfactuals (a non-existent symbol, an absent feature), with the gold = the defining **symbol** chunk (Phase 2's symbol-aware chunking makes one chunk per `fn`/`struct`/`impl` method). Like the CCNA / cr350 local-source corpora, the **query set + baseline ship; the source repository stays local** (the reference target is `codex-rs`). The full ingest + baseline are Phases 4–5 (see [`docs/specs/code-chunking.md`](specs/code-chunking.md)); Phases 1–2 (verbatim ingest + Rust symbol-aware chunking) are shipped.
+
 Multilingual coverage: at least 30% of the corpus must be in non-English languages, with explicit coverage of (a) right-to-left scripts (Arabic, Hebrew), (b) CJK, (c) at least three European languages with diacritics (French, German, Polish), and (d) one Indic script (Devanagari).
 
 ---
