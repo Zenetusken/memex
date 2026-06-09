@@ -19,6 +19,7 @@ from memex.core.text import (
     strip_superseded_gfm_tables,
 )
 from memex.core.types import Chunk
+from memex.index.code_query import build_code_term_match
 
 logger = structlog.get_logger(__name__)
 
@@ -399,23 +400,25 @@ class FTSStore:
 
         return await asyncio.to_thread(_read)
 
-    async def search(self, query: str, *, k: int) -> list[Chunk]:
+    async def search(self, query: str, *, k: int, term_query: bool = False) -> list[Chunk]:
         """BM25 search over chunks_fts; returns top `k` joined with chunks_meta.
 
-        The whole query is wrapped as one FTS5 literal phrase, which matches
-        nothing for a natural-language question — so BM25 contributes 0 to RRF and
-        hybrid retrieval is effectively dense-only. This is intentional and BENIGN:
-        a 2026-05-29 arm-separation probe found BM25 recall is a strict SUBSET of the
-        dense embedder's on every eval corpus (union@50 ceiling == dense@50), so a
-        working lexical arm recovers no gold chunk dense misses. Don't "fix" the
+        Default (`term_query=False`): the whole query is wrapped as one FTS5 literal phrase,
+        which matches nothing for a natural-language question — so BM25 contributes 0 to RRF and
+        hybrid retrieval is effectively dense-only. This is intentional and BENIGN for PROSE:
+        a 2026-05-29 arm-separation probe found BM25 recall is a strict SUBSET of the dense
+        embedder's on every PROSE eval corpus (union@50 ceiling == dense@50). Don't "fix" the
         phrase wrap without re-measuring (e.g. against a future embedder swap).
+
+        `term_query=True` (the code-only path, Phase-3 Lever A, ADR-0021 / `docs/audits/13`):
+        build an OR'd-quoted-WHOLE-identifier MATCH instead (`index/code_query`) — for CODE the
+        prose finding INVERTS (a body identifier in a chunk titled by a different symbol is what
+        dense misses). Only `retrieve/hybrid.py` passes it, and only when the query NAMES a code
+        identifier; every other caller keeps the phrase-wrap.
         """
-        cleaned = _normalize_fts_query(query)
-        if not cleaned:
+        match = _fts_match_expr(query, term_query=term_query)
+        if match is None:
             return []
-        # Double-quoted, so FTS5 operator chars (" * : ( ^ AND/OR/NEAR) stay literal
-        # (no "malformed MATCH").
-        match = '"' + cleaned.replace('"', '""') + '"'
 
         def _read() -> list[Chunk]:
             rows = self._db.execute(
@@ -457,20 +460,20 @@ class FTSStore:
         *,
         doc_ids: list[str],
         k: int,
+        term_query: bool = False,
     ) -> list[Chunk]:
         """BM25 search restricted to a whitelist of document IDs.
 
         Used by the agent's `expand_graph` node — given a set of
         documents the graph says are related to the original query
         results, fetch the BM25-best chunks from those documents
-        specifically.
+        specifically. `term_query` is the code-only path (see `search`).
         """
         if not doc_ids or k <= 0:
             return []
-        cleaned = _normalize_fts_query(query)
-        if not cleaned:
+        match = _fts_match_expr(query, term_query=term_query)
+        if match is None:
             return []
-        match = '"' + cleaned.replace('"', '""') + '"'  # literal phrase (see search())
         placeholders = ",".join("?" for _ in doc_ids)
 
         def _read() -> list[Chunk]:
@@ -527,3 +530,23 @@ def _normalize_fts_query(query: str) -> str:
     # Drop ASCII control chars and Unicode line/paragraph separators.
     stripped = "".join(ch for ch in query if ord(ch) >= 0x20 and ch not in ("\x7f",))
     return stripped.strip()
+
+
+def _fts_match_expr(query: str, *, term_query: bool) -> str | None:
+    """Build the FTS5 MATCH expression for `query`; `None` if it normalises to nothing.
+
+    Default (`term_query=False`) is the literal phrase-wrap — byte-identical to the historical
+    behaviour, the only path any non-/ask caller ever uses. `term_query=True` is the code-only
+    path (Phase-3 Lever A, `index/code_query.build_code_term_match`): an OR'd-quoted-WHOLE-
+    identifier MATCH that GRACEFULLY FALLS BACK to the phrase-wrap when no identifier survives,
+    so a degenerate query can never break.
+    """
+    cleaned = _normalize_fts_query(query)
+    if not cleaned:
+        return None
+    if term_query:
+        term = build_code_term_match(query)
+        if term:
+            return term
+    # Double-quoted, so FTS5 operator chars (" * : ( ^ AND/OR/NEAR) stay literal.
+    return '"' + cleaned.replace('"', '""') + '"'

@@ -10,6 +10,7 @@ import structlog
 
 from memex.core.config import get_settings
 from memex.core.types import Chunk
+from memex.index.code_query import code_term_query_enabled, query_has_code_identifier
 from memex.index.embed_prompts import (
     EMBED_QUERY_PROMPT_NAME,
     EMBED_QUERY_PROMPT_TEXT,
@@ -75,12 +76,17 @@ async def hybrid_search(query: str, k: int = 50) -> list[Chunk]:
         fstore = await FTSStore.open(settings.vault_path)
         stack.push_async_callback(fstore.close)
         embedding = await _embed_query(query)
+        # Code-only term path (Phase-3 Lever A): the BM25 arm builds an OR'd-quoted-WHOLE-
+        # identifier MATCH ONLY when the flag is on AND the query NAMES a code identifier;
+        # a natural-language prose question keeps the unchanged phrase-wrap. Fail-open
+        # (config-read error → False) lives in `code_term_query_enabled`.
+        term = code_term_query_enabled() and query_has_code_identifier(query)
         dense_task = asyncio.create_task(vstore.search(embedding, k=k))
-        bm25_task = asyncio.create_task(fstore.search(query, k=k))
+        bm25_task = asyncio.create_task(fstore.search(query, k=k, term_query=term))
         dense, bm25 = await asyncio.gather(dense_task, bm25_task)
 
     fused = reciprocal_rank_fusion([dense, bm25])[:k]
-    log.info("hybrid.done", dense=len(dense), bm25=len(bm25), fused=len(fused))
+    log.info("hybrid.done", dense=len(dense), bm25=len(bm25), fused=len(fused), term=term)
     return fused
 
 
@@ -109,8 +115,11 @@ async def hybrid_search_in_docs(
         fstore = await FTSStore.open(settings.vault_path)
         stack.push_async_callback(fstore.close)
         embedding = await _embed_query(query)
+        term = code_term_query_enabled() and query_has_code_identifier(query)
         dense_task = asyncio.create_task(vstore.search_in_docs(embedding, doc_ids=doc_ids, k=k))
-        bm25_task = asyncio.create_task(fstore.search_in_docs(query, doc_ids=doc_ids, k=k))
+        bm25_task = asyncio.create_task(
+            fstore.search_in_docs(query, doc_ids=doc_ids, k=k, term_query=term)
+        )
         dense, bm25 = await asyncio.gather(dense_task, bm25_task)
 
     fused = reciprocal_rank_fusion([dense, bm25])[:k]
@@ -119,5 +128,6 @@ async def hybrid_search_in_docs(
         dense=len(dense),
         bm25=len(bm25),
         fused=len(fused),
+        term=term,
     )
     return fused

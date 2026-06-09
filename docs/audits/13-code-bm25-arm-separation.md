@@ -106,3 +106,42 @@ The query corpus is REPRODUCIBLE: `doc_id = sha256(bytes)[:8] + slug(stem)`, so 
 same files regenerates the SAME gold `relevant_chunk_ids` (content-addressed chunk_ids). The corpus
 ships (query set + ids; source stays local) and is the Phase 4-5 find-the-code baseline regardless of
 the build decision.
+
+## Lever A — SHIPPED (2026-06-09, default-ON, prose-validated)
+
+The build is the term-WHOLE recommendation, scoped to code so the prose phrase-wrap is untouched:
+- `index/code_query.py` — `query_has_code_identifier` (the per-query gate: a `_` or camelCase token),
+  the validated `build_code_term_match` WHOLE builder, `code_term_query_enabled` (fail-open).
+- `FTSStore.search`/`search_in_docs` gain `term_query: bool = False` (branch the MATCH; empty-term →
+  phrase-wrap fallback; default byte-identical — every non-/ask caller unaffected).
+- `retrieve/hybrid.py` threads `term = code_term_query_enabled() and query_has_code_identifier(query)`
+  into its 2 /ask calls ONLY. Config `AgentsSettings.code_term_query_enabled = True` (kill-switch
+  `MEMEX_AGENTS__CODE_TERM_QUERY_ENABLED=false`). Query-side only ⇒ NO reindex.
+
+**Validation (the build's measure-don't-assert):**
+- **Code benefit (production path):** `hybrid_search` flag-ON recovers all 3 only-by-term usage golds
+  (ranks 3 / 3 / 7); flag-OFF misses all 3; the definition control is rank 1 either way.
+- **Prose safety:** the detector changes behaviour on EXACTLY the 8 prose queries it fires on (across
+  cr350-diagrams / scientific-gte / technical-guidelines / slide-decks — **3 of them COUNTERFACTUALS**).
+  Ran those 8 through the production `/ask` path flag ON vs OFF, **N=2: byte-identical** — the 3
+  counterfactuals refused both runs (`refusal_cf` = 1.0 held), the 5 ANS answered both. Every
+  non-triggering prose query is byte-identical by construction (detector → phrase-wrap). So the default
+  ships **ON**. 1452 unit + 27 feature tests pass; pyright 0/0; ruff clean.
+
+The validation is the **triggering-query A/B** (the complete set of behaviour-changing queries), not a
+full multi-corpus eval — non-triggering queries can't change, so a full sweep would only re-measure
+baseline LLM flakiness. ADR-0021 (Amendment) records the decision.
+
+**Scope of the prose validation (honest):** it ran on the **prose-only main vault** (the current
+deployed state), so default-ON is genuinely safe *today*. But the feature's target is a vault that
+CONTAINS code, where a detector-triggering prose query retrieves over a pool that now includes code
+chunks — untested here. Concrete interaction: `scientific-gte-16` ("OpenAI text-embedding-3-large
+dimension", a counterfactual) triggers the detector, and codex-rs `model_provider_info.rs` carries
+openai/deepseek base URLs, so once code is in the vault term-WHOLE on "openai" can pull that code chunk
+into the counterfactual's pool. It almost certainly still refuses (no dimension there → `verify`
+rejects), but the **Phase 4-5 shared-vault re-verify MUST explicitly re-run the detector-triggering
+prose counterfactuals** after adding the code domain.
+
+**Known limitation:** the detector misses a usage query naming a BARE all-lowercase identifier ("which
+function calls `backoff`?" → no `_` / camelCase → stays on the phrase-wrap). Acceptable for v1 — the
+targeted usage/reference queries mostly name snake_case or PascalCase identifiers, which do fire.

@@ -137,3 +137,24 @@ spec [`docs/specs/code-chunking.md`](../specs/code-chunking.md) and the backend 
 - `docs/audits/09-fts-bm25-arm-separation.md` — the prose BM25 finding Phase 3 re-measures for code.
 - Commits: `268e39e` (Phase 1), `6e477b3` (code-view), `b9c3a58` (Phase 2).
 - Backend cheat-sheet: `src/memex/CLAUDE.md` (the code-ingest + symbol-chunking bullets).
+
+## Amendment (2026-06-09): Phase 3 — BM25-for-code, measured then shipped (Lever A)
+
+The "Phase 3 measurement shows BM25 recovers identifier chunks the dense arm misses" revisit trigger
+fired. **Measured (GO, `docs/audits/13`):** the prose finding "BM25 recall ⊆ dense" (`docs/audits/09`)
+INVERTS for code, but COMPLEMENTARILY — only on the **usage/reference** regime (the gold chunk is titled
+by a DIFFERENT symbol than the queried identifier, so dense's Phase-2 symbol-title lever misses it; a
+lexical body-match recovers it). Definitions are already saturated by the title lever; BM25 is
+redundant there.
+
+**Shipped (Lever A, default-ON, prose-validated):** a code-only term-query path — `FTSStore.search`
+builds an OR'd-quoted-WHOLE-identifier MATCH instead of the literal phrase-wrap, but **only** for the
+`/ask` retrieval path (`retrieve/hybrid.py`) and **only** when the query NAMES a code identifier
+(`index/code_query.query_has_code_identifier`) AND the flag is on. The prose phrase-wrap is otherwise
+untouched (every non-/ask `FTSStore.search` caller keeps the `term_query=False` default; a prose
+natural-language query is gated to the phrase-wrap by the detector). Query-side only ⇒ NO reindex, no
+chunk-id churn ⇒ HARD-gate-neutral on the index. The shared-primitive safety was confirmed by re-running
+the 8 detector-triggering prose queries (3 of them counterfactuals) through `/ask` flag ON vs OFF, N=2:
+byte-identical, `refusal_cf`=1.0 held. Kill-switch `MEMEX_AGENTS__CODE_TERM_QUERY_ENABLED=false`. Spec
+`docs/specs/code-chunking.md` §"Phase 3 BUILD"; audit `docs/audits/13`. Phases 4–5 (full codex-rs corpus
++ `gold_chunk_recall@k` baseline) remain.

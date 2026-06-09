@@ -135,6 +135,19 @@ prose + `v0`), `test_partial_reindex.py` (recipe record + force-on-mismatch), `t
   for the code path ONLY (never the prose phrase-wrap), shipped with the prose HARD-gate corpora re-run
   + the prose arm-separation re-confirmed. Lever B (FTS `tokenchars=_`, reindex-forcing) is NOT needed —
   the quoted-WHOLE term already matches snake_case contiguously.
+- **Phase 3 BUILD — Lever A SHIPPED 2026-06-09 (default-ON, prose-validated).** `index/code_query.py`
+  (`query_has_code_identifier` = the per-query gate: a query with a `_` or camelCase token; the validated
+  `build_code_term_match` WHOLE builder; `code_term_query_enabled` fail-open) + a `term_query: bool=False`
+  param on `FTSStore.search`/`search_in_docs` (branch the MATCH; empty-term → phrase-wrap fallback; default
+  byte-identical) threaded ONLY through `retrieve/hybrid.py`'s 2 /ask calls as
+  `term = code_term_query_enabled() and query_has_code_identifier(query)`. Config flag
+  `AgentsSettings.code_term_query_enabled: bool = True` (kill-switch `MEMEX_AGENTS__CODE_TERM_QUERY_ENABLED=
+  false`). **Query-side only → NO reindex.** Validation: (a) production `hybrid_search` flag-ON recovers
+  3/3 usage golds (flag-OFF misses all 3; definitions rank-1 either way); (b) the 8 detector-triggering
+  prose queries — incl. 3 COUNTERFACTUALS — are **byte-stable flag ON vs OFF, N=2** (`refusal_cf`=1.0 held;
+  answered counts identical), and every non-triggering prose query is byte-identical by construction. The
+  recommended **term-WHOLE** variant ships (sub-token splitting rejected — 0 recall gain, counterfactual
+  noise). See `docs/audits/13` + ADR-0021 (Amendment).
 - **Phases 4–5 — corpus + baseline.** Full `codex-rs` ingest + a find-the-code query corpus (where is
   `X` defined / what does `fn Y` do / which module handles `Z`, + counterfactuals: a non-existent
   symbol, an absent feature); gold = the symbol chunk via FTS-scoped anchors. Metric =
