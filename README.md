@@ -179,6 +179,8 @@ For scanned content add `MEMEX_PARSE_DOCLING_OCR=1`; for born-digital PDFs (Powe
 
 **Standalone images** (`.png`/`.jpg`/`.jpeg`/`.webp`/`.bmp`/`.tif`/`.tiff`/`.gif`) ingest as a one-page scan (ADR-0020): the image is wrapped into a cached 1-page PDF and run through the VLM transcription route, so a screenshot, infographic, exported topology diagram, or photographed page becomes searchable + grounded-answerable. The VLM is **mandatory** for images (an image has no text layer to read — the same precedent as audio always running ASR), so `memex ingest diagram.png` works out of the box even with the default `MEMEX_PARSE__DISABLE_VLM=true`. An unreadable image is HARD-gate-safe either way: it transcribes to nothing (refused, no document written) or the VLM returns an honest "the image is blank" caption — a thin document that then refuses every substantive query; never a junk document with fabricated content. HEIC/AVIF are not yet accepted (they need a separate decode dependency). Spec: [`docs/specs/image-ingestion.md`](docs/specs/image-ingestion.md).
 
+**Source code** (`.rs`/`.py`/`.ts`/`.go`/`.js`/… — the `CODE_SUFFIXES` set) ingests as **documents** (ADR-0021), not through the prose layout model that mangles aligned code into pipe-tables. A code file is stored **verbatim** (the canonical `.md` is the literal source) and chunked on **symbol boundaries** — for Rust, one chunk per `fn` / `struct` / `impl` method — so "where is `FunctionCallOutputPayload` serialized?" lands on the exact symbol rather than a size-budgeted fragment. The web UI renders a code document *as code* (`source · rust`, no heading/wikilink transforms — a `# comment` is not a heading). `scripts/ingest_codebase.py` walks a whole repository (titles are repo-relative paths; `.git`/`target`/`node_modules` skipped). Symbol-aware chunking is **Rust-first** in v1; other languages ingest verbatim and chunk by size for now. Spec: [`docs/specs/code-chunking.md`](docs/specs/code-chunking.md).
+
 **Or ingest from the browser** — the web UI has an **Add document** page: drag/drop or pick a file and it runs the *whole* pipeline (parse → VLM/chart-OCR/ASR → index → enrich) with chat-style live progress and a real-time VRAM panel, then lands the doc fully searchable + browsable. Ingestion is an **exclusive-GPU mode**: while a document is being consumed the answering surfaces pause (you can still browse everything already ingested), so all VRAM goes to the pipeline. No terminal needed.
 
 ### Ask grounded questions
@@ -489,7 +491,7 @@ Integration tests fake the heavy I/O (vLLM, Docling, PyMuPDF worker, LanceDB, se
 | 🔧 The how (engineering rules + stack) | [`docs/GUIDELINES.md`](docs/GUIDELINES.md) |
 | 🗺️ What's done & what's queued | [`docs/ROADMAP.md`](docs/ROADMAP.md) |
 | 🏗️ The architecture blueprint | [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) |
-| 📐 Why we picked what we picked | [`docs/adr/`](docs/adr/) (ADRs 0001–0020) |
+| 📐 Why we picked what we picked | [`docs/adr/`](docs/adr/) (ADRs 0001–0022) |
 | 🚀 Network-facing MCP setup | [`docs/deploy/mcp-http.md`](docs/deploy/mcp-http.md) |
 | 🖥️ systemd deployment (Linux) | [`docs/deploy/systemd.md`](docs/deploy/systemd.md) |
 | 🍎 launchd deployment (macOS dev) | [`docs/deploy/launchd.md`](docs/deploy/launchd.md) |

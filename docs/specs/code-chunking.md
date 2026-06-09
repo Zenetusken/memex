@@ -1,0 +1,147 @@
+# Spec: Symbol-Aware Code Chunking
+
+**Status:** Phase 1 + Phase 2 shipped (2026-06-07, `268e39e` + `b9c3a58`); Phases 3–5 planned.
+**Decision record:** [ADR-0021](../adr/0021-codebase-corpus-code-as-documents.md).
+**Backend cheat-sheet:** `src/memex/CLAUDE.md` (the code-ingest + symbol-chunking bullets).
+
+This spec is the build-level design for ingesting a **source-code repository as documents** with
+**symbol-precise retrieval** — the mechanism behind ADR-0021. It assumes the grounded contract is
+unchanged: answer from the vault or refuse, `refusal_cf=1.0`.
+
+## Goal
+
+A code question ("where is `X` defined", "what does `fn Y` do") must rank the **defining symbol**
+chunk, not a size-budgeted fragment. The lever is the chunk's title: the deepest `heading_path`
+becomes the EmbeddingGemma document-prompt title (`index/embed_prompts.py`), so if each chunk's
+heading *is* its symbol, the symbol name is in the embedding input. Everything below exists to make
+the chunker split on symbol boundaries while keeping the canonical `.md` the verbatim source.
+
+## Phase 1 — verbatim ingest (`268e39e`)
+
+The pipeline previously mangled code: a non-(md/media/office/image/pdf) file fell through to Docling,
+which renders aligned code as a markdown pipe-table. Phase 1 routes code around that.
+
+- **`core/source_types.py`** — `CODE_SUFFIXES` (the known code extensions), `LANGUAGE_FOR_SUFFIX` +
+  `language_for_suffix(suffix)` (suffix → display language, bare-ext fallback), and
+  `code_language_for_doc(asset_dir)` (globs `source.*` → the language, or `None`) — the shared
+  index+enrich gate.
+- **`ingest/validation.py`** — a `code` `DetectedKind`: a suffix ∈ `CODE_SUFFIXES` **and**
+  `_looks_like_text(head)`. It is deliberately **absent from `_EXTENSION_FOR_KIND`**, so the original
+  suffix is preserved on copy (the image/audio precedent — a `.rs` mapped to `.txt` would lose the
+  language before parse).
+- **`parse/pipeline.py`** — `parse_document` routes a `CODE_SUFFIXES` source to the existing
+  **`_passthrough_markdown`** (verbatim UTF-8; no chart-OCR / no VLM) **before** the Docling fallback.
+  Rust `#[attr]` / `#!` have no space after `#`, so they don't trip the chunker's `# `-heading regex.
+- **Title = repo-relative path** (`exec/src/lib.rs`), not the basename — `lib.rs`/`mod.rs`/`main.rs`
+  collide across crates. `scripts/ingest_codebase.py` walks a repo with repo-relative titles and skips
+  `.git`/`target`/`node_modules`.
+
+HARD-gate-neutral: code is a verbatim-stored prose-shaped document; it adds no grounding surface.
+
+## Code-view rendering (`6e477b3`)
+
+A source-code doc renders **as code**, not as markdown. `webui/app.py::_is_code_source(source)`
+(suffix ∈ `CODE_SUFFIXES`) gates all three body-render sites (detail route + the inline-edit
+cancel/save partials) to: render the verbatim body in a `<pre>` under a `source · <language>` label,
+and **suppress** the markdown heading-anchor + `[[wikilink]]` transforms (a Python/shell `# comment`
+must not become an H1; a literal `[[x]]` must not become a link). Zero template edits — a code doc is
+already the `has_source=True`/`has_preview=False` pane-solo branch, and the `_document_body.html`
+`rendered_body or document.body` fallback renders the raw (Jinja-autoescaped) body when
+`rendered_body=None`. Presentation-only, HARD-gate-neutral. No syntax highlighting in v1 (deliberate;
+`<pre>` word-wrap kept to preserve the zero-template-edit elegance).
+
+## Phase 2 — symbol-aware chunking (`b9c3a58`)
+
+The mechanism is **transient `## <symbol>` heading injection** into the chunker's copy only — the
+blessed `reattach_chart_extractions` / `linearize_gfm_tables` transform pattern. No `chunk_document`
+surgery (injection can't drop bytes; the embed-title lever is mechanism-independent).
+
+### The Rust symbol splitter — `index/rust_symbols.py`
+
+`split_rust_symbols(body) -> list[Symbol]` is pure and dependency-free (NO tree-sitter — the air-gap
+constraint):
+
+- a **masking lexer** blanks string literals, comments, char-literals, and raw-strings so a brace or
+  `fn` *inside* them can't corrupt the brace-depth scan;
+- a **line-start regex grammar** for `fn` / `struct` / `enum` / `union` / `trait` / `type` / `mod` /
+  `const` / `static` / `macro_rules` / `impl`, plus methods nested inside `impl` / `trait` / `mod tests`
+  (fully-qualified as `Type::method`);
+- **preamble capture** backs each symbol's start up over its `#[..]` attributes (multi-line,
+  bracket-balanced) and `///` / `//!` doc-comments;
+- **bounded failure** — any error returns `[]`, so the doc falls back to the unchanged prose path and
+  never drops content.
+
+`inject_symbol_headings(body, symbols)` prepends `## <symbol>` / `### <Type::method>` ATX lines at the
+symbol starts, so the existing section-splitter produces one chunk per symbol with
+`heading_path = [impl Foo, Foo::bar]`.
+
+### The shared seam — `index/pipeline.py::build_chunking_body`
+
+```python
+def build_chunking_body(doc, chart_extractions, *, code_language) -> tuple[str, str]:
+    body = linearize_gfm_tables(reattach_chart_extractions(doc.body, chart_extractions))
+    if code_language == "rust":
+        return inject_symbol_headings(body, split_rust_symbols(body)), "code-rust-v1"
+    return body, "v0"
+```
+
+Called by **both** `index_document` and `enrich.pipeline.enrich_document` (the #394 MENTIONS-resolution
+parity — both chunk byte-identical bytes). `code_language` is the caller's one-shot
+`code_language_for_doc(doc.ref.asset_dir)` result (passed in so index + enrich glob once, not twice).
+The returned `chunking_recipe_version` is keyed on the transform **actually applied**: `"code-rust-v1"`
+iff the Rust grammar ran, else `"v0"` (prose **and** non-Rust code, which both fall through to the
+unchanged prose path). It is recorded on the manifest `IndexStage` (default `"v0"`) and OR'd into the
+`index_document` force-detection — mirroring `embedding_recipe_version` — so a future grammar/label
+change force-rechunks exactly the docs that used that grammar. (Page attribution is off for code.)
+
+### Decisions (user-confirmed)
+
+- **Rust-only v1** — a Python splitter misfires on `# comment` lines and significant-whitespace blocks
+  (a separate increment).
+- **Method-level granularity**; **one symbol per chunk** (no packing in v1).
+
+### Honest costs
+
+- **Chunk *text* is not byte-verbatim** — the chunker's `_PARAGRAPH_RE.split` + `.strip()` normalizes
+  blank runs / post-blank indentation. Cosmetic for Rust; a second reason Python is out of v1. The
+  canonical `.md` stays verbatim.
+- **No in-source citation anchors** (`#fn-foo` jump-to-symbol) — deferred to v2.
+
+### HARD-gate neutrality — by construction
+
+The code path is gated (prose chunking byte-identical — verified 16/16 chunk_ids on a real ingest),
+and off-topic code chunks cannot make a counterfactual answerable regardless of LLM sampling. The
+linux-fundamentals eval (code doc present, `refusal_cf=1.0`) is a confirmatory backstop, not the
+proof. Tests: `test_rust_symbols.py` (grammar + edge cases: brace-in-string / char-lit / raw-string /
+lifetime / multiline-sig / multiline-attr / unbalanced→graceful), `test_source_types.py`,
+`test_code_chunking.py` (rust → symbol chunks + `heading_path`; prose byte-identical; non-rust →
+prose + `v0`), `test_partial_reindex.py` (recipe record + force-on-mismatch), `test_enrich_and_graph.py`
+(code MENTIONS parity).
+
+## Phases 3–5 — planned
+
+- **Phase 3 — BM25 for code, MEASURE-FIRST.** Code is identifier search; the prose "BM25 recall ⊆
+  dense" finding (`docs/audits/09-fts-bm25-arm-separation.md`) likely **inverts** for code, where
+  EmbeddingGemma is off-distribution and BM25 can recover exact-identifier chunks. First re-run the
+  dense-vs-union arm-separation probe (`eval/scoring.py::gold_chunk_recall`) on *code* queries. Only if
+  BM25 adds recall does a scoped code-path branch ship in `FTSStore.search` query construction — and it
+  ships with the existing **prose** corpora's HARD gates re-run, since `FTSStore.search` is shared. The
+  reverted NL term-query mode may be the right tool for identifiers (re-evaluate code-specific).
+- **Phases 4–5 — corpus + baseline.** Full `codex-rs` ingest + a find-the-code query corpus (where is
+  `X` defined / what does `fn Y` do / which module handles `Z`, + counterfactuals: a non-existent
+  symbol, an absent feature); gold = the symbol chunk via FTS-scoped anchors. Metric =
+  `gold_chunk_recall@k` (the razor-sharp target) + grounded answer + `refusal_cf`; multi-run +
+  device-pinned (`co_residence_mode=manual`); re-verify the shared-vault gates (cr350/ccna/linux) still
+  hold after adding the code domain.
+- **Entry condition before the full ingest** (a doc-identity hazard): `doc_id = sha256(bytes)[:8] +
+  slug(basename-stem)`, so two byte-identical same-stem files (e.g. two trivial `mod.rs`) merge to one
+  doc and the second `retitle` silently overwrites the first's path. Pre-check
+  `#distinct(sha256, stem) == #files`; if short, fold the repo-relative path into the hashed identity
+  or accept+log the merges deliberately.
+
+## References
+
+- [ADR-0021](../adr/0021-codebase-corpus-code-as-documents.md) — the decision.
+- `docs/audits/09-fts-bm25-arm-separation.md` — the prose BM25 finding Phase 3 re-measures.
+- The transient-transform precedents: `reattach_chart_extractions` (the chart-sidecar, #362) and
+  `linearize_gfm_tables` (`[table-rows]`) — the pattern symbol injection rides.

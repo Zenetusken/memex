@@ -13,7 +13,7 @@ node (which keeps its own inline bounded schema — the answer graph stays byte-
 `assess_responsiveness` is the responsiveness twin: the consented A→B escalation, when it presents
 the grounded subset AS an answer (ADR-0016), needs the SAME responsiveness verdict the `/ask`
 `assess_relevance` node applies — "do these grounded claims answer the SPECIFIC question, or a
-related-but-different one?". We render the UNCHANGED `assess_relevance@v1` prompt + `RelevanceAssessment`
+related-but-different one?". We render the UNCHANGED `assess_relevance` prompt (the loader auto-selects the live version — now `@v2`, the ADR-0022 world-knowledge ban) + `RelevanceAssessment`
 schema here rather than refactor the `/ask` node to call this helper: making `answering` import
 `grounding` would create an `answering↔grounding` cycle (this module already imports FROM answering)
 AND would edit a HARD-gate node for zero behavioural gain. The single source of truth is the prompt
@@ -150,8 +150,9 @@ async def assess_responsiveness(
 ) -> tuple[RelevanceAssessment, int]:
     """Whole-answer responsiveness gate, reusable OUTSIDE the `/ask` graph — does the
     already-grounded `summary` + `claim_texts` answer the SPECIFIC question, or a
-    related-but-different one? Runs the UNCHANGED `assess_relevance@v1` prompt + schema (the
-    same one the `/ask` `assess_relevance` node uses; the node is left untouched, see the
+    related-but-different one? Runs the UNCHANGED `assess_relevance` prompt + schema (the
+    loader-selected live version, now `@v2`; the same one the `/ask` `assess_relevance` node
+    uses; the node is left untouched, see the
     module docstring on the import-cycle reason).
 
     FAIL-CLOSED on a `ModelCallError` → `(RelevanceAssessment(responsive=False, …), 0)`: a gate
