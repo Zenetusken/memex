@@ -46,8 +46,8 @@ def _highest_on_disk(name: str) -> str:
 
 def test_prompt_tag_for_derives_name_and_version() -> None:
     load_prompt_spec.cache_clear()
-    assert active_version("assess_sufficiency") == "v2"
-    assert prompt_tag_for("assess_sufficiency") == "assess_sufficiency@v2"
+    assert active_version("assess_sufficiency") == "v4"
+    assert prompt_tag_for("assess_sufficiency") == "assess_sufficiency@v4"
 
 
 def test_prompt_tag_for_is_pin_aware(monkeypatch: pytest.MonkeyPatch) -> None:
