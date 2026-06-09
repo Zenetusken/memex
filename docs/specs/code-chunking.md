@@ -120,13 +120,34 @@ prose + `v0`), `test_partial_reindex.py` (recipe record + force-on-mismatch), `t
 
 ## Phases 3–5 — planned
 
-- **Phase 3 — BM25 for code, MEASURE-FIRST.** Code is identifier search; the prose "BM25 recall ⊆
-  dense" finding (`docs/audits/09-fts-bm25-arm-separation.md`) likely **inverts** for code, where
-  EmbeddingGemma is off-distribution and BM25 can recover exact-identifier chunks. First re-run the
-  dense-vs-union arm-separation probe (`eval/scoring.py::gold_chunk_recall`) on *code* queries. Only if
-  BM25 adds recall does a scoped code-path branch ship in `FTSStore.search` query construction — and it
-  ships with the existing **prose** corpora's HARD gates re-run, since `FTSStore.search` is shared. The
-  reverted NL term-query mode may be the right tool for identifiers (re-evaluate code-specific).
+- **Phase 3 — BM25 for code, MEASURE-FIRST → MEASURED 2026-06-09, verdict GO (complementary).**
+  Record: [`docs/audits/13-code-bm25-arm-separation.md`]. The prose "BM25 recall ⊆ dense" finding
+  (`docs/audits/09`) **inverts for code, but only on the usage/reference regime.** On a 357-chunk
+  `codex-rs/core` slice + a 20-query find-the-code corpus (`tests/eval-data/codex-rs-find-the-code/`,
+  the Phase 4-5 seed) measured via the read-only `scripts/code_bm25_arm_probe.py` (deterministic, N=2
+  byte-identical): **definition queries** dense recall@50 = 1.00 (Phase-2's symbol-as-embed-title lever
+  saturates them — BM25 redundant); **usage/reference queries** ("which fn calls X", "where is X used",
+  gold titled by a DIFFERENT symbol) dense = 0.70 → **bm25-term = 1.00, 3/3 dense-misses recovered**;
+  the LIVE bm25-phrase = 0.05 (≈ nothing). So BM25-for-code is a COMPLEMENT that patches the
+  usage/reference gap, NOT "BM25 beats dense." The recommended builder is **term-WHOLE** (OR'd quoted
+  WHOLE identifiers; `_`-sub-splitting buys 0 recall + adds counterfactual noise). **The BUILD is gated
+  on a user go-ahead** (it edits the SHARED `FTSStore.search`): a scoped, env-gated code-path term-query
+  for the code path ONLY (never the prose phrase-wrap), shipped with the prose HARD-gate corpora re-run
+  + the prose arm-separation re-confirmed. Lever B (FTS `tokenchars=_`, reindex-forcing) is NOT needed —
+  the quoted-WHOLE term already matches snake_case contiguously.
+- **Phase 3 BUILD — Lever A SHIPPED 2026-06-09 (default-ON, prose-validated).** `index/code_query.py`
+  (`query_has_code_identifier` = the per-query gate: a query with a `_` or camelCase token; the validated
+  `build_code_term_match` WHOLE builder; `code_term_query_enabled` fail-open) + a `term_query: bool=False`
+  param on `FTSStore.search`/`search_in_docs` (branch the MATCH; empty-term → phrase-wrap fallback; default
+  byte-identical) threaded ONLY through `retrieve/hybrid.py`'s 2 /ask calls as
+  `term = code_term_query_enabled() and query_has_code_identifier(query)`. Config flag
+  `AgentsSettings.code_term_query_enabled: bool = True` (kill-switch `MEMEX_AGENTS__CODE_TERM_QUERY_ENABLED=
+  false`). **Query-side only → NO reindex.** Validation: (a) production `hybrid_search` flag-ON recovers
+  3/3 usage golds (flag-OFF misses all 3; definitions rank-1 either way); (b) the 8 detector-triggering
+  prose queries — incl. 3 COUNTERFACTUALS — are **byte-stable flag ON vs OFF, N=2** (`refusal_cf`=1.0 held;
+  answered counts identical), and every non-triggering prose query is byte-identical by construction. The
+  recommended **term-WHOLE** variant ships (sub-token splitting rejected — 0 recall gain, counterfactual
+  noise). See `docs/audits/13` + ADR-0021 (Amendment).
 - **Phases 4–5 — corpus + baseline.** Full `codex-rs` ingest + a find-the-code query corpus (where is
   `X` defined / what does `fn Y` do / which module handles `Z`, + counterfactuals: a non-existent
   symbol, an absent feature); gold = the symbol chunk via FTS-scoped anchors. Metric =

@@ -750,6 +750,15 @@ class AgentsSettings(BaseModel):
     # over-refusal-safe BY CONSTRUCTION; table/chart chunks are never name-only so Table-RAG is
     # untouched. Default on; `MEMEX_AGENTS__NAME_ONLY_GROUNDING_BACKSTOP_ENABLED=false` reverts.
     name_only_grounding_backstop_enabled: bool = True
+    # The code-only FTS term-query path (Phase-3 Lever A, 2026-06-09, ADR-0021 / audits/13):
+    # when a /ask query NAMES a code identifier (snake_case / camelCase — see
+    # `index/code_query.query_has_code_identifier`), the BM25 arm builds an OR'd-quoted-WHOLE-
+    # identifier MATCH instead of the literal phrase-wrap, recovering usage/reference code chunks
+    # the dense embedder misses (gold titled by a DIFFERENT symbol, the queried id in the body).
+    # SCOPED to code-identifier queries + query-side only (NO reindex); prose natural-language
+    # queries keep the unchanged phrase-wrap. Default on (prose HARD-gate-validated, refusal_cf
+    # held); `MEMEX_AGENTS__CODE_TERM_QUERY_ENABLED=false` reverts to the phrase-wrap everywhere.
+    code_term_query_enabled: bool = True
     # Index-time column UNDER-SPLIT recovery (2026-05-31): split a Docling-MERGED
     # table column (a >=2-bold-group header over K>=2 clean number-runs, e.g. the
     # 10-K "Stock Awards ($) Total ($)" / "278,809 342,559") back into K columns
