@@ -148,12 +148,22 @@ prose + `v0`), `test_partial_reindex.py` (recipe record + force-on-mismatch), `t
   answered counts identical), and every non-triggering prose query is byte-identical by construction. The
   recommended **term-WHOLE** variant ships (sub-token splitting rejected — 0 recall gain, counterfactual
   noise). See `docs/audits/13` + ADR-0021 (Amendment).
-- **Phases 4–5 — corpus + baseline.** Full `codex-rs` ingest + a find-the-code query corpus (where is
-  `X` defined / what does `fn Y` do / which module handles `Z`, + counterfactuals: a non-existent
-  symbol, an absent feature); gold = the symbol chunk via FTS-scoped anchors. Metric =
-  `gold_chunk_recall@k` (the razor-sharp target) + grounded answer + `refusal_cf`; multi-run +
-  device-pinned (`co_residence_mode=manual`); re-verify the shared-vault gates (cr350/ccna/linux) still
-  hold after adding the code domain.
+- **Phases 4–5 — corpus + baseline — DONE 2026-06-09 (`docs/audits/14`).** The full `codex-rs` (99 `.rs`)
+  is now a permanent MAIN-vault corpus (~1235 chunks among 7356; vault backed up first), with a 47-query
+  find-the-code set (16 definition + 17 usage/reference + 6 big-function truncation probes + 8
+  counterfactuals). **Baseline: retrieval `rrf@50` (production) = 1.000 / dense 0.923 (usage-regime Δ via
+  Lever A +0.130, 3/3 dense-misses recovered); grounded answering 38/39 ANS answered, `refusal_cf`=1.0
+  (N=3 — the HARD gate holds on code even with 37–50 lexical counterfactual hits); cp 0.77.** An
+  answer-correctness spot-check (N=8, usage-weighted) found 6/8 correct but **2 usage-class answers
+  wrong/partial** — the answer stage prefers the title-matching DEFINITION over the usage gold (`memex
+  eval` scores answered/cp, not answer text). So retrieval + the HARD gate are validated; answer
+  correctness has a usage-class gap — the **next-frontier answer-stage lever** (audit-14 §Residuals). The
+  shared-vault prose gates HELD with code present (`refusal_cf`=1.0 on the 3 detector-triggering prose
+  counterfactuals — the Lever A × `model_provider_info.rs`-openai interaction is safe). **Truncation
+  measured-benign:** 5/6 big-function probes (incl. the 2 largest, 4912/4647 chars) answer despite
+  `truncate(1800)`; the lone false-refusal (`run_main`, an entry-point fn) is borderline relevance, not
+  truncation — recorded, no fix. The metric was the standalone `code_bm25_arm_probe.py` (recall@k) +
+  `memex eval` (grounded answering); the gold_chunk_recall stays a committed probe, not a new eval mode.
 - **Entry condition before the full ingest** (a doc-identity hazard): `doc_id = sha256(bytes)[:8] +
   slug(basename-stem)`, so two byte-identical same-stem files (e.g. two trivial `mod.rs`) merge to one
   doc and the second `retitle` silently overwrites the first's path. Pre-check

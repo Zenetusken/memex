@@ -11,14 +11,58 @@
     "is-safe-command": "c95df415-is-safe-command",
     "codex": "453bd6d4-codex",
     "exec-linux": "e6de09aa-exec-linux",
-    "models": "709be946-models"
+    "models": "709be946-models",
+    "apply-patch-lib": "f519b452-lib",
+    "apply-patch-parser": "8ebab925-parser",
+    "ansi-escape-lib": "ad99fc46-lib",
+    "execpolicy-program": "558719b2-program",
+    "execpolicy-arg-resolver": "9743e48a-arg-resolver",
+    "execpolicy-policy": "5dd22fa4-policy",
+    "exec-lib": "37fddba9-lib",
+    "mcp-client": "323dd3ed-mcp-client",
+    "mcp-connection-manager": "31a4e505-mcp-connection-manager",
+    "tui-app": "408a2d3e-app",
+    "tui-history-cell": "5c8a9b2a-history-cell",
+    "tui-conv-history-widget": "f2e23d3e-conversation-history-widget",
+    "cli-main": "e5448b1d-main"
   },
-  "_query_count": 24,
+  "_query_count": 47,
   "_mix": {
-    "ans": 20,
-    "ref": 4,
-    "definition": 10,
-    "usage_reference": 10
+    "ans": 39,
+    "ref": 8,
+    "definition": 16,
+    "usage_reference": 17,
+    "big_function_truncation_probe": 6
+  },
+  "_phase": "4-5 expansion (2026-06-09): full codex-rs (99 .rs) in the MAIN vault; +24 queries across apply-patch/ansi-escape/exec/execpolicy/mcp-client/tui/cli + 6 deliberate BIG-FUNCTION probes (gold chunk >1800 chars, the truncate-budget risk) + cross-crate usage.",
+  "_baseline_2026_06_09": {
+    "stack": "Qwen3.5-4B-AWQ-4bit orchestrator (vLLM) + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3; device PINNED co_residence_mode=manual, embedder+reranker=cpu; Lever A (code-term FTS) default-ON; MAIN vault = codex-rs 99 .rs + prose corpora (7356 chunks).",
+    "retrieval_recall_at_k": {
+      "n_ans": 39,
+      "dense_at_50": 0.923,
+      "bm25_term_whole_at_50": 0.949,
+      "union_at_50": 1.0,
+      "rrf_at_50_production": 1.0,
+      "definition_dense_at_50": 1.0,
+      "usage_reference_dense_at_50": 0.87,
+      "usage_reference_union_at_50": 1.0,
+      "only_via_bm25_term_at_50": 3
+    },
+    "grounded_answering": {
+      "query_count": 47,
+      "answered_count_single_run": 38,
+      "refused_count": 9,
+      "refusal_rate_on_counterfactuals": 1.0,
+      "refusal_cf_runs": 3,
+      "mean_citation_precision": 0.771,
+      "mean_citation_precision_answered_only": 0.717,
+      "hallucinations": 0,
+      "false_refusals": "ftc-big-runmain (orchestration entry-point fn; deterministic borderline relevance refusal, NOT truncation — the 2 bigger probes answer)",
+      "answer_correctness_spotcheck": "N=8 usage-weighted vs _expected_answer: 6 correct, 2 usage-class wrong/partial (ftc-use-isknownsafe answered the DEFINITION not the caller; ftc-use-unifieddiff named the test callers, missed the gold production caller). memex eval scores answered/cp, NOT answer-text correctness. The answer stage still prefers the title-matching definition over the usage gold — the next-frontier answer-stage lever (audit-14 §Residuals)."
+    },
+    "truncation_probe": "5/6 big-function chunks (>1800 chars, incl. the 2 largest 4912/4647) answer correctly; truncate(1800) does not broadly break grounded code answering.",
+    "shared_vault_prose_gate_reverify": "refusal_cf=1.0 N=2 on the 3 detector-triggering prose counterfactuals (scientific-gte-16/cr350-diag-14/technical-guidelines-17) WITH code present; 5 prose ANS byte-stable.",
+    "record": "docs/audits/14-codebase-corpus-baseline.md"
   },
   "_labelling_rule": "ANS queries: `_anchor_phrase` is a distinctive SINGLE-LINE substring (Rust chunk text is whitespace-normalised, so a multi-line anchor won't FTS-match) from the GOLD chunk; `scripts/extend_corpus.py resolve --max-chunks 1` populates `relevant_chunk_ids` via FTS scoped to the per-query `_doc_id`. For USAGE queries the gold is the symbol that USES the queried identifier (its heading is a DIFFERENT symbol). REF queries: `should_refuse=true`, `relevant_chunk_ids=[]` (a non-existent symbol -> no chunk contains it -> bm25-term=0, the lexical true-negative check).",
   "_created": "2026-06-09",
@@ -300,7 +344,271 @@
       "_answer_type": "counterfactual_nonexistent_symbol",
       "should_refuse": true,
       "relevant_chunk_ids": []
+    },
+    {
+      "qid": "ftc-def-applypatchaction",
+      "question": "What fields does the ApplyPatchAction struct hold?",
+      "_anchor_phrase": "struct ApplyPatchAction",
+      "_expected_answer": "ApplyPatchAction (apply-patch/lib.rs) holds the parsed per-file changes.",
+      "_answer_type": "definition_pascal_struct",
+      "_doc_id": "f519b452-lib",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "f519b452-lib#46b30859b7"
+      ]
+    },
+    {
+      "qid": "ftc-def-parsepatch",
+      "question": "How is the parse_patch function implemented?",
+      "_anchor_phrase": "fn parse_patch",
+      "_expected_answer": "parse_patch (apply-patch/parser.rs) parses a patch into hunks.",
+      "_answer_type": "definition_snake_fn",
+      "_doc_id": "8ebab925-parser",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "8ebab925-parser#1bb8d2ea29"
+      ]
+    },
+    {
+      "qid": "ftc-def-ansiescapeline",
+      "question": "What does the ansi_escape_line function do?",
+      "_anchor_phrase": "fn ansi_escape_line",
+      "_expected_answer": "ansi_escape_line (ansi-escape/lib.rs) converts an ANSI-escaped line into styled spans.",
+      "_answer_type": "definition_snake_fn",
+      "_doc_id": "ad99fc46-lib",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "ad99fc46-lib#c550366430"
+      ]
+    },
+    {
+      "qid": "ftc-def-programspec",
+      "question": "What does the ProgramSpec struct define?",
+      "_anchor_phrase": "struct ProgramSpec",
+      "_expected_answer": "ProgramSpec (execpolicy/program.rs) defines an allowed program + its arg rules.",
+      "_answer_type": "definition_pascal_struct",
+      "_doc_id": "558719b2-program",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "558719b2-program#e642d63747"
+      ]
+    },
+    {
+      "qid": "ftc-def-policy",
+      "question": "What does the Policy struct represent?",
+      "_anchor_phrase": "struct Policy",
+      "_expected_answer": "Policy (execpolicy/policy.rs) holds the set of allowed ProgramSpecs.",
+      "_answer_type": "definition_pascal_struct",
+      "_doc_id": "5dd22fa4-policy",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "5dd22fa4-policy#d8f52402d4"
+      ]
+    },
+    {
+      "qid": "ftc-def-hunk",
+      "question": "What variants does the Hunk enum have?",
+      "_anchor_phrase": "enum Hunk",
+      "_expected_answer": "Hunk (apply-patch/parser.rs) variants for add/delete/update file changes.",
+      "_answer_type": "definition_pascal_enum",
+      "_doc_id": "8ebab925-parser",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "8ebab925-parser#68b366c87f"
+      ]
+    },
+    {
+      "qid": "ftc-big-resolveargs",
+      "question": "What does the resolve_observed_args_with_patterns function do?",
+      "_anchor_phrase": "fn resolve_observed_args_with_patterns",
+      "_expected_answer": "resolve_observed_args_with_patterns (execpolicy/arg_resolver.rs) matches observed args against the spec patterns. BIG chunk (>1800) \u2014 truncation probe.",
+      "_answer_type": "big_function_truncation_probe",
+      "_doc_id": "9743e48a-arg-resolver",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "9743e48a-arg-resolver#6e1ebbe250"
+      ]
+    },
+    {
+      "qid": "ftc-big-runmain",
+      "question": "What does the run_main function in the exec crate do?",
+      "_anchor_phrase": "fn run_main",
+      "_expected_answer": "run_main (exec/lib.rs) is the exec entry point. BIG chunk (>1800) \u2014 truncation probe.",
+      "_answer_type": "big_function_truncation_probe",
+      "_doc_id": "37fddba9-lib",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "37fddba9-lib#51229904df"
+      ]
+    },
+    {
+      "qid": "ftc-big-programcheck",
+      "question": "How does ProgramSpec::check validate a command invocation?",
+      "_anchor_phrase": "ProgramSpec::check",
+      "_expected_answer": "ProgramSpec::check (execpolicy/program.rs) validates argv against the spec. BIG chunk (>1800) \u2014 truncation probe.",
+      "_answer_type": "big_function_truncation_probe",
+      "_doc_id": "558719b2-program",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "558719b2-program#2e83f37beb"
+      ]
+    },
+    {
+      "qid": "ftc-big-appnew",
+      "question": "What does App::new initialize in the TUI?",
+      "_anchor_phrase": "App::new",
+      "_expected_answer": "App::new (tui/app.rs) builds the TUI application state. BIG chunk (>1800) \u2014 truncation probe.",
+      "_answer_type": "big_function_truncation_probe",
+      "_doc_id": "408a2d3e-app",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "408a2d3e-app#5b5a8ee78e"
+      ]
+    },
+    {
+      "qid": "ftc-big-convrender",
+      "question": "What does ConversationHistoryWidget::render_ref render?",
+      "_anchor_phrase": "ConversationHistoryWidget::render_ref",
+      "_expected_answer": "ConversationHistoryWidget::render_ref (tui) renders the conversation history. BIG chunk (>1800) \u2014 truncation probe.",
+      "_answer_type": "big_function_truncation_probe",
+      "_doc_id": "f2e23d3e-conversation-history-widget",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "f2e23d3e-conversation-history-widget#2e03000330"
+      ]
+    },
+    {
+      "qid": "ftc-big-mcpstdio",
+      "question": "How does McpClient::new_stdio_client start the MCP client?",
+      "_anchor_phrase": "McpClient::new_stdio_client",
+      "_expected_answer": "McpClient::new_stdio_client (mcp-client) spawns the stdio MCP server process. BIG chunk (>1800) \u2014 truncation probe.",
+      "_answer_type": "big_function_truncation_probe",
+      "_doc_id": "323dd3ed-mcp-client",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "323dd3ed-mcp-client#b45e983a0a"
+      ]
+    },
+    {
+      "qid": "ftc-use-seekseq",
+      "question": "Which function uses seek_sequence?",
+      "_anchor_phrase": "fn compute_replacements",
+      "_expected_answer": "compute_replacements (apply-patch/lib.rs) uses seek_sequence. Gold titled by the caller.",
+      "_answer_type": "usage_reference",
+      "_doc_id": "f519b452-lib",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "f519b452-lib#d3962c361b"
+      ]
+    },
+    {
+      "qid": "ftc-use-unifieddiff",
+      "question": "Which function calls unified_diff_from_chunks?",
+      "_anchor_phrase": "fn maybe_parse_apply_patch_verified",
+      "_expected_answer": "maybe_parse_apply_patch_verified (apply-patch/lib.rs) calls unified_diff_from_chunks. Gold titled by the caller.",
+      "_answer_type": "usage_reference",
+      "_doc_id": "f519b452-lib",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "f519b452-lib#573acc6fca"
+      ]
+    },
+    {
+      "qid": "ftc-use-applyhunks",
+      "question": "Which function calls apply_hunks?",
+      "_anchor_phrase": "fn apply_patch",
+      "_expected_answer": "apply_patch (apply-patch/lib.rs) calls apply_hunks. Gold titled by the caller.",
+      "_answer_type": "usage_reference",
+      "_doc_id": "f519b452-lib",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "f519b452-lib#9ac20cda86"
+      ]
+    },
+    {
+      "qid": "ftc-use-ansiescape",
+      "question": "Which method uses ansi_escape_line to format command output?",
+      "_anchor_phrase": "new_completed_exec_command",
+      "_expected_answer": "HistoryCell::new_completed_exec_command (tui/history_cell.rs) uses ansi_escape_line (cross-crate). Gold titled by a DIFFERENT symbol.",
+      "_answer_type": "usage_reference",
+      "_doc_id": "5c8a9b2a-history-cell",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "5c8a9b2a-history-cell#a1a3f95507"
+      ]
+    },
+    {
+      "qid": "ftc-use-newstdio",
+      "question": "Which function calls new_stdio_client?",
+      "_anchor_phrase": "McpConnectionManager::new",
+      "_expected_answer": "McpConnectionManager::new (core/mcp_connection_manager.rs) calls McpClient::new_stdio_client (cross-crate). Gold titled by a DIFFERENT symbol.",
+      "_answer_type": "usage_reference",
+      "_doc_id": "31a4e505-mcp-connection-manager",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "31a4e505-mcp-connection-manager#8dceb74fc3"
+      ]
+    },
+    {
+      "qid": "ftc-use-parsepatch",
+      "question": "Which function calls parse_patch?",
+      "_anchor_phrase": "fn maybe_parse_apply_patch",
+      "_expected_answer": "maybe_parse_apply_patch (apply-patch/lib.rs) calls parse_patch (parser.rs). Gold titled by the caller.",
+      "_answer_type": "usage_reference",
+      "_doc_id": "f519b452-lib",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "f519b452-lib#8d3903684a"
+      ]
+    },
+    {
+      "qid": "ftc-use-applypatchaction",
+      "question": "Which enum wraps a verified ApplyPatchAction?",
+      "_anchor_phrase": "enum MaybeApplyPatchVerified",
+      "_expected_answer": "MaybeApplyPatchVerified (apply-patch/lib.rs) wraps an ApplyPatchAction. Gold titled by a DIFFERENT symbol.",
+      "_answer_type": "usage_reference",
+      "_doc_id": "f519b452-lib",
+      "should_refuse": false,
+      "relevant_chunk_ids": [
+        "f519b452-lib#7d0d7a9ee8"
+      ]
+    },
+    {
+      "qid": "ftc-cf-quantum",
+      "question": "Where is the QuantumScheduler struct defined?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE - no such symbol in codex-rs.",
+      "_answer_type": "counterfactual_nonexistent_symbol",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "ftc-cf-blockchain",
+      "question": "How does the blockchain consensus module work?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE - codex-rs has no blockchain.",
+      "_answer_type": "counterfactual_absent_feature",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "ftc-cf-renderpdf",
+      "question": "Which function calls render_pdf_thumbnail?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE - no such identifier (the lexical true-negative).",
+      "_answer_type": "counterfactual_nonexistent_symbol",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "ftc-cf-oauth",
+      "question": "How is the oauth2_refresh_token flow implemented?",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE - no such feature in codex-rs.",
+      "_answer_type": "counterfactual_absent_feature",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
     }
   ],
-  "_resolved_at": "2026-06-09T15:25:34Z"
+  "_resolved_at": "2026-06-09T17:41:19Z"
 }
