@@ -28,9 +28,34 @@ def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", text)
 
 
-def test_v2_is_the_active_version() -> None:
+def test_v3_is_the_active_version() -> None:
     load_prompt_spec.cache_clear()
-    assert load_prompt_spec("assess_relevance").version == "v2"
+    assert load_prompt_spec("assess_relevance").version == "v3"
+
+
+def test_v3_widens_the_world_knowledge_ban_to_content() -> None:
+    """v3 (2026-06-10, audit-15 M3): v2 banned world knowledge for DATES (the fiscal-2026 class);
+    handwritten-06 showed the same disease on CONTENT — the gate rejected the note's own 3-stage
+    compilation answer because it "does not correspond to the standard C++ compilation process"
+    (textbook knowledge overriding grounded content). v3 = v2 verbatim + the content ban: never
+    judge the answer against textbook/standard accounts; documents may simplify or disagree."""
+    body = _norm(load_prompt_spec("assess_relevance").template)
+    load_prompt_spec.cache_clear()
+    assert "Do NOT judge the answer against textbook, standard" in body
+    assert "does not correspond to" in body
+    assert "simplify" in body
+    # v2's date ban is KEPT verbatim
+    assert "fiscal 2026" in body
+    assert "Do NOT apply outside or world knowledge" in body
+
+
+def test_kill_switch_pins_v2(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MEMEX_PROMPTS__PIN__ASSESS_RELEVANCE", "v2")
+    load_prompt_spec.cache_clear()
+    spec = load_prompt_spec("assess_relevance")
+    assert spec.version == "v2"
+    assert "Do NOT judge the answer against textbook, standard" not in spec.template
+    load_prompt_spec.cache_clear()
 
 
 def test_v2_forbids_world_knowledge_override() -> None:
