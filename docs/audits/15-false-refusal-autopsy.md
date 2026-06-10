@@ -120,3 +120,31 @@ re-walked:
 denial-reframe retry (ONE bounded re-draft through the existing v5 feedback slot when a zero-claims
 draft denial-frames a present answer; the retry faces the full gate). M6 = the aggregate framing now
 NAMES its source table (the ar-15 precedent). Stack validation: /tmp/stack_ladder.
+
+## STACK SHIPPED — M3 + M2 + M6 + the column-grounding gate (2026-06-10)
+
+**Full ladder: PASS.** 14 corpora × N=2 all `refusal_cf`=1.00, **+6 ANS net, 0 regressions, 0 errors**;
+codex answer-text 32/38 byte-stable; eval-summary 6/6, 0 leaks (the `[table-rows]` verify-render strip
+proven summarizer-neutral). **The original 18 false refusals now stand at 10**, flips: chart-types-01
+(M1), nist-zero-trust-10 (M1b), handwritten-06 (M3), chart-types-04/-05 + scientific-gte-09/-11 +
+slide-decks-16→(no, see residuals)… correction: + annual-report-14 (M2+M6). Per-corpus: annual-report
++1, chart-types +2, handwritten +1, scientific-gte +2.
+
+**The ladder's biggest catch — a HARD-gate breach the autopsy structurally couldn't see:** the first
+stack ladder showed annual-report `cf=0.83` ×2 — ar-16 ("total stock options") answered "$3,345,710"
+via a text-to-SQL COLUMN SUBSTITUTION (options→`Stock Awards ($)`; the recompute gate proves the
+ARITHMETIC of the chosen column, not the column-to-question match). The M2/M6 fixes had UN-MASKED it:
+the old denial-framing defect had silently suppressed this fabrication path — **an over-refusal bug
+hiding an under-refusal bug**. Root fix: the deterministic aggregate COLUMN-GROUNDING gate
+(`table_sql._aggregate_column_grounded_in_question` — every content token of the chosen column must
+appear in the question; COUNT(*) permissive; fail = conservative no-injection, the recompute gate's
+own fail-closed shape, no kill-switch). ar-16 refuses by construction; ar-14 keeps its recovery.
+
+**Remaining 10:** cr350-img-01 (M7 synthesis — principled residual), sd-03 (verifier table-fixation
+residual), sd-21 (claim/chunk spelling strictness residual), sd-17/sd-25 (reranker-deficiency
+residuals: tiny gold chunks buried under long same-doc prose + cross-corpus noise; top_k≥15 is
+self-defeating at the 8192 window), sd-04 (gold expects never-parsed chart data → corpus re-label),
+sd-31 (gold stale + rerank-buried → re-anchor + reranker residual), sd-05 (honest-negative relevance),
+sd-16 (the M2 retry did not take — the model anchors on the table's ordinal axis labels over the
+bolded "6x speedup since CUDA 11.8" takeaway; triage pending), ftc-big-runmain (the measured
+MEMEX_RERANK_TOP_K=8 hypothesis, pending probe).
