@@ -69,6 +69,8 @@ from memex.core.text import (
     STOPWORDS,
     atomise,
     claim_grounded_only_by_name,
+    is_denial_framed_summary,
+    relevance_reason_cites_world_knowledge,
     strip_table_rows_blocks,
 )
 from memex.core.types import (
@@ -600,6 +602,10 @@ class AnswerState(BaseModel):
     # verify-time citation-retarget (audit-15): promote-only re-test of still-ungrounded
     # claims against sibling window chunks on the FINAL verify pass.
     citation_retarget: bool = True
+    # Set from `agents.relevance_world_knowledge_guard_enabled` in `answer_query` (fail-open).
+    relevance_world_knowledge_guard: bool = True
+    # Set from `agents.denial_reframe_retry_enabled` in `answer_query` (fail-open).
+    denial_reframe_retry: bool = True
 
     nodes_traversed: int = 0
     max_nodes_traversed: int = 20
@@ -1142,7 +1148,19 @@ def _build_synthetic_chunk(result: TableQueryResult) -> Chunk:
         agg_val = result.aggregate_value
         val_str = f"{agg_val:g}" if agg_val is not None else "n/a"
         label = describe_aggregate(result) or "Aggregate result"
-        lines.append(f"{label} = {val_str} over {len(result.contributing_rows)} rows:")
+        # ar-14 (audit-15 M6): NAME the source table in the aggregate framing, mirroring
+        # the ar-15 row-path fix — an anonymous "SUM of X = N" reads as a computed value
+        # the literal-presence rule refuses; the caption ties it to the queried table.
+        agg_table = (
+            (result.section or (result.heading_path[-1] if result.heading_path else "") or "")
+            .strip()
+            .strip("*")
+            .strip()
+        )[:_SYNTHETIC_TABLE_NAME_MAX]
+        agg_suffix = f' in the "{agg_table}" table' if agg_table else ""
+        lines.append(
+            f"{label}{agg_suffix} = {val_str} over {len(result.contributing_rows)} rows:"
+        )
         for cells in result.contributing_rows:
             candidate = "\n".join([*lines, _render_kv_row(header, cells)])
             # Stop adding rows once we'd exceed the evidence budget (leaving
@@ -1721,6 +1739,49 @@ async def answer(state: AnswerState) -> AnswerStateUpdate:
                 remaining=len(answer_chunks),
                 dropped_chunk=dropped.chunk_id,
             )
+
+    # Denial-reframe RETRY (audit-15 M2): the dominant false-refusal class is a draft
+    # with ZERO claims whose summary is a denial that CONTAINS the answer ("The chunks
+    # do not state which GPUs..., only that training was conducted on up to 8 NVIDIA
+    # A100 GPUs"). answer/v5 already forbids this shape; the 4B violates it on these
+    # queries deterministically, and an empty draft short-circuits verify → refuse with
+    # no regenerate. ONE bounded retry through the EXISTING feedback slot (no prompt
+    # version change — the ADR-0022 v4-breach lesson); the retried draft faces the FULL
+    # verify gate + backstops, so a sibling-substituted retry claim is still gated ⇒
+    # HARD-gate-safe. A failed/overflowing retry keeps the original draft (fail-safe).
+    if (
+        state.denial_reframe_retry
+        and not draft.claims
+        and is_denial_framed_summary(draft.summary)
+    ):
+        log.info("answer.denial_reframe_retry", summary_head=draft.summary[:120])
+        reframe_feedback = (
+            "Your previous draft denied an answer while itself CONTAINING responsive "
+            "facts from the sources. If the sources DO state a fact responsive to the "
+            "question, state it AFFIRMATIVELY as a claim citing its chunk; do not frame "
+            "a present fact as a denial. If the sources truly contain nothing responsive, "
+            "return zero claims with the summary 'No literal answer in chunks.'. "
+            f"Previous draft: {draft.summary[:400]}"
+        )
+        retry_messages = render_messages(
+            "answer",
+            query=state.query,
+            chunks=answer_chunks,
+            feedback=reframe_feedback,
+        )
+        try:
+            retry_draft, retry_tokens = await complete_structured(
+                prompt=retry_messages,
+                schema=DraftAnswer,
+                max_tokens=1800,
+                prompt_tag=prompt_tag_for("answer"),
+            )
+            tokens += retry_tokens
+            if retry_draft.claims:
+                log.info("answer.denial_reframe_succeeded", claims=len(retry_draft.claims))
+                draft = retry_draft
+        except ModelCallError as e:
+            log.warning("answer.denial_reframe_failed", error=str(e)[:120])
 
     # Repair corrupted citation ids before they reach verify/compose.
     # The answer LLM sometimes mangles the long `docid#hash` ids it's
@@ -2335,6 +2396,23 @@ async def assess_relevance(state: AnswerState) -> AnswerStateUpdate:
             ),
             "nodes_traversed": state.nodes_traversed + 1,
         }
+    # World-knowledge OVERRIDE (audit-15 M3): the v3 prompt bans judging grounded content
+    # against textbook/standard accounts, but the 4B's prior wins on strong-prior topics
+    # (handwritten-06 rejected for not matching "the standard three stages" 3/3 UNDER the
+    # ban). When the gate's OWN stated reason is a world-knowledge comparison, override to
+    # responsive — deterministic, advisory-gate-only (the claims are already grounded), so
+    # the worst case is shipping a grounded answer the gate mis-judged: never a hallucination.
+    if (
+        state.relevance_world_knowledge_guard
+        and not relevance.responsive
+        and relevance_reason_cites_world_knowledge(relevance.reason)
+    ):
+        log.info("relevance.world_knowledge_overridden", original_reason=relevance.reason[:160])
+        relevance = RelevanceAssessment(
+            responsive=True,
+            reason="overridden: the gate compared the answer to standard/textbook knowledge "
+            "rather than the documents' own account",
+        )
     log.info("relevance", responsive=relevance.responsive)
     return {
         "relevance": relevance,
@@ -2750,6 +2828,20 @@ async def answer_query(
     except (ConfigurationError, MemexError):
         citation_retarget = True
 
+    # The M3 relevance world-knowledge override (audit-15), same fail-open pattern.
+    try:
+        relevance_world_knowledge_guard = (
+            get_settings().agents.relevance_world_knowledge_guard_enabled
+        )
+    except (ConfigurationError, MemexError):
+        relevance_world_knowledge_guard = True
+
+    # The M2 denial-reframe retry (audit-15), same fail-open pattern.
+    try:
+        denial_reframe_retry = get_settings().agents.denial_reframe_retry_enabled
+    except (ConfigurationError, MemexError):
+        denial_reframe_retry = True
+
     # Graph expansion is the param ANDed with the settings kill-switch (default on),
     # read fail-open — so `MEMEX_AGENTS__GRAPH_EXPANSION_ENABLED=false` disables it
     # globally (for the earns-its-keep A/B) while an explicit param=False still wins.
@@ -2785,6 +2877,8 @@ async def answer_query(
         numeric_grounding_backstop=numeric_grounding_backstop,
         name_only_grounding_backstop=name_only_grounding_backstop,
         citation_retarget=citation_retarget,
+        relevance_world_knowledge_guard=relevance_world_knowledge_guard,
+        denial_reframe_retry=denial_reframe_retry,
         scope_doc_ids=scope_doc_ids or [],
         # The grounded multi-turn chat's bounded prior-chunk carry (Surface A). Default
         # None/[] → byte-identical to a bare `/ask`; `retrieve` unions these into the

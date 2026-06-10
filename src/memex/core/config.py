@@ -758,6 +758,19 @@ class AgentsSettings(BaseModel):
     # refusals (chart-types-01, nist-10, sd-03, sd-21). Promote-only on the unchanged gate =>
     # HARD-gate-safe by construction. MEMEX_AGENTS__CITATION_RETARGET_ENABLED=false reverts.
     citation_retarget_enabled: bool = True
+    # Relevance world-knowledge OVERRIDE (audit-15 M3, 2026-06-10): when the (advisory)
+    # relevance gate votes non-responsive with a reason that COMPARES the answer to
+    # standard/textbook knowledge ("instead of the standard three stages..."), the verdict
+    # is deterministically overridden to responsive — the prompt ban (assess_relevance@v3)
+    # alone failed on strong-prior topics. Advisory-gate-only ⇒ HARD-gate-safe (ships only
+    # already-grounded answers). MEMEX_AGENTS__RELEVANCE_WORLD_KNOWLEDGE_GUARD_ENABLED=false reverts.
+    relevance_world_knowledge_guard_enabled: bool = True
+    # Denial-reframe RETRY (audit-15 M2, 2026-06-10): when the answer draft has ZERO
+    # claims AND its summary is a denial that CONTAINS the answer ("do not state X,
+    # only that <the answer>"), regenerate ONCE with targeted feedback through the
+    # existing v5 feedback slot (no prompt-version change). The retried draft faces the
+    # FULL verify gate ⇒ HARD-gate-safe. MEMEX_AGENTS__DENIAL_REFRAME_RETRY_ENABLED=false reverts.
+    denial_reframe_retry_enabled: bool = True
     # The code-only FTS term-query path (Phase-3 Lever A, 2026-06-09, ADR-0021 / audits/13):
     # when a /ask query NAMES a code identifier (snake_case / camelCase — see
     # `index/code_query.query_has_code_identifier`), the BM25 arm builds an OR'd-quoted-WHOLE-

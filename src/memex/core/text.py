@@ -276,6 +276,61 @@ _TABLE_ROWS_OPEN_RE = re.compile(r"\[table-rows\]", flags=re.DOTALL)
 _TABLE_ROWS_CLOSE_RE = re.compile(r"\[/table-rows\]", flags=re.DOTALL)
 
 
+_DENIAL_MARKER_RE = re.compile(
+    r"\b(?:do(?:es)?|did) not\s+(?:state|mention|specify|contain|define|provide|describe|include|list)\b"
+    r"|\b(?:is|are) not\s+(?:explicitly\s+)?(?:stated|mentioned|specified|defined|provided|described|listed)\b"
+    r"|\bne\s+(?:pr[ée]cisen?t?|mentionnen?t?|contienn?en?t?|indiquen?t?)\s+pas\b",
+    flags=re.IGNORECASE,
+)
+_DENIAL_CONTINUATION_RE = re.compile(
+    r"\b(?:only that|, only\b|they mention|but (?:do|does|the|it|they)\b|however\b|"
+    r"although\b|; (?:the|it|they)\b|instead\b|while\b)",
+    flags=re.IGNORECASE,
+)
+
+
+def is_denial_framed_summary(summary: str) -> bool:
+    """Whether an EMPTY-CLAIMS draft summary is a DENIAL THAT CONTAINS THE ANSWER —
+    the audit-15 M2 false-refusal class: "The chunks do not state which GPUs were used,
+    only that training was conducted on up to 8 NVIDIA A100 GPUs" (the answer, framed as
+    a denial; verify short-circuits on zero claims → refuse). Trigger = a denial MARKER
+    plus a SUBSTANTIVE CONTINUATION; the prompt-canonical counterfactual summary
+    ("No literal answer in chunks.") and flat content-free denials do NOT match, so a
+    true refusal stays terminal. Used by the answer node's ONE bounded reframe-retry.
+    """
+    if not summary:
+        return False
+    return (
+        _DENIAL_MARKER_RE.search(summary) is not None
+        and _DENIAL_CONTINUATION_RE.search(summary) is not None
+    )
+
+
+_WORLD_KNOWLEDGE_COMPARISON_RE = re.compile(
+    r"\b(?:the\s+)?(?:standard|textbook|widely[- ]accepted|commonly[- ]accepted|conventional)\b"
+    r"|\binstead of the (?:standard|usual|typical|correct)\b"
+    r"|\bthe correct (?:stages?|versions?|process(?:es)?|definitions?|models?|steps?)\b"
+    r"|\bdescribed in [A-Za-z+#]+ documentation\b",
+    flags=re.IGNORECASE,
+)
+
+
+def relevance_reason_cites_world_knowledge(reason: str) -> bool:
+    """Whether a relevance-gate NON-RESPONSIVE reason compares the answer to STANDARD/
+    TEXTBOOK knowledge rather than to the asked topic (audit-15 M3). The v2/v3 prompt
+    bans judging grounded content against world knowledge, but the 4B's prior overrides
+    the rule on strong-prior topics (measured: handwritten-06 rejected for not matching
+    "the standard three stages ... described in C++ documentation" 3/3 UNDER the v3 ban).
+    The deterministic override is the GUARANTEE the prompt can't give: when the gate's
+    own stated reason is a world-knowledge comparison, the verdict is overridden to
+    responsive. Relevance is ADVISORY (ADR-0022; runs only on grounded answers), so the
+    override can only ship a GROUNDED answer — never a hallucination. Deliberately tight:
+    matches comparison-to-external-authority phrasings, not the word "standard" inside a
+    quoted topic (a topic-mismatch reason names the asked topic, not "the standard X").
+    """
+    return _WORLD_KNOWLEDGE_COMPARISON_RE.search(reason) is not None
+
+
 def strip_table_rows_blocks(text: str) -> str:
     """Remove `[table-rows]...[/table-rows]` blocks (the BM25-side KV duplication of a
     GFM table). Verify-render dedup (audit-15 M1b-i): when a chunk carries BOTH the raw
