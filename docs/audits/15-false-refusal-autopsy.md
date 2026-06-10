@@ -79,3 +79,44 @@ The build (4 commits, each validation-caught issue fixed at the root):
 sentence trailing a table even at 424 chars 1×1, reason citing only the table — a verify-prompt-v3
 candidate, its own increment); sd-21 = `'-minimal'` vs `"--minimal"` claim/chunk spelling mismatch
 (arguably correct strictness; possibly a corpus-wording fix). Inventory: 18 → **16**.
+
+## CORRECTIONS from the M4-M6 forensics (2026-06-10) — the M4/M6 narratives above were WRONG
+
+A 4-agent read-only forensics pass (vault backups, VLM/chart-OCR caches, manifests, live indexes,
+rendered slides) falsified two of the stage-2 classifications. Recording so the wrong fixes are never
+re-walked:
+
+- **M4 DISSOLVES — nothing was lost.** (a) **sd-31**: the "4 design principles" (the slide labels them
+  "Key Features") are PRESENT in the canonical md AND indexed (chunk `2f96ae1c-…#59c55cabec`); the W6
+  re-parse changed the VLM prompt (`c911a80` → new prompt_sha8 → cache-key miss → fresh draws) but BOTH
+  draws carry the identical bullets. The 06-01 VLM unification moved the content from a `[chart-extracted]`
+  block into VLM page text — the audit's "0/8 manifest chart_extractions carry it" was a true observation,
+  wrong inference. The actual failure is RERANK (4 same-doc "Architecture Diagram" distractor chunks
+  out-rank the Key-Features chunk; not in top-10) + a STALE gold (`relevant_chunk_ids` empty with an
+  FTS-unresolvable note that no longer applies — re-anchor to `#59c55cabec`). (b) **sd-04**: the TSMC
+  chart's numeric series was NEVER parsed in ANY era (all 6 backups empty of it; Nemotron returned
+  length-0 for all 5 crops in a fresh draw — and empties are cached BY DESIGN, so the chart-guide
+  cache-replay precedent does NOT apply). Gold expects never-parsed data → re-label (qualitative half,
+  already in-window at ranks 1/2/4) or an evidence-side chart-OCR-empty→VLM-escalation build (its own
+  eval-gated increment). (c) **sd-16**: the gold chunk is rerank RANK-1 and contains the verbatim
+  "**6x speedup since CUDA 11.8**"; the chart's x-axis literally labels its bars 1-6 (the "mis-OCR"
+  hypothesis falsified by rendering the slide) — the failure is the answer LLM anchoring on the table
+  ordinals and denial-framing → **M2-class**.
+- **M6 REFRAMED — the SQL path WORKED.** For ar-14 the Table-RAG path fired end-to-end: the recompute-
+  gated `#sql0001` chunk ("SUM of Fees Earned or Paid in Cash ($) = 956250 over 12 rows") was IN the
+  answer window in both autopsy snapshots; the 4B then drafted the empty-claims denial ("…but do not
+  provide a total"). The failure class is answer-node denial of the pre-verified synthetic aggregate —
+  adjacent to M2, NOT retrieval/SQL routing. (The audit's stage-1 "RETRIEVAL-MISS" label was technically
+  true of the raw table chunk but irrelevant — the synthetic chunk is the designed compensation.)
+- **M5 refinements:** the live fast/auto window is **8192** (not 6144 — the 8B-era figure); the answer
+  node's overflow degrade-loop drops the LOWEST-RANKED real chunk first, so pushing top_k to ≥15 at 8192
+  deterministically evicts the rank-15 gold it was meant to admit (self-defeating) — sd-17/sd-25 are
+  RERANKER-DEFICIENCY residuals (tiny 163-405-char gold chunks buried under long same-doc prose +
+  cross-corpus 10-K lexical noise). The one measured hypothesis: `MEMEX_RERANK_TOP_K=8` for
+  ftc-big-runmain (gold at #6; budget-verified ~7.5k worst-case at 8192).
+
+**The shipped levers for the corrected map (branch `fix/m3-relevance-v3`):** M3 = assess_relevance v3
++ the deterministic world-knowledge override (handwritten-06 flips 3/3; tripwires hold 3/3). M2 = the
+denial-reframe retry (ONE bounded re-draft through the existing v5 feedback slot when a zero-claims
+draft denial-frames a present answer; the retry faces the full gate). M6 = the aggregate framing now
+NAMES its source table (the ar-15 precedent). Stack validation: /tmp/stack_ladder.
