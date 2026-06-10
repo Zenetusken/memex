@@ -591,6 +591,10 @@ class AnswerState(BaseModel):
     # the entity-name-presence loophole. Fail-open + demotion-only (membership/unknown claims kept).
     # Set from `agents.name_only_grounding_backstop_enabled` in `answer_query` (fail-open).
     name_only_grounding_backstop: bool = True
+    # Set from `agents.citation_retarget_enabled` in `answer_query` (fail-open). The M1
+    # verify-time citation-retarget (audit-15): promote-only re-test of still-ungrounded
+    # claims against sibling window chunks on the FINAL verify pass.
+    citation_retarget: bool = True
 
     nodes_traversed: int = 0
     max_nodes_traversed: int = 20
@@ -2089,17 +2093,85 @@ async def verify(state: AnswerState) -> AnswerStateUpdate:
                         "state the behavior/property the claim asserts."
                     )
 
+    # Citation RETARGET (audit-15 M1, 2026-06-10): the 6th and FINAL pass — promote-only,
+    # the inverse shape of the demotion backstops above. The autopsy found 4 false refusals
+    # where the DRAFT is correct but cites the topically-nearest window chunk instead of the
+    # one carrying verbatim support (nist-10 "20-30 records" cited to a PE/PA prose chunk;
+    # sd-21 "1.6x" cited to the flag-description chunk) — verify correctly fails the cited
+    # PAIR and the right answer dies. Before declaring such a claim ungrounded on the FINAL
+    # pass (regeneration exhausted or over budget — earlier passes let regen try first),
+    # re-test it against the OTHER window chunks via the SAME unchanged verify_grounding
+    # gate (1 claim x 1 candidate); on positive support, PROMOTE the claim and rewrite its
+    # source_chunk_id to the supporting chunk (compose/wikilinks then cite the right chunk).
+    # Promote-only on the same gate => HARD-gate-safe by construction: nothing can ground
+    # that the gate itself wouldn't ground — the gate is RETARGETED, never loosened. Cost-
+    # bounded: <=2 claims x <=4 sibling candidates, sequential, break on first support.
+    # Kill-switch `agents.citation_retarget_enabled` (fail-open) -> AnswerState.citation_retarget.
+    retarget_tokens = 0
+    retargeted_draft = False
+    final_pass = state.over_budget() or state.regenerate_attempts >= state.max_regenerate_attempts
+    if state.citation_retarget and final_pass and valid_ungrounded:
+        window = state.reranked[:5]
+        promoted: list[int] = []
+        for i in list(valid_ungrounded)[:2]:
+            claim = state.draft.claims[i]
+            for cand in window:
+                if cand.chunk_id == claim.source_chunk_id:
+                    continue  # the pair the gate already rejected
+                probe_claim = CitedClaim(
+                    claim=claim.claim, source_chunk_id=cand.chunk_id, confidence=claim.confidence
+                )
+                probe_draft = DraftAnswer(summary=claim.claim, claims=[probe_claim])
+                probe_prompt = render_prompt(
+                    "verify_grounding",
+                    draft=probe_draft,
+                    chunk_by_id={cand.chunk_id: cand},
+                )
+                try:
+                    probe_res, probe_tok = await complete_structured(
+                        prompt=probe_prompt,
+                        schema=BoundedVerificationResult,
+                        prompt_tag=prompt_tag_for("verify_grounding"),
+                    )
+                except ModelCallError as e:  # fail SAFE: an error just means no promotion
+                    log.warning("verify.retarget_probe_failed", error=str(e)[:120])
+                    continue
+                retarget_tokens += probe_tok
+                if 0 in probe_res.grounded and 0 not in probe_res.ungrounded:
+                    log.info(
+                        "verify.citation_retargeted",
+                        claim_index=i,
+                        old_chunk=claim.source_chunk_id,
+                        new_chunk=cand.chunk_id,
+                    )
+                    claim.source_chunk_id = cand.chunk_id
+                    retargeted_draft = True
+                    promoted.append(i)
+                    break
+        if promoted:
+            keep = set(promoted)
+            valid_reasons = [
+                r for j, r in zip(valid_ungrounded, valid_reasons, strict=False) if j not in keep
+            ]
+            valid_ungrounded = [j for j in valid_ungrounded if j not in keep]
+            valid_grounded.extend(sorted(keep))
+
     verification = VerificationResult(
         grounded=valid_grounded,
         ungrounded=valid_ungrounded,
         ungrounded_reasons=valid_reasons,
     )
 
-    return {
+    update: AnswerStateUpdate = {
         "verification": verification,
-        "tokens_used": state.tokens_used + tokens,
+        "tokens_used": state.tokens_used + tokens + retarget_tokens,
         "nodes_traversed": state.nodes_traversed + 1,
     }
+    if retargeted_draft:
+        # The promoted claims' source_chunk_id was rewritten on the draft objects; return
+        # the draft so the langgraph state merge carries the corrected citations to compose.
+        update["draft"] = state.draft
+    return update
 
 
 async def regenerate(state: AnswerState) -> AnswerStateUpdate:
@@ -2622,6 +2694,12 @@ async def answer_query(
     except (ConfigurationError, MemexError):
         name_only_grounding_backstop = True
 
+    # The M1 citation-retarget toggle (audit-15), same fail-open policy pattern.
+    try:
+        citation_retarget = get_settings().agents.citation_retarget_enabled
+    except (ConfigurationError, MemexError):
+        citation_retarget = True
+
     # Graph expansion is the param ANDed with the settings kill-switch (default on),
     # read fail-open — so `MEMEX_AGENTS__GRAPH_EXPANSION_ENABLED=false` disables it
     # globally (for the earns-its-keep A/B) while an explicit param=False still wins.
@@ -2656,6 +2734,7 @@ async def answer_query(
         allow_partial_grounded=allow_partial_grounded,
         numeric_grounding_backstop=numeric_grounding_backstop,
         name_only_grounding_backstop=name_only_grounding_backstop,
+        citation_retarget=citation_retarget,
         scope_doc_ids=scope_doc_ids or [],
         # The grounded multi-turn chat's bounded prior-chunk carry (Surface A). Default
         # None/[] → byte-identical to a bare `/ask`; `retrieve` unions these into the
