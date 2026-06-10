@@ -65,7 +65,12 @@ from memex.agents.artifact_scope import (
 )
 from memex.agents.table_sql import coerce_number, describe_aggregate
 from memex.core.errors import AnswerStateInvariantError
-from memex.core.text import STOPWORDS, atomise, claim_grounded_only_by_name
+from memex.core.text import (
+    STOPWORDS,
+    atomise,
+    claim_grounded_only_by_name,
+    strip_table_rows_blocks,
+)
 from memex.core.types import (
     Chunk,
     CompanionAlignment,
@@ -1896,10 +1901,26 @@ async def verify(state: AnswerState) -> AnswerStateUpdate:
     # chart blocks no longer eat the truncate budget.
     chunk_by_id = {c.chunk_id: c for c in state.reranked}
 
+    # Verify-render DEDUP (audit-15 M1b-i): when a chunk carries BOTH the raw GFM table
+    # AND its [table-rows] linearization, the doubled numeric noise drowns trailing prose
+    # from the verifier (a verbatim-present sentence was rejected 3/3, the model's reason
+    # citing only the table). Render the verifier's copy with the duplicate stripped —
+    # the GFM table stays (the Table-RAG literal-read rule untouched); linearization-only
+    # chunks are left alone. VERIFY-NODE-ONLY: ground_claims/the summarizer render their
+    # own prompts, so eval-summary is unaffected by construction.
+    render_chunks = {
+        cid: (
+            c.model_copy(update={"text": strip_table_rows_blocks(c.text)})
+            if "[table-rows]" in c.text and "|" in c.text.split("[table-rows]")[0]
+            else c
+        )
+        for cid, c in chunk_by_id.items()
+    }
+
     prompt = render_prompt(
         "verify_grounding",
         draft=state.draft,
-        chunk_by_id=chunk_by_id,
+        chunk_by_id=render_chunks,
     )
 
     # Bounded-schema construction. The default `VerificationResult` has
@@ -2115,9 +2136,15 @@ async def verify(state: AnswerState) -> AnswerStateUpdate:
         promoted: list[int] = []
         for i in list(valid_ungrounded)[:2]:
             claim = state.draft.claims[i]
-            for cand in window:
-                if cand.chunk_id == claim.source_chunk_id:
-                    continue  # the pair the gate already rejected
+            # M1b-ii: probe the CITED chunk FIRST, in isolation — the batch render (all
+            # reranked chunks for one claim) can drown support the 1x1 view grounds
+            # (nist-10: rejected in the 5-chunk render, grounded at 1 claim x 1 chunk).
+            # The batch verdict is NOT an isolation verdict; only then try the siblings.
+            cited = chunk_by_id.get(claim.source_chunk_id)
+            candidates = ([cited] if cited is not None else []) + [
+                c for c in window if c.chunk_id != claim.source_chunk_id
+            ]
+            for cand in candidates:
                 probe_claim = CitedClaim(
                     claim=claim.claim, source_chunk_id=cand.chunk_id, confidence=claim.confidence
                 )

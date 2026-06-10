@@ -276,6 +276,17 @@ _TABLE_ROWS_OPEN_RE = re.compile(r"\[table-rows\]", flags=re.DOTALL)
 _TABLE_ROWS_CLOSE_RE = re.compile(r"\[/table-rows\]", flags=re.DOTALL)
 
 
+def strip_table_rows_blocks(text: str) -> str:
+    """Remove `[table-rows]...[/table-rows]` blocks (the BM25-side KV duplication of a
+    GFM table). Verify-render dedup (audit-15 M1b-i): when a chunk carries BOTH the raw
+    GFM table AND its linearization, the doubled numeric noise drowns trailing prose
+    from the 4B verifier (measured: a verbatim-present sentence rejected 3/3 with the
+    verifier's reason citing only the table). Callers strip ONLY when a GFM pipe-table
+    is also present, so a linearization-only chunk (e.g. a split block) keeps its rows.
+    """
+    return _TABLE_ROWS_RE.sub("", text)
+
+
 def table_rows_spans(text: str) -> list[tuple[int, int]]:
     """Return `(start, end)` char offsets of each
     `[table-rows]...[/table-rows]` block in *text*.
