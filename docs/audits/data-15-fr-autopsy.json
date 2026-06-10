@@ -1,0 +1,1097 @@
+[
+ {
+  "corpus": "chart-types",
+  "qid": "chart-types-01",
+  "question": "Who wrote the Tableau paper on which chart or graph to use?",
+  "expected": "Tracy Rodgers (Product Marketing Manager) and Robert Bloom (Tableau Engineer).",
+  "final_answered": false,
+  "refusal_reason": "I drafted an answer but couldn't ground 1 claim(s) after 1 attempt(s). I won't return a partially hallucinated answer.",
+  "window_top10": [
+   {
+    "rank": 1,
+    "chunk_id": "1797d794-which-chart-or-graph-is-right-for-you#25920c3228",
+    "heading": "Which chart or graph is right for you?",
+    "text_head": "<!-- image: kind=logo -->\n\nWhich chart or graph is right for you?\n\nTracy Rodgers, Product Marketing Manager Robert Bloom, Tableau Engineer You've got data and you've got questions. You know there's a "
+   },
+   {
+    "rank": 2,
+    "chunk_id": "1797d794-which-chart-or-graph-is-right-for-you#47837ba314",
+    "heading": "Tips:",
+    "text_head": "#### Tips:\n\n- Use color to illustrate achievement thresholds. Including color as a backdrop gives the viewer another reference to better understand how performance is measured against goals.\n- Add bul"
+   },
+   {
+    "rank": 3,
+    "chunk_id": "1797d794-which-chart-or-graph-is-right-for-you#1e40f6d252",
+    "heading": "[Tips:](https://www.tableau.com/resource/dos-and-donts-dashb",
+    "text_head": "#### [Tips:](https://www.tableau.com/resource/dos-and-donts-dashboards)\n\n- [Color the rectangles by category. Because heatmaps are such a dense chart type, color makes it easier for the viewer to dist"
+   },
+   {
+    "rank": 4,
+    "chunk_id": "1797d794-which-chart-or-graph-is-right-for-you#7d1770fdee",
+    "heading": "Bar chart",
+    "text_head": "# Bar chart\n\nBar charts are one of the most common data visualizations. With them, you can quickly highlight differences between categories, clearly show trends and outliers, and reveal historical hig"
+   },
+   {
+    "rank": 5,
+    "chunk_id": "1797d794-which-chart-or-graph-is-right-for-you#8449727aab",
+    "heading": "[Treemap](https://www.tableau.com/resource/dos-and-donts-das",
+    "text_head": "### [Treemap](https://www.tableau.com/resource/dos-and-donts-dashboards)\n\n[Treemaps relate different segments of your data to the whole. By nesting rectangles within others, treemaps show how individu"
+   }
+  ],
+  "drafts": [
+   {
+    "summary": "The paper 'Which chart or graph is right for you?' was written by Tracy Rodgers and Robert Bloom.",
+    "claims": [
+     {
+      "claim": "Tracy Rodgers, Product Marketing Manager and Robert Bloom, Tableau Engineer wrote the paper 'Which chart or graph is right for you?'.",
+      "source_chunk_id": "1797d794-which-chart-or-graph-is-right-for-you#25920c3228"
+     }
+    ]
+   },
+   {
+    "summary": "The paper 'Which chart or graph is right for you?' was written by Tracy Rodgers, Product Marketing Manager, and Robert Bloom, Tableau Engineer.",
+    "claims": [
+     {
+      "claim": "Tracy Rodgers, Product Marketing Manager and Robert Bloom, Tableau Engineer wrote the paper 'Which chart or graph is right for you?'.",
+      "source_chunk_id": "1797d794-which-chart-or-graph-is-right-for-you#25920c3228"
+     }
+    ]
+   }
+  ],
+  "verify_calls": [
+   {
+    "claims": [
+     "Tracy Rodgers, Product Marketing Manager and Robert Bloom, Tableau Engineer wrote the paper 'Which chart or graph is right for you?'."
+    ],
+    "grounded": [],
+    "ungrounded": [
+     0
+    ],
+    "ungrounded_reasons": [
+     ""
+    ]
+   },
+   {
+    "claims": [
+     "Tracy Rodgers, Product Marketing Manager and Robert Bloom, Tableau Engineer wrote the paper 'Which chart or graph is right for you?'."
+    ],
+    "grounded": [],
+    "ungrounded": [
+     0
+    ],
+    "ungrounded_reasons": [
+     ""
+    ]
+   }
+  ],
+  "relevance_calls": null,
+  "ungrounded_detail": [
+   {
+    "claim": "Tracy Rodgers, Product Marketing Manager and Robert Bloom, Tableau Engineer wrote the paper 'Which chart or graph is right for you?'.",
+    "cited_chunk_id": "1797d794-which-chart-or-graph-is-right-for-you#25920c3228",
+    "cited_chunk_text": "<!-- image: kind=logo -->\n\nWhich chart or graph is right for you?\n\nTracy Rodgers, Product Marketing Manager Robert Bloom, Tableau Engineer You've got data and you've got questions. You know there's a chart or graph out there that will find the answer you're looking for, but it's not always easy knowing which one is best without some trial and error. This paper pairs appropriate charts with the type of data you're analyzing and questions you want to answer. But it won't stop there. Stranding your data in isolated, static graphs limits the number and depth of questions you can answer. Let your analysis become your organization's centerpiece by using it to fuel exploration. Combine related charts. Add a map. Provide filters to dig deeper. The impact? Immediate business insight and answers to questions that actually drive decisions. So, which chart is right for you? Transforming data into an effective visualization (any kind of chart or graph) or dashboard is the first step towards making your data make an impact. Here are some best practices for conducting meaningful visual analysis:"
+   }
+  ]
+ },
+ {
+  "corpus": "chart-types",
+  "qid": "chart-types-04",
+  "question": "What is a Pareto chart?",
+  "expected": "A chart showing the accumulation of multiple categories \u2014 created by combining bar charts with table calculations.",
+  "final_answered": false,
+  "refusal_reason": "The retrieved material addresses a related topic but not your specific question. The answer fails to define the Pareto chart as requested, instead stating that the documents do not contain a literal definition.",
+  "window_top10": [
+   {
+    "rank": 1,
+    "chunk_id": "1797d794-which-chart-or-graph-is-right-for-you#7d1770fdee",
+    "heading": "Bar chart",
+    "text_head": "# Bar chart\n\nBar charts are one of the most common data visualizations. With them, you can quickly highlight differences between categories, clearly show trends and outliers, and reveal historical hig"
+   },
+   {
+    "rank": 2,
+    "chunk_id": "1797d794-which-chart-or-graph-is-right-for-you#c1c8a218eb",
+    "heading": "Line chart",
+    "text_head": "## Line chart\n\nThe line chart, or line graph, is another familiar method for displaying data. It connects several distinct data points, presenting them as one continuous evolution. The result is a sim"
+   },
+   {
+    "rank": 3,
+    "chunk_id": "0e725ba0-2026-annual-report-web#b985ce056d",
+    "heading": "**Stock Performance Graphs**",
+    "text_head": "## **Stock Performance Graphs**\n\nThe following graph compares the cumulative total shareholder return for our common stock, the S&P 500 Index, and the Nasdaq 100 Index for the five years ended January"
+   },
+   {
+    "rank": 4,
+    "chunk_id": "1797d794-which-chart-or-graph-is-right-for-you#a1e2832dca",
+    "heading": "Use candlestick charts:",
+    "text_head": "#### Use candlestick charts:\n\n- Showing financial data: A candlestick chart is an advanced chart type, meant specifically for financial analysis. Though it may look like a box-and-whisker plot, these "
+   },
+   {
+    "rank": 5,
+    "chunk_id": "1797d794-which-chart-or-graph-is-right-for-you#1418117f78",
+    "heading": "Candlestick Chart",
+    "text_head": "### Candlestick Chart\n\nCandlestick charts are commonly used for financial analysis, showing metrics about a financial instrument over a period of time. This chart type shows the open, close, high, and"
+   }
+  ],
+  "drafts": [
+   {
+    "summary": "The chunks do not contain a literal definition or description of what a Pareto chart is. They mention 'Pareto analysis' in the context of combining bar charts with table calculations, but do not define the Pareto chart itself.",
+    "claims": []
+   }
+  ],
+  "verify_calls": [
+   {
+    "claims": [],
+    "grounded": [],
+    "ungrounded": [],
+    "ungrounded_reasons": []
+   }
+  ],
+  "relevance_calls": [
+   {
+    "responsive": false,
+    "reason": "The answer fails to define the Pareto chart as requested, instead stating that the documents do not contain a literal definition."
+   }
+  ],
+  "ungrounded_detail": []
+ },
+ {
+  "corpus": "chart-types",
+  "qid": "chart-types-05",
+  "question": "Why do bar charts work well combined with maps?",
+  "expected": "Maps are a powerful and intuitive way to visualize data; using a map as a filter lets viewers drill down and find detailed answers.",
+  "final_answered": false,
+  "refusal_reason": "The retrieved material addresses a related topic but not your specific question. The answer describes general benefits of maps without addressing the specific reasons why bar charts work well when combined with maps.",
+  "window_top10": [
+   {
+    "rank": 1,
+    "chunk_id": "1797d794-which-chart-or-graph-is-right-for-you#7d1770fdee",
+    "heading": "Bar chart",
+    "text_head": "# Bar chart\n\nBar charts are one of the most common data visualizations. With them, you can quickly highlight differences between categories, clearly show trends and outliers, and reveal historical hig"
+   },
+   {
+    "rank": 2,
+    "chunk_id": "1797d794-which-chart-or-graph-is-right-for-you#1e40f6d252",
+    "heading": "[Tips:](https://www.tableau.com/resource/dos-and-donts-dashb",
+    "text_head": "#### [Tips:](https://www.tableau.com/resource/dos-and-donts-dashboards)\n\n- [Color the rectangles by category. Because heatmaps are such a dense chart type, color makes it easier for the viewer to dist"
+   },
+   {
+    "rank": 3,
+    "chunk_id": "1797d794-which-chart-or-graph-is-right-for-you#2b7e690810",
+    "heading": "Tips:",
+    "text_head": "#### Tips:\n\n- Combine a line graph with bar charts. Bar and line charts go well together. Showing two kinds of information on the same axis adds powerful context to your data.\n- Shade the area under l"
+   },
+   {
+    "rank": 4,
+    "chunk_id": "1797d794-which-chart-or-graph-is-right-for-you#bd6227f3a3",
+    "heading": "Tips:",
+    "text_head": "#### Tips:\n\n- Add color. Changing the color of the bars within the Gantt chart quickly informs viewers about key aspects of the variable.\n- Combine maps and other chart types with Gantt charts. Includ"
+   },
+   {
+    "rank": 5,
+    "chunk_id": "1797d794-which-chart-or-graph-is-right-for-you#47837ba314",
+    "heading": "Tips:",
+    "text_head": "#### Tips:\n\n- Use color to illustrate achievement thresholds. Including color as a backdrop gives the viewer another reference to better understand how performance is measured against goals.\n- Add bul"
+   }
+  ],
+  "drafts": [
+   {
+    "summary": "The chunks state that bar charts can be combined with maps because maps are a powerful and intuitive way to visualize data, and using a map as a filter lets viewers drill down and find detailed answers.",
+    "claims": [
+     {
+      "claim": "Maps are a powerful and intuitive way to visualize data. Using a map as a filter lets viewers drill down and find detailed answers.",
+      "source_chunk_id": "1797d794-which-chart-or-graph-is-right-for-you#7d1770fdee"
+     }
+    ]
+   }
+  ],
+  "verify_calls": [
+   {
+    "claims": [
+     "Maps are a powerful and intuitive way to visualize data. Using a map as a filter lets viewers drill down and find detailed answers."
+    ],
+    "grounded": [
+     0
+    ],
+    "ungrounded": [],
+    "ungrounded_reasons": []
+   }
+  ],
+  "relevance_calls": [
+   {
+    "responsive": false,
+    "reason": "The answer describes general benefits of maps without addressing the specific reasons why bar charts work well when combined with maps."
+   }
+  ],
+  "ungrounded_detail": []
+ },
+ {
+  "corpus": "cr350-multidoc",
+  "qid": "cr350-img-01",
+  "question": "Selon le diagramme de configuration VLAN du commutateur, quel port sert de port tronc et vers quels VLAN ?",
+  "expected": "Le port Fa0/21 est le port tronc, connect\u00e9 aux VLAN 10, 20 et 30.",
+  "final_answered": false,
+  "refusal_reason": "Verification returned no grounded claims; I won't ship a summary without citations to back it.",
+  "window_top10": [
+   {
+    "rank": 1,
+    "chunk_id": "0cef9b34-cr350-zoom-cours-04#246259b2a7",
+    "heading": "[02:59:25]",
+    "text_head": "## [02:59:25]\non a fini avec les VLAN. On a fait le parall\u00e8le entre un LAN et un VLAN. \u00c7a s'est d\u00e9fini sur des commutateurs \u00e0 la base qui est pour le routage intervirale. \u00c7a nous prend un routeur sur "
+   },
+   {
+    "rank": 2,
+    "chunk_id": "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a#71a85da2b0",
+    "heading": "Diagramme de R\u00e9seau",
+    "text_head": "## Diagramme de R\u00e9seau\n\nUn switch est connect\u00e9 \u00e0 trois h\u00f4tes (A1, A2, A3) via les ports Fa0/1, Fa0/2, et Fa0/3 respectivement. Chaque h\u00f4te appartient \u00e0 un VLAN diff\u00e9rent : A1 est dans VLAN 10, A2 est "
+   },
+   {
+    "rank": 3,
+    "chunk_id": "cbe4bab8-srwe-module-3-2021#962fd0b6b2",
+    "heading": "Network Diagram Description",
+    "text_head": "### Network Diagram Description\n\nThe diagram shows a network topology with three devices:\n- **S1** (top switch) connected to **S2** (bottom switch) via port F0/1, labeled as \"Trunk\".\n- **S2** connects"
+   },
+   {
+    "rank": 4,
+    "chunk_id": "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a#3625950b8b",
+    "heading": "Question 8:",
+    "text_head": "## Question 8:\n- Quels ordinateurs peuvent s'\u00e9changer des informations entre eux?\n\nThe diagram shows a network topology with two switches connected to a central router. The router has a trunk port (Fa"
+   },
+   {
+    "rank": 5,
+    "chunk_id": "0cef9b34-cr350-zoom-cours-04#c26be0735c",
+    "heading": "[02:57:42]",
+    "text_head": "## [02:57:42]\net B2 peuvent communiquer? Je ne pense pas. parce que le tronc n'est pas le tronc. Le tronc, il relie le commutateur de B1 au commutateur de niveau 3 qui vous a dans le sch\u00e9ma. \u00c7a ne pre"
+   }
+  ],
+  "drafts": [
+   {
+    "summary": "Le diagramme de configuration VLAN montre que le port Fa0/21 du switch sert de port tronc et est connect\u00e9 \u00e0 un autre appareil. Les VLANs sont nomm\u00e9s pour une meilleure identification, mais les noms sp\u00e9cifiques des VLANs ne sont pas mentionn\u00e9s dans ce diagramme.",
+    "claims": []
+   }
+  ],
+  "verify_calls": [
+   {
+    "claims": [],
+    "grounded": [],
+    "ungrounded": [],
+    "ungrounded_reasons": []
+   }
+  ],
+  "relevance_calls": [
+   {
+    "responsive": true,
+    "reason": "The answer directly addresses the question by identifying the trunk port (Fa0/21) and explaining that specific VLAN names are not mentioned in the diagram."
+   }
+  ],
+  "ungrounded_detail": []
+ },
+ {
+  "corpus": "handwritten",
+  "qid": "handwritten-06",
+  "question": "What are the stages of the C++ compilation process shown in the notes?",
+  "expected": "Source Code \u2192 Compile \u2192 Machine Code (the source code is compiled into machine/binary code).",
+  "final_answered": false,
+  "refusal_reason": "The retrieved material addresses a related topic but not your specific question. The answer lists three stages (Source Code, Compile, Machine Code) that do not correspond to the standard C++ compilation process described in authoritative sources.",
+  "window_top10": [
+   {
+    "rank": 1,
+    "chunk_id": "6cf677b7-cs-notes-1#b008799e72",
+    "heading": "C++ Compilation Process",
+    "text_head": "### C++ Compilation Process\n\n```\n[C++ Code]\n   |\n   v\n[Compile]\n   |\n   v\n[Machine Code]\n```\n\n- **Source Code**: C++ code containing classes.\n- **Compile**: Process of translating source code into mac"
+   },
+   {
+    "rank": 2,
+    "chunk_id": "3973498d-cr350-cours-2#906999d8a0",
+    "heading": "\u00c9tapes d'encapsulation (de la couche 1 \u00e0 la couche 4, de bas",
+    "text_head": "### \u00c9tapes d'encapsulation (de la couche 1 \u00e0 la couche 4, de bas en haut)\n\n1) Receive bits \u2014> 2) Decapsulate \u2014> 3) Decapsulate \u2014> 4) Decapsulate \u2014> 5) Data"
+   },
+   {
+    "rank": 3,
+    "chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#988998fd2b",
+    "heading": "Notes",
+    "text_head": "### Notes\n- The diagram shows data flowing directly from GPU to NIC.\n- Control signals still require CPU mediation.\n- The entire process is described as 3 steps."
+   },
+   {
+    "rank": 4,
+    "chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#556c898526",
+    "heading": "Notes",
+    "text_head": "## Notes\n\n- The diagram shows a vertical stack from applications down to the Legate Plugin Runtime.\n- Arrows indicate the flow of execution from higher-level applications down to the Legate Plugin Run"
+   },
+   {
+    "rank": 5,
+    "chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#dd556e16ca",
+    "heading": "XLA Compilation Layer",
+    "text_head": "## XLA Compilation Layer\n- **XLA**\n  - GPU Compiler\n  - Global SPMD Executable\n  - GPU Runtime\n\nThe flow proceeds from top to bottom: Applications use the libraries, which are built on top of Jax (Pyt"
+   }
+  ],
+  "drafts": [
+   {
+    "summary": "The chunks describe the C++ compilation process stages as: Source Code, Compile, and Machine Code.",
+    "claims": [
+     {
+      "claim": "The C++ compilation process has three stages: Source Code, Compile, and Machine Code.",
+      "source_chunk_id": "6cf677b7-cs-notes-1#b008799e72"
+     }
+    ]
+   }
+  ],
+  "verify_calls": [
+   {
+    "claims": [
+     "The C++ compilation process has three stages: Source Code, Compile, and Machine Code."
+    ],
+    "grounded": [
+     0
+    ],
+    "ungrounded": [],
+    "ungrounded_reasons": []
+   }
+  ],
+  "relevance_calls": [
+   {
+    "responsive": false,
+    "reason": "The answer lists three stages (Source Code, Compile, Machine Code) that do not correspond to the standard C++ compilation process described in authoritative sources."
+   }
+  ],
+  "ungrounded_detail": []
+ },
+ {
+  "corpus": "nist-zero-trust",
+  "qid": "nist-zero-trust-10",
+  "question": "In SP 800-207's contextual trust-algorithm example, how many employee records does an HR employee typically access in a workday?",
+  "expected": "20 to 30 records in a typical workday (a contextual TA might alert if requests suddenly exceed 100).",
+  "final_answered": false,
+  "refusal_reason": "I drafted an answer but couldn't ground 1 claim(s) after 0 attempt(s). I won't return a partially hallucinated answer.",
+  "window_top10": [
+   {
+    "rank": 1,
+    "chunk_id": "0290d6ec-nist-sp-800-207#83f5557874",
+    "heading": "**3.3.1 Trust Algorithm Variations**",
+    "text_head": "of what the PE sees for the given subject. This also means that the PE must be informed of user behavior by the PA (and PEPs) that subjects interact with when communicating. Analysis of subject behavi"
+   },
+   {
+    "rank": 2,
+    "chunk_id": "0290d6ec-nist-sp-800-207#21da5c5890",
+    "heading": "**Authority**",
+    "text_head": "## **Authority**\n\nThis publication has been developed by NIST in accordance with its statutory responsibilities under the Federal Information Security Modernization Act (FISMA) of 2014, 44 U.S.C. \u00a7 35"
+   },
+   {
+    "rank": 3,
+    "chunk_id": "0290d6ec-nist-sp-800-207#a83b018cbf",
+    "heading": "**3.3 Trust Algorithm**",
+    "text_head": "### **3.3 Trust Algorithm**\n\nFor an enterprise with a ZTA deployment, the policy engine can be thought of as the brain and the PE\u2019s trust algorithm as its primary thought process. The trust algorithm "
+   },
+   {
+    "rank": 4,
+    "chunk_id": "0290d6ec-nist-sp-800-207#3e74c9642a",
+    "heading": "**References**",
+    "text_head": "Management and Budget (2019) Update to the Trusted Internet Connections (TIC) Initiative. (The White House, Washington, DC), OMB Memorandum M-19-26, September 12, 2019. Available at https://www.whiteh"
+   },
+   {
+    "rank": 5,
+    "chunk_id": "0290d6ec-nist-sp-800-207#c1f36e6459",
+    "heading": "**5.3 Stolen Credentials/Insider Threat**",
+    "text_head": "### **5.3 Stolen Credentials/Insider Threat**\n\nProperly implemented ZT, information security and resiliency policies, and best practices reduce the risk of an attacker gaining broad access via stolen "
+   }
+  ],
+  "drafts": [
+   {
+    "summary": "The chunks contain a specific example from NIST SP 800-207 regarding an HR employee accessing employee records, stating that normally they access 20 to 30 records in a typical workday.",
+    "claims": [
+     {
+      "claim": "An HR employee typically accesses 20 to 30 employee records in a typical workday.",
+      "source_chunk_id": "0290d6ec-nist-sp-800-207#83f5557874"
+     }
+    ]
+   }
+  ],
+  "verify_calls": [
+   {
+    "claims": [
+     "An HR employee typically accesses 20 to 30 employee records in a typical workday."
+    ],
+    "grounded": [],
+    "ungrounded": [
+     0
+    ],
+    "ungrounded_reasons": [
+     ""
+    ]
+   }
+  ],
+  "relevance_calls": null,
+  "ungrounded_detail": [
+   {
+    "claim": "An HR employee typically accesses 20 to 30 employee records in a typical workday.",
+    "cited_chunk_id": "0290d6ec-nist-sp-800-207#83f5557874",
+    "cited_chunk_text": "of what the PE sees for the given subject. This also means that the PE must be informed of user behavior by the PA (and PEPs) that subjects interact with when communicating. Analysis of subject behavior can be used to provide a model of acceptable use, and deviations from this behavior could trigger additional authentication checks or resource request denials.\n\nThe two factors are not always dependent on each other. It is possible to have a TA that assigns a confidence level to every subject and/or device and still considers every access request independently (i.e., singular). However, contextual, score-based TAs would provide the ability to offer more dynamic and granular access control, since the score provides a current confidence level for the requesting account and adapts to changing factors more quickly than static policies modified by human administrators.\n\nIdeally, a ZTA trust algorithm should be contextual, but this may not always be possible with the infrastructure components available to the enterprise. A contextual TA can mitigate threats where an attacker stays close to a \u201cnormal\u201d set of access requests for a compromised subject account or insider attack. It is important to balance security, usability, and cost-effectiveness when defining and implementing trust algorithms. Continually prompting a subject for reauthentication against behavior that is consistent with historical trends and norms for their mission function and role within the organization can lead to usability issues. For example, if an employee in the HR department of an agency normally accesses 20 to 30 employee records in a typical workday, a contextual TA may send an alert if the access requests suddenly exceed 100 records in a day. A contextual TA may also send an alert if someone is making access requests after normal business hours as this could be an attacker exfiltrating records by using a compromised HR account. These are examples where a contextual TA can detect an attack whereas a singular TA may fail to detect the new behavior. In another example, an accountant who typically accesses the financial system during normal business hours is now trying to access the system in the middle of the night from an unrecognizable location. A contextual TA may trigger an alert and require the subject to satisfy a more stringent confidence level or other criteria as outlined in NIST Special Publication 800-63A [SP800-63A]."
+   }
+  ]
+ },
+ {
+  "corpus": "scientific-gte",
+  "qid": "scientific-gte-09",
+  "question": "What GPUs was GTE trained on?",
+  "expected": "Up to 8 NVIDIA A100 GPUs with 80GB memory (evaluation on up to 8 V100 32GB).",
+  "final_answered": false,
+  "refusal_reason": "Verification returned no grounded claims; I won't ship a summary without citations to back it.",
+  "window_top10": [
+   {
+    "rank": 1,
+    "chunk_id": "d646b885-gte-2308-03281#9b49a2ff2f",
+    "heading": "**3.4 Training Details**",
+    "text_head": "rate decay and a warm-up period during the initial 5% of training steps. We conducted experiments on three distinct model scales: small, base, and large. These models were initialized using the small-"
+   },
+   {
+    "rank": 2,
+    "chunk_id": "d646b885-gte-2308-03281#33363d4b77",
+    "heading": "**Abstract**",
+    "text_head": "## **Abstract**\n\nWe present GTE, a general-purpose text embedding model trained with multi-stage contrastive learning. In line with recent advancements in unifying various NLP tasks into a single form"
+   },
+   {
+    "rank": 3,
+    "chunk_id": "0e725ba0-2026-annual-report-web#890988c153",
+    "heading": "**Our Company**",
+    "text_head": "being developed by thousands of enterprises to deliver services and products that would have been immensely difficult or even impossible with traditional coding. Examples include generative AI, which "
+   },
+   {
+    "rank": 4,
+    "chunk_id": "d646b885-gte-2308-03281#9ac405ef35",
+    "heading": "**1 Introduction**",
+    "text_head": "## **1 Introduction**\n\nText embeddings have became an indispensable component in many natural language processing tasks, such as text classification, text retrieval, question answering and dialogue sy"
+   },
+   {
+    "rank": 5,
+    "chunk_id": "d646b885-gte-2308-03281#ecf9f7c85f",
+    "heading": "**1 Introduction**",
+    "text_head": "tasks do not exhibit robust performance in sentence textual similarity tasks. Recently, there has been a shift in research focus towards developing more comprehensive models for text representation le"
+   }
+  ],
+  "drafts": [
+   {
+    "summary": "The chunks do not state which specific GPUs were used to train GTE, only that training was conducted on up to 8 NVIDIA A100 GPUs with 80GB memory and evaluation on up to 8 NVIDIA Tesla V100 GPUs with 32GB memory.",
+    "claims": []
+   }
+  ],
+  "verify_calls": [
+   {
+    "claims": [],
+    "grounded": [],
+    "ungrounded": [],
+    "ungrounded_reasons": []
+   }
+  ],
+  "relevance_calls": [
+   {
+    "responsive": true,
+    "reason": "The answer directly addresses the question by stating which GPUs were used for training and evaluation based on the provided documents."
+   }
+  ],
+  "ungrounded_detail": []
+ },
+ {
+  "corpus": "scientific-gte",
+  "qid": "scientific-gte-11",
+  "question": "Which base language model is GTE-large initialized from?",
+  "expected": "bert-large-uncased (330M params); GTE-base uses bert-base-uncased and GTE-small uses MiniLM.",
+  "final_answered": false,
+  "refusal_reason": "Verification returned no grounded claims; I won't ship a summary without citations to back it.",
+  "window_top10": [
+   {
+    "rank": 1,
+    "chunk_id": "d646b885-gte-2308-03281#0e9fda00dc",
+    "heading": "**4.4 Code Search**",
+    "text_head": "### **4.4 Code Search**\n\nProgramming languages can be regarded as a distinct form of text. To assess the effectiveness of our approach in code search, we conduct a comparative analysis with other code"
+   },
+   {
+    "rank": 2,
+    "chunk_id": "d646b885-gte-2308-03281#cb3fda5f5e",
+    "heading": "**4.3 Massive Text Embedding Benchmark**",
+    "text_head": "SimCSE is based on BERTbase backbone.\n\nCPT-S (Neelakantan et al., 2022) is of similar size to BERTlarge.\n\nBaseline results are borrowed from E5 paper (Wang et al., 2022b).\n\nNote that Contriever uses d"
+   },
+   {
+    "rank": 3,
+    "chunk_id": "d646b885-gte-2308-03281#9b49a2ff2f",
+    "heading": "**3.4 Training Details**",
+    "text_head": "rate decay and a warm-up period during the initial 5% of training steps. We conducted experiments on three distinct model scales: small, base, and large. These models were initialized using the small-"
+   },
+   {
+    "rank": 4,
+    "chunk_id": "d646b885-gte-2308-03281#33363d4b77",
+    "heading": "**Abstract**",
+    "text_head": "## **Abstract**\n\nWe present GTE, a general-purpose text embedding model trained with multi-stage contrastive learning. In line with recent advancements in unifying various NLP tasks into a single form"
+   },
+   {
+    "rank": 5,
+    "chunk_id": "d646b885-gte-2308-03281#c369ffd6b1",
+    "heading": "**C Original CodeSearchNet Results**",
+    "text_head": "## **C Original CodeSearchNet Results**\n\nWe list the results of the original setting on CodeSearchNet in Table 13, where the retrieval corpus contains 1k randomly sampled code snippets. Compared to pr"
+   }
+  ],
+  "drafts": [
+   {
+    "summary": "The chunks do not state which base language model GTE-large is initialized from. They mention that GTEbase and GTElarge are initialized from BERT models (bert-base-uncased and bert-large-uncased respectively), but the specific initialization source for GTE-large is not explicitly stated in the provided text.",
+    "claims": []
+   }
+  ],
+  "verify_calls": [
+   {
+    "claims": [],
+    "grounded": [],
+    "ungrounded": [],
+    "ungrounded_reasons": []
+   }
+  ],
+  "relevance_calls": [
+   {
+    "responsive": true,
+    "reason": "The answer directly addresses the question by stating whether the information is present in the provided documents."
+   }
+  ],
+  "ungrounded_detail": []
+ },
+ {
+  "corpus": "slide-decks",
+  "qid": "slide-decks-03",
+  "question": "How does the power cost of floating point arithmetic scale with the mantissa length?",
+  "expected": "Power of floating point arithmetic generally scales as the square of the mantissa length.",
+  "final_answered": false,
+  "refusal_reason": "I drafted an answer but couldn't ground 1 claim(s) after 0 attempt(s). I won't return a partially hallucinated answer.",
+  "window_top10": [
+   {
+    "rank": 1,
+    "chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#98c8843dfc",
+    "heading": "So Let's Talk About Floating Point Arithmetic",
+    "text_head": "##### So Let's Talk About Floating Point Arithmetic\n\n<!-- image: kind=bar-chart -->\n\n|            | sign   | 11-bit exponent   | 52-bit mantissa   |\n|------------|--------|-------------------|--------"
+   },
+   {
+    "rank": 2,
+    "chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#f2cc18240f",
+    "heading": "More to the point, the Power Cost of Floating Point Arithmet",
+    "text_head": "Energy per FLOP (Matrix Multiply) | |-------------|----------------|-------------------------------------| | FP64 | FMA | 2.5x | | FP32 | FMA | 1.0x | | FP16 | FMA | 0.5x | | FP64 | Tensor CoreMMA | 1"
+   },
+   {
+    "rank": 3,
+    "chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#f5c90d49b6",
+    "heading": "Tensor Cores are 1.5x-4x more power efficient than normal op",
+    "text_head": "##### Tensor Cores are 1.5x-4x more power efficient than normal ops\n\n<!-- image: kind=bar-chart -->\n\n<!-- image: kind=table -->\n\n| Precision   | Operation      | Energy per FLOP (Matrix Multiply)   |\n"
+   },
+   {
+    "rank": 4,
+    "chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#143a331185",
+    "heading": "Tensor Cores are 1.5x-4x more power efficient than normal op",
+    "text_head": "##### Tensor Cores are 1.5x-4x more power efficient than normal ops\n\n<!-- image: kind=bar-chart -->\n\n<!-- image: kind=table -->\n\n| Precision   | Operation      | Energy per FLOP (Matrix Multiply)   |\n"
+   },
+   {
+    "rank": 5,
+    "chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#3b268ba060",
+    "heading": "Tensor Cores are 1.5x-4x more power efficient than normal op",
+    "text_head": "Multiply) | |-----------|---------------|-----------------------------------| | FP64 | FMA | 2.5x | | **FP32** | **FMA** | **1.0x** | | FP16 | FMA | 0.5x | | FP64 | Tensor Core MMA | 1.5x | | FP16 | T"
+   }
+  ],
+  "drafts": [
+   {
+    "summary": "The chunks state that power cost of floating point arithmetic generally scales as the square of the mantissa length, and provide energy per FLOP data for various precisions.",
+    "claims": [
+     {
+      "claim": "Power of floating point arithmetic generally scales as the square of the mantissa length",
+      "source_chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#f2cc18240f"
+     }
+    ]
+   }
+  ],
+  "verify_calls": [
+   {
+    "claims": [
+     "Power of floating point arithmetic generally scales as the square of the mantissa length"
+    ],
+    "grounded": [],
+    "ungrounded": [
+     0
+    ],
+    "ungrounded_reasons": [
+     ""
+    ]
+   }
+  ],
+  "relevance_calls": null,
+  "ungrounded_detail": [
+   {
+    "claim": "Power of floating point arithmetic generally scales as the square of the mantissa length",
+    "cited_chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#f2cc18240f",
+    "cited_chunk_text": "Energy per FLOP (Matrix Multiply) | |-------------|----------------|-------------------------------------| | FP64 | FMA | 2.5x | | FP32 | FMA | 1.0x | | FP16 | FMA | 0.5x | | FP64 | Tensor CoreMMA | 1.5x | | FP16 | Tensor CoreMMA | 0.12x | | FP8 | Tensor CoreMMA | 0.06x | | Int8 | Tensor CoreMMA | 0.04x |\n\n[table-rows]\n[More to the point, the Power Cost of Floating Point Arithmetic] Precision=FP64, Operation=FMA, Energy per FLOP (Matrix Multiply)=2.5x\n[More to the point, the Power Cost of Floating Point Arithmetic] Precision=FP32, Operation=FMA, Energy per FLOP (Matrix Multiply)=1.0x\n[More to the point, the Power Cost of Floating Point Arithmetic] Precision=FP16, Operation=FMA, Energy per FLOP (Matrix Multiply)=0.5x\n[More to the point, the Power Cost of Floating Point Arithmetic] Precision=FP64, Operation=Tensor CoreMMA, Energy per FLOP (Matrix Multiply)=1.5x\n[More to the point, the Power Cost of Floating Point Arithmetic] Precision=FP16, Operation=Tensor CoreMMA, Energy per FLOP (Matrix Multiply)=0.12x\n[More to the point, the Power Cost of Floating Point Arithmetic] Precision=FP8, Operation=Tensor CoreMMA, Energy per FLOP (Matrix Multiply)=0.06x\n[More to the point, the Power Cost of Floating Point Arithmetic] Precision=Int8, Operation=Tensor CoreMMA, Energy per FLOP (Matrix Multiply)=0.04x\n[/table-rows]\nPower of floating point arithmetic generally scales as the square of the mantissa length\n\n<!-- image: kind=logo -->"
+   }
+  ]
+ },
+ {
+  "corpus": "slide-decks",
+  "qid": "slide-decks-04",
+  "question": "What changed about transistor density and power efficiency between 2004 and 2022, per the TSMC chart?",
+  "expected": "Transistor density grew massively (120x), but transistors got less power-efficient over the same window; the deck calls out this divergence as the energy-efficiency motivation.",
+  "final_answered": false,
+  "refusal_reason": "The retrieved material addresses a related topic but not your specific question. The answer states that the documents do not contain specific data about transistor density and power efficiency changes between 2004 and 2022 per the TSMC chart, which is a direct response to the question rather than a topic mismatch.",
+  "window_top10": [
+   {
+    "rank": 1,
+    "chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#d8ee4ee9ea",
+    "heading": "TSMC Lithography Process Power & Density Evolution (Increase",
+    "text_head": "##### TSMC Lithography Process Power & Density Evolution (Increases relative to 90nm process in 2004)\n\n<!-- image: kind=line-chart -->\n\n<!-- image: kind=logo -->"
+   },
+   {
+    "rank": 2,
+    "chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#59cd4f41ec",
+    "heading": "The Problem is That Transistor Density Keeps Increasing Expo",
+    "text_head": "##### The Problem is That Transistor Density Keeps Increasing Exponentially\n\n<!-- image: kind=line-chart -->\n\n<!-- image: kind=line-chart -->\n\n<!-- image: kind=logo -->"
+   },
+   {
+    "rank": 3,
+    "chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#f5c90d49b6",
+    "heading": "Tensor Cores are 1.5x-4x more power efficient than normal op",
+    "text_head": "##### Tensor Cores are 1.5x-4x more power efficient than normal ops\n\n<!-- image: kind=bar-chart -->\n\n<!-- image: kind=table -->\n\n| Precision   | Operation      | Energy per FLOP (Matrix Multiply)   |\n"
+   },
+   {
+    "rank": 4,
+    "chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#92f9379a5c",
+    "heading": "But Transistors Are Getting Less Power-Efficient",
+    "text_head": "##### But Transistors Are Getting Less Power-Efficient\n\n<!-- image: kind=line-chart -->\n\n<!-- image: kind=line-chart -->\n\n<!-- image: kind=logo -->"
+   },
+   {
+    "rank": 5,
+    "chunk_id": "d646b885-gte-2308-03281#354fd6f03f",
+    "heading": "**4.3 Massive Text Embedding Benchmark**",
+    "text_head": "[table-rows]\n[**4.3 Massive Text Embedding Benchmark**] Dataset=MS MARCO, BM25=22.8, SimCSE=9.4, Contriever=20.6, CPT-S=19.9, E5small=25.4, E5base=26.0, E5large=26.2, GTEsmall=31.3, GTEbase=31.8, GTEl"
+   }
+  ],
+  "drafts": [
+   {
+    "summary": "The chunks do not contain specific data about transistor density and power efficiency changes between 2004 and 2022 per the TSMC chart. While one chunk mentions a TSMC Lithography Process Power & Density Evolution chart with a reference to increases relative to 90nm process in 2004, it does not provide actual values or changes for the period up to 2022.",
+    "claims": []
+   }
+  ],
+  "verify_calls": [
+   {
+    "claims": [],
+    "grounded": [],
+    "ungrounded": [],
+    "ungrounded_reasons": []
+   }
+  ],
+  "relevance_calls": [
+   {
+    "responsive": false,
+    "reason": "The answer states that the documents do not contain specific data about transistor density and power efficiency changes between 2004 and 2022 per the TSMC chart, which is a direct response to the question rather than a topic mismatch."
+   }
+  ],
+  "ungrounded_detail": []
+ },
+ {
+  "corpus": "slide-decks",
+  "qid": "slide-decks-05",
+  "question": "Why is data movement a key concern for power efficiency in modern processors?",
+  "expected": "Modern processors spend significant power on data movement (one of the two categories of power consumption); reducing it is one of the headline strategies in the deck.",
+  "final_answered": false,
+  "refusal_reason": "The retrieved material addresses a related topic but not your specific question. The answer fails to address the question because it explicitly states that the source does not explain why data movement is a key concern for power efficiency.",
+  "window_top10": [
+   {
+    "rank": 1,
+    "chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#04775b8330",
+    "heading": "We spend power on two things",
+    "text_head": "##### We spend power on two things\n\n1. Data movement\n2. Computation"
+   },
+   {
+    "rank": 2,
+    "chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#f5c90d49b6",
+    "heading": "Tensor Cores are 1.5x-4x more power efficient than normal op",
+    "text_head": "##### Tensor Cores are 1.5x-4x more power efficient than normal ops\n\n<!-- image: kind=bar-chart -->\n\n<!-- image: kind=table -->\n\n| Precision   | Operation      | Energy per FLOP (Matrix Multiply)   |\n"
+   },
+   {
+    "rank": 3,
+    "chunk_id": "0e725ba0-2026-annual-report-web#fdd95173a6",
+    "heading": "**AI Factories Manufacture Intelligence**",
+    "text_head": "## **AI Factories Manufacture Intelligence**\n\n**Intelligence is now produced, not stored.**\n\nModern data centers are AI factories, converting energy into tokens\u2014just as power plants convert energy int"
+   },
+   {
+    "rank": 4,
+    "chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#6a0ebae48a",
+    "heading": "Architecture Diagram",
+    "text_head": "## Architecture Diagram\n\nThe diagram illustrates the data flow and performance characteristics between CPU and GPU memory systems, highlighting the benefits of data migration."
+   },
+   {
+    "rank": 5,
+    "chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#98c8843dfc",
+    "heading": "So Let's Talk About Floating Point Arithmetic",
+    "text_head": "##### So Let's Talk About Floating Point Arithmetic\n\n<!-- image: kind=bar-chart -->\n\n|            | sign   | 11-bit exponent   | 52-bit mantissa   |\n|------------|--------|-------------------|--------"
+   }
+  ],
+  "drafts": [
+   {
+    "summary": "The chunks state that power is spent on two things: data movement and computation, but do not explain why data movement is a key concern for power efficiency in modern processors.",
+    "claims": []
+   }
+  ],
+  "verify_calls": [
+   {
+    "claims": [],
+    "grounded": [],
+    "ungrounded": [],
+    "ungrounded_reasons": []
+   }
+  ],
+  "relevance_calls": [
+   {
+    "responsive": false,
+    "reason": "The answer fails to address the question because it explicitly states that the source does not explain why data movement is a key concern for power efficiency."
+   }
+  ],
+  "ungrounded_detail": []
+ },
+ {
+  "corpus": "slide-decks",
+  "qid": "slide-decks-16",
+  "question": "By how much has NVRTC compilation time improved since CUDA 11.8 for a hello-world kernel?",
+  "expected": "6x speedup since CUDA 11.8 (from the NVRTC compile-time chart).",
+  "final_answered": false,
+  "refusal_reason": "The retrieved material addresses a related topic but not your specific question. The answer states that the documents do not contain data for CUDA 11.8 or later versions, making it impossible to address the specific question about compilation time improvements since that version.",
+  "window_top10": [
+   {
+    "rank": 1,
+    "chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#2516c9617d",
+    "heading": "NVRTC Compile Time in milliseconds for \"hello world\"",
+    "text_head": "## NVRTC Compile Time in milliseconds for \"hello world\"\n\nCompiling CUDA to PTX using NVRTC from indicated CUDA version\n\n| CUDA Version | Hello World Compilation Time (ms) |\n|--------------|-----------"
+   },
+   {
+    "rank": 2,
+    "chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#4c4e1edc33",
+    "heading": "Annotated dynamic code ranges",
+    "text_head": "### Annotated dynamic code ranges\nBuilt into in popular frameworks and libraries such as RAPIDS, Spark, CV-CUDA, and more...\n\n---\n\n**Timeline range for a CUDA API call**\n\n- Call to computeOffsetsKerne"
+   },
+   {
+    "rank": 3,
+    "chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#0486ddc120",
+    "heading": "kernel launch",
+    "text_head": "# kernel launch\nwp.launch(integrate, dim=1024, inputs=[x, v, f, ...], device=\"cuda:0\")\n```\n\nGet Warp at: [https://github.com/nvidia/warp](https://github.com/nvidia/warp)\nor: `pip install warp-lang`\n\n-"
+   },
+   {
+    "rank": 4,
+    "chunk_id": "0e725ba0-2026-annual-report-web#f4439fcf93",
+    "heading": "**Business Strategies**",
+    "text_head": "NVIDIA NIM, which increases token throughput using industry-leading open and proprietary models; NVIDIA NeMo, a complete solution for curating, fine-tuning, reinforcement learning, evaluating, and saf"
+   },
+   {
+    "rank": 5,
+    "chunk_id": "0e725ba0-2026-annual-report-web#5bfb563677",
+    "heading": "**CUDA Installed Base Powering AI Flywheel**",
+    "text_head": "## **CUDA Installed Base Powering AI Flywheel**\n\nThis year marked the 20th anniversary of CUDA.\n\nCUDA is a revolutionary programming model\u2014and the foundation of the NVIDIA platform. Over two decades, "
+   }
+  ],
+  "drafts": [
+   {
+    "summary": "The chunks contain a table showing NVRTC compilation times for CUDA versions 1-6, but do not include data for CUDA 11.8 or any version after that. The only statement about speedup is '6x speedup since CUDA 11.8', which appears to be a general claim without specific version numbers in the table.",
+    "claims": []
+   }
+  ],
+  "verify_calls": [
+   {
+    "claims": [],
+    "grounded": [],
+    "ungrounded": [],
+    "ungrounded_reasons": []
+   }
+  ],
+  "relevance_calls": [
+   {
+    "responsive": false,
+    "reason": "The answer states that the documents do not contain data for CUDA 11.8 or later versions, making it impossible to address the specific question about compilation time improvements since that version."
+   }
+  ],
+  "ungrounded_detail": []
+ },
+ {
+  "corpus": "slide-decks",
+  "qid": "slide-decks-21",
+  "question": "How much lower are the overheads of the NVRTC '-minimal' flag compared to the default '-O3'?",
+  "expected": "1.6x lower overheads than default '-O3'.",
+  "final_answered": false,
+  "refusal_reason": "I drafted an answer but couldn't ground 1 claim(s) after 0 attempt(s). I won't return a partially hallucinated answer.",
+  "window_top10": [
+   {
+    "rank": 1,
+    "chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#e07a98ccd9",
+    "heading": "New \"--minimal\" flag reduces front-end compilation time by e",
+    "text_head": "## New \"--minimal\" flag reduces front-end compilation time by excluding rarely used compile-time-expensive features\n\n- Examples of such features include textures and surfaces\n- 1.6x lower overheads th"
+   },
+   {
+    "rank": 2,
+    "chunk_id": "02e67b60-flags#8096d8697d",
+    "heading": "core/src/flags.rs",
+    "text_head": "use std::time::Duration;\n\nuse env_flags::env_flags;\n\nenv_flags! {\n    pub OPENAI_DEFAULT_MODEL: &str = \"o3\";\n    pub OPENAI_API_BASE: &str = \"https://api.openai.com/v1\";\n\n/// Fallback when the provide"
+   },
+   {
+    "rank": 3,
+    "chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#2516c9617d",
+    "heading": "NVRTC Compile Time in milliseconds for \"hello world\"",
+    "text_head": "## NVRTC Compile Time in milliseconds for \"hello world\"\n\nCompiling CUDA to PTX using NVRTC from indicated CUDA version\n\n| CUDA Version | Hello World Compilation Time (ms) |\n|--------------|-----------"
+   },
+   {
+    "rank": 4,
+    "chunk_id": "f59860eb-guidelines#23187cdd3f",
+    "heading": "**The model stack and VRAM budget**",
+    "text_head": "### **The model stack and VRAM budget**\n\nThe reference target is an RTX 4070 (12GB VRAM) with 32GB system RAM. Every model choice is constrained by this. **bf16 across the stack on Ada** (ADR-0006); t"
+   },
+   {
+    "rank": 5,
+    "chunk_id": "d646b885-gte-2308-03281#9b49a2ff2f",
+    "heading": "**3.4 Training Details**",
+    "text_head": "rate decay and a warm-up period during the initial 5% of training steps. We conducted experiments on three distinct model scales: small, base, and large. These models were initialized using the small-"
+   }
+  ],
+  "drafts": [
+   {
+    "summary": "The chunks state that the NVRTC '-minimal' flag has 1.6x lower overheads than the default '-O3' flag.",
+    "claims": [
+     {
+      "claim": "The NVRTC '-minimal' flag has 1.6x lower overheads than the default '-O3'.",
+      "source_chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#e07a98ccd9"
+     }
+    ]
+   }
+  ],
+  "verify_calls": [
+   {
+    "claims": [
+     "The NVRTC '-minimal' flag has 1.6x lower overheads than the default '-O3'."
+    ],
+    "grounded": [],
+    "ungrounded": [
+     0
+    ],
+    "ungrounded_reasons": [
+     ""
+    ]
+   }
+  ],
+  "relevance_calls": null,
+  "ungrounded_detail": [
+   {
+    "claim": "The NVRTC '-minimal' flag has 1.6x lower overheads than the default '-O3'.",
+    "cited_chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#e07a98ccd9",
+    "cited_chunk_text": "## New \"--minimal\" flag reduces front-end compilation time by excluding rarely used compile-time-expensive features\n\n- Examples of such features include textures and surfaces\n- 1.6x lower overheads than default \"-O3\"\n- Ideal for programs which re-JIT kernels repeatedly (for example when targeting dynamic shapes in DNNs)"
+   }
+  ]
+ },
+ {
+  "corpus": "slide-decks",
+  "qid": "slide-decks-17",
+  "question": "In the deck's basic kernel-fusion example, how many kernel launches does the unfused FP32\u2192FP16 multiplication require versus the single fused version?",
+  "expected": "3 kernel launches unfused vs 1 launch fused.",
+  "final_answered": false,
+  "refusal_reason": "The retrieved chunks only discuss floating-point precision formats and energy efficiency metrics, lacking any information about kernel launch counts or the specific basic kernel-fusion example mentioned in the query.",
+  "window_top10": null,
+  "drafts": [],
+  "verify_calls": [],
+  "relevance_calls": null,
+  "ungrounded_detail": []
+ },
+ {
+  "corpus": "slide-decks",
+  "qid": "slide-decks-25",
+  "question": "What is the deck's central thesis about the right performance metric to optimise in modern accelerators?",
+  "expected": "It's about performance per watt (the section is titled '_It's about Performance per Watt_').",
+  "final_answered": false,
+  "refusal_reason": "The retrieved chunks discuss executive compensation metrics and general company capabilities but do not explicitly state the deck's central thesis on the right performance metric to optimise in modern accelerators.",
+  "window_top10": null,
+  "drafts": [],
+  "verify_calls": [],
+  "relevance_calls": null,
+  "ungrounded_detail": []
+ },
+ {
+  "corpus": "codex-rs-find-the-code",
+  "qid": "ftc-big-runmain",
+  "question": "What does the run_main function in the exec crate do?",
+  "expected": "run_main (exec/lib.rs) is the exec entry point. BIG chunk (>1800) \u2014 truncation probe.",
+  "final_answered": false,
+  "refusal_reason": "The retrieved material addresses a related topic but not your specific question. The answer states that the information is not available in the documents, which is a direct response to the question but indicates a lack of content rather than a topic mismatch.",
+  "window_top10": [
+   {
+    "rank": 1,
+    "chunk_id": "e5448b1d-main#da42f10e42",
+    "heading": "fn main",
+    "text_head": "## fn main\n#[tokio::main]\nasync fn main() -> anyhow::Result<()> {\n    let cli = MultitoolCli::parse();\n\nmatch cli.subcommand {\n        None => {\n            codex_tui::run_main(cli.interactive)?;\n    "
+   },
+   {
+    "rank": 2,
+    "chunk_id": "453bd6d4-codex#4f66f903e8",
+    "heading": "core/src/codex.rs",
+    "text_head": "// Poisoned mutex should fail the program\n#![allow(clippy::unwrap_used)]\n\nuse std::collections::HashMap;\nuse std::collections::HashSet;\nuse std::path::Path;\nuse std::path::PathBuf;\nuse std::sync::Arc;"
+   },
+   {
+    "rank": 3,
+    "chunk_id": "00ba4f16-lib#b4f8c9b6d9",
+    "heading": "fn run_main",
+    "text_head": "## fn run_main\npub fn run_main(cli: Cli) -> std::io::Result<()> {\n    let (sandbox_policy, approval_policy) = if cli.full_auto {\n        (\n            Some(SandboxPolicy::new_full_auto_policy()),\n    "
+   },
+   {
+    "rank": 4,
+    "chunk_id": "453bd6d4-codex#73e41e152f",
+    "heading": "fn handle_function_call",
+    "text_head": "## fn handle_function_call\nasync fn handle_function_call(\n    sess: &Session,\n    sub_id: String,\n    name: String,\n    arguments: String,\n    call_id: String,\n) -> ResponseInputItem {\n    match name."
+   },
+   {
+    "rank": 5,
+    "chunk_id": "8a6db2fc-proto#666b3ffd05",
+    "heading": "fn run_main",
+    "text_head": "## fn run_main\npub async fn run_main(_opts: ProtoCli) -> anyhow::Result<()> {\n    if std::io::stdin().is_terminal() {\n        anyhow::bail!(\"Protocol mode expects stdin to be a pipe, not a terminal\");"
+   }
+  ],
+  "drafts": [
+   {
+    "summary": "The chunks do not contain information about what the run_main function in the exec crate does.",
+    "claims": []
+   }
+  ],
+  "verify_calls": [
+   {
+    "claims": [],
+    "grounded": [],
+    "ungrounded": [],
+    "ungrounded_reasons": []
+   }
+  ],
+  "relevance_calls": [
+   {
+    "responsive": false,
+    "reason": "The answer states that the information is not available in the documents, which is a direct response to the question but indicates a lack of content rather than a topic mismatch."
+   }
+  ],
+  "ungrounded_detail": []
+ },
+ {
+  "corpus": "slide-decks",
+  "qid": "slide-decks-31",
+  "question": "What four design principles does the nvmath-python architecture figure highlight?",
+  "expected": "Minimal lead-time, Inter-operability, Pythonic library interface, Platform-agnostic",
+  "final_answered": false,
+  "refusal_reason": "The retrieved material addresses a related topic but not your specific question. The answer states that the documents do not explicitly list four design principles for nvmath-python, which is a direct mismatch with the user's request to identify those specific principles.",
+  "window_top10": [
+   {
+    "rank": 1,
+    "chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#84925ee228",
+    "heading": "Architecture Diagram",
+    "text_head": "## Architecture Diagram\n\nA diagram illustrating the architecture of cuNumeric:\n\n- **NumPy Application** (cloud shape) \u2192 **cuNumeric Python Library** (rectangle)\n- **cuNumeric Python Library** \u2192 **Prod"
+   },
+   {
+    "rank": 2,
+    "chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#360e7ab790",
+    "heading": "Architecture Diagram",
+    "text_head": "## Architecture Diagram\n\nThe diagram illustrates the flow of data during backward propagation in a supervised fine-tuning process, specifically highlighting asynchronous offloading of intermediate ten"
+   },
+   {
+    "rank": 3,
+    "chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#e04eccc123",
+    "heading": "Architecture Diagram",
+    "text_head": "## Architecture Diagram\n\n```\nPython Application\n        |\n        v\nPython Libraries\n  (NumPy, SciPy, CuPy, PyTorch, scikit-learn, scikit-image, etc.)\n        |\n        v\nNVIDIA Python APIs\n  \u251c\u2500\u2500 Host"
+   },
+   {
+    "rank": 4,
+    "chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#4ceaf63f2d",
+    "heading": "nvmath-python",
+    "text_head": "# nvmath-python\n\nEasy Pythonic access to CUDA Math library functionality in a performant manner"
+   },
+   {
+    "rank": 5,
+    "chunk_id": "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#4d868226a0",
+    "heading": "Architecture Diagram",
+    "text_head": "## Architecture Diagram\n\nThe diagram illustrates a method for optimizing memory usage during supervised fine-tuning of a language model.\n\n- **Language Model**: The main component, composed of multiple"
+   }
+  ],
+  "drafts": [
+   {
+    "summary": "The chunks describe the cuNumeric architecture and nvmath-python features but do not explicitly list four design principles for nvmath-python. The available information focuses on architecture diagrams, data flow, and optimization strategies rather than enumerated design principles.",
+    "claims": []
+   }
+  ],
+  "verify_calls": [
+   {
+    "claims": [],
+    "grounded": [],
+    "ungrounded": [],
+    "ungrounded_reasons": []
+   }
+  ],
+  "relevance_calls": [
+   {
+    "responsive": false,
+    "reason": "The answer states that the documents do not explicitly list four design principles for nvmath-python, which is a direct mismatch with the user's request to identify those specific principles."
+   }
+  ],
+  "ungrounded_detail": []
+ },
+ {
+  "corpus": "annual-report",
+  "qid": "annual-report-14",
+  "question": "What was the total amount of fees earned or paid in cash to all of NVIDIA's directors in fiscal 2026?",
+  "expected": "$956,250 \u2014 the sum of the 'Fees Earned or Paid in Cash ($)' column across all 12 directors in the Director Compensation for Fiscal 2026 table (10x$85,000 + $63,750 + $42,500). Phase-2 text-to-SQL aggregate, gated by the independent Python recompute.",
+  "final_answered": false,
+  "refusal_reason": "Verification returned no grounded claims; I won't ship a summary without citations to back it.",
+  "window_top10": [
+   {
+    "rank": 1,
+    "chunk_id": "0e725ba0-2026-annual-report-web#910dfa7ff2",
+    "heading": "**NVIDIA Corporation and Subsidiaries Notes to the Consolida",
+    "text_head": "## **NVIDIA Corporation and Subsidiaries Notes to the Consolidated Financial Statements**\n\n(Continued)\n\nA reconciliation of segment operating income to consolidated income before income tax for fiscal"
+   },
+   {
+    "rank": 2,
+    "chunk_id": "0e725ba0-2026-annual-report-web#6688b1c5c3",
+    "heading": "**BUSINESS OVERVIEW**",
+    "text_head": "#### **BUSINESS OVERVIEW**\n\nFiscal 2026 marked another year of strong growth for NVIDIA, with revenue surging 65% year on year to $215.9 billion reflecting continued momentum across our platform trans"
+   },
+   {
+    "rank": 3,
+    "chunk_id": "0e725ba0-2026-annual-report-web#f817d857b0",
+    "heading": "**NVIDIA Corporation and Subsidiaries Notes to the Consolida",
+    "text_head": "In July 2025, the OBBBA was enacted into law and contains several changes to key U.S. federal income tax laws. We have recognized the tax effects of currently effective OBBBA provisions in our results"
+   },
+   {
+    "rank": 4,
+    "chunk_id": "0e725ba0-2026-annual-report-web#a790d9df09",
+    "heading": "**Pay Versus Performance**",
+    "text_head": "## **Pay Versus Performance**\n\nNVIDIA\u2019s executive compensation program is guided by a pay for performance philosophy and is designed to align NEO pay with our stockholders\u2019 interests.  Accordingly, a "
+   },
+   {
+    "rank": 5,
+    "chunk_id": "0e725ba0-2026-annual-report-web#ea8ba8853f",
+    "heading": "**NVIDIA Corporation and Subsidiaries Notes to the Consolida",
+    "text_head": "## **NVIDIA Corporation and Subsidiaries Notes to the Consolidated Financial Statements**\n\n(Continued)\n\n- (B) The estimated useful lives of our buildings are up to thirty years. Leasehold improvements"
+   },
+   {
+    "rank": 6,
+    "chunk_id": "0e725ba0-2026-annual-report-web#sql0001",
+    "heading": "Director Compensation for Fiscal 2026",
+    "text_head": "SUM of Fees Earned or Paid in Cash ($) = 956250 over 12 rows:\n**Name=Robert K. Burgess (2), **Fees Earned or Paid in Cash ($)=63,750, Stock Awards ($) (1)=278,809, Total ($)=342,559\n**Name=Tench Coxe,"
+   }
+  ],
+  "drafts": [
+   {
+    "summary": "The chunks contain a table listing fees earned or paid in cash for individual directors, but do not provide a total amount for all of NVIDIA's directors in fiscal 2026.",
+    "claims": []
+   }
+  ],
+  "verify_calls": [
+   {
+    "claims": [],
+    "grounded": [],
+    "ungrounded": [],
+    "ungrounded_reasons": []
+   }
+  ],
+  "relevance_calls": [
+   {
+    "responsive": true,
+    "reason": "The answer directly addresses the specific question by stating that the documents do not contain the requested total amount."
+   }
+  ],
+  "ungrounded_detail": []
+ }
+]
