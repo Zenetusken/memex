@@ -2130,7 +2130,16 @@ async def verify(state: AnswerState) -> AnswerStateUpdate:
     # Kill-switch `agents.citation_retarget_enabled` (fail-open) -> AnswerState.citation_retarget.
     retarget_tokens = 0
     retargeted_draft = False
-    final_pass = state.over_budget() or state.regenerate_attempts >= state.max_regenerate_attempts
+    # final_pass must PROJECT the post-merge budget: route_after_verify sees tokens_used
+    # AFTER this verify call's tokens merge, so a budget-exhaustion refusal (the dominant
+    # real path — "after 0 attempts") would otherwise slip past the retarget (the router
+    # refuses on the very state this check pre-dated; caught by the M1b autopsy re-run).
+    projected_tokens = state.tokens_used + tokens
+    final_pass = (
+        projected_tokens >= state.token_budget
+        or state.over_budget()
+        or state.regenerate_attempts >= state.max_regenerate_attempts
+    )
     if state.citation_retarget and final_pass and valid_ungrounded:
         window = state.reranked[:5]
         promoted: list[int] = []
@@ -2150,9 +2159,13 @@ async def verify(state: AnswerState) -> AnswerStateUpdate:
             # reranked chunks for one claim) can drown support the 1x1 view grounds
             # (nist-10: rejected in the 5-chunk render, grounded at 1 claim x 1 chunk).
             # The batch verdict is NOT an isolation verdict; only then try the siblings.
-            cited = chunk_by_id.get(claim.source_chunk_id)
+            # Probe the STRIPPED render copies (M1b-i) — a raw-chunk probe would re-drown
+            # the support behind the [table-rows] duplicate the main render just removed.
+            cited = render_chunks.get(claim.source_chunk_id)
             candidates = ([cited] if cited is not None else []) + [
-                c for c in window if c.chunk_id != claim.source_chunk_id
+                render_chunks.get(c.chunk_id, c)
+                for c in window
+                if c.chunk_id != claim.source_chunk_id
             ]
             for cand in candidates:
                 probe_claim = CitedClaim(
