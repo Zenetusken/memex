@@ -37,7 +37,14 @@ the rerank pool. Lever A's contribution is the usage/reference regime, as Phase 
 **38/39 ANS *answered* (97%) · `refusal_cf` = 1.0 · mean citation_precision 0.771 (answered-only 0.717) ·
 0 errors** (the answered_count is a single full run; the gate is N=3 and the borderline ANS — runmain,
 mcpstdio — were N=2 spot-confirmed). NB `memex eval` scores answered/refused + `cp`, NOT answer *text*
-correctness, so the headline below is qualified by a manual spot-check.
+correctness, so the headline below is qualified by a manual spot-check. **(CLOSED 2026-06-09: `memex
+eval` now grades answer TEXT via the deterministic `answer_must_mention` → `answer_mention_recall`
+metric — whole-token boundary match, any-of slots; the 39 ANS queries are annotated. First baseline
+(N=2 BYTE-STABLE): 32/38 text-correct, mean recall 0.855; the 6 deterministic flags = the 3 usage-class
+definition-distraction answers below + 3 honest def-class partials (modelclient misses the streaming
+purpose; nl-safe never names the decision function; ansiescapeline misses the spans transform). The
+metric reproduces this section's manual ground truth exactly — incl. PASSING the 2 valid-sibling answers
+GOLD_CITED false-negatived. See `_answer_text_baseline_2026_06_09` in queries.json.)**
 
 ### Answer-correctness spot-check (N=8, usage-weighted — the advisor's required check)
 
