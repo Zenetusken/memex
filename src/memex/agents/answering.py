@@ -2134,7 +2134,17 @@ async def verify(state: AnswerState) -> AnswerStateUpdate:
     if state.citation_retarget and final_pass and valid_ungrounded:
         window = state.reranked[:5]
         promoted: list[int] = []
-        for i in list(valid_ungrounded)[:2]:
+        # ELIGIBILITY (HARD-gate-critical): only claims the LLM itself rejected (empty
+        # parallel reason) may be retargeted. A claim a DETERMINISTIC backstop demoted
+        # (numeric-aggregate, name-only — always reason-carrying) must NEVER be re-probed:
+        # the 1x1 LLM call is exactly the rubber-stamp those backstops exist to overrule
+        # (caught by test_numeric_backstop_fabrication_refuses_end_to_end — the retarget
+        # re-promoted a fabricated table SUM). Missing/contested/failed-call claims also
+        # carry reasons and stay excluded.
+        eligible = [
+            i for i, r in zip(valid_ungrounded, valid_reasons, strict=False) if r == ""
+        ]
+        for i in eligible[:2]:
             claim = state.draft.claims[i]
             # M1b-ii: probe the CITED chunk FIRST, in isolation — the batch render (all
             # reranked chunks for one claim) can drown support the 1x1 view grounds
