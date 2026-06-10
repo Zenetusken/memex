@@ -53,3 +53,29 @@ ftc-big-runmain **#6** — one past the top-5 window); 1 RETRIEVAL-MISS (ar-14);
 
 Projected ceiling: **18 → ~2–3** with M1–M5 landed, HARD gate untouched throughout (every lever
 kill-switched, validated N≥2 full-suite per the ADR-0022 discipline).
+
+## M1 + M1b SHIPPED (2026-06-10, branch `fix/m1-citation-retarget`)
+
+**+2 deterministic flips (chart-types-01, nist-zero-trust-10), 0 regressions** — autopsy ×3 + the full
+ship ladder (14 corpora × N=2: `refusal_cf`=1.0 everywhere, 0 errors, ANS at-or-above baseline
+[technical-guidelines −1 = the re-scoped tg-13 CF now correctly refusing — tg is at a PERFECT
+12/12+6/6]; eval-summary 6/6, 0 leaks; codex-rs `answer_text_correct` 32/38 stable both runs).
+
+The build (4 commits, each validation-caught issue fixed at the root):
+1. **M1 retarget** — promote-only re-test of still-ungrounded claims vs window chunks via the SAME
+   gate; `source_chunk_id` rewritten on promotion. Kill-switch `MEMEX_AGENTS__CITATION_RETARGET_ENABLED`.
+2. **M1b-i render dedup** — the verifier's copy strips the `[table-rows]` duplicate when the GFM table
+   is present (the doubled noise drowned a verbatim-present trailing sentence, 3/3; verify-NODE-only ⇒
+   summarizer unaffected). New `core/text.strip_table_rows_blocks`.
+3. **M1b-ii cited-first isolation probe** — the batch render (5 chunks per claim) drowns support the
+   1×1 view grounds (nist-10); the batch verdict is NOT an isolation verdict.
+4. **Eligibility filter (HARD-gate-critical, caught by the suite):** only LLM-rejected claims (empty
+   reason) are retargetable — a backstop-demoted claim must NEVER be re-probed (the 1×1 LLM call is the
+   rubber-stamp the deterministic backstops exist to overrule; the retarget had re-promoted a fabricated
+   table SUM). + the final-pass BUDGET PROJECTION (the router refuses on post-merge tokens, so
+   budget-exhaustion refusals — "after 0 attempts", the dominant path — never reached the retarget).
+
+**Recorded residuals (not chased):** sd-03 = 4B verifier TABLE-FIXATION (rejects a character-identical
+sentence trailing a table even at 424 chars 1×1, reason citing only the table — a verify-prompt-v3
+candidate, its own increment); sd-21 = `'-minimal'` vs `"--minimal"` claim/chunk spelling mismatch
+(arguably correct strictness; possibly a corpus-wording fix). Inventory: 18 → **16**.

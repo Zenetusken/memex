@@ -474,6 +474,7 @@ async def test_verify_filters_phantom_indices(fake_llm: FakeLLM) -> None:
 @pytest.mark.usefixtures("patch_retrieve", "patch_prompt")
 async def test_verify_missing_index_treated_as_ungrounded(
     fake_llm: FakeLLM,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """If a claim index is missing from both `grounded` and `ungrounded`,
     treat it as ungrounded (conservative — don't default to grounded on
@@ -486,6 +487,12 @@ async def test_verify_missing_index_treated_as_ungrounded(
     DROPS claim 1. The contract this pins is unchanged: the omitted claim is
     never treated as grounded (it's dropped, not shipped). The observable
     outcome moved from whole-answer refusal to a partial-grounded ship."""
+    # M1 citation-retarget OFF: this test pins the PRE-retarget filter semantics
+    # (a probe-aware fake would conflate the two contracts; the retarget has its own tests).
+    monkeypatch.setenv("MEMEX_AGENTS__CITATION_RETARGET_ENABLED", "false")
+    from memex.core.config import MemexSettings as _MS
+    from memex.core.config import set_settings as _ss
+    _ss(_MS())
     fake_llm.respond(
         "assess_sufficiency",
         SufficiencyAssessment,
@@ -529,11 +536,17 @@ async def test_verify_missing_index_treated_as_ungrounded(
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("patch_retrieve", "patch_prompt")
-async def test_verify_contested_index_is_not_shipped_as_grounded(fake_llm: FakeLLM) -> None:
+async def test_verify_contested_index_is_not_shipped_as_grounded(fake_llm: FakeLLM, monkeypatch: pytest.MonkeyPatch) -> None:
     """A claim index the verifier put in BOTH `grounded` and `ungrounded` must NOT ship
     as grounded — ungrounded is authoritative (the HARD gate: a verifier-flagged claim
     can't leak into the answer because `compose` keys only on `grounded`). The contested
     claim is dropped; the clean one ships."""
+    # M1 citation-retarget OFF: this test pins the PRE-retarget filter semantics
+    # (a probe-aware fake would conflate the two contracts; the retarget has its own tests).
+    monkeypatch.setenv("MEMEX_AGENTS__CITATION_RETARGET_ENABLED", "false")
+    from memex.core.config import MemexSettings as _MS
+    from memex.core.config import set_settings as _ss
+    _ss(_MS())
     fake_llm.respond(
         "assess_sufficiency",
         SufficiencyAssessment,
@@ -573,13 +586,19 @@ async def test_verify_contested_index_is_not_shipped_as_grounded(fake_llm: FakeL
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("patch_retrieve", "patch_prompt")
-async def test_partial_grounded_ships_grounded_subset(fake_llm: FakeLLM) -> None:
+async def test_partial_grounded_ships_grounded_subset(fake_llm: FakeLLM, monkeypatch: pytest.MonkeyPatch) -> None:
     """#262 — the compound-question fix. A draft with one grounded claim (the
     answerable half) + one ungrounded claim (the half the corpus can't support)
     ships the GROUNDED subset: the ungrounded claim is dropped and the summary is
     rebuilt from the survivor, so no ungrounded assertion reaches the headline.
     `max_regenerate_attempts=0` exhausts the retry immediately → straight to the
     partial-ship branch."""
+    # M1 citation-retarget OFF: this test pins the PRE-retarget filter semantics
+    # (a probe-aware fake would conflate the two contracts; the retarget has its own tests).
+    monkeypatch.setenv("MEMEX_AGENTS__CITATION_RETARGET_ENABLED", "false")
+    from memex.core.config import MemexSettings as _MS
+    from memex.core.config import set_settings as _ss
+    _ss(_MS())
     fake_llm.respond(
         "assess_sufficiency",
         SufficiencyAssessment,
@@ -668,6 +687,12 @@ async def test_partial_grounded_kill_switch_refuses(
 ) -> None:
     """`MEMEX_AGENTS__PARTIAL_GROUNDED_ANSWERS=false` restores all-or-nothing:
     a mixed verdict refuses instead of shipping the grounded subset."""
+    # M1 citation-retarget OFF: this test pins the PRE-retarget filter semantics
+    # (a probe-aware fake would conflate the two contracts; the retarget has its own tests).
+    monkeypatch.setenv("MEMEX_AGENTS__CITATION_RETARGET_ENABLED", "false")
+    from memex.core.config import MemexSettings as _MS
+    from memex.core.config import set_settings as _ss
+    _ss(_MS())
     from memex.core.config import MemexSettings, set_settings
 
     monkeypatch.setenv("MEMEX_VAULT_PATH", str(tmp_path))
@@ -2170,4 +2195,100 @@ async def test_rerank_definition_query_is_untouched(
         assert [c.chunk_id for c in out["reranked"]] == ["def", "test"]
     finally:
         monkeypatch.delenv("MEMEX_AGENTS__USAGE_INTENT_DEMOTION_ENABLED", raising=False)
+        set_settings(MemexSettings())
+
+
+# ---- M1: verify-time citation RETARGET (audit-15, promote-only) ----
+
+
+def _retarget_fixture(_mp: object, *, support_in_sibling: bool):
+    """Two-chunk window: the draft cites c1 (no support); c2 carries the support iff
+    support_in_sibling. The fake verify grounds ONLY a 1-claim probe whose rendered
+    prompt contains c2's marker text."""
+    c1 = Chunk(chunk_id="d#c1", document_id="d", document_title="D", text="related prose, no figure")
+    c2 = Chunk(chunk_id="d#c2", document_id="d", document_title="D", text="the overhead is 1.6x lower MARKER")
+    calls = {"verify": 0, "probes": 0}
+
+    async def _hybrid(query: str, k: int = 50) -> list[Chunk]:
+        return [c1, c2]
+
+    async def _rerank(query: str, candidates: list[Chunk], top_k: int = 10) -> list[Chunk]:
+        return list(candidates[:top_k])
+
+    async def fake_call(*, prompt: object, schema: type, **_kw: object) -> tuple[object, int]:
+        name = schema.__name__
+        text = prompt if isinstance(prompt, str) else " ".join(str(m) for m in prompt)
+        if name == "SufficiencyAssessment":
+            return SufficiencyAssessment(sufficient=True, reason="ok"), 3
+        if name == "DraftAnswer":
+            return (
+                DraftAnswer(
+                    summary="The overhead is 1.6x lower.",
+                    claims=[CitedClaim(claim="The overhead is 1.6x lower.", source_chunk_id="d#c1", confidence="high")],
+                ),
+                5,
+            )
+        if name == "VerificationResult":
+            calls["verify"] += 1
+            if "MARKER" in text and "d#c1" not in text:  # the 1-claim retarget probe vs c2
+                calls["probes"] += 1
+                ok = support_in_sibling
+                return schema(grounded=[0] if ok else [], ungrounded=[] if ok else [0]), 4
+            return schema(grounded=[], ungrounded=[0]), 4  # main verify: cited pair fails
+        if name == "RelevanceAssessment":
+            return RelevanceAssessment(responsive=True, reason="on topic"), 2
+        raise AssertionError(f"unexpected schema {name}")
+
+    return c1, c2, calls, _hybrid, _rerank, fake_call
+
+
+async def test_retarget_promotes_and_rewrites_citation(monkeypatch: pytest.MonkeyPatch) -> None:
+    c1, c2, calls, _hybrid, _rerank, fake_call = _retarget_fixture(monkeypatch, support_in_sibling=True)
+    monkeypatch.setattr("memex.agents.answering.hybrid_search", _hybrid)
+    monkeypatch.setattr("memex.agents.answering.cross_encoder_rerank", _rerank)
+    monkeypatch.setattr("memex.agents.answering.complete_structured", fake_call)
+    monkeypatch.delenv("MEMEX_AGENTS__CITATION_RETARGET_ENABLED", raising=False)
+    resp = await answer_query("How much lower is the overhead?", max_regenerate_attempts=0)
+    assert resp.answered is True
+    assert resp.claims and resp.claims[0].source_chunk_id == "d#c2"  # citation REWRITTEN
+    assert calls["probes"] >= 1
+
+
+async def test_retarget_no_sibling_support_still_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
+    *_, calls, _hybrid, _rerank, fake_call = _retarget_fixture(monkeypatch, support_in_sibling=False)
+    monkeypatch.setattr("memex.agents.answering.hybrid_search", _hybrid)
+    monkeypatch.setattr("memex.agents.answering.cross_encoder_rerank", _rerank)
+    monkeypatch.setattr("memex.agents.answering.complete_structured", fake_call)
+    resp = await answer_query("How much lower is the overhead?", max_regenerate_attempts=0)
+    assert resp.answered is False  # promote-only: no support, no promotion
+    assert calls["probes"] >= 1
+
+
+async def test_retarget_waits_for_regenerate_exhaustion(monkeypatch: pytest.MonkeyPatch) -> None:
+    *_, calls, _hybrid, _rerank, fake_call = _retarget_fixture(monkeypatch, support_in_sibling=True)
+    monkeypatch.setattr("memex.agents.answering.hybrid_search", _hybrid)
+    monkeypatch.setattr("memex.agents.answering.cross_encoder_rerank", _rerank)
+    monkeypatch.setattr("memex.agents.answering.complete_structured", fake_call)
+    resp = await answer_query("How much lower is the overhead?", max_regenerate_attempts=1)
+    assert resp.answered is True
+    # verify ran twice (attempt 0: no probe, regen; attempt 1 = final: probed)
+    assert calls["probes"] == 1
+    assert calls["verify"] >= 2 + calls["probes"]
+
+
+async def test_retarget_kill_switch(monkeypatch: pytest.MonkeyPatch) -> None:
+    from memex.core.config import MemexSettings, set_settings
+
+    *_, calls, _hybrid, _rerank, fake_call = _retarget_fixture(monkeypatch, support_in_sibling=True)
+    monkeypatch.setattr("memex.agents.answering.hybrid_search", _hybrid)
+    monkeypatch.setattr("memex.agents.answering.cross_encoder_rerank", _rerank)
+    monkeypatch.setattr("memex.agents.answering.complete_structured", fake_call)
+    monkeypatch.setenv("MEMEX_AGENTS__CITATION_RETARGET_ENABLED", "false")
+    set_settings(MemexSettings())
+    try:
+        resp = await answer_query("How much lower is the overhead?", max_regenerate_attempts=0)
+        assert resp.answered is False
+        assert calls["probes"] == 0  # the lever never fired
+    finally:
+        monkeypatch.delenv("MEMEX_AGENTS__CITATION_RETARGET_ENABLED", raising=False)
         set_settings(MemexSettings())

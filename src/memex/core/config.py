@@ -750,6 +750,14 @@ class AgentsSettings(BaseModel):
     # over-refusal-safe BY CONSTRUCTION; table/chart chunks are never name-only so Table-RAG is
     # untouched. Default on; `MEMEX_AGENTS__NAME_ONLY_GROUNDING_BACKSTOP_ENABLED=false` reverts.
     name_only_grounding_backstop_enabled: bool = True
+    # Verify-time CITATION RETARGET (audit-15 M1, 2026-06-10): when a claim is still
+    # ungrounded after the LLM verdict + the 5 deterministic filters AND regeneration is
+    # exhausted, re-test it against the OTHER reranked window chunks via the SAME
+    # verify_grounding gate (1 claim x 1 chunk); PROMOTE only on positive support, rewriting
+    # source_chunk_id to the supporting chunk. Fixes the correct-draft-wrong-citation false
+    # refusals (chart-types-01, nist-10, sd-03, sd-21). Promote-only on the unchanged gate =>
+    # HARD-gate-safe by construction. MEMEX_AGENTS__CITATION_RETARGET_ENABLED=false reverts.
+    citation_retarget_enabled: bool = True
     # The code-only FTS term-query path (Phase-3 Lever A, 2026-06-09, ADR-0021 / audits/13):
     # when a /ask query NAMES a code identifier (snake_case / camelCase — see
     # `index/code_query.query_has_code_identifier`), the BM25 arm builds an OR'd-quoted-WHOLE-
