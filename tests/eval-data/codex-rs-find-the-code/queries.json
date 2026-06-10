@@ -35,6 +35,15 @@
     "big_function_truncation_probe": 6
   },
   "_phase": "4-5 expansion (2026-06-09): full codex-rs (99 .rs) in the MAIN vault; +24 queries across apply-patch/ansi-escape/exec/execpolicy/mcp-client/tui/cli + 6 deliberate BIG-FUNCTION probes (gold chunk >1800 chars, the truncate-budget risk) + cross-crate usage.",
+  "_answer_text_baseline_2026_06_09": {
+    "metric": "answer_must_mention -> answer_mention_recall / answer_text_correct (deterministic whole-token boundary match; eval/scoring.py)",
+    "stack": "Qwen3.5-4B-AWQ + Lever A ON + usage_intent_demotion OFF (default config), device-pinned, N=2 BYTE-STABLE (aggregates AND per-query verdicts identical)",
+    "answer_text_checked": 38,
+    "answer_text_correct_count": 32,
+    "mean_answer_mention_recall": 0.855,
+    "text_wrong": ["ftc-use-isknownsafe", "ftc-use-unifieddiff", "ftc-use-issafetocall", "ftc-def-modelclient", "ftc-def-nl-safe", "ftc-def-ansiescapeline"],
+    "notes": "The metric REPRODUCES the audit-14 manual ground truth: the 3 usage-class definition-distraction answers flag recall=0.0 (isknownsafe/unifieddiff/issafetocall — the answer describes X's definition, never the caller), and the 2 GOLD_CITED false-negatives PASS via any-of sibling slots (getplatform names assess_command_safety, a vault-verified 2nd caller; rollout names RolloutRecorder::new). The 3 additional def-class flags are HONEST partials, answer-text-verified: modelclient lists fields but misses the streaming purpose (recall 0.5); nl-safe describes the decision logic accurately but never NAMES assess_command_safety (strict by design — find-the-code = identification); ansiescapeline describes the single-line contract, misses the ANSI->styled-spans transform. ftc-big-runmain refused (the documented borderline-relevance residual) -> ungraded. This baseline is the instrument for the usage-class fix (sharper reranker / opt-in demotion lever A/B): the target is text_wrong shrinking WITHOUT new flags."
+  },
   "_baseline_2026_06_09": {
     "stack": "Qwen3.5-4B-AWQ-4bit orchestrator (vLLM) + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3; device PINNED co_residence_mode=manual, embedder+reranker=cpu; Lever A (code-term FTS) default-ON; MAIN vault = codex-rs 99 .rs + prose corpora (7356 chunks).",
     "retrieval_recall_at_k": {
@@ -72,6 +81,7 @@
     {
       "qid": "ftc-def-execparams",
       "question": "What fields does the ExecParams struct define?",
+      "answer_must_mention": ["cwd", "timeout_ms"],
       "_anchor_phrase": "struct ExecParams",
       "_expected_answer": "The ExecParams struct (exec.rs) with command, cwd, timeout_ms, env fields.",
       "_answer_type": "definition_pascal_struct",
@@ -84,6 +94,7 @@
     {
       "qid": "ftc-def-sandboxtype",
       "question": "What are the variants of the SandboxType enum?",
+      "answer_must_mention": [["macosseatbelt", "macos seatbelt"], ["linuxseccomp", "linux seccomp"]],
       "_anchor_phrase": "enum SandboxType",
       "_expected_answer": "SandboxType variants (None, MacosSeatbelt, LinuxSeccomp).",
       "_answer_type": "definition_pascal_enum",
@@ -96,6 +107,7 @@
     {
       "qid": "ftc-def-modelclient",
       "question": "What is the ModelClient struct used for?",
+      "answer_must_mention": [["stream", "streams", "streaming"], ["provider", "http"]],
       "_anchor_phrase": "struct ModelClient",
       "_expected_answer": "ModelClient (client.rs) wraps the HTTP client + provider config to stream model responses.",
       "_answer_type": "definition_pascal_struct",
@@ -108,6 +120,7 @@
     {
       "qid": "ftc-def-assess",
       "question": "What does the assess_command_safety function do?",
+      "answer_must_mention": [["approved", "approval", "auto-approved"], ["reject", "rejected"]],
       "_anchor_phrase": "fn assess_command_safety",
       "_expected_answer": "assess_command_safety (safety.rs) decides whether a command is auto-approved, needs approval, or is rejected.",
       "_answer_type": "definition_snake_fn",
@@ -120,6 +133,7 @@
     {
       "qid": "ftc-def-procexec",
       "question": "How is process_exec_tool_call implemented?",
+      "answer_must_mention": ["sandbox", ["truncated", "truncates", "truncation"]],
       "_anchor_phrase": "fn process_exec_tool_call",
       "_expected_answer": "process_exec_tool_call (exec.rs) runs a command under the chosen sandbox and captures truncated output.",
       "_answer_type": "definition_snake_fn",
@@ -132,6 +146,7 @@
     {
       "qid": "ftc-def-backoff",
       "question": "What does the backoff function compute?",
+      "answer_must_mention": ["exponential"],
       "_anchor_phrase": "fn backoff",
       "_expected_answer": "backoff (util.rs) computes an exponential retry delay.",
       "_answer_type": "definition_snake_fn",
@@ -144,6 +159,7 @@
     {
       "qid": "ftc-def-configload",
       "question": "How does Config::load_with_overrides work?",
+      "answer_must_mention": [["override", "overrides", "overridden"]],
       "_anchor_phrase": "load_with_overrides",
       "_expected_answer": "Config::load_with_overrides (config.rs) loads the base config then applies CLI overrides.",
       "_answer_type": "definition_trait_method",
@@ -156,6 +172,7 @@
     {
       "qid": "ftc-def-timeout",
       "question": "What is the DEFAULT_TIMEOUT_MS constant set to?",
+      "answer_must_mention": [["10_000", "10,000", "10000", "10 000", "10 seconds"]],
       "_anchor_phrase": "const DEFAULT_TIMEOUT_MS",
       "_expected_answer": "DEFAULT_TIMEOUT_MS (exec.rs) is the default exec timeout in milliseconds.",
       "_answer_type": "definition_const",
@@ -168,6 +185,7 @@
     {
       "qid": "ftc-def-nl-safe",
       "question": "How does the agent decide whether a shell command is safe to run without asking for approval?",
+      "answer_must_mention": [["assess_command_safety", "is_known_safe_command"]],
       "_anchor_phrase": "fn assess_command_safety",
       "_expected_answer": "assess_command_safety (safety.rs) is the decision function (NL-phrased, no identifier named).",
       "_answer_type": "definition_nl_no_identifier",
@@ -180,6 +198,7 @@
     {
       "qid": "ftc-def-bareident",
       "question": "is_known_safe_command",
+      "answer_must_mention": [["bash", "exec", "safe"]],
       "_anchor_phrase": "fn is_known_safe_command",
       "_expected_answer": "is_known_safe_command (is_safe_command.rs) \u2014 bare-identifier query (arms converge).",
       "_answer_type": "definition_bare_identifier",
@@ -192,6 +211,7 @@
     {
       "qid": "ftc-use-isknownsafe",
       "question": "Which function calls is_known_safe_command?",
+      "answer_must_mention": ["assess_command_safety"],
       "_anchor_phrase": "fn assess_command_safety",
       "_expected_answer": "assess_command_safety (safety.rs) calls is_known_safe_command. Gold heading is assess_command_safety, NOT the queried id.",
       "_answer_type": "usage_reference",
@@ -204,6 +224,7 @@
     {
       "qid": "ftc-use-spawnseatbelt",
       "question": "Which function invokes spawn_command_under_seatbelt?",
+      "answer_must_mention": ["process_exec_tool_call"],
       "_anchor_phrase": "fn process_exec_tool_call",
       "_expected_answer": "process_exec_tool_call (exec.rs) invokes spawn_command_under_seatbelt. Gold titled by the caller.",
       "_answer_type": "usage_reference",
@@ -216,6 +237,7 @@
     {
       "qid": "ftc-use-embeddedinstr",
       "question": "Where is the EMBEDDED_INSTRUCTIONS constant used?",
+      "answer_must_mention": ["load_from_base_config_with_overrides"],
       "_anchor_phrase": "user-provided instructions",
       "_expected_answer": "Config::load_from_base_config_with_overrides (config.rs) reads EMBEDDED_INSTRUCTIONS. Gold titled by the using method.",
       "_answer_type": "usage_reference",
@@ -228,6 +250,7 @@
     {
       "qid": "ftc-use-assesspatch",
       "question": "Which function calls assess_patch_safety before applying a patch?",
+      "answer_must_mention": ["apply_patch"],
       "_anchor_phrase": "fn apply_patch",
       "_expected_answer": "apply_patch (codex.rs) calls assess_patch_safety. Gold heading apply_patch, NOT the queried id.",
       "_answer_type": "usage_reference",
@@ -240,6 +263,7 @@
     {
       "qid": "ftc-use-issafetocall",
       "question": "Which function uses is_safe_to_call_with_exec?",
+      "answer_must_mention": ["is_known_safe_command"],
       "_anchor_phrase": "fn is_known_safe_command",
       "_expected_answer": "is_known_safe_command (is_safe_command.rs) calls is_safe_to_call_with_exec. Gold titled by the caller.",
       "_answer_type": "usage_reference",
@@ -252,6 +276,7 @@
     {
       "qid": "ftc-use-getplatform",
       "question": "Where is get_platform_sandbox called?",
+      "answer_must_mention": [["assess_patch_safety", "assess_command_safety"]],
       "_anchor_phrase": "fn assess_patch_safety",
       "_expected_answer": "assess_patch_safety (safety.rs) calls get_platform_sandbox. Gold titled assess_patch_safety, NOT the queried id.",
       "_answer_type": "usage_reference",
@@ -264,6 +289,7 @@
     {
       "qid": "ftc-use-consumetrunc",
       "question": "Which function calls consume_truncated_output?",
+      "answer_must_mention": [["exec_linux", "process_exec_tool_call"]],
       "_anchor_phrase": "fn exec_linux",
       "_expected_answer": "exec_linux (exec_linux.rs) calls consume_truncated_output. Gold titled by the caller.",
       "_answer_type": "usage_reference",
@@ -276,6 +302,7 @@
     {
       "qid": "ftc-use-rollout",
       "question": "Which function creates a RolloutRecorder?",
+      "answer_must_mention": [["submission_loop", "rolloutrecorder::new"]],
       "_anchor_phrase": "fn submission_loop",
       "_expected_answer": "submission_loop (codex.rs) creates a RolloutRecorder. Gold titled by the caller.",
       "_answer_type": "usage_reference",
@@ -288,6 +315,7 @@
     {
       "qid": "ftc-use-mcpmgr",
       "question": "Which struct owns the McpConnectionManager?",
+      "answer_must_mention": [["struct session", "session struct", "is session"]],
       "_anchor_phrase": "struct Session",
       "_expected_answer": "The Session struct (codex.rs) holds an McpConnectionManager field. Gold titled Session, NOT the queried id.",
       "_answer_type": "usage_reference",
@@ -300,6 +328,7 @@
     {
       "qid": "ftc-use-convhistory",
       "question": "Which struct holds the ConversationHistory?",
+      "answer_must_mention": [["struct state", "state struct", "is state", "zdr_transcript"]],
       "_anchor_phrase": "struct State",
       "_expected_answer": "The State struct (codex.rs) holds a ConversationHistory. Gold titled State, NOT the queried id.",
       "_answer_type": "usage_reference",
@@ -348,6 +377,7 @@
     {
       "qid": "ftc-def-applypatchaction",
       "question": "What fields does the ApplyPatchAction struct hold?",
+      "answer_must_mention": [["changes", "change"]],
       "_anchor_phrase": "struct ApplyPatchAction",
       "_expected_answer": "ApplyPatchAction (apply-patch/lib.rs) holds the parsed per-file changes.",
       "_answer_type": "definition_pascal_struct",
@@ -360,6 +390,7 @@
     {
       "qid": "ftc-def-parsepatch",
       "question": "How is the parse_patch function implemented?",
+      "answer_must_mention": [["hunk", "hunks"]],
       "_anchor_phrase": "fn parse_patch",
       "_expected_answer": "parse_patch (apply-patch/parser.rs) parses a patch into hunks.",
       "_answer_type": "definition_snake_fn",
@@ -372,6 +403,7 @@
     {
       "qid": "ftc-def-ansiescapeline",
       "question": "What does the ansi_escape_line function do?",
+      "answer_must_mention": [["span", "spans", "styled"]],
       "_anchor_phrase": "fn ansi_escape_line",
       "_expected_answer": "ansi_escape_line (ansi-escape/lib.rs) converts an ANSI-escaped line into styled spans.",
       "_answer_type": "definition_snake_fn",
@@ -384,6 +416,7 @@
     {
       "qid": "ftc-def-programspec",
       "question": "What does the ProgramSpec struct define?",
+      "answer_must_mention": [["allowed", "allow"]],
       "_anchor_phrase": "struct ProgramSpec",
       "_expected_answer": "ProgramSpec (execpolicy/program.rs) defines an allowed program + its arg rules.",
       "_answer_type": "definition_pascal_struct",
@@ -396,6 +429,7 @@
     {
       "qid": "ftc-def-policy",
       "question": "What does the Policy struct represent?",
+      "answer_must_mention": [["programspec", "program spec", "programspecs", "program specs"]],
       "_anchor_phrase": "struct Policy",
       "_expected_answer": "Policy (execpolicy/policy.rs) holds the set of allowed ProgramSpecs.",
       "_answer_type": "definition_pascal_struct",
@@ -408,6 +442,7 @@
     {
       "qid": "ftc-def-hunk",
       "question": "What variants does the Hunk enum have?",
+      "answer_must_mention": [["delete", "deletefile", "delete file"], ["update", "updatefile", "update file"]],
       "_anchor_phrase": "enum Hunk",
       "_expected_answer": "Hunk (apply-patch/parser.rs) variants for add/delete/update file changes.",
       "_answer_type": "definition_pascal_enum",
@@ -420,6 +455,7 @@
     {
       "qid": "ftc-big-resolveargs",
       "question": "What does the resolve_observed_args_with_patterns function do?",
+      "answer_must_mention": [["pattern", "patterns"]],
       "_anchor_phrase": "fn resolve_observed_args_with_patterns",
       "_expected_answer": "resolve_observed_args_with_patterns (execpolicy/arg_resolver.rs) matches observed args against the spec patterns. BIG chunk (>1800) \u2014 truncation probe.",
       "_answer_type": "big_function_truncation_probe",
@@ -432,6 +468,7 @@
     {
       "qid": "ftc-big-runmain",
       "question": "What does the run_main function in the exec crate do?",
+      "answer_must_mention": [["entry point", "cli", "sandbox"]],
       "_anchor_phrase": "fn run_main",
       "_expected_answer": "run_main (exec/lib.rs) is the exec entry point. BIG chunk (>1800) \u2014 truncation probe.",
       "_answer_type": "big_function_truncation_probe",
@@ -444,6 +481,7 @@
     {
       "qid": "ftc-big-programcheck",
       "question": "How does ProgramSpec::check validate a command invocation?",
+      "answer_must_mention": [["argv", "args", "arguments"]],
       "_anchor_phrase": "ProgramSpec::check",
       "_expected_answer": "ProgramSpec::check (execpolicy/program.rs) validates argv against the spec. BIG chunk (>1800) \u2014 truncation probe.",
       "_answer_type": "big_function_truncation_probe",
@@ -456,6 +494,7 @@
     {
       "qid": "ftc-big-appnew",
       "question": "What does App::new initialize in the TUI?",
+      "answer_must_mention": [["widget", "event", "events", "state"]],
       "_anchor_phrase": "App::new",
       "_expected_answer": "App::new (tui/app.rs) builds the TUI application state. BIG chunk (>1800) \u2014 truncation probe.",
       "_answer_type": "big_function_truncation_probe",
@@ -468,6 +507,7 @@
     {
       "qid": "ftc-big-convrender",
       "question": "What does ConversationHistoryWidget::render_ref render?",
+      "answer_must_mention": [["history", "scroll", "lines"]],
       "_anchor_phrase": "ConversationHistoryWidget::render_ref",
       "_expected_answer": "ConversationHistoryWidget::render_ref (tui) renders the conversation history. BIG chunk (>1800) \u2014 truncation probe.",
       "_answer_type": "big_function_truncation_probe",
@@ -480,6 +520,7 @@
     {
       "qid": "ftc-big-mcpstdio",
       "question": "How does McpClient::new_stdio_client start the MCP client?",
+      "answer_must_mention": [["spawn", "spawns", "process", "child"]],
       "_anchor_phrase": "McpClient::new_stdio_client",
       "_expected_answer": "McpClient::new_stdio_client (mcp-client) spawns the stdio MCP server process. BIG chunk (>1800) \u2014 truncation probe.",
       "_answer_type": "big_function_truncation_probe",
@@ -492,6 +533,7 @@
     {
       "qid": "ftc-use-seekseq",
       "question": "Which function uses seek_sequence?",
+      "answer_must_mention": ["compute_replacements"],
       "_anchor_phrase": "fn compute_replacements",
       "_expected_answer": "compute_replacements (apply-patch/lib.rs) uses seek_sequence. Gold titled by the caller.",
       "_answer_type": "usage_reference",
@@ -504,6 +546,7 @@
     {
       "qid": "ftc-use-unifieddiff",
       "question": "Which function calls unified_diff_from_chunks?",
+      "answer_must_mention": ["maybe_parse_apply_patch_verified"],
       "_anchor_phrase": "fn maybe_parse_apply_patch_verified",
       "_expected_answer": "maybe_parse_apply_patch_verified (apply-patch/lib.rs) calls unified_diff_from_chunks. Gold titled by the caller.",
       "_answer_type": "usage_reference",
@@ -516,6 +559,7 @@
     {
       "qid": "ftc-use-applyhunks",
       "question": "Which function calls apply_hunks?",
+      "answer_must_mention": ["apply_patch"],
       "_anchor_phrase": "fn apply_patch",
       "_expected_answer": "apply_patch (apply-patch/lib.rs) calls apply_hunks. Gold titled by the caller.",
       "_answer_type": "usage_reference",
@@ -528,6 +572,7 @@
     {
       "qid": "ftc-use-ansiescape",
       "question": "Which method uses ansi_escape_line to format command output?",
+      "answer_must_mention": ["new_completed_exec_command"],
       "_anchor_phrase": "new_completed_exec_command",
       "_expected_answer": "HistoryCell::new_completed_exec_command (tui/history_cell.rs) uses ansi_escape_line (cross-crate). Gold titled by a DIFFERENT symbol.",
       "_answer_type": "usage_reference",
@@ -540,6 +585,7 @@
     {
       "qid": "ftc-use-newstdio",
       "question": "Which function calls new_stdio_client?",
+      "answer_must_mention": ["mcpconnectionmanager"],
       "_anchor_phrase": "McpConnectionManager::new",
       "_expected_answer": "McpConnectionManager::new (core/mcp_connection_manager.rs) calls McpClient::new_stdio_client (cross-crate). Gold titled by a DIFFERENT symbol.",
       "_answer_type": "usage_reference",
@@ -552,6 +598,7 @@
     {
       "qid": "ftc-use-parsepatch",
       "question": "Which function calls parse_patch?",
+      "answer_must_mention": [["maybe_parse_apply_patch", "apply_patch"]],
       "_anchor_phrase": "fn maybe_parse_apply_patch",
       "_expected_answer": "maybe_parse_apply_patch (apply-patch/lib.rs) calls parse_patch (parser.rs). Gold titled by the caller.",
       "_answer_type": "usage_reference",
@@ -564,6 +611,7 @@
     {
       "qid": "ftc-use-applypatchaction",
       "question": "Which enum wraps a verified ApplyPatchAction?",
+      "answer_must_mention": ["maybeapplypatchverified"],
       "_anchor_phrase": "enum MaybeApplyPatchVerified",
       "_expected_answer": "MaybeApplyPatchVerified (apply-patch/lib.rs) wraps an ApplyPatchAction. Gold titled by a DIFFERENT symbol.",
       "_answer_type": "usage_reference",

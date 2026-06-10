@@ -483,6 +483,35 @@ def absent_assertion_violations(summary_text: str, must_not_assert: list[str]) -
     return [m for m in must_not_assert if _normalize(m) in norm]
 
 
+def answer_mention_recall(answer_text: str, slots: list[str | list[str]]) -> float:
+    """Fraction of required SLOTS satisfied in the (normalized) answer text — the
+    deterministic answer-TEXT-correctness signal (`answer_must_mention`, audit-14).
+
+    A `str` slot is satisfied by that term; a `list[str]` slot by ANY of its
+    alternatives (the multiple-valid-callers case: "which fn calls get_platform_sandbox"
+    has two true callers, either answer is correct). Matching is WHOLE-TOKEN boundary
+    (`_boundary_in`) over `_normalize`d text — NOT bare substring like `mention_recall` —
+    because the slot vocabulary is code identifiers: `apply_patch` must NOT match inside
+    `maybe_parse_apply_patch_verified` (`_` is a `\\w` char, so the lookarounds treat a
+    snake_case identifier as one unit). Prose inflections are handled by any-of
+    alternatives (["rejected", "reject"]), deliberately not a per-slot mode bit.
+
+    `1.0` when no slots are required (ungraded). An EMPTY any-of group is
+    UNSATISFIABLE (recall < 1.0) — a loud corpus-authoring error, not vacuous truth.
+    NB a camelCase compound normalizes to ONE token (`MacosSeatbelt` → `macosseatbelt`),
+    so a sub-token slot (`seatbelt`) will not match — annotate full identifiers.
+    """
+    if not slots:
+        return 1.0
+    norm = _normalize(answer_text)
+    hits = 0
+    for slot in slots:
+        alts = [slot] if isinstance(slot, str) else slot
+        if any(_boundary_in(_normalize(a), norm) for a in alts if a):
+            hits += 1
+    return hits / len(slots)
+
+
 def gold_chunk_recall(retrieved_ids: list[str], relevant_ids: list[str], k: int) -> float:
     """Recall@k of the gold chunks: fraction of `relevant_ids` present in the top-`k`
     `retrieved_ids`. 1.0 = every gold chunk retrieved within k; 0.0 = none.

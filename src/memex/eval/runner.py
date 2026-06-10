@@ -27,6 +27,7 @@ from memex.eval.scoring import (
     CitationPrecisionInput,
     ParseQualityScores,
     absent_assertion_violations,
+    answer_mention_recall,
     citation_precision,
     fabricated_figure_violations,
     fabricated_quote_violations,
@@ -50,6 +51,14 @@ class EvalQuery(BaseModel):
     question: str
     relevant_chunk_ids: list[str] = Field(default_factory=list)
     should_refuse: bool = False
+    # Required answer-TEXT slots (the deterministic text-correctness check, audit-14
+    # — `citation_precision` grades CITED CHUNKS, never the answer text, which hid the
+    # usage-class wrong-answer class). Each entry is a required SLOT: a `str` slot is
+    # satisfied by that term; a `list[str]` slot by ANY of its alternatives (multiple
+    # valid callers). Whole-token boundary match on normalized text
+    # (`scoring.answer_mention_recall`). OPTIONAL — absent/empty ⇒ this query's answer
+    # text is not graded (every un-annotated corpus is value-compatible).
+    answer_must_mention: list[str | list[str]] = Field(default_factory=list[str | list[str]])
 
 
 class EvalQueryResult(BaseModel):
@@ -69,6 +78,11 @@ class EvalQueryResult(BaseModel):
     # refusal_cf so a failure never silently inflates a metric (an errored counterfactual
     # must NOT count as a correct refusal). Surfaced via `EvalReport.error_count`.
     error: str | None = None
+    # Answer-TEXT correctness (`answer_must_mention`). None = NOT GRADED — the query is
+    # un-annotated, refused (refusal accounting already covers it), or errored. A float
+    # is the fraction of required slots satisfied; `answer_text_correct` = (recall == 1.0).
+    answer_mention_recall: float | None = None
+    answer_text_correct: bool | None = None
 
 
 class EvalReport(BaseModel):
@@ -94,6 +108,13 @@ class EvalReport(BaseModel):
     # the agent actually attempted. NaN when zero queries answered.
     mean_citation_precision_answered_only: float
     refusal_rate_on_counterfactuals: float
+    # Answer-TEXT correctness aggregates (graded only on annotated + answered +
+    # non-error queries — see `EvalQueryResult.answer_mention_recall`). On a corpus
+    # with no `answer_must_mention` annotations: checked=0, correct=0, mean=None
+    # (None — not NaN — is deliberate: "not applicable" must serialize as valid JSON).
+    answer_text_checked: int = 0
+    answer_text_correct_count: int = 0
+    mean_answer_mention_recall: float | None = None
     per_query: list[EvalQueryResult] = Field(default_factory=list[EvalQueryResult])
 
 
@@ -160,6 +181,18 @@ async def run_eval(
             counterfactual_count += 1
             if refusal_correct:
                 refusal_correct_count += 1
+        # Answer-TEXT correctness — graded ONLY for annotated + answered queries.
+        # `response.summary` is accessed inside this gate alone, so a minimal test
+        # fake (answered/claims/refusal_reason) on an un-annotated query stays valid.
+        # The graded text = headline + claim texts (mirrors `_summary_text` minus
+        # sections, which the /ask path leaves empty): the key fact often lives in a
+        # claim, and the partial-grounded path rebuilds the summary FROM claims.
+        amr: float | None = None
+        if q.answer_must_mention and response.answered:
+            answer_text = " ".join(
+                [response.summary or "", *(c.claim for c in response.claims)]
+            )
+            amr = answer_mention_recall(answer_text, q.answer_must_mention)
         results.append(
             EvalQueryResult(
                 qid=q.qid,
@@ -168,6 +201,8 @@ async def run_eval(
                 citation_precision=cp,
                 refusal_correct=refusal_correct,
                 refusal_reason=response.refusal_reason,
+                answer_mention_recall=amr,
+                answer_text_correct=(amr == 1.0) if amr is not None else None,
             )
         )
 
@@ -176,6 +211,11 @@ async def run_eval(
     # masquerade as a refusal/answer). answered + refused + error == query_count.
     non_error = [r for r in results if r.error is None]
     answered_results = [r for r in non_error if r.answered]
+    # Answer-text aggregates: a non-None recall already implies annotated + answered +
+    # non-error (the loop only grades inside that gate), so this filter is the whole rule.
+    text_recalls = [
+        r.answer_mention_recall for r in results if r.answer_mention_recall is not None
+    ]
     report = EvalReport(
         run_id=str(ulid.ULID()),
         started_at=started,
@@ -195,6 +235,11 @@ async def run_eval(
         refusal_rate_on_counterfactuals=(
             refusal_correct_count / counterfactual_count if counterfactual_count else 1.0
         ),
+        answer_text_checked=len(text_recalls),
+        answer_text_correct_count=sum(1 for r in results if r.answer_text_correct),
+        mean_answer_mention_recall=(
+            sum(text_recalls) / len(text_recalls) if text_recalls else None
+        ),
         per_query=results,
     )
     log.info(
@@ -203,6 +248,9 @@ async def run_eval(
         error_count=report.error_count,
         mean_citation_precision=report.mean_citation_precision,
         mean_citation_precision_answered_only=report.mean_citation_precision_answered_only,
+        answer_text_checked=report.answer_text_checked,
+        answer_text_correct_count=report.answer_text_correct_count,
+        mean_answer_mention_recall=report.mean_answer_mention_recall,
     )
     return report
 

@@ -1,6 +1,6 @@
 # Spec: Symbol-Aware Code Chunking
 
-**Status:** Phase 1 + Phase 2 shipped (2026-06-07, `268e39e` + `b9c3a58`); Phases 3–5 planned.
+**Status:** Phases 1–5 shipped (Phases 1-2 2026-06-07 `268e39e`+`b9c3a58`; Phases 3-5 2026-06-09 `f0f47bb`). Lever A default-ON; usage-intent demotion default-OFF; answer-TEXT metric shipped 2026-06-09.
 **Decision record:** [ADR-0021](../adr/0021-codebase-corpus-code-as-documents.md).
 **Backend cheat-sheet:** `src/memex/CLAUDE.md` (the code-ingest + symbol-chunking bullets).
 
@@ -170,6 +170,14 @@ prose + `v0`), `test_partial_reindex.py` (recipe record + force-on-mismatch), `t
   doc and the second `retitle` silently overwrites the first's path. Pre-check
   `#distinct(sha256, stem) == #files`; if short, fold the repo-relative path into the hashed identity
   or accept+log the merges deliberately.
+- **Answer-TEXT-correctness metric SHIPPED (2026-06-09): `answer_must_mention` → `answer_mention_recall`.**
+  `memex eval` now grades the answer TEXT deterministically (whole-token boundary match over normalized
+  text — `apply_patch` never matches inside `maybe_parse_apply_patch_verified`; any-of slots for
+  multiple-valid-caller queries), the measure-first instrument the usage-class gap demanded (recall@k +
+  `answered` HID it). The 39 find-the-code ANS queries are annotated; first baseline N=2 BYTE-STABLE:
+  32/38 text-correct / mean recall 0.855; the 6 flags reproduce the audit-14 manual ground truth exactly.
+  Corpus-opt-in (un-annotated corpora value-compatible). `eval/scoring.py::answer_mention_recall` +
+  `eval/runner.py`; pinned by `tests/unit/test_answer_text_eval.py` + `tests/integration/test_eval_answer_text.py`.
 - **The usage-class answer gap — root-caused, a rerank lever measured DOUBLE-EDGED, shipped DEFAULT-OFF
   (2026-06-09, `docs/audits/14`, ADR-0021 amendment).** The audit-14 spot-check residual ("which function
   calls X" answered by describing X's DEFINITION) was investigated. Root cause: the cross-encoder ranks
