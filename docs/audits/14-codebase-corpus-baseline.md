@@ -141,6 +141,61 @@ byte-identical to the pre-lever baseline. ADR-0021 (usage-intent-demotion amendm
   NER quality is a separate question.
 - Citation rendering for code in the web UI (symbol-named wikilinks in a `<pre>` code-view) is unverified.
 
+## Shared-vault close-out — the FULL prose-gate sweep (2026-06-09, post-merge `f0f47bb`)
+
+The audit-14 prose-gate re-verify above was a SPOT-CHECK (3 detector-triggering counterfactuals, N=2).
+Per "an eval-gated-path change needs the REAL eval," the full 13-corpus prose sweep was run on the live
+shared vault (device-pinned, codex-rs present, Lever A ON, usage-intent lever OFF):
+
+| corpus | refusal_cf | answered | err | vs in-file baseline |
+|---|---|---|---|---|
+| annual-report | 1.0 | 9 | 0 | +2 |
+| ccna-multidoc | 1.0 | 8 | 0 | 0 |
+| chart-types | 1.0 | 3→**4** | 0 | see triage (restored) |
+| cr350-diagrams | 1.0 | 11 | 0 | 0 |
+| cr350-multidoc | 1.0 | 13 | 0 | +2 |
+| forms-w9 | 1.0 | 12 | 0 | +1 |
+| french-course | 1.0 | 5 | 0 | 0 |
+| handwritten | 1.0 | 5 | 0 | +1 |
+| linux-fundamentals | 1.0 | 13 | 0 | 0 |
+| nist-zero-trust | 1.0 | 11 | 0 | +3 |
+| scientific-gte | 1.0 | 12 | 0 | +2 |
+| slide-decks | 1.0 | 13 | 0 | −2 (pre-existing) |
+| technical-guidelines | 0.833→**1.0** | 13 | 0 | +2 (CF re-scoped) |
+
+The positive deltas are ADR-0022's recoveries landing after the (stale, 05-24/05-25-era) in-file
+baselines. **Verdict: the codex-rs ingest did NOT displace prose answers.** Three flags, triaged to root
+cause:
+
+1. **technical-guidelines-13 — the ONE real code-ingest effect (deterministic 3/3), a CORPUS-DESIGN
+   finding, not a system defect.** The counterfactual "what exact maximum line length do the coding
+   standards enforce?" stopped being counterfactual: codex-rs `tui/src/log_layer.rs` carries
+   `const _DEFAULT_MAX_LEN: usize = 120` ("Maximum characters forwarded to the TUI"), dense retrieval
+   surfaced it (Lever A did NOT fire — no code identifier in the query), and the answer was a GROUNDED,
+   honestly-hedged "120 for TUI log messages … the guidelines document does not specify one" — **no
+   fabrication; `verify` held.** The CF's "no answer exists in the vault" premise broke. **The
+   shared-vault CF principle:** a counterfactual must be counterfactual against the WHOLE vault, not just
+   its fixture. FIX: re-scoped the question to name its fixture ("According to the developer guidelines,
+   …" — its siblings' phrasing); refuses deterministically N=3. tg refusal_cf restored to 1.0.
+2. **chart-types −2 (08/09) — a pre-existing VAULT-STATE regression, newly root-caused (NOT the
+   ingest).** The chart-guide doc was silently re-parsed 2026-06-01 via PyMuPDF (manifest-proven:
+   `engine=pymupdf` all pages, `chart_extractions` MISSING), losing ALL chart-OCR content — the
+   chart-content queries (gold ONLY in `[chart-extracted]` blocks, dense-only by design) had been
+   refusing since, mis-binned as generic retrieval-miss residuals in the audit-12 era. FIX: backed up
+   (`~/.memex/chart-guide-backup-20260609`) + `memex parse --force-docling` (the chart-OCR cache replayed
+   the original extractions byte-reproducibly; 6 chart blocks restored; 21→34 chunks) + reindex +
+   re-resolve golds 01-05. **08/09 RECOVERED** (refusal_cf=1.0, 0 err). One new stable (N=3) conservative
+   false-refusal appeared: chart-types-01 — the Docling byline chunk lists the authors WITHOUT the verb
+   "wrote", so verify judges the authorship claim unsupported (the borderline-verify class; HARD-gate-safe;
+   recorded, not chased). Net chart-types: 3→4 ANS with the chart-content class restored.
+   **LESSON: check the manifest `engine` before debugging chart-content refusals as retrieval — and a
+   re-parse that switches parser route is a baseline-invalidating event.**
+3. **slide-decks −2 — pre-existing (NOT the ingest).** Today's 8 refused ANS match the documented
+   post-ADR-0022 residual set (04/16 unreadable-figure + the borderline classes); ADR-0022 recovered no
+   slide-decks queries, and the in-file baseline (05-24) predates that era.
+
+Raw sweep reports: `/tmp/prose_sweep/*.json` (transient; the table above is the durable record).
+
 ## Reproducibility
 
 ```sh

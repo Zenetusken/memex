@@ -1,5 +1,5 @@
 {
-  "_description": "Hand-labelled eval corpus for the Tableau 'Which Chart or Graph Is Right For You?' tutorial PDF. 18-page Adobe-InDesign-produced doc that routed via PyMuPDF (Tier 1.A high confidence, born-digital) — chart-OCR was NOT applied. Tests prose-retrieval on a chart-knowledge-tutorial domain.",
+  "_description": "Hand-labelled eval corpus for the Tableau 'Which Chart or Graph Is Right For You?' tutorial PDF. 18-page Adobe-InDesign-produced doc that routed via PyMuPDF (Tier 1.A high confidence, born-digital) \u2014 chart-OCR was NOT applied. Tests prose-retrieval on a chart-knowledge-tutorial domain.",
   "_doc_id": "1797d794-which-chart-or-graph-is-right-for-you",
   "_query_count": 9,
   "_mix": {
@@ -21,7 +21,7 @@
       "_note": "Author attribution from the title page.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "1797d794-which-chart-or-graph-is-right-for-you#3644dc0e85"
+        "1797d794-which-chart-or-graph-is-right-for-you#25920c3228"
       ]
     },
     {
@@ -30,10 +30,10 @@
       "_anchor_phrase": "Compare data across categories",
       "_expected_answer": "To compare data across categories (best suited for data that can be split into several groups, e.g., volume of shirts in different sizes, website traffic by referrer).",
       "_answer_type": "concept",
-      "_note": "Concept question — tests prose retrieval on a bullet-list usage section.",
+      "_note": "Concept question \u2014 tests prose retrieval on a bullet-list usage section.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "1797d794-which-chart-or-graph-is-right-for-you#4b1078fe8a"
+        "1797d794-which-chart-or-graph-is-right-for-you#7d1770fdee"
       ]
     },
     {
@@ -52,12 +52,12 @@
       "qid": "chart-types-04",
       "question": "What is a Pareto chart?",
       "_anchor_phrase": "Pareto chart showing the accumulation of multiple categories",
-      "_expected_answer": "A chart showing the accumulation of multiple categories — created by combining bar charts with table calculations.",
+      "_expected_answer": "A chart showing the accumulation of multiple categories \u2014 created by combining bar charts with table calculations.",
       "_answer_type": "concept",
       "_note": "Tests a specific chart-type concept; should pull from the bar-chart tips section.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "1797d794-which-chart-or-graph-is-right-for-you#4b1078fe8a"
+        "1797d794-which-chart-or-graph-is-right-for-you#7d1770fdee"
       ]
     },
     {
@@ -69,14 +69,14 @@
       "_note": "Tests the bar-chart + map combination guidance.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "1797d794-which-chart-or-graph-is-right-for-you#4b1078fe8a"
+        "1797d794-which-chart-or-graph-is-right-for-you#7d1770fdee"
       ]
     },
     {
       "qid": "chart-types-06",
       "question": "What was Tableau's revenue in 2026?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE — this paper is about chart selection, not Tableau's financials.",
+      "_expected_answer": "REFUSE \u2014 this paper is about chart selection, not Tableau's financials.",
       "_answer_type": "counterfactual",
       "_note": "HARD GATE refusal. The doc is a how-to guide, not a financial report.",
       "should_refuse": true,
@@ -86,7 +86,7 @@
       "qid": "chart-types-07",
       "question": "What's the difference between a Sankey diagram and a Sunburst chart according to this paper?",
       "_anchor_phrase": "",
-      "_expected_answer": "REFUSE — this paper doesn't cover Sankey diagrams or Sunburst charts; it focuses on bar charts, line charts, pie charts, scatter plots, etc.",
+      "_expected_answer": "REFUSE \u2014 this paper doesn't cover Sankey diagrams or Sunburst charts; it focuses on bar charts, line charts, pie charts, scatter plots, etc.",
       "_answer_type": "counterfactual",
       "_note": "HARD GATE refusal. Out-of-scope chart types. Tests the agent's not-in-corpus discipline.",
       "should_refuse": true,
@@ -102,7 +102,8 @@
       "should_refuse": false,
       "relevant_chunk_ids": [
         "1797d794-which-chart-or-graph-is-right-for-you#257fc3050e"
-      ]
+      ],
+      "_unresolved": true
     },
     {
       "qid": "chart-types-09",
@@ -115,10 +116,21 @@
       "relevant_chunk_ids": [
         "1797d794-which-chart-or-graph-is-right-for-you#257fc3050e",
         "1797d794-which-chart-or-graph-is-right-for-you#cf183ca71c"
-      ]
+      ],
+      "_unresolved": true
     }
   ],
-  "_resolved_at": "2026-05-26T06:39:42Z",
+  "_resolved_at": "2026-06-10T01:38:48Z",
+  "_baseline_2026_06_09_post_chart_restore": {
+    "stack": "Qwen3.5-4B-AWQ orchestrator + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3, top_k=5, ADR-0022 gates (assess_sufficiency@v4 / answer@v5 / assess_relevance@v2), shared vault incl. codex-rs (99 .rs)",
+    "answered_count": 4,
+    "refused_count": 5,
+    "error_count": 0,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "answered": ["chart-types-02", "chart-types-03", "chart-types-08", "chart-types-09"],
+    "false_refusals": ["chart-types-01", "chart-types-04", "chart-types-05"],
+    "notes": "POST chart-guide RESTORE (audit-14 close-out): the doc was silently re-parsed 2026-06-01 via PyMuPDF, losing ALL chart-OCR content (manifest-proven: engine=pymupdf, chart_extractions missing) -> chart-content 08/09 refused since. Restored 2026-06-09 via memex parse --force-docling (chart-OCR cache replayed the original extractions; 6 chart-extracted blocks back; 21->34 chunks, ids churned, golds 01-05 re-resolved). 08/09 RECOVERED. chart-types-01 is a NEW stable (N=3) conservative false-refusal from the route change: the Docling byline chunk lists the authors without the verb 'wrote', and verify judges the authorship claim unsupported -- the borderline-verify class, HARD-gate-safe, recorded not chased. 04/05 remain the documented relevance-gate residuals. LESSON: a re-parse that switches parser route invalidates this baseline; chart-content queries REQUIRE the Docling+chart-OCR route (P3.3) -- check the manifest engine before debugging refusals as retrieval."
+  },
   "_baseline_2026_05_24_bf16_reranker": {
     "query_count": 9,
     "answered": 5,
@@ -131,7 +143,7 @@
       "chart-types-01",
       "chart-types-04"
     ],
-    "note": "Run config: vLLM Qwen/Qwen3-8B-AWQ orchestrator + BAAI/bge-reranker-v2-m3 now loading in bf16 (ADR-0006 intent), restored by the CrossEncoder automodel_args->model_kwargs fix on 2026-05-24. HARD GATES held: refusal_rate_on_counterfactuals=1.0, zero hallucinations (every refusal_correct=False case is a conservative false-refusal on an answerable query, not a wrongly-answered REF). ANS/REF counts identical to the prior (fp32-reranker) baselines. Any citation-precision delta vs the fp32 baseline is a chunk-granularity shift — the bf16 reranker cites an equally-valid sibling chunk in the SAME correct document — not a quality regression (verified: doc disambiguation + answer correctness intact)."
+    "note": "Run config: vLLM Qwen/Qwen3-8B-AWQ orchestrator + BAAI/bge-reranker-v2-m3 now loading in bf16 (ADR-0006 intent), restored by the CrossEncoder automodel_args->model_kwargs fix on 2026-05-24. HARD GATES held: refusal_rate_on_counterfactuals=1.0, zero hallucinations (every refusal_correct=False case is a conservative false-refusal on an answerable query, not a wrongly-answered REF). ANS/REF counts identical to the prior (fp32-reranker) baselines. Any citation-precision delta vs the fp32 baseline is a chunk-granularity shift \u2014 the bf16 reranker cites an equally-valid sibling chunk in the SAME correct document \u2014 not a quality regression (verified: doc disambiguation + answer correctness intact)."
   },
   "_baseline_2026_05_26_relevance_gate": {
     "query_count": 9,

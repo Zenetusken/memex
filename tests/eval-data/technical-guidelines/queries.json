@@ -174,11 +174,11 @@
     },
     {
       "qid": "technical-guidelines-13",
-      "question": "What is the exact maximum line length in characters that the coding standards enforce?",
+      "question": "According to the developer guidelines, what is the exact maximum line length in characters that the coding standards enforce?",
       "_anchor_phrase": "",
       "_expected_answer": "REFUSE \u2014 the coding standards cover types, errors, async, logging, etc., but specify no maximum line length.",
       "_answer_type": "counterfactual",
-      "_note": "In-corpus-unanswerable: coding standards present, no line-length rule. HARD GATE.",
+      "_note": "In-corpus-unanswerable: coding standards present, no line-length rule. HARD GATE. RE-SCOPED 2026-06-09 to name the guidelines doc explicitly: the codex-rs ingest added tui/src/log_layer.rs (_DEFAULT_MAX_LEN=120, a TUI log-line cap) to the shared vault, making the generic phrasing 'the coding standards' answerable as a grounded-but-off-subject hedge (deterministic 3/3, audit-14 close-out). Shared-vault CF principle: a counterfactual must be counterfactual vs the WHOLE vault, so it scopes its subject like its siblings.",
       "should_refuse": true,
       "relevant_chunk_ids": []
     },
