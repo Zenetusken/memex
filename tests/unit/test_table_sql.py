@@ -682,7 +682,10 @@ async def _probe_one(sql: str, header: list[str], rows: list[list[str]]) -> obje
     mp = pytest.MonkeyPatch()
     try:
         mp.setattr("memex.agents.table_sql.complete_structured", _fake)
-        return await query_doc_tables("q", [st])
+        # The question names the matrix's aggregate column ("cost") — the column-
+        # grounding gate (audit-15 ar-16) requires the real flows' invariant that the
+        # question asks about the aggregated column; this matrix tests the WHERE oracle.
+        return await query_doc_tables("what is the total cost (val) for the matching regions?", [st])
     finally:
         mp.undo()
 
@@ -851,7 +854,7 @@ async def test_aggregate_coercion_soundness(
     mp = pytest.MonkeyPatch()
     try:
         mp.setattr("memex.agents.table_sql.complete_structured", _fake)
-        result = await query_doc_tables("q", [st])
+        result = await query_doc_tables("what is the total val of the items?", [st])
     finally:
         mp.undo()
     if expected is None:
@@ -859,3 +862,31 @@ async def test_aggregate_coercion_soundness(
     else:
         assert result is not None
         assert result.aggregate_value == pytest.approx(expected)
+
+
+# ---- aggregate COLUMN-GROUNDING gate (audit-15, the ar-16 fabrication) ----
+
+
+from memex.agents.table_sql import (  # noqa: E402 — section-local import, file convention
+    _aggregate_column_grounded_in_question as _colg,
+)
+
+
+def test_column_grounding_blocks_the_ar16_substitution() -> None:
+    q = "According to the fiscal 2026 director compensation table, what was the total value of stock options granted to NVIDIA's directors?"
+    assert _colg(q, "Stock Awards ($) (1)") is False  # 'awards' not in a question about options
+
+
+def test_column_grounding_passes_the_ar14_exact_match() -> None:
+    q = "What was the total amount of fees earned or paid in cash to all of NVIDIA's directors?"
+    assert _colg(q, "**Fees Earned or Paid in Cash ($)") is True
+
+
+def test_column_grounding_plural_fold_and_stopwords() -> None:
+    assert _colg("How many training GPUs were used in total across variants?", "Training GPU") is True
+    assert _colg("What is the total number of employees?", "Employees") is True
+    assert _colg("What is the sum of revenue?", "Total Revenue ($)") is True  # 'total' is a stop
+
+
+def test_column_grounding_empty_label_is_permissive() -> None:
+    assert _colg("anything", "($)") is True  # no content tokens -> no substitutable claim

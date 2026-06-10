@@ -279,6 +279,60 @@ def _strip_quotes(ident: str) -> str:
     return ident.strip().strip('"').strip("'")
 
 
+_COLUMN_TOKEN_STOP = frozenset(
+    {"of", "or", "and", "in", "the", "a", "an", "per", "for", "to", "total", "number", "no"}
+)
+
+
+def _aggregate_column_label(sql: str, header: list[str]) -> str | None:
+    """The ORIGINAL header label of the column a scalar-aggregate SQL runs over,
+    or None when unmappable / `*`. (The `describe_aggregate` mapping, reusable
+    pre-result — the grounding gate below needs it before a TableQueryResult exists.)"""
+    m = _AGG_RE.match(sql)
+    if not m:
+        return None
+    col = _strip_quotes(m.group("col"))
+    if col == "*":
+        return ""  # COUNT(*): no column claim to mismatch — the gate is permissive
+    base = col[:-5] if col.lower().endswith("__num") else col
+    for h in header:
+        if _sanitize_identifier(h, fallback="c") == base.lower():
+            return h.strip().strip("*").strip()
+    return None
+
+
+def _aggregate_column_grounded_in_question(question: str, column_label: str) -> bool:
+    """The COLUMN-GROUNDING gate (audit-15, the ar-16 fabrication): the text-to-SQL
+    column mapping can substitute a semantically-NEAR column for an ABSENT one the
+    question names ("total value of stock OPTIONS" → the `Stock Awards ($)` column),
+    and the recompute gate validates the arithmetic OF THE CHOSEN COLUMN, not the
+    column-to-question match — shipping a fabricated answer to the asked question
+    (the doc never states option values). Deterministic rule: EVERY significant
+    content token of the chosen column's label must appear in the question
+    (case-folded, naive plural fold). ar-14 passes ({fees, earned, paid, cash} ⊆
+    the question); ar-16 blocks ("awards" is not in a question about options).
+    Failure direction is a conservative NO-INJECTION (→ the agent refuses or
+    answers from real chunks) — never a fabrication; the same fail-closed shape
+    as the recompute gate itself, so no kill-switch (it IS a correctness gate).
+    """
+    if not question.strip():
+        # No question available (direct/legacy callers, the unit WHERE-matrix) —
+        # there is nothing to mismatch against; the recompute gate still applies.
+        return True
+    q = question.lower()
+    q_tokens = set(re.findall(r"[a-z0-9]+", q))
+    # naive plural fold both ways
+    q_folded = q_tokens | {t.rstrip("s") for t in q_tokens} | {t + "s" for t in q_tokens}
+    col_tokens = [
+        t
+        for t in re.findall(r"[a-z0-9]+", column_label.lower())
+        if len(t) >= 3 and t not in _COLUMN_TOKEN_STOP and not t.isdigit()
+    ]
+    if not col_tokens:
+        return True  # a label with no content tokens makes no substitutable claim
+    return all((t in q_folded) or (t.rstrip("s") in q_folded) for t in col_tokens)
+
+
 def describe_aggregate(result: TableQueryResult) -> str | None:
     """A human-readable label for an aggregate result — e.g. `SUM of Fees Earned
     or Paid in Cash ($)` — by parsing the SQL's function + column and mapping the
@@ -843,7 +897,7 @@ async def query_doc_tables(question: str, tables: list[StoredTable]) -> TableQue
             rows = _execute_select(db, sql)
             if rows is None or not rows:
                 return None
-            return _classify_and_build(sql, target, loaded, rows)
+            return _classify_and_build(sql, target, loaded, rows, question=question)
         finally:
             db.close()
 
@@ -860,6 +914,8 @@ def _classify_and_build(
     target: StoredTable,
     loaded: _LoadedTable,
     rows: list[tuple[object, ...]],
+    *,
+    question: str = "",
 ) -> TableQueryResult | None:
     """Classify the executed SELECT and build the gated TableQueryResult."""
     agg = _AGG_RE.match(sql)
@@ -957,6 +1013,19 @@ def _classify_and_build(
             "table_sql.recompute_disagree",
             sql_value=sql_value,
             recompute=recompute,
+            target=target.table_id,
+        )
+        return None
+
+    # COLUMN-GROUNDING gate (the ar-16 fabrication class): the recompute above proves
+    # the ARITHMETIC; this proves the COLUMN is the one the question asked about. A
+    # near-miss mapping (options→awards) is a fabrication at the question level even
+    # with perfect arithmetic. Unmappable label (None) → conservative no-injection.
+    agg_label = _aggregate_column_label(sql, target.header)
+    if agg_label is None or not _aggregate_column_grounded_in_question(question, agg_label):
+        logger.bind(node="query_doc_tables").info(
+            "table_sql.aggregate_column_ungrounded",
+            column=agg_label,
             target=target.table_id,
         )
         return None
