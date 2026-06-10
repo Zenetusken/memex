@@ -490,7 +490,8 @@ async def test_verify_missing_index_treated_as_ungrounded(
     # M1 citation-retarget OFF: this test pins the PRE-retarget filter semantics
     # (a probe-aware fake would conflate the two contracts; the retarget has its own tests).
     monkeypatch.setenv("MEMEX_AGENTS__CITATION_RETARGET_ENABLED", "false")
-    from memex.core.config import MemexSettings as _MS, set_settings as _ss
+    from memex.core.config import MemexSettings as _MS
+    from memex.core.config import set_settings as _ss
     _ss(_MS())
     fake_llm.respond(
         "assess_sufficiency",
@@ -543,7 +544,8 @@ async def test_verify_contested_index_is_not_shipped_as_grounded(fake_llm: FakeL
     # M1 citation-retarget OFF: this test pins the PRE-retarget filter semantics
     # (a probe-aware fake would conflate the two contracts; the retarget has its own tests).
     monkeypatch.setenv("MEMEX_AGENTS__CITATION_RETARGET_ENABLED", "false")
-    from memex.core.config import MemexSettings as _MS, set_settings as _ss
+    from memex.core.config import MemexSettings as _MS
+    from memex.core.config import set_settings as _ss
     _ss(_MS())
     fake_llm.respond(
         "assess_sufficiency",
@@ -594,7 +596,8 @@ async def test_partial_grounded_ships_grounded_subset(fake_llm: FakeLLM, monkeyp
     # M1 citation-retarget OFF: this test pins the PRE-retarget filter semantics
     # (a probe-aware fake would conflate the two contracts; the retarget has its own tests).
     monkeypatch.setenv("MEMEX_AGENTS__CITATION_RETARGET_ENABLED", "false")
-    from memex.core.config import MemexSettings as _MS, set_settings as _ss
+    from memex.core.config import MemexSettings as _MS
+    from memex.core.config import set_settings as _ss
     _ss(_MS())
     fake_llm.respond(
         "assess_sufficiency",
@@ -687,7 +690,8 @@ async def test_partial_grounded_kill_switch_refuses(
     # M1 citation-retarget OFF: this test pins the PRE-retarget filter semantics
     # (a probe-aware fake would conflate the two contracts; the retarget has its own tests).
     monkeypatch.setenv("MEMEX_AGENTS__CITATION_RETARGET_ENABLED", "false")
-    from memex.core.config import MemexSettings as _MS, set_settings as _ss
+    from memex.core.config import MemexSettings as _MS
+    from memex.core.config import set_settings as _ss
     _ss(_MS())
     from memex.core.config import MemexSettings, set_settings
 
