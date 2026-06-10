@@ -69,6 +69,7 @@ from memex.core.text import (
     STOPWORDS,
     atomise,
     claim_grounded_only_by_name,
+    relevance_reason_cites_world_knowledge,
     strip_table_rows_blocks,
 )
 from memex.core.types import (
@@ -600,6 +601,8 @@ class AnswerState(BaseModel):
     # verify-time citation-retarget (audit-15): promote-only re-test of still-ungrounded
     # claims against sibling window chunks on the FINAL verify pass.
     citation_retarget: bool = True
+    # Set from `agents.relevance_world_knowledge_guard_enabled` in `answer_query` (fail-open).
+    relevance_world_knowledge_guard: bool = True
 
     nodes_traversed: int = 0
     max_nodes_traversed: int = 20
@@ -2335,6 +2338,23 @@ async def assess_relevance(state: AnswerState) -> AnswerStateUpdate:
             ),
             "nodes_traversed": state.nodes_traversed + 1,
         }
+    # World-knowledge OVERRIDE (audit-15 M3): the v3 prompt bans judging grounded content
+    # against textbook/standard accounts, but the 4B's prior wins on strong-prior topics
+    # (handwritten-06 rejected for not matching "the standard three stages" 3/3 UNDER the
+    # ban). When the gate's OWN stated reason is a world-knowledge comparison, override to
+    # responsive — deterministic, advisory-gate-only (the claims are already grounded), so
+    # the worst case is shipping a grounded answer the gate mis-judged: never a hallucination.
+    if (
+        state.relevance_world_knowledge_guard
+        and not relevance.responsive
+        and relevance_reason_cites_world_knowledge(relevance.reason)
+    ):
+        log.info("relevance.world_knowledge_overridden", original_reason=relevance.reason[:160])
+        relevance = RelevanceAssessment(
+            responsive=True,
+            reason="overridden: the gate compared the answer to standard/textbook knowledge "
+            "rather than the documents' own account",
+        )
     log.info("relevance", responsive=relevance.responsive)
     return {
         "relevance": relevance,
@@ -2750,6 +2770,14 @@ async def answer_query(
     except (ConfigurationError, MemexError):
         citation_retarget = True
 
+    # The M3 relevance world-knowledge override (audit-15), same fail-open pattern.
+    try:
+        relevance_world_knowledge_guard = (
+            get_settings().agents.relevance_world_knowledge_guard_enabled
+        )
+    except (ConfigurationError, MemexError):
+        relevance_world_knowledge_guard = True
+
     # Graph expansion is the param ANDed with the settings kill-switch (default on),
     # read fail-open — so `MEMEX_AGENTS__GRAPH_EXPANSION_ENABLED=false` disables it
     # globally (for the earns-its-keep A/B) while an explicit param=False still wins.
@@ -2785,6 +2813,7 @@ async def answer_query(
         numeric_grounding_backstop=numeric_grounding_backstop,
         name_only_grounding_backstop=name_only_grounding_backstop,
         citation_retarget=citation_retarget,
+        relevance_world_knowledge_guard=relevance_world_knowledge_guard,
         scope_doc_ids=scope_doc_ids or [],
         # The grounded multi-turn chat's bounded prior-chunk carry (Surface A). Default
         # None/[] → byte-identical to a bare `/ask`; `retrieve` unions these into the

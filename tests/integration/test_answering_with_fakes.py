@@ -2292,3 +2292,68 @@ async def test_retarget_kill_switch(monkeypatch: pytest.MonkeyPatch) -> None:
     finally:
         monkeypatch.delenv("MEMEX_AGENTS__CITATION_RETARGET_ENABLED", raising=False)
         set_settings(MemexSettings())
+
+
+# ---- M3: relevance world-knowledge override (audit-15) ----
+
+
+async def _wk_fixture(monkeypatch: pytest.MonkeyPatch, *, reason: str) -> object:
+    c1 = Chunk(chunk_id="d#c1", document_id="d", document_title="D",
+               text="The notes show three stages: source code, compile, machine code.")
+
+    async def _hybrid(query: str, k: int = 50) -> list[Chunk]:
+        return [c1]
+
+    async def _rerank(query: str, candidates: list[Chunk], top_k: int = 10) -> list[Chunk]:
+        return list(candidates[:top_k])
+
+    async def fake_call(*, prompt: object, schema: type, **_kw: object) -> tuple[object, int]:
+        name = schema.__name__
+        if name == "SufficiencyAssessment":
+            return SufficiencyAssessment(sufficient=True, reason="ok"), 3
+        if name == "DraftAnswer":
+            return DraftAnswer(summary="Three stages: source, compile, machine code.",
+                               claims=[CitedClaim(claim="The stages are source code, compile, machine code.",
+                                                  source_chunk_id="d#c1", confidence="high")]), 5
+        if name == "VerificationResult":
+            return schema(grounded=[0], ungrounded=[]), 4
+        if name == "RelevanceAssessment":
+            return RelevanceAssessment(responsive=False, reason=reason), 2
+        raise AssertionError(name)
+
+    monkeypatch.setattr("memex.agents.answering.hybrid_search", _hybrid)
+    monkeypatch.setattr("memex.agents.answering.cross_encoder_rerank", _rerank)
+    monkeypatch.setattr("memex.agents.answering.complete_structured", fake_call)
+    return await answer_query("What are the stages shown in the notes?")
+
+
+async def test_world_knowledge_nonresponsive_is_overridden(monkeypatch: pytest.MonkeyPatch) -> None:
+    resp = await _wk_fixture(
+        monkeypatch,
+        reason="The answer lists three stages instead of the standard four described in C++ documentation.",
+    )
+    assert resp.answered is True  # the override ships the grounded answer
+
+
+async def test_topic_mismatch_nonresponsive_is_kept(monkeypatch: pytest.MonkeyPatch) -> None:
+    resp = await _wk_fixture(
+        monkeypatch,
+        reason="The question asks about linker flags but the answer describes compilation stages.",
+    )
+    assert resp.answered is False  # a legit conflation still refuses
+
+
+async def test_world_knowledge_override_kill_switch(monkeypatch: pytest.MonkeyPatch) -> None:
+    from memex.core.config import MemexSettings, set_settings
+
+    monkeypatch.setenv("MEMEX_AGENTS__RELEVANCE_WORLD_KNOWLEDGE_GUARD_ENABLED", "false")
+    set_settings(MemexSettings())
+    try:
+        resp = await _wk_fixture(
+            monkeypatch,
+            reason="The answer lists three stages instead of the standard four described in C++ documentation.",
+        )
+        assert resp.answered is False  # without the guard, the gate's vote stands
+    finally:
+        monkeypatch.delenv("MEMEX_AGENTS__RELEVANCE_WORLD_KNOWLEDGE_GUARD_ENABLED", raising=False)
+        set_settings(MemexSettings())

@@ -305,3 +305,39 @@ def test_grounded_only_by_name_fr_chunk_en_claim_trap() -> None:
         claim_grounded_only_by_name("ABAC is included in the access-control list.", _NAME_LIST)
         is False
     )
+
+
+# ---- relevance world-knowledge comparison detector (audit-15 M3) ----
+
+
+from memex.core.text import relevance_reason_cites_world_knowledge as _wk
+
+
+def test_wk_matches_the_observed_handwritten_case() -> None:
+    r = ("The answer incorrectly lists 'Compile' and 'Machine Code' as stages instead of the "
+         "standard three stages (Preprocessing, Compilation, Assembly, Linking) or the "
+         "two-stage model (Compilation, Linking) described in C++ documentation")
+    assert _wk(r) is True
+
+
+def test_wk_matches_textbook_and_widely_accepted() -> None:
+    assert _wk("This contradicts the textbook account of TCP handshakes.") is True
+    assert _wk("The widely-accepted model has four phases, not three.") is True
+    assert _wk("The answer omits the conventional linking stage.") is True
+    assert _wk("These are not the correct stages of compilation.") is True
+
+
+def test_wk_does_not_match_topic_mismatch_reasons() -> None:
+    # Legit non-responsive reasons must NOT be overridden — including ones where
+    # "standard" is the TOPIC (a document/spec name), not an external-knowledge comparison.
+    assert _wk("The question asks about kernels but the answer describes libraries.") is False
+    assert _wk("The answer is about X's ecosystem, not X itself.") is False
+    assert _wk("The answer fails to define the Pareto chart as requested.") is False
+    assert _wk("The question asks which port is the trunk; the answer discusses VLAN ranges.") is False
+
+
+def test_wk_nist_standard_as_topic_is_borderline_accepted_tradeoff() -> None:
+    # DOCUMENTED TRADEOFF: "the NIST standard" as a topic noun DOES match the regex; the
+    # override would ship a GROUNDED answer despite a topic-mismatch vote. Advisory-gate
+    # worst case (a grounded slightly-off-topic answer), accepted and pinned here.
+    assert _wk("The answer describes the NIST standard rather than the asked protocol.") is True
