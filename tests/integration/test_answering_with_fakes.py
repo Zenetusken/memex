@@ -2357,3 +2357,82 @@ async def test_world_knowledge_override_kill_switch(monkeypatch: pytest.MonkeyPa
     finally:
         monkeypatch.delenv("MEMEX_AGENTS__RELEVANCE_WORLD_KNOWLEDGE_GUARD_ENABLED", raising=False)
         set_settings(MemexSettings())
+
+
+# ---- M2: denial-reframe retry (audit-15) ----
+
+
+async def _denial_fixture(monkeypatch: pytest.MonkeyPatch, *, retry_has_claims: bool,
+                          first_summary: str) -> tuple[object, dict[str, int]]:
+    c1 = Chunk(chunk_id="d#c1", document_id="d", document_title="GTE paper",
+               text="Training was conducted on up to 8 NVIDIA A100 GPUs with fp16.")
+    calls = {"draft": 0}
+
+    async def _hybrid(query: str, k: int = 50) -> list[Chunk]:
+        return [c1]
+
+    async def _rerank(query: str, candidates: list[Chunk], top_k: int = 10) -> list[Chunk]:
+        return list(candidates[:top_k])
+
+    async def fake_call(*, prompt: object, schema: type, **_kw: object) -> tuple[object, int]:
+        name = schema.__name__
+        if name == "SufficiencyAssessment":
+            return SufficiencyAssessment(sufficient=True, reason="ok"), 3
+        if name == "DraftAnswer":
+            calls["draft"] += 1
+            if calls["draft"] == 1:
+                return DraftAnswer(summary=first_summary, claims=[]), 5
+            if retry_has_claims:
+                return DraftAnswer(summary="GTE was trained on up to 8 NVIDIA A100 GPUs.",
+                                   claims=[CitedClaim(claim="GTE was trained on up to 8 NVIDIA A100 GPUs.",
+                                                      source_chunk_id="d#c1", confidence="high")]), 5
+            return DraftAnswer(summary="No literal answer in chunks.", claims=[]), 5
+        if name == "VerificationResult":
+            return schema(grounded=[0], ungrounded=[]), 4
+        if name == "RelevanceAssessment":
+            return RelevanceAssessment(responsive=True, reason="on topic"), 2
+        raise AssertionError(name)
+
+    monkeypatch.setattr("memex.agents.answering.hybrid_search", _hybrid)
+    monkeypatch.setattr("memex.agents.answering.cross_encoder_rerank", _rerank)
+    monkeypatch.setattr("memex.agents.answering.complete_structured", fake_call)
+    resp = await answer_query("What GPUs was GTE trained on?")
+    return resp, calls
+
+
+DENIAL = ("The chunks do not state which specific GPUs were used, only that training "
+          "was conducted on up to 8 NVIDIA A100 GPUs")
+
+
+async def test_denial_reframe_retry_recovers_the_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    resp, calls = await _denial_fixture(monkeypatch, retry_has_claims=True, first_summary=DENIAL)
+    assert calls["draft"] == 2  # exactly ONE retry
+    assert resp.answered is True
+    assert resp.claims and "A100" in resp.claims[0].claim
+
+
+async def test_denial_retry_empty_second_draft_still_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
+    resp, calls = await _denial_fixture(monkeypatch, retry_has_claims=False, first_summary=DENIAL)
+    assert calls["draft"] == 2
+    assert resp.answered is False  # the retry's honest empty draft stands
+
+
+async def test_true_refusal_summary_does_not_trigger_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    resp, calls = await _denial_fixture(monkeypatch, retry_has_claims=True,
+                                        first_summary="No literal answer in chunks.")
+    assert calls["draft"] == 1  # no retry — terminal refusal preserved
+    assert resp.answered is False
+
+
+async def test_denial_retry_kill_switch(monkeypatch: pytest.MonkeyPatch) -> None:
+    from memex.core.config import MemexSettings, set_settings
+
+    monkeypatch.setenv("MEMEX_AGENTS__DENIAL_REFRAME_RETRY_ENABLED", "false")
+    set_settings(MemexSettings())
+    try:
+        resp, calls = await _denial_fixture(monkeypatch, retry_has_claims=True, first_summary=DENIAL)
+        assert calls["draft"] == 1
+        assert resp.answered is False
+    finally:
+        monkeypatch.delenv("MEMEX_AGENTS__DENIAL_REFRAME_RETRY_ENABLED", raising=False)
+        set_settings(MemexSettings())

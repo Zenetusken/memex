@@ -341,3 +341,29 @@ def test_wk_nist_standard_as_topic_is_borderline_accepted_tradeoff() -> None:
     # override would ship a GROUNDED answer despite a topic-mismatch vote. Advisory-gate
     # worst case (a grounded slightly-off-topic answer), accepted and pinned here.
     assert _wk("The answer describes the NIST standard rather than the asked protocol.") is True
+
+
+# ---- denial-framed summary detector (audit-15 M2) ----
+
+
+from memex.core.text import is_denial_framed_summary as _denial
+
+
+def test_denial_matches_the_three_observed_drafts() -> None:
+    assert _denial("The chunks do not state which specific GPUs were used to train GTE, "
+                   "only that training was conducted on up to 8 NVIDIA A100 GPUs") is True
+    assert _denial("The chunks do not state which base language model GTE-large is initialized "
+                   "from. They mention that GTEbase and GTElarge are initialized") is True
+    assert _denial("The chunks do not contain a literal definition of what a Pareto chart is. "
+                   "They mention 'Pareto analysis' in the context of bar charts") is True
+
+
+def test_denial_does_not_match_true_refusals() -> None:
+    assert _denial("No literal answer in chunks.") is False
+    assert _denial("The chunks do not contain any information about quantum schedulers.") is False
+    assert _denial("") is False
+
+
+def test_denial_does_not_match_affirmative_summaries() -> None:
+    assert _denial("GTE was trained on up to 8 NVIDIA A100 GPUs.") is False
+    assert _denial("The stages are source code, compile, and machine code.") is False

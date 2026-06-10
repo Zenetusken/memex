@@ -133,9 +133,10 @@ def test_synthetic_chunk_total_text_bounded_with_long_sql() -> None:
     # Evidence survived (rows are present even though SQL is huge).
     assert "Compute & Networking" in chunk.text
     assert "Graphics" in chunk.text
-    # The aggregate self-describes by its column header (2026-05-31) so the answer
-    # node connects the scalar to the queried quantity.
-    assert "SUM of Revenue = 133302" in chunk.text
+    # The aggregate self-describes by its column header (2026-05-31) AND names its
+    # source table (audit-15 M6, the ar-15 row-path precedent) so the answer node
+    # connects the scalar to the queried quantity in the queried table.
+    assert 'SUM of Revenue in the "Reportable Segments" table = 133302' in chunk.text
 
 
 # ======================================================================
