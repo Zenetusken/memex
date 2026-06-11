@@ -310,7 +310,9 @@ def test_grounded_only_by_name_fr_chunk_en_claim_trap() -> None:
 # ---- relevance world-knowledge comparison detector (audit-15 M3) ----
 
 
-from memex.core.text import relevance_reason_cites_world_knowledge as _wk
+from memex.core.text import (  # noqa: E402 — section-local import, file convention
+    relevance_reason_cites_world_knowledge as _wk,
+)
 
 
 def test_wk_matches_the_observed_handwritten_case() -> None:
@@ -346,7 +348,9 @@ def test_wk_nist_standard_as_topic_is_borderline_accepted_tradeoff() -> None:
 # ---- denial-framed summary detector (audit-15 M2) ----
 
 
-from memex.core.text import is_denial_framed_summary as _denial
+from memex.core.text import (  # noqa: E402 — section-local import, file convention
+    is_denial_framed_summary as _denial,
+)
 
 
 def test_denial_matches_the_three_observed_drafts() -> None:

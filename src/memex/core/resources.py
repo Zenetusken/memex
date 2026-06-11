@@ -49,10 +49,17 @@ REFERENCE_VRAM_GB = 12.0
 # has no fixed profile (it echoes the user's explicit device knobs).
 _CURATED_ORDER: tuple[CoResidenceMode, ...] = ("fast", "full", "gpu_only")
 
-# The historical RAG default (matches the prior hard-coded `MEMEX_RERANK_TOP_K`
-# default in the answer node) — `manual` mode echoes it, so the common path is
-# byte-unchanged; only the curated `full` mode raises retrieval depth.
-_DEFAULT_TOP_K = 5
+# The default rerank/answer window. 5→8 (2026-06-10, audit-15 M5): the false-refusal
+# autopsy measured the binding answer-node budget at top_k=8 as ~7.4k tok prose /
+# ~8.1k code-heavy against the 4B's 8192 window (scaffold 2,049 + 8 × ~447-530/chunk
+# + 1,800 output; the overflow degrade-loop is the backstop), and the k=8 probe was
+# DETERMINISTIC-CLEAN on both window-sensitive corpora: codex-rs posted its first
+# PERFECT 39/39 answered (ftc-big-runmain's gold enters at #6) and slide-decks gained
+# sd-03 with zero regressions, refusal_cf=1.0 ×2 each. Validated by the full
+# 14-corpus ladder before the default flip shipped. ALL non-`full` modes share this
+# constant (incl. `manual`, which the device-pinned eval uses — so evals measure the
+# live posture); `full` keeps its curated 18 at the 24,576 window.
+_DEFAULT_TOP_K = 8
 
 
 class ResourceProfile(BaseModel):
@@ -101,9 +108,9 @@ def _curated(mode: CoResidenceMode) -> ResourceProfile:
             # desktop-peak slack). The 8B kill-switch fallback runs fine at this posture.
             orchestrator_gpu_fraction=0.62,
             orchestrator_max_model_len=8192,
-            retrieval_top_k=5,
+            retrieval_top_k=_DEFAULT_TOP_K,
             expected_latency="~14 s / answer",
-            context_window="8,192 tokens · top-5 chunks",
+            context_window="8,192 tokens · top-8 chunks",
         )
     if mode == "full":
         return ResourceProfile(
@@ -135,9 +142,9 @@ def _curated(mode: CoResidenceMode) -> ResourceProfile:
             reranker_device="cuda",
             orchestrator_gpu_fraction=0.72,
             orchestrator_max_model_len=8192,
-            retrieval_top_k=5,
+            retrieval_top_k=_DEFAULT_TOP_K,
             expected_latency="~14 s / answer",
-            context_window="8,192 tokens · top-5 chunks",
+            context_window="8,192 tokens · top-8 chunks",
         )
     raise ConfigurationError(
         f"unknown co-residence mode {mode!r}",
@@ -186,9 +193,9 @@ def resolve_profile(
             reranker_device=rr,
             orchestrator_gpu_fraction=0.62,
             orchestrator_max_model_len=8192,
-            retrieval_top_k=5,
+            retrieval_top_k=_DEFAULT_TOP_K,
             expected_latency="~14 s (GPU rerank) · ~34 s (CPU fallback)",
-            context_window="8,192 tokens · top-5 chunks",
+            context_window="8,192 tokens · top-8 chunks",
         )
     if mode == "manual":
         return ResourceProfile(
