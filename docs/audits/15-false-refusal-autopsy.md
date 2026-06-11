@@ -210,3 +210,21 @@ double-edged without its own measured design) or the sharper reranker (now THREE
 files: codex usage-class, tiny-gold burial sd-17/25/31, and the k=8-conditional pair). A probe on the
 TARGETED corpora is necessary but NOT sufficient for a default that changes every query's window —
 the full ladder is the only honest gate for window-level changes.
+
+### The k=8 NO-GO, root-caused (instrumented k5-vs-k8 traces, 2026-06-11)
+
+All 5 regressions deterministic; traces (`/tmp/k8_regression_traces.json` methodology — the autopsy
+recorders at both k values):
+- **4/5 = answer-node EMPTY DRAFTS with the gold IN the window** (ccna-05, chart-types-04 [+its M2
+  retry fired and re-denied], scientific-gte-04/-11): at k=5 the model drafts the correct claim
+  (verify grounds 1/1); at k=8 it returns zero claims. For the gte pair the 8192 overflow compounds
+  (one degrade-drop — rank 8 only — so the gold SURVIVES; the model still drafts empty over 7 chunks).
+- **1/5 = verify batch-drowning** (nist-05): the IDENTICAL claim citing the IDENTICAL chunk grounds in
+  the 5-chunk verify render, LLM-rejected in the 8-chunk render (M1b-ii re-observed at the margin).
+
+**The mechanism is MODEL CAPACITY, not window content: the 4B's drafting+verifying reliability
+degrades between 5 and 8 chunks** (with the overflow margin compounding at 8 × ~530tok + 2,049
+scaffold + 1,800 output ≈ the 8,192 ceiling). Consequences: (a) the NO-GO is durable on this model —
+no top_k tuning fixes it; (b) any bigger-window/bigger-model revisit has a measurable acceptance
+threshold (stable drafting at the larger k across this 5-query canary set before any default change);
+(c) the SHARPER RERANKER remains the right lever — top-5 QUALITY beats window SIZE on a 4B.
