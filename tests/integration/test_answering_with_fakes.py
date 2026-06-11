@@ -2243,7 +2243,7 @@ def _retarget_fixture(_mp: object, *, support_in_sibling: bool):
 
 
 async def test_retarget_promotes_and_rewrites_citation(monkeypatch: pytest.MonkeyPatch) -> None:
-    c1, c2, calls, _hybrid, _rerank, fake_call = _retarget_fixture(monkeypatch, support_in_sibling=True)
+    *_, calls, _hybrid, _rerank, fake_call = _retarget_fixture(monkeypatch, support_in_sibling=True)
     monkeypatch.setattr("memex.agents.answering.hybrid_search", _hybrid)
     monkeypatch.setattr("memex.agents.answering.cross_encoder_rerank", _rerank)
     monkeypatch.setattr("memex.agents.answering.complete_structured", fake_call)

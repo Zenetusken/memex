@@ -39,6 +39,8 @@ def test_retrieval_top_k_scales_with_the_window() -> None:
     chunks than fast (its larger orchestrator window holds them). fast/gpu_only/
     manual keep the historical 5 — so only an explicit `full` switch deepens
     retrieval (the common manual path is unchanged)."""
+    # 5 is a MEASURED default: the k=8 flip was full-ladder NO-GO'd 2026-06-10
+    # (net −3 ANS deterministic; audit-15 M5) — do not re-raise without a new ladder.
     assert resolve_profile("fast").retrieval_top_k == 5
     assert resolve_profile("gpu_only").retrieval_top_k == 5
     assert resolve_profile("manual").retrieval_top_k == 5

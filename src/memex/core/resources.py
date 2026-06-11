@@ -49,9 +49,17 @@ REFERENCE_VRAM_GB = 12.0
 # has no fixed profile (it echoes the user's explicit device knobs).
 _CURATED_ORDER: tuple[CoResidenceMode, ...] = ("fast", "full", "gpu_only")
 
-# The historical RAG default (matches the prior hard-coded `MEMEX_RERANK_TOP_K`
-# default in the answer node) — `manual` mode echoes it, so the common path is
-# byte-unchanged; only the curated `full` mode raises retrieval depth.
+# The default rerank/answer window — 5, a MEASURED choice (do not casually raise).
+# The k=8 DEFAULT was tried 2026-06-10 and REVERTED as a full-ladder NO-GO (audit-15 M5):
+# the targeted probe was clean (codex 39/39 — runmain's gold enters at #6; slide-decks
+# +sd-03) but the 14-corpus ladder measured a DETERMINISTIC net −3 ANS (ccna −1,
+# chart-types −1, nist −1, scientific-gte −2; cf=1.0 held everywhere) — wider windows
+# admit distractors and push prompts into the 8192 overflow zone where the degrade-loop
+# sheds chunks (the audit-14 convhistory lesson at scale). The k=8 winners remain
+# reachable per-run via the MEMEX_RERANK_TOP_K env escape hatch; a default change needs
+# a per-query adaptive mechanism or a sharper reranker, not a blanket bump. ALL
+# non-`full` modes share this constant (incl. `manual`, the device-pinned eval mode);
+# `full` keeps its curated 18 at the 24,576 window.
 _DEFAULT_TOP_K = 5
 
 
@@ -101,7 +109,7 @@ def _curated(mode: CoResidenceMode) -> ResourceProfile:
             # desktop-peak slack). The 8B kill-switch fallback runs fine at this posture.
             orchestrator_gpu_fraction=0.62,
             orchestrator_max_model_len=8192,
-            retrieval_top_k=5,
+            retrieval_top_k=_DEFAULT_TOP_K,
             expected_latency="~14 s / answer",
             context_window="8,192 tokens · top-5 chunks",
         )
@@ -135,7 +143,7 @@ def _curated(mode: CoResidenceMode) -> ResourceProfile:
             reranker_device="cuda",
             orchestrator_gpu_fraction=0.72,
             orchestrator_max_model_len=8192,
-            retrieval_top_k=5,
+            retrieval_top_k=_DEFAULT_TOP_K,
             expected_latency="~14 s / answer",
             context_window="8,192 tokens · top-5 chunks",
         )
@@ -186,7 +194,7 @@ def resolve_profile(
             reranker_device=rr,
             orchestrator_gpu_fraction=0.62,
             orchestrator_max_model_len=8192,
-            retrieval_top_k=5,
+            retrieval_top_k=_DEFAULT_TOP_K,
             expected_latency="~14 s (GPU rerank) · ~34 s (CPU fallback)",
             context_window="8,192 tokens · top-5 chunks",
         )
