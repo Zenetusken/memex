@@ -146,7 +146,7 @@ async def main() -> None:
         probes.append({"set": "case", "corpus": corpus, "qid": qid, "q": q["question"], "gold": gold})
     case_qids = {p["qid"] for p in probes}
     for corpus in CONTROL_CORPORA:
-        qs = json.load(open(f"tests/eval-data/{corpus}/queries.json"))
+        qs = json.load(open(f"tests/eval-data/{corpus}/queries.json"))  # noqa: ASYNC230 — one-shot probe
         picked = 0
         for x in qs["queries"]:
             if picked >= args.controls_per_corpus:
