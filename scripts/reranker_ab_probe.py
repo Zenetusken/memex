@@ -78,10 +78,13 @@ class _Scorer:
         self.model_id = model_id
         self.label = f"{backend}:{model_id.split('/')[-1]}"
         t0 = time.time()
-        if backend == "ce":
+        if backend in ("ce", "cet"):
             from sentence_transformers import CrossEncoder
 
-            self._m = CrossEncoder(model_id, device="cpu")
+            # "cet" = CrossEncoder with trust_remote_code (zerank-1-small's custom head).
+            self._m = CrossEncoder(
+                model_id, device="cpu", trust_remote_code=(backend == "cet")
+            )
         elif backend == "qwen3":
             import torch
             from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -104,7 +107,7 @@ class _Scorer:
         """Score the frozen pool; return (chunk_ids best-first, seconds)."""
         pairs = [(query, c.text) for c in chunks]
         t0 = time.time()
-        if self.backend == "ce":
+        if self.backend in ("ce", "cet"):
             scores = [float(s) for s in self._m.predict(pairs, batch_size=8)]
         else:
             import torch
@@ -128,7 +131,7 @@ class _Scorer:
 
 async def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--candidate", action="append", required=True, help="<ce|qwen3>:<hf_model_id>")
+    ap.add_argument("--candidate", action="append", required=True, help="<ce|cet|qwen3>:<hf_model_id> (cet = CrossEncoder + trust_remote_code)")
     ap.add_argument("--out", default="/tmp/reranker_ab.json")  # noqa: S108 — probe artifact
     ap.add_argument("--controls-per-corpus", type=int, default=3)
     args = ap.parse_args()
@@ -168,34 +171,47 @@ async def main() -> None:
     for p in probes:
         p["pool"] = await hybrid_search(p["q"], k=50)
 
-    # ---- score each candidate over the frozen pools ----
-    results: dict[str, Any] = {"probes": [], "candidates": []}
-    scorers = [_Scorer(*c.split(":", 1)) for c in args.candidate]
-    for s in scorers:
-        results["candidates"].append({"label": s.label, "load_s": round(s.load_s, 1)})
-        print(f"loaded {s.label} in {s.load_s:.1f}s")
+    # ---- score each candidate over the frozen pools, ONE MODEL RESIDENT AT A TIME ----
+    # (Loading all candidates simultaneously OOM-killed the host: 4 fp32 CPU models
+    # ≈ 14+ GB system RAM. Sequential load → score-all-pools → free.)
+    import gc
 
-    for p in probes:
-        row: dict[str, Any] = {
+    results: dict[str, Any] = {"probes": [], "candidates": []}
+    rows: dict[str, dict[str, Any]] = {
+        p["qid"]: {
             "set": p["set"],
             "qid": p["qid"],
             "corpus": p["corpus"],
             "pool": len(p["pool"]),
             "ranks": {},
         }
-        for s in scorers:
+        for p in probes
+    }
+    labels: list[str] = []
+    for cand in args.candidate:
+        s = _Scorer(*cand.split(":", 1))
+        labels.append(s.label)
+        results["candidates"].append({"label": s.label, "load_s": round(s.load_s, 1)})
+        print(f"loaded {s.label} in {s.load_s:.1f}s", flush=True)
+        for p in probes:
             ranked, dt = s.rank(p["q"], p["pool"])
-            row["ranks"][s.label] = {"gold_rank": _gold_rank(ranked, p["gold"]), "s": round(dt, 1)}
-        results["probes"].append(row)
-        json.dump(results, open(args.out, "w"), indent=1)  # noqa: ASYNC230 — incremental flush
-        marks = "  ".join(f"{k}:#{v['gold_rank']}" for k, v in row["ranks"].items())
-        print(f"[{p['set']:7}] {p['qid']:26} {marks}", flush=True)
+            rows[p["qid"]]["ranks"][s.label] = {
+                "gold_rank": _gold_rank(ranked, p["gold"]),
+                "s": round(dt, 1),
+            }
+            results["probes"] = list(rows.values())
+            json.dump(results, open(args.out, "w"), indent=1)  # noqa: ASYNC230 — incremental flush
+            r = rows[p["qid"]]["ranks"][s.label]
+            print(f"  [{p['set']:7}] {p['qid']:26} {s.label}:#{r['gold_rank']} ({r['s']}s)", flush=True)
+        del s
+        gc.collect()
+    results["probes"] = list(rows.values())
 
     # ---- the gate summary ----
     # Controls are only meaningful where the INCUMBENT (candidate[0]) ranks the gold
     # top-5 today; auto-picked queries with stale/buried golds are excluded from the
     # control denominator (they cannot "escape" what they never held).
-    base = scorers[0].label
+    base = labels[0]
     valid_controls = {
         r["qid"]
         for r in results["probes"]
@@ -203,21 +219,21 @@ async def main() -> None:
     }
     print(f"\nvalid controls (incumbent top-5): {len(valid_controls)}")
     print("\n===== GATE SUMMARY (case-file: gold ENTERS top-5; control: gold STAYS top-5) =====")
-    for s in scorers:
+    for label in labels:
         case_in = sum(
             1
             for r in results["probes"]
-            if r["set"] == "case" and (r["ranks"][s.label]["gold_rank"] or 99) <= 5
+            if r["set"] == "case" and (r["ranks"][label]["gold_rank"] or 99) <= 5
         )
         case_n = sum(1 for r in results["probes"] if r["set"] == "case")
         esc = sum(
             1
             for r in results["probes"]
-            if r["qid"] in valid_controls and (r["ranks"][s.label]["gold_rank"] or 99) > 5
+            if r["qid"] in valid_controls and (r["ranks"][label]["gold_rank"] or 99) > 5
         )
         ctrl_n = len(valid_controls)
-        mean_s = sum(r["ranks"][s.label]["s"] for r in results["probes"]) / max(1, len(results["probes"]))
-        print(f"{s.label:42} case top-5: {case_in}/{case_n}   control escapes: {esc}/{ctrl_n}   ~{mean_s:.1f}s/query")
+        mean_s = sum(r["ranks"][label]["s"] for r in results["probes"]) / max(1, len(results["probes"]))
+        print(f"{label:42} case top-5: {case_in}/{case_n}   control escapes: {esc}/{ctrl_n}   ~{mean_s:.1f}s/query")
     print(f"\nartifact -> {args.out}")
 
 
