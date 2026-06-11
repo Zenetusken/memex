@@ -120,7 +120,7 @@
     {
       "qid": "ftc-def-assess",
       "question": "What does the assess_command_safety function do?",
-      "answer_must_mention": [["approved", "approval", "auto-approved"], ["reject", "rejected"]],
+      "answer_must_mention": [["approved", "approval", "auto-approved", "approves", "auto-approves"], ["reject", "rejected", "rejects"]],
       "_anchor_phrase": "fn assess_command_safety",
       "_expected_answer": "assess_command_safety (safety.rs) decides whether a command is auto-approved, needs approval, or is rejected.",
       "_answer_type": "definition_snake_fn",
@@ -585,7 +585,7 @@
     {
       "qid": "ftc-use-newstdio",
       "question": "Which function calls new_stdio_client?",
-      "answer_must_mention": ["mcpconnectionmanager"],
+      "answer_must_mention": [["mcpconnectionmanager", "mcp_connection_manager"]],
       "_anchor_phrase": "McpConnectionManager::new",
       "_expected_answer": "McpConnectionManager::new (core/mcp_connection_manager.rs) calls McpClient::new_stdio_client (cross-crate). Gold titled by a DIFFERENT symbol.",
       "_answer_type": "usage_reference",
