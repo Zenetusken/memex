@@ -192,3 +192,21 @@ answer-stage loosening without the full counterfactual ladder (the autopsy can't
 batch-DROWNING here); (3) prompt bans lose to strong model priors — the guarantee must be deterministic
 (the world-knowledge override, the column-grounding gate); (4) deterministic backstop demotions must be
 unreachable by any later promotion pass (the retarget eligibility filter).
+
+## k=8 DEFAULT FLIP — TRIED, full-ladder NO-GO, REVERTED (2026-06-10/11)
+
+The probe-clean k=8 result did NOT survive the full ladder: 14 corpora × N=2 at the flipped default
+measured a **DETERMINISTIC net −3 ANS** (codex +1 [runmain, 39/39] and slide-decks +1 [sd-03] as
+probed, BUT ccna −1, chart-types −1 [ct-04, an M2 recovery, regressed], nist −1, scientific-gte −2
+[incl. gte-11, another M2 recovery]). `refusal_cf`=1.00 held on all 28 runs and eval-summary stayed
+clean — the failure is pure WINDOW COMPOSITION: 3 more chunks admit distractors and push real prompts
+into the 8192 overflow zone (observed 400s: 6,393 input + 1,800 output), where the degrade-loop sheds
+tail chunks. The audit-14 convhistory lesson at corpus scale: a wider window is double-edged per query.
+
+**Disposition: `_DEFAULT_TOP_K` stays 5 (the revert carries the NO-GO in its comment + test pins);
+the k=8 winners (runmain, sd-03) move to the residual ledger as k=8-CONDITIONAL** — reachable per-run
+via `MEMEX_RERANK_TOP_K=8`, durably fixable only by a per-query adaptive top_k (already rejected as
+double-edged without its own measured design) or the sharper reranker (now THREE converging case
+files: codex usage-class, tiny-gold burial sd-17/25/31, and the k=8-conditional pair). A probe on the
+TARGETED corpora is necessary but NOT sufficient for a default that changes every query's window —
+the full ladder is the only honest gate for window-level changes.

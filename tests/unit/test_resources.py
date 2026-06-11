@@ -39,11 +39,11 @@ def test_retrieval_top_k_scales_with_the_window() -> None:
     chunks than fast (its larger orchestrator window holds them). fast/gpu_only/
     manual keep the historical 5 — so only an explicit `full` switch deepens
     retrieval (the common manual path is unchanged)."""
-    # 5→8 (2026-06-10, audit-15 M5): probe-validated on the window-sensitive corpora
-    # (codex 39/39 + slide-decks +1, refusal_cf=1.0) then full-ladder-validated.
-    assert resolve_profile("fast").retrieval_top_k == 8
-    assert resolve_profile("gpu_only").retrieval_top_k == 8
-    assert resolve_profile("manual").retrieval_top_k == 8
+    # 5 is a MEASURED default: the k=8 flip was full-ladder NO-GO'd 2026-06-10
+    # (net −3 ANS deterministic; audit-15 M5) — do not re-raise without a new ladder.
+    assert resolve_profile("fast").retrieval_top_k == 5
+    assert resolve_profile("gpu_only").retrieval_top_k == 5
+    assert resolve_profile("manual").retrieval_top_k == 5
     assert resolve_profile("full").retrieval_top_k == 18
     # full's deeper retrieval must fit its window: 18 chunks × 1800-char truncate
     # ≈ 8.1k tokens + scaffold + output, well under 24,576.
@@ -106,7 +106,7 @@ def test_auto_keeps_reranker_on_gpu_when_free_clears_the_floor() -> None:
     p = resolve_profile("auto", free_vram_gb=3.77)  # the measured live operating point
     assert (p.embedder_device, p.reranker_device) == ("cuda", "cuda")
     # Posture mirrors fast (no orchestrator change vs today's default).
-    assert (p.orchestrator_gpu_fraction, p.orchestrator_max_model_len, p.retrieval_top_k) == (0.62, 8192, 8)
+    assert (p.orchestrator_gpu_fraction, p.orchestrator_max_model_len, p.retrieval_top_k) == (0.62, 8192, 5)
 
 
 def test_auto_demotes_reranker_to_cpu_under_vram_pressure() -> None:

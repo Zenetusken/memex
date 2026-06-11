@@ -148,7 +148,7 @@ def test_resolve_rerank_top_k_follows_active_mode(monkeypatch) -> None:
     from memex.core.config import MemexSettings, set_settings
 
     monkeypatch.delenv("MEMEX_RERANK_TOP_K", raising=False)
-    for mode, expected in (("manual", 8), ("fast", 8), ("gpu_only", 8), ("full", 18)):
+    for mode, expected in (("manual", 5), ("fast", 5), ("gpu_only", 5), ("full", 18)):
         s = MemexSettings()
         s.models.co_residence_mode = mode
         set_settings(s)
