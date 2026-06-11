@@ -56,7 +56,7 @@
         "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#59cd4f41ec"
       ],
       "should_refuse": false,
-      "_expected_answer": "Transistor density grew massively (120x), but transistors got less power-efficient over the same window; the deck calls out this divergence as the energy-efficiency motivation.",
+      "_expected_answer": "QUALITATIVE (re-labelled 2026-06-10, audit-15 forensics): density kept increasing while power efficiency lagged — the divergence the deck cites as the energy-efficiency motivation. The NUMERIC series was NEVER parsed in any era (Nemotron chart-OCR returned empty for all 5 crops; verified vs all 6 vault backups; '120x' is the axis ceiling — the top series reads ~105x). A numeric gold needs an evidence-side chart-OCR-empty→VLM-escalation build (its own eval-gated increment). The two gold heading chunks ARE retrieved (ranks 1/2/4); this refusal is the honest-negative class.",
       "_baseline_rerank_top1": 0.2061
     },
     {
@@ -330,11 +330,13 @@
     {
       "qid": "slide-decks-31",
       "question": "What four design principles does the nvmath-python architecture figure highlight?",
-      "relevant_chunk_ids": [],
+      "relevant_chunk_ids": [
+        "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#59c55cabec"
+      ],
       "should_refuse": false,
       "_answer_type": "chart_content",
       "_expected_answer": "Minimal lead-time, Inter-operability, Pythonic library interface, Platform-agnostic",
-      "_note": "CHART-TARGETED (P3.3 v7 follow-up). Content exists ONLY in the chart-extracted block from the nvmath-python architecture figure. Should answer under Docling+chart-OCR+v7 stack. Anchor unresolvable via FTS by design (chart blocks stripped from BM25)."
+      "_note": "RE-ANCHORED 2026-06-10 (audit-15 forensics): the 06-01 VLM unification moved this content from a chart-extracted block into VLM page text under '## Key Features' — a REGULAR FTS-indexed chunk now (#59c55cabec; the old 'unresolvable via FTS by design' note was stale; the slide labels these 'Key Features', not 'design principles'). Still refuses: RERANK buries the gold under 4 same-doc 'Architecture Diagram' siblings (the query wording attracts them) — the reranker-deficiency case file, NOT content loss."
     },
     {
       "qid": "slide-decks-32",

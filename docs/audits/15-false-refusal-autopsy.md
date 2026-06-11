@@ -148,3 +148,47 @@ sd-31 (gold stale + rerank-buried → re-anchor + reranker residual), sd-05 (hon
 sd-16 (the M2 retry did not take — the model anchors on the table's ordinal axis labels over the
 bolded "6x speedup since CUDA 11.8" takeaway; triage pending), ftc-big-runmain (the measured
 MEMEX_RERANK_TOP_K=8 hypothesis, pending probe).
+
+## FINAL LEDGER (2026-06-10) — the false-refusal-zero arc, closed at its honest floor
+
+**Of the original 18 answerable false refusals: 8 FIXED at current defaults (+1 the gate breach
+prevented), 2 more PROBE-PROVEN at k=8, 2 gold-corrected, 6 principled residuals with case files.**
+All shipped levers kill-switched; `refusal_cf`=1.00 on every validation run of the arc (28 stack-ladder
+runs + the closing probes); zero ANS regressions anywhere; eval-summary 6/6 throughout.
+
+**FIXED (shipped, default config):** chart-types-01 (M1 citation-retarget), nist-zero-trust-10 (M1b
+cited-first isolation probe), handwritten-06 (M3 world-knowledge override), chart-types-04/-05 +
+scientific-gte-09/-11 (M2 denial-reframe retry), annual-report-14 (M2+M6 aggregate caption).
+**PLUS the un-masked fabrication CLOSED:** ar-16's sibling-column SQL mint (the column-grounding gate).
+
+**PROBE-PROVEN at `MEMEX_RERANK_TOP_K=8` (deterministic N=2 each):** ftc-big-runmain (gold enters at
+#6; codex-rs posts its first PERFECT 39/39 answered, atc 33/39, cf=1.0 ×2) and slide-decks-03 (a
+sibling copy of the mantissa sentence grounds in the wider window; slide-decks 14 ANS, cf=1.0, no
+regressions). **The k=8 → mode-default flip (retrieval_top_k 5→8) is now a strong, pre-validated
+candidate — its own increment with a full 14-corpus ladder** (it changes every query's window; the
+audit-14 convhistory lesson).
+
+**GOLD-CORRECTED:** sd-31 (re-anchored to the indexed Key-Features chunk `#59c55cabec`; the refusal
+that remains is reranker burial under 4 same-doc "Architecture Diagram" siblings) and sd-04
+(re-labelled qualitative; the numeric series was never parsed in any era — a numeric gold needs the
+chart-OCR-empty→VLM-escalation build). slide-decks re-baselined N=2 with the corrected golds
+(13 ANS byte-stable, mcp 0.926).
+
+**PRINCIPLED RESIDUALS (each with a named mechanism + revisit path):**
+- cr350-img-01 — synthesis-class (recorded NO-GO on gate relaxation; evidence-side only).
+- sd-16 + (sd-03's 1×1 trait) — the 4B TABLE-BIAS family: the model anchors on table structure over
+  adjacent prose/takeaway lines (sd-16's retry fired and re-denied, distrusting the bolded "6x" banner
+  against the ordinal axis). Revisit: a measured answer/verify table-takeaway example or a model swap.
+- sd-21 — claim/chunk spelling strictness ('-minimal' vs "--minimal"; arguably correct).
+- sd-17/sd-25 (+ sd-31's burial) — RERANKER-DEFICIENCY: tiny gold chunks (163-405 chars) buried under
+  long same-doc prose + cross-corpus lexical noise; top_k≥15 is self-defeating at the 8192 window (the
+  overflow degrade-loop drops the tail gold first). The sharper-reranker case file (the same revisit as
+  the codex usage-class gap, audit-14).
+- sd-05 — honest-negative (the doc states the two power consumers but not the asked "why").
+
+**Arc lessons (durable):** (1) an over-refusal bug can MASK an under-refusal bug — never validate an
+answer-stage loosening without the full counterfactual ladder (the autopsy can't see counterfactuals);
+(2) the batch verify verdict is NOT an isolation verdict (both directions: batch-leniency on the bridge,
+batch-DROWNING here); (3) prompt bans lose to strong model priors — the guarantee must be deterministic
+(the world-knowledge override, the column-grounding gate); (4) deterministic backstop demotions must be
+unreachable by any later promotion pass (the retarget eligibility filter).
