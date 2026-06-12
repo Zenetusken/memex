@@ -2202,12 +2202,7 @@ async def verify(state: AnswerState) -> AnswerStateUpdate:
         or state.regenerate_attempts >= state.max_regenerate_attempts
     )
     if state.citation_retarget and final_pass and valid_ungrounded:
-        # Top-10 reach (audit-17 ct-01): the rescue net was top-5-bounded, so a window
-        # reshuffle (reranker change) could remove the very sibling a claim grounds via
-        # — the support often sits at #6-10. Promote-only on the unchanged gate, final
-        # pass only, <=2 claims: the wider reach adds at most a few 1x1 probes on the
-        # refusal path and can never ground what the gate itself wouldn't.
-        window = state.reranked[:10]
+        window = state.reranked[:5]
         promoted: list[int] = []
         # ELIGIBILITY (HARD-gate-critical): only claims the LLM itself rejected (empty
         # parallel reason) may be retargeted. A claim a DETERMINISTIC backstop demoted
