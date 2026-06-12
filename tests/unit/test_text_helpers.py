@@ -371,3 +371,56 @@ def test_denial_does_not_match_true_refusals() -> None:
 def test_denial_does_not_match_affirmative_summaries() -> None:
     assert _denial("GTE was trained on up to 8 NVIDIA A100 GPUs.") is False
     assert _denial("The stages are source code, compile, and machine code.") is False
+
+
+# ---- summary-scope guard v2 detector (audit-17; v1 reverted for -107 over-refusal) ----
+
+
+from memex.core.text import summary_subject_unsupported as _scope2
+
+
+AR12_CHUNK = "Gross margin was 71.1% for fiscal year 2026, up from 69.8%. Revenue grew across segments."
+TG13_CHUNK = ("## const _DEFAULT_MAX_LEN\n/// Maximum characters forwarded to the TUI. "
+              "const _DEFAULT_MAX_LEN: usize = 120;")
+
+
+def test_scope2_fires_on_ar12_with_evidence() -> None:
+    # The subject 'Graphics segment' is absent from claim AND chunk -> fire.
+    assert _scope2(
+        "What was the gross margin of NVIDIA's Graphics segment in fiscal 2026?",
+        "The gross margin for NVIDIA's Graphics segment in fiscal 2026 was 71.1%.",
+        ["Gross margin was 71.1% in fiscal year 2026"],
+        [AR12_CHUNK],
+    ) is True
+
+
+def test_scope2_fires_on_tg13_with_evidence() -> None:
+    assert _scope2(
+        "According to the developer guidelines, what is the exact maximum line length in characters?",
+        "The developer guidelines specify a maximum line length of 120 characters.",
+        ["The maximum line length enforced is 120 characters."],
+        [TG13_CHUNK],
+    ) is True
+
+
+def test_scope2_paraphrase_with_subject_in_evidence_does_not_fire() -> None:
+    # THE v1 KILLER: the claim paraphrases, but the EVIDENCE carries the subject -> no fire.
+    assert _scope2(
+        "What are the stages of the C++ compilation process shown in the notes?",
+        "The compilation process has three stages: source code, compile, machine code.",
+        ["The stages are source code, compile, and machine code."],
+        ["My notes on the C++ compilation process: source code -> compile -> machine code."],
+    ) is False
+
+
+def test_scope2_subject_in_claim_does_not_fire() -> None:
+    assert _scope2(
+        "What was the gross margin of the Graphics segment?",
+        "The Graphics segment gross margin was 65%.",
+        ["The Graphics segment gross margin was 65%."],
+        ["irrelevant chunk"],
+    ) is False
+
+
+def test_scope2_no_claims_inert() -> None:
+    assert _scope2("q?", "s", [], ["chunk"]) is False
