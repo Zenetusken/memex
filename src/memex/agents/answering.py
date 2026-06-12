@@ -177,7 +177,6 @@ class AnswerStateUpdate(TypedDict, total=False):
     artifact_scope_doc_ids: list[str]
     sufficiency: SufficiencyAssessment
     draft: DraftAnswer
-    summary_scope_rebuilt: bool
     verification: VerificationResult
     relevance: RelevanceAssessment
     regenerate_attempts: int
@@ -610,11 +609,6 @@ class AnswerState(BaseModel):
     denial_reframe_retry: bool = True
     # Set from `agents.summary_scope_guard_enabled` in `answer_query` (fail-open).
     summary_scope_guard: bool = True
-    # Set by the ANSWER node when the summary-scope guard rebuilt the summary: the draft
-    # asserted the query's subject with NO claim support, so it definitionally does not
-    # address the qualified subject — assess_relevance refuses DETERMINISTICALLY (the 4B
-    # judge hallucinates the subject match on the rebuilt text; measured ar-12 2/2).
-    summary_scope_rebuilt: bool = False
 
     nodes_traversed: int = 0
     max_nodes_traversed: int = 20
@@ -1799,7 +1793,6 @@ async def answer(state: AnswerState) -> AnswerStateUpdate:
     # query∩summary content-bigram is unsupported by EVERY claim, rebuild the summary
     # from the claims HERE — so assess_relevance judges the honest text and refuses a
     # subject mismatch. Rewrite-only-narrows ⇒ direction-safe by construction.
-    scope_rebuilt = False
     if (
         state.summary_scope_guard
         and draft.claims
@@ -1809,7 +1802,6 @@ async def answer(state: AnswerState) -> AnswerStateUpdate:
     ):
         log.info("answer.summary_scope_rebuilt", original=draft.summary[:120])
         draft = draft.model_copy(update={"summary": " ".join(c.claim for c in draft.claims)})
-        scope_rebuilt = True
 
     # Repair corrupted citation ids before they reach verify/compose.
     # The answer LLM sometimes mangles the long `docid#hash` ids it's
@@ -1823,7 +1815,6 @@ async def answer(state: AnswerState) -> AnswerStateUpdate:
 
     return {
         "draft": draft,
-        "summary_scope_rebuilt": scope_rebuilt,
         "tokens_used": state.tokens_used + tokens,
         "nodes_traversed": state.nodes_traversed + 1,
     }
@@ -2401,22 +2392,6 @@ async def assess_relevance(state: AnswerState) -> AnswerStateUpdate:
             "relevance": RelevanceAssessment(responsive=True, reason="no grounded draft to assess"),
             "nodes_traversed": state.nodes_traversed + 1,
         }
-    # Deterministic scope verdict (audit-17): the summary-scope guard rebuilt this draft
-    # because it asserted the query's subject with NO claim support — by the trigger's own
-    # definition the grounded content does not address the qualified subject, and the 4B
-    # judge HALLUCINATES the match on the rebuilt text (measured: "provides the figure for
-    # NVIDIA's Graphics segment" about a segment-free answer, 2/2). Decide here, no LLM.
-    if state.summary_scope_rebuilt:
-        log.info("relevance.scope_rebuilt_refuse")
-        return {
-            "relevance": RelevanceAssessment(
-                responsive=False,
-                reason="the answer's support does not address the specific subject the "
-                "question names; the summary had asserted it without claim support",
-            ),
-            "nodes_traversed": state.nodes_traversed + 1,
-        }
-
     grounded = set(state.verification.grounded)
     grounded_claims = [c.claim for i, c in enumerate(state.draft.claims) if i in grounded]
     prompt = render_prompt(
