@@ -1,0 +1,638 @@
+{
+ "probes": [
+  {
+   "set": "case",
+   "qid": "ftc-use-isknownsafe",
+   "corpus": "codex-rs-find-the-code",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": 6,
+     "s": 48.7
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": 2,
+     "s": 36.2
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": 6,
+     "s": 82.0
+    }
+   }
+  },
+  {
+   "set": "case",
+   "qid": "ftc-use-unifieddiff",
+   "corpus": "codex-rs-find-the-code",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": 6,
+     "s": 37.7
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": 4,
+     "s": 40.5
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": 8,
+     "s": 69.0
+    }
+   }
+  },
+  {
+   "set": "case",
+   "qid": "ftc-use-issafetocall",
+   "corpus": "codex-rs-find-the-code",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": 4,
+     "s": 30.3
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": 3,
+     "s": 28.9
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": 2,
+     "s": 72.6
+    }
+   }
+  },
+  {
+   "set": "case",
+   "qid": "ftc-use-convhistory",
+   "corpus": "codex-rs-find-the-code",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": 5,
+     "s": 27.1
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": 5,
+     "s": 25.4
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": 4,
+     "s": 47.5
+    }
+   }
+  },
+  {
+   "set": "case",
+   "qid": "ftc-use-applyhunks",
+   "corpus": "codex-rs-find-the-code",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": 3,
+     "s": 34.8
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": 3,
+     "s": 30.2
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": 3,
+     "s": 74.0
+    }
+   }
+  },
+  {
+   "set": "case",
+   "qid": "ftc-big-runmain",
+   "corpus": "codex-rs-find-the-code",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": 6,
+     "s": 30.6
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": 2,
+     "s": 27.6
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": 2,
+     "s": 100.8
+    }
+   }
+  },
+  {
+   "set": "case",
+   "qid": "slide-decks-17",
+   "corpus": "slide-decks",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": 15,
+     "s": 26.2
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": 5,
+     "s": 31.0
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": 3,
+     "s": 71.6
+    }
+   }
+  },
+  {
+   "set": "case",
+   "qid": "slide-decks-25",
+   "corpus": "slide-decks",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": 15,
+     "s": 36.7
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": 4,
+     "s": 44.1
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": 24,
+     "s": 96.3
+    }
+   }
+  },
+  {
+   "set": "case",
+   "qid": "slide-decks-31",
+   "corpus": "slide-decks",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": 43,
+     "s": 26.0
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": 3,
+     "s": 29.0
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": 4,
+     "s": 55.4
+    }
+   }
+  },
+  {
+   "set": "case",
+   "qid": "slide-decks-03",
+   "corpus": "slide-decks",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": 1,
+     "s": 30.3
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": 1,
+     "s": 36.5
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": 1,
+     "s": 76.2
+    }
+   }
+  },
+  {
+   "set": "control",
+   "qid": "ftc-def-execparams",
+   "corpus": "codex-rs-find-the-code",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": 1,
+     "s": 21.9
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": 1,
+     "s": 22.3
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": 1,
+     "s": 43.1
+    }
+   }
+  },
+  {
+   "set": "control",
+   "qid": "ftc-def-sandboxtype",
+   "corpus": "codex-rs-find-the-code",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": 1,
+     "s": 27.6
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": 1,
+     "s": 27.4
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": 1,
+     "s": 58.0
+    }
+   }
+  },
+  {
+   "set": "control",
+   "qid": "ftc-def-modelclient",
+   "corpus": "codex-rs-find-the-code",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": 3,
+     "s": 28.5
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": 1,
+     "s": 27.0
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": 1,
+     "s": 65.6
+    }
+   }
+  },
+  {
+   "set": "control",
+   "qid": "annual-report-01",
+   "corpus": "annual-report",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": null,
+     "s": 46.7
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": null,
+     "s": 62.9
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": null,
+     "s": 143.5
+    }
+   }
+  },
+  {
+   "set": "control",
+   "qid": "annual-report-02",
+   "corpus": "annual-report",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": null,
+     "s": 50.2
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": null,
+     "s": 66.6
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": null,
+     "s": 193.2
+    }
+   }
+  },
+  {
+   "set": "control",
+   "qid": "annual-report-03",
+   "corpus": "annual-report",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": null,
+     "s": 47.1
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": null,
+     "s": 62.9
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": null,
+     "s": 169.5
+    }
+   }
+  },
+  {
+   "set": "control",
+   "qid": "nist-zero-trust-01",
+   "corpus": "nist-zero-trust",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": null,
+     "s": 35.6
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": null,
+     "s": 45.2
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": null,
+     "s": 128.8
+    }
+   }
+  },
+  {
+   "set": "control",
+   "qid": "nist-zero-trust-02",
+   "corpus": "nist-zero-trust",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": null,
+     "s": 27.2
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": null,
+     "s": 37.2
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": null,
+     "s": 74.3
+    }
+   }
+  },
+  {
+   "set": "control",
+   "qid": "nist-zero-trust-03",
+   "corpus": "nist-zero-trust",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": null,
+     "s": 28.1
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": null,
+     "s": 33.6
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": null,
+     "s": 66.7
+    }
+   }
+  },
+  {
+   "set": "control",
+   "qid": "scientific-gte-01",
+   "corpus": "scientific-gte",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": 9,
+     "s": 40.2
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": 7,
+     "s": 57.2
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": 7,
+     "s": 159.5
+    }
+   }
+  },
+  {
+   "set": "control",
+   "qid": "scientific-gte-02",
+   "corpus": "scientific-gte",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": null,
+     "s": 60.0
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": null,
+     "s": 82.5
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": null,
+     "s": 202.9
+    }
+   }
+  },
+  {
+   "set": "control",
+   "qid": "scientific-gte-03",
+   "corpus": "scientific-gte",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": null,
+     "s": 59.3
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": null,
+     "s": 79.8
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": null,
+     "s": 223.6
+    }
+   }
+  },
+  {
+   "set": "control",
+   "qid": "linux-fundamentals-01",
+   "corpus": "linux-fundamentals",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": 1,
+     "s": 11.7
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": 1,
+     "s": 20.1
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": 1,
+     "s": 33.0
+    }
+   }
+  },
+  {
+   "set": "control",
+   "qid": "linux-fundamentals-02",
+   "corpus": "linux-fundamentals",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": 1,
+     "s": 16.4
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": 1,
+     "s": 21.5
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": 1,
+     "s": 38.5
+    }
+   }
+  },
+  {
+   "set": "control",
+   "qid": "linux-fundamentals-03",
+   "corpus": "linux-fundamentals",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": 1,
+     "s": 13.3
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": 1,
+     "s": 19.1
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": 1,
+     "s": 35.3
+    }
+   }
+  },
+  {
+   "set": "control",
+   "qid": "technical-guidelines-01",
+   "corpus": "technical-guidelines",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": 1,
+     "s": 15.9
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": 1,
+     "s": 19.6
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": 1,
+     "s": 42.6
+    }
+   }
+  },
+  {
+   "set": "control",
+   "qid": "technical-guidelines-02",
+   "corpus": "technical-guidelines",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": 1,
+     "s": 16.3
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": 2,
+     "s": 21.6
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": 2,
+     "s": 43.8
+    }
+   }
+  },
+  {
+   "set": "control",
+   "qid": "technical-guidelines-03",
+   "corpus": "technical-guidelines",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": 1,
+     "s": 24.2
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": 1,
+     "s": 25.3
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": 1,
+     "s": 52.4
+    }
+   }
+  },
+  {
+   "set": "control",
+   "qid": "cr350-xref-01",
+   "corpus": "cr350-multidoc",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": 1,
+     "s": 12.8
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": 1,
+     "s": 22.5
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": 1,
+     "s": 39.1
+    }
+   }
+  },
+  {
+   "set": "control",
+   "qid": "cr350-xref-02",
+   "corpus": "cr350-multidoc",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": 4,
+     "s": 10.6
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": 1,
+     "s": 18.1
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": 3,
+     "s": 32.7
+    }
+   }
+  },
+  {
+   "set": "control",
+   "qid": "cr350-xref-03",
+   "corpus": "cr350-multidoc",
+   "pool": 50,
+   "ranks": {
+    "ce:bge-reranker-v2-m3": {
+     "gold_rank": 1,
+     "s": 15.1
+    },
+    "ce:mxbai-rerank-base-v2": {
+     "gold_rank": 1,
+     "s": 22.9
+    },
+    "qwen3:Qwen3-Reranker-0.6B": {
+     "gold_rank": 3,
+     "s": 41.9
+    }
+   }
+  }
+ ],
+ "candidates": [
+  {
+   "label": "ce:bge-reranker-v2-m3",
+   "load_s": 1.5
+  },
+  {
+   "label": "ce:mxbai-rerank-base-v2",
+   "load_s": 3.8
+  },
+  {
+   "label": "qwen3:Qwen3-Reranker-0.6B",
+   "load_s": 1.3
+  }
+ ]
+}
