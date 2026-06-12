@@ -48,3 +48,19 @@ verified correct, slots calibrated. Unattributed pending the ladder: rollout, ap
 baseline per corpus (the FR corpora are mxbai's real exam — its one below-incumbent benchmark),
 codex atc ≥ baseline, eval-summary 6/6. Ship = config-only default flip with bge as the
 kill-switch; the k=8 NO-GO discipline applies (probe-clean ≠ ladder-clean).
+
+## The summary-scope guard v1 — CATASTROPHIC over-refusal, REVERTED (2026-06-12)
+
+The guard concept validated on the breach pair (ar-12/tg-13 refuse 2/2; ar-14/hw-06 hold) but the
+full ladder measured **net −107 ANS**: the bigram trigger (query∩summary bigram absent from claims)
+fires on INNOCENT shared phrasing ("compilation process", "zero trust"), and the deterministic
+relevance refuse converted every false-positive into a refusal. All 3 commits reverted; 1984 green.
+**LESSONS:** (1) a deterministic REFUSE amplifies its trigger's false-positive rate corpus-wide — a
+4-case validation cannot price a base-rate; ANY new deterministic gate needs a ~30-query mini-sweep
+BEFORE a ladder; (2) my ladder grader gated cf/errors but not ANS — graders must encode EVERY gate.
+**The tightening candidate (unbuilt):** require the unsupported subject-bigram to be absent from the
+CITED CHUNKS too (ar-12/tg-13 still fire — the subject is genuinely absent from the evidence; legit
+paraphrase answers don't — the chunk usually carries the subject). Its own increment, mini-sweep-gated.
+**Standing state:** bge remains the shipped default (no breaches); the mxbai config CANNOT ship while
+the scope hole is open. The hole itself is PRE-EXISTING and reachable under bge (less often) — a
+first-class finding independent of the reranker verdict.
