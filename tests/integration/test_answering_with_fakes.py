@@ -433,7 +433,8 @@ async def test_verify_filters_phantom_indices(fake_llm: FakeLLM, monkeypatch: py
     # Summary-scope guard OFF: this test pins the PHANTOM-INDEX filter; its fixture
     # summary incidentally trips the guard (the guard has its own tests).
     monkeypatch.setenv("MEMEX_AGENTS__SUMMARY_SCOPE_GUARD_ENABLED", "false")
-    from memex.core.config import MemexSettings as _MS2, set_settings as _ss2
+    from memex.core.config import MemexSettings as _MS2
+    from memex.core.config import set_settings as _ss2
     _ss2(_MS2())
     fake_llm.respond(
         "assess_sufficiency",
