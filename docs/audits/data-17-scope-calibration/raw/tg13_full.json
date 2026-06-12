@@ -1,0 +1,62 @@
+[
+ {
+  "leg": "full",
+  "run": 1,
+  "answered": true,
+  "drafts": [
+   {
+    "sum": "The developer guidelines specify a maximum line length of 120 characters for the TUI log layer, enforced by the _DEFAULT_MAX_LEN constant in log_layer.rs.",
+    "claims": [
+     {
+      "c": "The maximum line length enforced is 120 characters.",
+      "cid": "r#a270b0ee35"
+     }
+    ]
+   }
+  ],
+  "verify": [
+   {
+    "g": [
+     0
+    ],
+    "u": []
+   }
+  ],
+  "final_claims": [
+   {
+    "c": "The maximum line length enforced is 120 characters.",
+    "cid": "r#a270b0ee35"
+   }
+  ]
+ },
+ {
+  "leg": "full",
+  "run": 2,
+  "answered": true,
+  "drafts": [
+   {
+    "sum": "The developer guidelines specify a maximum line length of 120 characters for the TUI log layer, enforced by the _DEFAULT_MAX_LEN constant in log_layer.rs.",
+    "claims": [
+     {
+      "c": "The maximum line length enforced is 120 characters.",
+      "cid": "r#a270b0ee35"
+     }
+    ]
+   }
+  ],
+  "verify": [
+   {
+    "g": [
+     0
+    ],
+    "u": []
+   }
+  ],
+  "final_claims": [
+   {
+    "c": "The maximum line length enforced is 120 characters.",
+    "cid": "r#a270b0ee35"
+   }
+  ]
+ }
+]

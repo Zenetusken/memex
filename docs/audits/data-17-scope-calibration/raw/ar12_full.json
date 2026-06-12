@@ -1,0 +1,62 @@
+[
+ {
+  "leg": "full",
+  "run": 1,
+  "answered": true,
+  "drafts": [
+   {
+    "sum": "The gross margin for NVIDIA's Graphics segment in fiscal 2026 was 71.1%, as stated in the company's 2026 Annual Review.",
+    "claims": [
+     {
+      "c": "Gross margin was 71.1% in fiscal year 2026",
+      "cid": "b#6688b1c5c3"
+     }
+    ]
+   }
+  ],
+  "verify": [
+   {
+    "g": [
+     0
+    ],
+    "u": []
+   }
+  ],
+  "final_claims": [
+   {
+    "c": "Gross margin was 71.1% in fiscal year 2026",
+    "cid": "b#6688b1c5c3"
+   }
+  ]
+ },
+ {
+  "leg": "full",
+  "run": 2,
+  "answered": true,
+  "drafts": [
+   {
+    "sum": "The gross margin for NVIDIA's Graphics segment in fiscal 2026 was 71.1%, as stated in the company's 2026 Annual Review.",
+    "claims": [
+     {
+      "c": "Gross margin was 71.1% in fiscal year 2026",
+      "cid": "b#6688b1c5c3"
+     }
+    ]
+   }
+  ],
+  "verify": [
+   {
+    "g": [
+     0
+    ],
+    "u": []
+   }
+  ],
+  "final_claims": [
+   {
+    "c": "Gross margin was 71.1% in fiscal year 2026",
+    "cid": "b#6688b1c5c3"
+   }
+  ]
+ }
+]

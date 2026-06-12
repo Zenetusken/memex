@@ -1,0 +1,272 @@
+[
+ {
+  "side": "BREACH",
+  "qid": "annual-report-12",
+  "span": "graphics segment",
+  "judge_votes": [
+   true,
+   true
+  ],
+  "doc_identity_match": false
+ },
+ {
+  "side": "BREACH",
+  "qid": "annual-report-12",
+  "span": "margin nvidia",
+  "judge_votes": [
+   false,
+   false
+  ],
+  "doc_identity_match": false
+ },
+ {
+  "side": "BREACH",
+  "qid": "annual-report-12",
+  "span": "nvidia graphics",
+  "judge_votes": [
+   false,
+   false
+  ],
+  "doc_identity_match": false
+ },
+ {
+  "side": "BREACH",
+  "qid": "annual-report-12",
+  "span": "segment fiscal",
+  "judge_votes": [
+   false,
+   false
+  ],
+  "doc_identity_match": false
+ },
+ {
+  "side": "BREACH",
+  "qid": "technical-guidelines-13",
+  "span": "developer guidelines",
+  "judge_votes": [
+   false,
+   false
+  ],
+  "doc_identity_match": false
+ },
+ {
+  "side": "FP",
+  "qid": "annual-report-01",
+  "span": "nvidia total",
+  "judge_votes": [
+   false,
+   false
+  ],
+  "doc_identity_match": false
+ },
+ {
+  "side": "FP",
+  "qid": "annual-report-01",
+  "span": "revenue fiscal",
+  "judge_votes": [
+   false,
+   false
+  ],
+  "doc_identity_match": false
+ },
+ {
+  "side": "FP",
+  "qid": "annual-report-03",
+  "span": "nvidia data",
+  "judge_votes": [
+   false,
+   false
+  ],
+  "doc_identity_match": false
+ },
+ {
+  "side": "FP",
+  "qid": "annual-report-05",
+  "span": "margin fiscal",
+  "judge_votes": [
+   false,
+   false
+  ],
+  "doc_identity_match": false
+ },
+ {
+  "side": "FP",
+  "qid": "annual-report-05",
+  "span": "nvidia gross",
+  "judge_votes": [
+   false,
+   false
+  ],
+  "doc_identity_match": false
+ },
+ {
+  "side": "FP",
+  "qid": "nist-zero-trust-02",
+  "span": "800-207 policy",
+  "judge_votes": [
+   false,
+   false
+  ],
+  "doc_identity_match": false
+ },
+ {
+  "side": "FP",
+  "qid": "nist-zero-trust-02",
+  "span": "sp 800-207",
+  "judge_votes": [
+   false,
+   false
+  ],
+  "doc_identity_match": false
+ },
+ {
+  "side": "FP",
+  "qid": "nist-zero-trust-03",
+  "span": "trust component",
+  "judge_votes": [
+   false,
+   false
+  ],
+  "doc_identity_match": false
+ },
+ {
+  "side": "FP",
+  "qid": "nist-zero-trust-05",
+  "span": "sp 800-207",
+  "judge_votes": [
+   false,
+   false
+  ],
+  "doc_identity_match": false
+ },
+ {
+  "side": "FP",
+  "qid": "scientific-gte-01",
+  "span": "gte-base model",
+  "judge_votes": [
+   true,
+   true
+  ],
+  "doc_identity_match": false
+ },
+ {
+  "side": "FP",
+  "qid": "scientific-gte-02",
+  "span": "encoder architecture",
+  "judge_votes": [
+   true,
+   true
+  ],
+  "doc_identity_match": false
+ },
+ {
+  "side": "FP",
+  "qid": "scientific-gte-02",
+  "span": "gte embedding",
+  "judge_votes": [
+   false,
+   false
+  ],
+  "doc_identity_match": false
+ },
+ {
+  "side": "FP",
+  "qid": "linux-fundamentals-01",
+  "span": "file or",
+  "judge_votes": [
+   false,
+   false
+  ],
+  "doc_identity_match": false
+ },
+ {
+  "side": "FP",
+  "qid": "linux-fundamentals-01",
+  "span": "or directory",
+  "judge_votes": [
+   true,
+   true
+  ],
+  "doc_identity_match": false
+ },
+ {
+  "side": "FP",
+  "qid": "linux-fundamentals-01",
+  "span": "permissions file",
+  "judge_votes": [
+   false,
+   false
+  ],
+  "doc_identity_match": false
+ },
+ {
+  "side": "FP",
+  "qid": "linux-fundamentals-03",
+  "span": "always begin",
+  "judge_votes": [
+   true,
+   true
+  ],
+  "doc_identity_match": false
+ },
+ {
+  "side": "FP",
+  "qid": "linux-fundamentals-03",
+  "span": "linux always",
+  "judge_votes": [
+   false,
+   false
+  ],
+  "doc_identity_match": false
+ },
+ {
+  "side": "FP",
+  "qid": "cr350-xref-02",
+  "span": "cyber kill",
+  "judge_votes": [
+   false,
+   false
+  ],
+  "doc_identity_match": true
+ },
+ {
+  "side": "FP",
+  "qid": "cr350-xref-02",
+  "span": "kill chain",
+  "judge_votes": [
+   false,
+   false
+  ],
+  "doc_identity_match": true
+ },
+ {
+  "side": "FP",
+  "qid": "cr350-xref-02",
+  "span": "la cyber",
+  "judge_votes": [
+   false,
+   false
+  ],
+  "doc_identity_match": false
+ },
+ {
+  "side": "FP",
+  "qid": "cr350-xref-02",
+  "span": "reconnaissance de",
+  "judge_votes": [
+   false,
+   false
+  ],
+  "doc_identity_match": false
+ },
+ {
+  "side": "FP",
+  "qid": "technical-guidelines-01",
+  "span": "developer guidelines",
+  "judge_votes": [
+   false,
+   false
+  ],
+  "doc_identity_match": false
+ }
+]

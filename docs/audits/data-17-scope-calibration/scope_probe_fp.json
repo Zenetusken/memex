@@ -1,0 +1,300 @@
+[
+ {
+  "qid": "annual-report-01",
+  "corpus": "annual-report",
+  "question": "What was NVIDIA's total revenue in fiscal 2026?",
+  "answered": true,
+  "refusal": "",
+  "summary": "NVIDIA's total revenue in fiscal 2026 was $215.9 billion, as stated in the 2026 Annual Review (Form 10-K).",
+  "claims": [
+   "NVIDIA Corporation reported total revenue of $215.9 billion for fiscal 2026."
+  ],
+  "cited": [
+   {
+    "chunk_id": "0e725ba0-2026-annual-report-web#6688b1c5c3",
+    "title": "**BUSINESS OVERVIEW**",
+    "text": "#### **BUSINESS OVERVIEW**\n\nFiscal 2026 marked another year of strong growth for NVIDIA, with revenue surging 65% year on year to $215.9 billion reflecting continued momentum across our platform transitions to accelerated computing and AI. Growth was led by Compute & Networking, where Data Center compute revenue grew 59% driven by demand for our Blackwell platform, and Data Center networking revenue increased 142% driven by the ramp of NVLink compute fabric for Blackwell systems, as well as continued growth in Ethernet and InfiniBand.  Gross margin was 71.1%, operating income reached $130.4 billion and diluted earnings per share increased 67% to $4.90.\n\n|||**Fiscal 2026**|**Results**|||\n|---|---|---|---|---|---|\n||**Revenue**|**Gross Margin**|**Operating Income**|**Diluted Earnings Per**||\n|||||**Share**||\n||**$215.9 billion**|**71.1%**|**$130.4 billion**|**$4.90**||\n|up|**65%**year on year|down**3.9 points**year on year|up**60%**year on year|up**67%**year on year||\n|||**Fiscal 2026 Reportable Segments**||||\n\nOur two reportable segments are “Compute & Networking” and “Graphics”:\n\n||**Compute & Networking**|**Graphics**|**Total**|\n|---|---|---|---|\n||**$193.5 billion (1)**|**$22.5 billion (1)**|**$215.9 billion**|\n|**Revenue**||||\n||up**67%**year on year|up**57%**year on year|up**65%**year on year|\n|**Operating**|**$130.1 billion**|**$9.2 billion**|**$139.3 billion**|\n|**Income (2)**|up**57%**year on year|up**80%**year on year|up**58%**year on year|\n|(1)       This figure has been rounded to the nearest tenth of a billion.||Due to rounding, the sum of the figures does not equal the total as presented.||\n|(2)       Segment operating income differs from consolidated operating income as certain expenses are not allocated to either Compute & Networking or||||\n|Graphics for purposes of making operating decisions or assessing financial performance.||||\n\n[table-rows]\n[**BUSINESS OVERVIEW**] : **Compute & Networking=**$193.5 billion (1), **Graphics=**$22.5 billion (1), **Total=**$215.9 billion\n[**BUSINESS OVERVIEW**] **Revenue: **Compute & Networking=, **Graphics=, **Total=\n[**BUSINESS OVERVIEW**] : **Compute & Networking=up**67%**year on year, **Graphics=up**57%**year on year, **Total=up**65%**year on year\n[**BUSINESS OVERVIEW**] **Operating: **Compute & Networking=**$130.1 billion, **Graphics=**$9.2 billion, **Total=**$139.3 billion\n[**BUSINESS OVERVIEW**] **Income (2): **Compute & Networking=up**57%**year on year, **Graphics=up**80%**year on year, **Total=up**58%**year on year\n[**BUSINESS OVERVIEW**] (1) This figure has been rounded to the nearest tenth of a billion.: **Compute & Networking=, **Graphics=Due to rounding, the sum of the figures does not equal the total as presented., **Total=\n[**BUSINESS OVERVIEW**] (2) Segment operating income differs from consolidated operating income as certain expenses are not allocated to either Compute & Networking or: **Compute & Networking=, **Graphics=, **Total=\n[**BUSINESS OVERVIEW**] Graphics for purposes of making operating decisions or assessing financial performance.: **Compute & Networking=, **Graphics=, **Total=\n[/table-rows]\n**Fiscal 2026 Market Platforms**\n\nOur platforms address four large markets where our expertise is critical:\n\n<!-- image -->\n\n<!-- image -->\n\n<!-- image -->\n\n<!-- image -->"
+   }
+  ],
+  "spans": [
+   "nvidia total",
+   "revenue fiscal"
+  ],
+  "elapsed_s": 64.1
+ },
+ {
+  "qid": "annual-report-03",
+  "corpus": "annual-report",
+  "question": "What was NVIDIA's Data Center revenue in fiscal 2026?",
+  "answered": true,
+  "refusal": "",
+  "summary": "NVIDIA's Data Center revenue in fiscal 2026 was $193.737 billion, as stated in the 2026 Annual Review (Form 10-K).",
+  "claims": [
+   "Data Center revenue in fiscal 2026 was $193,737 million ($193.737 billion)."
+  ],
+  "cited": [
+   {
+    "chunk_id": "0e725ba0-2026-annual-report-web#8360bd02be",
+    "title": "**NVIDIA Corporation and Subsidiaries Notes to the Consolidated Financial Statem",
+    "text": "## **NVIDIA Corporation and Subsidiaries Notes to the Consolidated Financial Statements**\n\n(Continued)\n\nThe following table summarizes revenue by specialized markets:\n\n|**Revenue by End Market:**||**Year Ended**|\n|---|---|---|\n||**Jan 25, 2026**|**Jan 26, 2025** **Jan 28, 2024** _(In millions)_|\n||||\n|Data Center|$ 193,737|$ 115,186 $ 47,525|\n|Compute|162,361|102,196 38,950|\n|Networking|31,376|12,990 8,575|\n|Gaming|16,042|11,350 10,447|\n|Professional Visualization|3,191|1,878 1,553|\n|Automotive|2,349|1,694 1,091|\n|OEM and Other|619|389 306|\n|Total revenue|$ 215,938|$ 130,497 $ 60,922|\n\nThe following table presents summarized information for long-lived assets by country. Long-lived assets consist of property and equipment and exclude other assets, operating lease assets, goodwill, and intangible assets.\n\n|**Long-lived assets:**|**Jan 25, 2026** **Jan 26, 2025** _(In millions)_|\n|---|---|\n|United States|$ 5,125 $ 3,626|\n|Taiwan|3,219 1,481|\n|Israel|1,471 840|\n|Other|568 336|\n|Total long-lived assets|$ 10,383 $ 6,283|"
+   }
+  ],
+  "spans": [
+   "nvidia data"
+  ],
+  "elapsed_s": 52.1
+ },
+ {
+  "qid": "annual-report-05",
+  "corpus": "annual-report",
+  "question": "What was NVIDIA's gross margin in fiscal 2026?",
+  "answered": true,
+  "refusal": "",
+  "summary": "NVIDIA's gross margin in fiscal 2026 was 71.1%, as stated in the 2026 Annual Review (Form 10-K). This represents a decrease of 3.9 points from the previous year.",
+  "claims": [
+   "Gross margin was 71.1% in fiscal 2026."
+  ],
+  "cited": [
+   {
+    "chunk_id": "0e725ba0-2026-annual-report-web#6688b1c5c3",
+    "title": "**BUSINESS OVERVIEW**",
+    "text": "#### **BUSINESS OVERVIEW**\n\nFiscal 2026 marked another year of strong growth for NVIDIA, with revenue surging 65% year on year to $215.9 billion reflecting continued momentum across our platform transitions to accelerated computing and AI. Growth was led by Compute & Networking, where Data Center compute revenue grew 59% driven by demand for our Blackwell platform, and Data Center networking revenue increased 142% driven by the ramp of NVLink compute fabric for Blackwell systems, as well as continued growth in Ethernet and InfiniBand.  Gross margin was 71.1%, operating income reached $130.4 billion and diluted earnings per share increased 67% to $4.90.\n\n|||**Fiscal 2026**|**Results**|||\n|---|---|---|---|---|---|\n||**Revenue**|**Gross Margin**|**Operating Income**|**Diluted Earnings Per**||\n|||||**Share**||\n||**$215.9 billion**|**71.1%**|**$130.4 billion**|**$4.90**||\n|up|**65%**year on year|down**3.9 points**year on year|up**60%**year on year|up**67%**year on year||\n|||**Fiscal 2026 Reportable Segments**||||\n\nOur two reportable segments are “Compute & Networking” and “Graphics”:\n\n||**Compute & Networking**|**Graphics**|**Total**|\n|---|---|---|---|\n||**$193.5 billion (1)**|**$22.5 billion (1)**|**$215.9 billion**|\n|**Revenue**||||\n||up**67%**year on year|up**57%**year on year|up**65%**year on year|\n|**Operating**|**$130.1 billion**|**$9.2 billion**|**$139.3 billion**|\n|**Income (2)**|up**57%**year on year|up**80%**year on year|up**58%**year on year|\n|(1)       This figure has been rounded to the nearest tenth of a billion.||Due to rounding, the sum of the figures does not equal the total as presented.||\n|(2)       Segment operating income differs from consolidated operating income as certain expenses are not allocated to either Compute & Networking or||||\n|Graphics for purposes of making operating decisions or assessing financial performance.||||\n\n[table-rows]\n[**BUSINESS OVERVIEW**] : **Compute & Networking=**$193.5 billion (1), **Graphics=**$22.5 billion (1), **Total=**$215.9 billion\n[**BUSINESS OVERVIEW**] **Revenue: **Compute & Networking=, **Graphics=, **Total=\n[**BUSINESS OVERVIEW**] : **Compute & Networking=up**67%**year on year, **Graphics=up**57%**year on year, **Total=up**65%**year on year\n[**BUSINESS OVERVIEW**] **Operating: **Compute & Networking=**$130.1 billion, **Graphics=**$9.2 billion, **Total=**$139.3 billion\n[**BUSINESS OVERVIEW**] **Income (2): **Compute & Networking=up**57%**year on year, **Graphics=up**80%**year on year, **Total=up**58%**year on year\n[**BUSINESS OVERVIEW**] (1) This figure has been rounded to the nearest tenth of a billion.: **Compute & Networking=, **Graphics=Due to rounding, the sum of the figures does not equal the total as presented., **Total=\n[**BUSINESS OVERVIEW**] (2) Segment operating income differs from consolidated operating income as certain expenses are not allocated to either Compute & Networking or: **Compute & Networking=, **Graphics=, **Total=\n[**BUSINESS OVERVIEW**] Graphics for purposes of making operating decisions or assessing financial performance.: **Compute & Networking=, **Graphics=, **Total=\n[/table-rows]\n**Fiscal 2026 Market Platforms**\n\nOur platforms address four large markets where our expertise is critical:\n\n<!-- image -->\n\n<!-- image -->\n\n<!-- image -->\n\n<!-- image -->"
+   }
+  ],
+  "spans": [
+   "margin fiscal",
+   "nvidia gross"
+  ],
+  "elapsed_s": 50.5
+ },
+ {
+  "qid": "nist-zero-trust-02",
+  "corpus": "nist-zero-trust",
+  "question": "In SP 800-207, the policy decision point (PDP) is broken down into which two logical components?",
+  "answered": true,
+  "refusal": "",
+  "summary": "In SP 800-207, the policy decision point (PDP) is broken down into two logical components: the policy engine and the policy administrator.",
+  "claims": [
+   "The policy decision point (PDP) is broken down into two logical components: the policy engine and policy administrator."
+  ],
+  "cited": [
+   {
+    "chunk_id": "0290d6ec-nist-sp-800-207#8d6068fc72",
+    "title": "**3 Logical Components of Zero Trust Architecture**",
+    "text": "## **3 Logical Components of Zero Trust Architecture**\n\nThere are numerous logical components that make up a ZTA deployment in an enterprise. These components may be operated as an on-premises service or through a cloud-based service. The conceptual framework model in Figure 2 shows the basic relationship between the components and their interactions. Note that this is an ideal model showing logical components and their interactions. From Figure 1, the policy decision point (PDP) is broken down into two logical components: the policy engine and policy administrator (defined below). The ZTA logical components use a separate control plane to communicate, while application data is communicated on a data plane (see Section 3.4).\n\n<!-- image -->\n\n**Figure 2: Core Zero Trust Logical Components**\n\nThe component descriptions:\n\n- **Policy engine (PE):** This component is responsible for the ultimate decision to grant access to a resource for a given subject. The PE uses enterprise policy as well as input from external sources (e.g., CDM systems, threat intelligence services described below) as input to a trust algorithm (see Section 3.3 for more details) to grant, deny, or revoke access to the resource. The PE is paired with the policy administrator component. The policy engine makes and logs the decision (as approved, or denied), and the policy administrator executes the decision.\n\n- **Policy administrator (PA):** This component is responsible for establishing and/or shutting down the communication path between a subject and a resource (via commands to relevant PEPs). It would generate any session-specific authentication and authentication token or credential used by a client to access an enterprise resource. It is closely tied to the PE and relies on its decision to ultimately allow or deny a session. If the session is authorized and the request authenticated, the PA configures the PEP to allow the session to start. If the session is denied (or a previous approval is countermanded), the PA signals to the PEP to shut down the connection. Some implementations may treat the PE and PA as a single service; here, it is divided into its\n\ntwo logical components. The PA communicates with the PEP when creating the communication path. This communication is done via the control plane."
+   }
+  ],
+  "spans": [
+   "800-207 policy",
+   "sp 800-207"
+  ],
+  "elapsed_s": 35.1
+ },
+ {
+  "qid": "nist-zero-trust-03",
+  "corpus": "nist-zero-trust",
+  "question": "Which zero trust component is responsible for the ultimate decision to grant access to a resource?",
+  "answered": true,
+  "refusal": "",
+  "summary": "The Policy Engine (PE) is the zero trust component responsible for making the ultimate decision to grant access to a resource.",
+  "claims": [
+   "The Policy Engine (PE) is responsible for the ultimate decision to grant access to a resource for a given subject."
+  ],
+  "cited": [
+   {
+    "chunk_id": "0290d6ec-nist-sp-800-207#8d6068fc72",
+    "title": "**3 Logical Components of Zero Trust Architecture**",
+    "text": "## **3 Logical Components of Zero Trust Architecture**\n\nThere are numerous logical components that make up a ZTA deployment in an enterprise. These components may be operated as an on-premises service or through a cloud-based service. The conceptual framework model in Figure 2 shows the basic relationship between the components and their interactions. Note that this is an ideal model showing logical components and their interactions. From Figure 1, the policy decision point (PDP) is broken down into two logical components: the policy engine and policy administrator (defined below). The ZTA logical components use a separate control plane to communicate, while application data is communicated on a data plane (see Section 3.4).\n\n<!-- image -->\n\n**Figure 2: Core Zero Trust Logical Components**\n\nThe component descriptions:\n\n- **Policy engine (PE):** This component is responsible for the ultimate decision to grant access to a resource for a given subject. The PE uses enterprise policy as well as input from external sources (e.g., CDM systems, threat intelligence services described below) as input to a trust algorithm (see Section 3.3 for more details) to grant, deny, or revoke access to the resource. The PE is paired with the policy administrator component. The policy engine makes and logs the decision (as approved, or denied), and the policy administrator executes the decision.\n\n- **Policy administrator (PA):** This component is responsible for establishing and/or shutting down the communication path between a subject and a resource (via commands to relevant PEPs). It would generate any session-specific authentication and authentication token or credential used by a client to access an enterprise resource. It is closely tied to the PE and relies on its decision to ultimately allow or deny a session. If the session is authorized and the request authenticated, the PA configures the PEP to allow the session to start. If the session is denied (or a previous approval is countermanded), the PA signals to the PEP to shut down the connection. Some implementations may treat the PE and PA as a single service; here, it is divided into its\n\ntwo logical components. The PA communicates with the PEP when creating the communication path. This communication is done via the control plane."
+   }
+  ],
+  "spans": [
+   "trust component"
+  ],
+  "elapsed_s": 33.6
+ },
+ {
+  "qid": "nist-zero-trust-05",
+  "corpus": "nist-zero-trust",
+  "question": "According to SP 800-207, who coined the term 'zero trust' and at which company?",
+  "answered": true,
+  "refusal": "",
+  "summary": "According to SP 800-207, the term 'zero trust' was coined by John Kindervag while at Forrester.",
+  "claims": [
+   "The term 'zero trust' was later coined by John Kindervag while at Forrester."
+  ],
+  "cited": [
+   {
+    "chunk_id": "0290d6ec-nist-sp-800-207#88cca72a0c",
+    "title": "**1.1 History of Zero Trust Efforts Related to Federal Agencies**",
+    "text": "### **1.1 History of Zero Trust Efforts Related to Federal Agencies**\n\nThe concept of zero trust has been present in cybersecurity since before the term “zero trust” was coined. The Defense Information Systems Agency (DISA) and the Department of Defense published their work on a more secure enterprise strategy dubbed “black core” [BCORE]. Black core involved moving from a perimeter-based security model to one that focused on the security of individual transactions. The work of the Jericho Forum in 2004 publicized the idea of deperimeterization—limiting implicit trust based on network location and the limitations of relying on single, static defenses over a large network segment [JERICHO]. The concepts of deperimeterization evolved and improved into the larger concept of zero trust, which was later coined by John Kindervag[1] while at Forrester.[2] Zero trust then became the term used to describe various cybersecurity solutions that moved security away from implied trust based on network location and instead focused on evaluating trust on a per-transaction basis. Both private industry and higher education have also undergone this evolution from perimeter-based security to a security strategy based on zero trust principles.\n\nFederal agencies have been urged to move to security based on zero trust principles for more than a decade, building capabilities and policies such as the Federal Information Security Modernization Act (FISMA) followed by the Risk Management Framework (RMF); Federal Identity, Credential, and Access Management (FICAM); Trusted Internet Connections (TIC); and Continuous Diagnostics and Mitigation (CDM) programs. All of these programs aim to restrict data and resource access to authorized parties. When these programs were started, they were limited by the technical capabilities of information systems. Security policies were largely static and were enforced at large “choke points” that an enterprise could control to get the largest effect for the effort. As technology matures, it is becoming possible to continually analyze and evaluate access requests in a dynamic and granular fashion to a “need to access” basis to mitigate data exposure due to compromised accounts, attackers monitoring a network, and other threats."
+   }
+  ],
+  "spans": [
+   "sp 800-207"
+  ],
+  "elapsed_s": 38.3
+ },
+ {
+  "qid": "scientific-gte-01",
+  "corpus": "scientific-gte",
+  "question": "How many parameters does the GTE-base model have?",
+  "answered": true,
+  "refusal": "",
+  "summary": "The GTE-base model has 110M parameters, as stated in the abstract and multiple tables.",
+  "claims": [
+   "GTEbase has 110M parameters.",
+   "GTEbase has 110M parameters.",
+   "GTEbase has 110M parameters.",
+   "GTEbase has 110M parameters."
+  ],
+  "cited": [
+   {
+    "chunk_id": "d646b885-gte-2308-03281#33363d4b77",
+    "title": "**Abstract**",
+    "text": "## **Abstract**\n\nWe present GTE, a general-purpose text embedding model trained with multi-stage contrastive learning. In line with recent advancements in unifying various NLP tasks into a single format, we train a unified text embedding model by employing contrastive learning over a diverse mixture of datasets from multiple sources. By significantly increasing the number of training data during both unsupervised pre-training and supervised fine-tuning stages, we achieve substantial performance gains over existing embedding models. Notably, even with a relatively modest parameter count of 110M, GTEbase outperforms the black-box embedding API provided by OpenAI and even surpasses 10x larger text embedding models on the massive text embedding benchmark. Furthermore, without additional fine-tuning on each programming language individually, our model outperforms previous best code retrievers of similar size by treating code as text. In summary, our model achieves impressive results by effectively harnessing multi-stage contrastive learning, offering a powerful and efficient text embedding model with broad applicability across various NLP and code-related tasks.[1]"
+   },
+   {
+    "chunk_id": "d646b885-gte-2308-03281#9b49a2ff2f",
+    "title": "**3.4 Training Details**",
+    "text": "rate decay and a warm-up period during the initial 5% of training steps. We conducted experiments on three distinct model scales: small, base, and large. These models were initialized using the small-sized MiniLM (Wang et al., 2020) model and the base and large models of the BERT (Devlin et al., 2019) model. Further details can be found in Table 3.\n\nIn the second stage of contrastive fine-tuning with supervised data and hard negatives, a large batch size is unnecessary since hard negatives can already provide a reliable gradient estimation of the learning objective (Xiong et al., 2021; Li et al., 2023). Therefore, a global batch size of 128 and a train group size of 16 are utilized, with one positive example and the remaining being either hard negatives or random negatives. Instead we increase the max sequence length to 512 to better handle texts with longer lengths. The learning rate is decreased by a factor of ten during fine-tuning. The model is fine-tuned on the collected dataset for a single epoch. In-batch texts are also incorporated as negative candidates using the enhanced contrastive loss described in Equation 5.\n\nAfter training, we directly take the last checkpoint for evaluation. We run model training on up to 8 NVIDIA A100 GPUs with 80GB memory and model evaluation on up to 8 NVIDIA Tesla V100 GPUs with 32GB memory. Models are trained with mixed precision using fp16 and evaluated with half precision fp16 as well.\n\n|Model|Params||LR|GPUs|BS|Base LM|\n|---|---|---|---|---|---|---|\n|GTEsmall|30M|3|_×_10_−_4|2|16384|microsoft/MiniLM-L12-H384-uncased|\n|GTEbase|110M|2|_×_10_−_4|4|16384|bert-base-uncased|\n|GTElarge|330M|5|_×_10_−_5|8|16384|bert-large-uncased|\n\n[table-rows]\n[**3.4 Training Details**] Model=GTEsmall, Params=30M, col3=3, LR=_×_10_−_4, GPUs=2, BS=16384, Base LM=microsoft/MiniLM-L12-H384-uncased\n[**3.4 Training Details**] Model=GTEbase, Params=110M, col3=2, LR=_×_10_−_4, GPUs=4, BS=16384, Base LM=bert-base-uncased\n[**3.4 Training Details**] Model=GTElarge, Params=330M, col3=5, LR=_×_10_−_5, GPUs=8, BS=16384, Base LM=bert-large-uncased\n[/table-rows]\n\nTable 3: Pre-training configurations of models of different sizes."
+   },
+   {
+    "chunk_id": "d646b885-gte-2308-03281#cb3fda5f5e",
+    "title": "**4.3 Massive Text Embedding Benchmark**",
+    "text": "SimCSE is based on BERTbase backbone.\n\nCPT-S (Neelakantan et al., 2022) is of similar size to BERTlarge.\n\nBaseline results are borrowed from E5 paper (Wang et al., 2022b).\n\nNote that Contriever uses dot product as the similarity metric while other models uses cosine similarity.\n\non the tasks covered in the MTEB benchmark, please refer to the Appendix B.\n\nTwo settings are considered for comparison: the unsupervised setting and the supervised setting. In the unsupervised setting, models are trained using unlabeled data, while supervised models are fine-tuned using high-quality datasets with human labels. The results of strong baseline models are presented in Table 6.\n\nIn the unsupervised setting, our model outper-\n\nforms the previous best model, E5, by a significant margin across all considered tasks, without the use of task-specific prompts. This improvement can be attributed to the inclusion of more training data formats and various sources of selfsupervision signals. Furthermore, it is worth noting that our unsupervised pre-trained model narrows the gap even further with larger supervised baselines, such as GTR and Sentence-T5. In the supervised setting, our model surpasses OpenAI results\n\n||Params|Class.|Clust.|Pair.|Rerank|Retr.|STS|Summ.|Avg|\n|---|---|---|---|---|---|---|---|---|---|\n|# of datasets_→_||12|11|3|4|15|10|1|56|\n|_Unsupervised models_||||||||||\n|Glove|120M|57.3|27.7|70.9|43.3|21.6|61.9|28.9|42.0|\n|BERT|110M|61.7|30.1|56.3|43.4|10.6|54.4|29.8|38.3|\n|SimCSE|110M|62.5|29.0|70.3|46.5|20.3|74.3|31.2|45.5|\n|E5small|30M|67.0|41.7|78.2|53.1|40.8|68.8|25.2|54.2|\n|E5base|110M|67.9|43.4|79.2|53.5|42.9|69.5|24.3|55.5|\n|E5large|330M|69.0|44.3|80.3|54.4|44.2|69.9|24.8|56.4|\n|GTEsmall|30M|71.0|44.9|82.4|57.5|43.4|77.2|30.4|58.5|\n|GTEbase|110M|71.5|46.0|83.3|58.4|44.2|76.5|29.5|59.0|\n|GTElarge|330M|71.8|46.4|83.3|58.8|44.6|76.3|30.1|59.3|\n|_Supervised models_||||||||||\n|SimCSE|110M|67.3|33.4|73.7|47.5|21.8|79.1|23.3|48.7|\n|Contriever|110M|66.7|41.1|82.5|53.1|41.9|76.5|30.4|56.0|\n|GTRlarge|330M|67.1|41.6|85.3|55.4|47.4|78.2|29.5|58.3|\n|Sentence-T5large|330M|72.3|41.7|85.0|54.0|36.7|81.8|29.6|57.1|\n|E5small|30M|71.7|39.5|85.1|54.5|46.0|80.9|31.4|58.9|\n|E5base|110M|72.6|42.1|85.1|55.7|48.7|81.0|31.0|60.4|\n|E5large|330M|73.1|43.3|85.9|56.5|50.0|82.1|31.0|61.4|\n|InstructORbase|110M|72.6|42.1|85.1|55.7|48.8|81.0|31.0|60.4|\n|InstructORlarge|330M|73.9|45.3|85.9|57.5|47.6|83.2|31.8|61.6|\n|OpenAIada-001|n.a.|70.4|37.5|76.9|49.0|18.4|78.6|26.9|49.5|\n|OpenAIada-002|n.a.|70.9|45.9|84.9|56.3|49.3|81.0|30.8|61.0|\n|GTEsmall|30M|72.3|44.9|83.5|57.7|49.5|82.1|30.4|61.4|\n|GTEbase|110M|73.0|46.1|84.3|58.6|51.2|82.3|30.7|62.4|\n|GTElarge|330M|73.3|46.8|85.0|59.1|52.2|83.4|31.7|63.1|\n|_Larger models_||||||||||\n|InstructORxl|1.5B|73.1|44.7|86.6|57.3|49.3|83.1|32.3|61.8|\n|GTRxxl|4.5B|67.4|42.4|86.1|56.7|48.5|78.4|30.6|59.0|\n|Sentence-T5xxl|4.5B|73.4|43.7|85.1|56.4|42.2|82.6|30.1|59.5|\n\nTable 6: Results on the MTEB (Muennighoff et al., 2023) (56 datasets in English subset). Compared models include SimCSE (Gao et al., 2021), Sentence-T5 (Ni et al., 2022a), GTR (Ni et al., 2022b), Contriever (Izacard et al., 2022a), OpenAI text embedding API (Neelakantan et al., 2022), E5 (Wang et al., 2022b) and InstructOR (Su et al., 2023). Exact parameter amount of OpenAI ada model is not available, but is suspected to be _∼_ 300M, comparable to the BERT large size model.\n\nby a large margin despite using a modest model size. GTEsmall is comparable to E5large while being 10 _×_ smaller. GTElarge establishes new stateof-the-art performance on the MTEB benchmark, outperforming the multi-task instruction-finetuned embedding model, InstructORlarge, by 1.5 points on average."
+   },
+   {
+    "chunk_id": "d646b885-gte-2308-03281#c158df2026",
+    "title": "**4.1 Zero-shot Text Classification**",
+    "text": "### **4.1 Zero-shot Text Classification**\n\n|Model|Params|Prompting|Accuracy|\n|---|---|---|---|\n|E5base|110M|✓|81.3|\n|E5large|330M|✓|85.3|\n|cpt-text|6B||88.1|\n|cpt-text|6B|✓|89.1|\n|GTEbase|110M||85.1|\n|GTEbase|110M|✓|87.2|\n\n[table-rows]\n[**4.1 Zero-shot Text Classification**] Model=E5base, Params=110M, Prompting=✓, Accuracy=81.3\n[**4.1 Zero-shot Text Classification**] Model=E5large, Params=330M, Prompting=✓, Accuracy=85.3\n[**4.1 Zero-shot Text Classification**] Model=cpt-text, Params=6B, Prompting=, Accuracy=88.1\n[**4.1 Zero-shot Text Classification**] Model=cpt-text, Params=6B, Prompting=✓, Accuracy=89.1\n[**4.1 Zero-shot Text Classification**] Model=GTEbase, Params=110M, Prompting=, Accuracy=85.1\n[**4.1 Zero-shot Text Classification**] Model=GTEbase, Params=110M, Prompting=✓, Accuracy=87.2\n[/table-rows]\n\nTable 4: Zero shot text classification performance on SST-2. All compared models are the fine-tuned ones.\n\nOne method to assess the quality of learned representation is through zero-shot classification. (Radford et al., 2021; Neelakantan et al., 2022; Wang et al., 2022b). We recast text classification into an embedding-based similarity matching problem. In this setting, inputs texts are converted into embeddings directly and labels are verbalized to corresponding text to get label embeddings. Distances between input embeddings and label embeddings are measured by their inner product and label with the most close embedding distance to the input text is regarded as the classification result. An example is SST-2 binary sentiment classification task. We consider two types of label verbalizers for evaluation. The vanilla version uses the sentiment word ‘positive’ or ‘negative’ to denote the corresponding labels. Prompted version uses fuzzy prompt template, such as ‘this is an example of positive/negative movie review’.\n\nZero-shot text classification accuracy on SST2 is shown in Table 4. In the vanilla setting, our 110M model already matches the performance of prompted E5large with 330M parameters. Using prompting strategy further improves results significantly and closes the gap with large models. Even without explicit prompt or instruction during training, our model can somewhat understand the label context better when formatted as a natural language text."
+   }
+  ],
+  "spans": [
+   "gte-base model"
+  ],
+  "elapsed_s": 49.1
+ },
+ {
+  "qid": "scientific-gte-02",
+  "corpus": "scientific-gte",
+  "question": "What encoder architecture does the GTE embedding model use?",
+  "answered": true,
+  "refusal": "",
+  "summary": "The GTE embedding model uses a deep Transformer encoder architecture, specifically following the vanilla dual-encoder architecture with mean pooling on top of contextualized token representations.",
+  "claims": [
+   "The backbone of our embedding model is a deep Transformer encoder (Vaswani et al., 2017) which can be initialized with pre-trained language models such as BERT (Devlin et al., 2019).",
+   "Our model follows the vanilla dual-encoder architecture with mean pooling on top of the contextualized token representations produced by the language model."
+  ],
+  "cited": [
+   {
+    "chunk_id": "d646b885-gte-2308-03281#3b16b0e282",
+    "title": "**3.1 Model Architecture**",
+    "text": "### **3.1 Model Architecture**\n\nThe backbone of our embedding model is a deep Transformer encoder (Vaswani et al., 2017) which can be initialized with pre-trained language models such as BERT (Devlin et al., 2019). Our model follows the vanilla dual-encoder architecture with mean pooling on top of the contextualized token representations produced by the language model.\n\nFormally, given a piece of text _x_ = ( _x_ 1 _, . . . , xn_ ) consisting of _n_ tokens, an embedding model _E_ convert the text into a low-dimensional dense vector **x** = _E_ ( _x_ ) _∈ R[d]_ . To implement _E_ , we first employ a language model to get the deep contextualized token representations\n\n<!-- image -->\n\nThen we apply a lightweight mean pooling across the first dimension to get the text representation,\n\n<!-- image -->\n\nThe text representations are learned through the contrastive objective, distinguishing semantic relevant text pairs from irrelevant ones. Such training procedure requires positive and negative pairs, taking the format of ( _q, d_[+] _, d[−]_ ). For a query _q_ , a relevant document _d_[+] , a set of irrelevant documents _D−_ = _{d[−]_ 1 _[, . . . , d] n[−][}]_[, one popular contrastive ob-] jective is the InfoNCE loss (van den Oord et al., 2018),\n\n<!-- image -->\n\nwhere _s_ ( _q, d_ ) estimates the similarity between two pieces of text _q_ and _d_ via vector distance between **q** = _E_ ( _q_ ) and **d** = _E_ ( _d_ ).\n\nTo acquire text embeddings of superior quality that can be applied across a wide range of scenarios, we compile an extensive text pair dataset from multiple formats and domains. This dataset is then trained using an improved contrastive loss method in a multi-stage fashion."
+   },
+   {
+    "chunk_id": "d646b885-gte-2308-03281#3b16b0e282",
+    "title": "**3.1 Model Architecture**",
+    "text": "### **3.1 Model Architecture**\n\nThe backbone of our embedding model is a deep Transformer encoder (Vaswani et al., 2017) which can be initialized with pre-trained language models such as BERT (Devlin et al., 2019). Our model follows the vanilla dual-encoder architecture with mean pooling on top of the contextualized token representations produced by the language model.\n\nFormally, given a piece of text _x_ = ( _x_ 1 _, . . . , xn_ ) consisting of _n_ tokens, an embedding model _E_ convert the text into a low-dimensional dense vector **x** = _E_ ( _x_ ) _∈ R[d]_ . To implement _E_ , we first employ a language model to get the deep contextualized token representations\n\n<!-- image -->\n\nThen we apply a lightweight mean pooling across the first dimension to get the text representation,\n\n<!-- image -->\n\nThe text representations are learned through the contrastive objective, distinguishing semantic relevant text pairs from irrelevant ones. Such training procedure requires positive and negative pairs, taking the format of ( _q, d_[+] _, d[−]_ ). For a query _q_ , a relevant document _d_[+] , a set of irrelevant documents _D−_ = _{d[−]_ 1 _[, . . . , d] n[−][}]_[, one popular contrastive ob-] jective is the InfoNCE loss (van den Oord et al., 2018),\n\n<!-- image -->\n\nwhere _s_ ( _q, d_ ) estimates the similarity between two pieces of text _q_ and _d_ via vector distance between **q** = _E_ ( _q_ ) and **d** = _E_ ( _d_ ).\n\nTo acquire text embeddings of superior quality that can be applied across a wide range of scenarios, we compile an extensive text pair dataset from multiple formats and domains. This dataset is then trained using an improved contrastive loss method in a multi-stage fashion."
+   }
+  ],
+  "spans": [
+   "encoder architecture",
+   "gte embedding"
+  ],
+  "elapsed_s": 66.7
+ },
+ {
+  "qid": "linux-fundamentals-01",
+  "corpus": "linux-fundamentals",
+  "question": "Which Linux command is used to change the permissions on a file or directory?",
+  "answered": true,
+  "refusal": "",
+  "summary": "The chmod command is used to change permissions on a file or directory in Linux.",
+  "claims": [
+   "The chmod (change mode) command is used to change permissions on a directory."
+  ],
+  "cited": [
+   {
+    "chunk_id": "61dd6510-module-17-ownership-and-permissions#29acd948b1",
+    "title": "Changing Permissions",
+    "text": "### Changing Permissions\n\n- There are two techniques that can be used with this command: symbolic and numeric.\n- Symbolic Method\n- The chmod (change mode) command is used to change permissions on a directory.\n- Characters indicate which permission group (user, group, others) to apply the changes to:\n\n<!-- image: kind=table -->\n\n<!-- image: kind=logo -->"
+   }
+  ],
+  "spans": [
+   "file or",
+   "or directory",
+   "permissions file"
+  ],
+  "elapsed_s": 15.2
+ },
+ {
+  "qid": "linux-fundamentals-03",
+  "corpus": "linux-fundamentals",
+  "question": "What character does an absolute path in Linux always begin with?",
+  "answered": true,
+  "refusal": "",
+  "summary": "The chunks state that absolute paths in Linux always begin with the / character.",
+  "claims": [
+   "Absolute paths always start at the root directory, and therefore it always begins with the / character."
+  ],
+  "cited": [
+   {
+    "chunk_id": "c7a039dc-ndg-lev2-ch07-navigating-the-filesystem#6a8fbb86f3",
+    "title": "Absolute Paths",
+    "text": "#### Absolute Paths\n\n- Absolute paths allow the user to specify the exact location of a directory.\n- Absolute paths always starts at the root directory, and therefore it always begins with the / character.\n- The path /home/sysadmin is an absolute path; it tells the system to:\n- Begin at the root / directory > move into the home directory > then into the sysadmin directory\n- If the path /home/sysadmin is used as an argument to the cd command, it moves the user into the home directory for the sysadmin user.\n\nsysadmin@localhost:~/Documents$\n\ncd /home/sysadmin\n\nsysadmin@localhost:~$\n\n<!-- image: kind=logo -->"
+   }
+  ],
+  "spans": [
+   "always begin",
+   "linux always"
+  ],
+  "elapsed_s": 16.8
+ },
+ {
+  "qid": "cr350-xref-02",
+  "corpus": "cr350-multidoc",
+  "question": "En quoi consiste la phase de Reconnaissance de la Cyber Kill Chain ?",
+  "answered": true,
+  "refusal": "",
+  "summary": "La phase de Reconnaissance de la Cyber Kill Chain consiste à collecter le maximum d'informations sur une cible sans l'alerter, afin de comprendre l'architecture réseau, identifier les systèmes exposés, repérer les technologies utilisées et détecter des points d'entrée potentiels.",
+  "claims": [
+   "La phase de Reconnaissance consiste à collecter le maximum d'informations sur une cible sans l'alerter, afin de : Comprendre l'architecture réseau, Identifier les systèmes exposés, Repérer les technologies utilisées, Détecter des points d'entrée potentiels."
+  ],
+  "cited": [
+   {
+    "chunk_id": "7e7cd59e-cr350-semaine-5-attaques-r-seau-et-cha-ne-d-atta#ab7b1c9bd3",
+    "title": "Objectif de la phase Reconnaissance",
+    "text": "#### Objectif de la phase Reconnaissance\n\nLa phase de Reconnaissance consiste à collecter le maximum d'informations sur une cible sans l'alerter, afin de :\n\n- Comprendre l'architecture réseau\n- Identifier les systèmes exposés\n- Repérer les technologies utilisées\n- Détecter des points d'entrée potentiels"
+   }
+  ],
+  "spans": [
+   "cyber kill",
+   "kill chain",
+   "la cyber",
+   "reconnaissance de"
+  ],
+  "elapsed_s": 15.2
+ },
+ {
+  "qid": "technical-guidelines-01",
+  "corpus": "technical-guidelines",
+  "question": "According to the developer guidelines, what must every custom exception inherit from, and what field must it include?",
+  "answered": true,
+  "refusal": "",
+  "summary": "According to the developer guidelines, every custom exception must inherit from MemexError and include a context: dict field.",
+  "claims": [
+   "Every custom exception inherits from MemexError and includes a context: dict field."
+  ],
+  "cited": [
+   {
+    "chunk_id": "f59860eb-guidelines#de93ff91c3",
+    "title": "**Coding standards**",
+    "text": "### **Coding standards**\n\n**Types are not optional.** Every function signature, every dataclass, every pydantic model. `pyright -- strict` runs in CI and `src/memex` is kept at **0 errors / 0 warnings** . Untyped `Any` requires a comment explaining why. When a third-party library ships no usable types, give it a minimal `.pyi` stub under `stubs/` (wired via `stubPath` ) covering only the surface Memex uses — don't silence at the call site. For libraries that ship a partial `py.typed` (torch, transformers, openai, typer), don't shadow them with a competing stub; fix at the call site with precise annotations, a single typed wrapper, or `typing.cast` . `# type: ignore[rule]` is a last resort and always carries a trailing `# reason` .\n\n**Pydantic models cross module boundaries, dicts don't.** If two modules need to exchange a `ParsedDocument` , it's a pydantic model in `core/types.py` , not `dict[str, Any]` . This rule alone prevents most integration bugs.\n\n**Async-first for I/O, sync for CPU.** Filesystem reads, HTTP, model inference calls, database writes — all async. Pure computation (parsing tokens, formatting) stays sync. Don't mix without a reason.\n\n**Explicit over clever.** No metaclasses unless there's a specific reason. No decorators that mutate behavior in non-obvious ways. The next person reading this code is you in six months — be kind.\n\n**Errors carry context.** Every custom exception inherits from `MemexError` and includes a `context: dict` field. When an exception propagates to the user, the context is what makes the error message useful.\n\n**Configuration is centralized and validated.** All settings live in a single pydantic-settings model in `core/config.py` . Read from `~/.config/memex/config.toml` with environment overrides. Validated at startup; the application refuses to run with invalid config.\n\n**Logs use structlog with bound context.** Bind the run-scope ( `correlation_id` , `query` preview, document ID) once via `structlog.contextvars.bind_contextvars(...)` at the entry point; bind node/function scope via `log = logger.bind(node=name)` locally. Then emit `log.info(\"event\", k=v)` . Never `extra={...}` — that's the stdlib idiom and structlog's processors drop the dict. Never f- strings in event names — `f\"retrieved {n}\"` kills field aggregation in Langfuse and downstream tooling. The architecture rationale is ADR-0004."
+   }
+  ],
+  "spans": [
+   "developer guidelines"
+  ],
+  "elapsed_s": 19.6
+ }
+]

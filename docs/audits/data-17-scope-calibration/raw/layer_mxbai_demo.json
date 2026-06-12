@@ -1,0 +1,682 @@
+[
+ {
+  "leg": "mxbai+demotion",
+  "qid": "ftc-use-isknownsafe",
+  "status": "wrong",
+  "run": 1,
+  "answered": true,
+  "refusal": "",
+  "symbol": "is_known_safe_command",
+  "window": [
+   {
+    "rank": 1,
+    "cid": "y#49db9fb174",
+    "head": "fn assess_command_safety",
+    "tags": ""
+   },
+   {
+    "rank": 2,
+    "cid": "y#7076298279",
+    "head": "core/src/safety.rs",
+    "tags": ""
+   },
+   {
+    "rank": 3,
+    "cid": "b#5cfd03b070",
+    "head": "mod is_safe_command",
+    "tags": ""
+   },
+   {
+    "rank": 4,
+    "cid": "l#59049c0824",
+    "head": "enum AskForApproval",
+    "tags": ""
+   },
+   {
+    "rank": 5,
+    "cid": "g#a9d516986e",
+    "head": "enum ApprovalModeCliArg",
+    "tags": ""
+   }
+  ],
+  "drafts": [
+   {
+    "summary": "The function `is_known_safe_command` is called within the `assess_command_safety` function in core/src/safety.rs. When this function returns true, the command is treated as known-safe and approved without sandboxing if it's either previously approved/allow-lis",
+    "claims": [
+     {
+      "claim": "The function `is_known_safe_command` is called in the `assess_command_safety` function to determine if a command should be auto-approved wit",
+      "cid": "y#49db9fb174"
+     }
+    ]
+   }
+  ],
+  "verify": [
+   {
+    "g": [
+     0
+    ],
+    "u": []
+   }
+  ],
+  "rel": [
+   {
+    "ok": true,
+    "why": "The answer directly addresses the specific question by identifying which function calls is_known_safe_command."
+   }
+  ]
+ },
+ {
+  "leg": "mxbai+demotion",
+  "qid": "ftc-use-isknownsafe",
+  "status": "wrong",
+  "run": 2,
+  "answered": true,
+  "refusal": "",
+  "symbol": "is_known_safe_command",
+  "window": [
+   {
+    "rank": 1,
+    "cid": "y#49db9fb174",
+    "head": "fn assess_command_safety",
+    "tags": ""
+   },
+   {
+    "rank": 2,
+    "cid": "y#7076298279",
+    "head": "core/src/safety.rs",
+    "tags": ""
+   },
+   {
+    "rank": 3,
+    "cid": "b#5cfd03b070",
+    "head": "mod is_safe_command",
+    "tags": ""
+   },
+   {
+    "rank": 4,
+    "cid": "l#59049c0824",
+    "head": "enum AskForApproval",
+    "tags": ""
+   },
+   {
+    "rank": 5,
+    "cid": "g#a9d516986e",
+    "head": "enum ApprovalModeCliArg",
+    "tags": ""
+   }
+  ],
+  "drafts": [
+   {
+    "summary": "The function `is_known_safe_command` is called within the `assess_command_safety` function in core/src/safety.rs. When this function returns true, the command is treated as known-safe and approved without sandboxing if it's either previously approved/allow-lis",
+    "claims": [
+     {
+      "claim": "The function `is_known_safe_command` is called in the `assess_command_safety` function to determine if a command should be auto-approved wit",
+      "cid": "y#49db9fb174"
+     }
+    ]
+   }
+  ],
+  "verify": [
+   {
+    "g": [
+     0
+    ],
+    "u": []
+   }
+  ],
+  "rel": [
+   {
+    "ok": true,
+    "why": "The answer directly addresses the specific question by identifying which function calls is_known_safe_command."
+   }
+  ]
+ },
+ {
+  "leg": "mxbai+demotion",
+  "qid": "ftc-use-issafetocall",
+  "status": "newly-wrong",
+  "run": 1,
+  "answered": true,
+  "refusal": "",
+  "symbol": "is_safe_to_call_with_exec",
+  "window": [
+   {
+    "rank": 1,
+    "cid": "d#81275aeeed",
+    "head": "fn is_known_safe_command",
+    "tags": ""
+   },
+   {
+    "rank": 2,
+    "cid": "b#12ec2d5c04",
+    "head": "mod valid_exec",
+    "tags": ""
+   },
+   {
+    "rank": 3,
+    "cid": "r#dd2a1d5c02",
+    "head": "execpolicy/src/execv_checker.rs",
+    "tags": ""
+   },
+   {
+    "rank": 4,
+    "cid": "n#b35b19f4c3",
+    "head": "fn check_command",
+    "tags": ""
+   },
+   {
+    "rank": 5,
+    "cid": "l#5081946a1f",
+    "head": "impl ExecCall",
+    "tags": ""
+   }
+  ],
+  "drafts": [
+   {
+    "summary": "The function that uses is_safe_to_call_with_exec is is_known_safe_command, which calls it to determine if a command is known safe.",
+    "claims": [
+     {
+      "claim": "The function is_known_safe_command uses is_safe_to_call_with_exec to check if a command is known safe.",
+      "cid": "d#81275aeeed"
+     }
+    ]
+   }
+  ],
+  "verify": [
+   {
+    "g": [
+     0
+    ],
+    "u": []
+   }
+  ],
+  "rel": [
+   {
+    "ok": true,
+    "why": "The answer directly identifies the specific function that uses is_safe_to_call_with_exec as requested."
+   }
+  ]
+ },
+ {
+  "leg": "mxbai+demotion",
+  "qid": "ftc-use-issafetocall",
+  "status": "newly-wrong",
+  "run": 2,
+  "answered": true,
+  "refusal": "",
+  "symbol": "is_safe_to_call_with_exec",
+  "window": [
+   {
+    "rank": 1,
+    "cid": "d#81275aeeed",
+    "head": "fn is_known_safe_command",
+    "tags": ""
+   },
+   {
+    "rank": 2,
+    "cid": "b#12ec2d5c04",
+    "head": "mod valid_exec",
+    "tags": ""
+   },
+   {
+    "rank": 3,
+    "cid": "r#dd2a1d5c02",
+    "head": "execpolicy/src/execv_checker.rs",
+    "tags": ""
+   },
+   {
+    "rank": 4,
+    "cid": "n#b35b19f4c3",
+    "head": "fn check_command",
+    "tags": ""
+   },
+   {
+    "rank": 5,
+    "cid": "l#5081946a1f",
+    "head": "impl ExecCall",
+    "tags": ""
+   }
+  ],
+  "drafts": [
+   {
+    "summary": "The function that uses is_safe_to_call_with_exec is is_known_safe_command, which calls it to determine if a command is known safe.",
+    "claims": [
+     {
+      "claim": "The function is_known_safe_command uses is_safe_to_call_with_exec to check if a command is known safe.",
+      "cid": "d#81275aeeed"
+     }
+    ]
+   }
+  ],
+  "verify": [
+   {
+    "g": [
+     0
+    ],
+    "u": []
+   }
+  ],
+  "rel": [
+   {
+    "ok": true,
+    "why": "The answer directly identifies the specific function that uses is_safe_to_call_with_exec as requested."
+   }
+  ]
+ },
+ {
+  "leg": "mxbai+demotion",
+  "qid": "ftc-use-newstdio",
+  "status": "newly-wrong",
+  "run": 1,
+  "answered": true,
+  "refusal": "",
+  "symbol": "new_stdio_client",
+  "window": [
+   {
+    "rank": 1,
+    "cid": "n#7cb492d583",
+    "head": "fn main",
+    "tags": ""
+   },
+   {
+    "rank": 2,
+    "cid": "r#8dceb74fc3",
+    "head": "McpConnectionManager::new",
+    "tags": ""
+   },
+   {
+    "rank": 3,
+    "cid": "n#f072b23fed",
+    "head": "fn main",
+    "tags": ""
+   },
+   {
+    "rank": 4,
+    "cid": "t#36acbfdfbd",
+    "head": "mcp-client/src/mcp_client.rs",
+    "tags": ""
+   },
+   {
+    "rank": 5,
+    "cid": "r#11f855aa32",
+    "head": "MessageProcessor::new",
+    "tags": ""
+   }
+  ],
+  "drafts": [
+   {
+    "summary": "The chunks show that `new_stdio_client` is called in two places: in `mcp-client/src/main.rs` within the main function, and in `core/src/mcp_connection_manager.rs` within the `McpConnectionManager::new` method. No other function calls are shown.",
+    "claims": [
+     {
+      "claim": "In mcp-client/src/main.rs, the function `new_stdio_client` is called with `let client = McpClient::new_stdio_client(program, args, env).awai",
+      "cid": "n#7cb492d583"
+     },
+     {
+      "claim": "In core/src/mcp_connection_manager.rs, the function `new_stdio_client` is called within a loop: `let client_res = McpClient::new_stdio_clien",
+      "cid": "r#8dceb74fc3"
+     }
+    ]
+   }
+  ],
+  "verify": [
+   {
+    "g": [
+     0,
+     1
+    ],
+    "u": []
+   }
+  ],
+  "rel": [
+   {
+    "ok": true,
+    "why": "The answer directly addresses the specific question by identifying the exact functions that call new_stdio_client as shown in the documents."
+   }
+  ]
+ },
+ {
+  "leg": "mxbai+demotion",
+  "qid": "ftc-use-newstdio",
+  "status": "newly-wrong",
+  "run": 2,
+  "answered": true,
+  "refusal": "",
+  "symbol": "new_stdio_client",
+  "window": [
+   {
+    "rank": 1,
+    "cid": "n#7cb492d583",
+    "head": "fn main",
+    "tags": ""
+   },
+   {
+    "rank": 2,
+    "cid": "r#8dceb74fc3",
+    "head": "McpConnectionManager::new",
+    "tags": ""
+   },
+   {
+    "rank": 3,
+    "cid": "n#f072b23fed",
+    "head": "fn main",
+    "tags": ""
+   },
+   {
+    "rank": 4,
+    "cid": "t#36acbfdfbd",
+    "head": "mcp-client/src/mcp_client.rs",
+    "tags": ""
+   },
+   {
+    "rank": 5,
+    "cid": "r#11f855aa32",
+    "head": "MessageProcessor::new",
+    "tags": ""
+   }
+  ],
+  "drafts": [
+   {
+    "summary": "The chunks show that `new_stdio_client` is called in two places: in `mcp-client/src/main.rs` within the main function, and in `core/src/mcp_connection_manager.rs` within the `McpConnectionManager::new` method. No other function calls are shown.",
+    "claims": [
+     {
+      "claim": "In mcp-client/src/main.rs, the function `new_stdio_client` is called with `let client = McpClient::new_stdio_client(program, args, env).awai",
+      "cid": "n#7cb492d583"
+     },
+     {
+      "claim": "In core/src/mcp_connection_manager.rs, the function `new_stdio_client` is called within a loop: `let client_res = McpClient::new_stdio_clien",
+      "cid": "r#8dceb74fc3"
+     }
+    ]
+   }
+  ],
+  "verify": [
+   {
+    "g": [
+     0,
+     1
+    ],
+    "u": []
+   }
+  ],
+  "rel": [
+   {
+    "ok": true,
+    "why": "The answer directly addresses the specific question by identifying the exact functions that call new_stdio_client as shown in the documents."
+   }
+  ]
+ },
+ {
+  "leg": "mxbai+demotion",
+  "qid": "ftc-def-assess",
+  "status": "newly-wrong",
+  "run": 1,
+  "answered": true,
+  "refusal": "",
+  "symbol": null,
+  "window": [
+   {
+    "rank": 1,
+    "cid": "y#49db9fb174",
+    "head": "fn assess_command_safety",
+    "tags": ""
+   },
+   {
+    "rank": 2,
+    "cid": "x#73e41e152f",
+    "head": "fn handle_function_call",
+    "tags": ""
+   },
+   {
+    "rank": 3,
+    "cid": "x#4f66f903e8",
+    "head": "core/src/codex.rs",
+    "tags": ""
+   },
+   {
+    "rank": 4,
+    "cid": "y#ee93372aaf",
+    "head": "fn assess_patch_safety",
+    "tags": ""
+   },
+   {
+    "rank": 5,
+    "cid": "b#5cfd03b070",
+    "head": "mod is_safe_command",
+    "tags": ""
+   }
+  ],
+  "drafts": [
+   {
+    "summary": "The assess_command_safety function evaluates whether a command should be executed safely by checking if it's known safe or allow-listed, then applying sandboxing based on policy settings.",
+    "claims": [
+     {
+      "claim": "The assess_command_safety function checks if a command is known safe or allow-listed, and if so, auto-approves it without sandboxing.",
+      "cid": "y#49db9fb174"
+     },
+     {
+      "claim": "If the command is not known safe or allow-listed, the function checks if sandboxing is unrestricted; if so, it auto-approves, otherwise it e",
+      "cid": "y#49db9fb174"
+     }
+    ]
+   }
+  ],
+  "verify": [
+   {
+    "g": [
+     0,
+     1
+    ],
+    "u": []
+   }
+  ],
+  "rel": [
+   {
+    "ok": true,
+    "why": "The answer directly explains the function's purpose and logic as described in the documents."
+   }
+  ]
+ },
+ {
+  "leg": "mxbai+demotion",
+  "qid": "ftc-def-assess",
+  "status": "newly-wrong",
+  "run": 2,
+  "answered": true,
+  "refusal": "",
+  "symbol": null,
+  "window": [
+   {
+    "rank": 1,
+    "cid": "y#49db9fb174",
+    "head": "fn assess_command_safety",
+    "tags": ""
+   },
+   {
+    "rank": 2,
+    "cid": "x#73e41e152f",
+    "head": "fn handle_function_call",
+    "tags": ""
+   },
+   {
+    "rank": 3,
+    "cid": "x#4f66f903e8",
+    "head": "core/src/codex.rs",
+    "tags": ""
+   },
+   {
+    "rank": 4,
+    "cid": "y#ee93372aaf",
+    "head": "fn assess_patch_safety",
+    "tags": ""
+   },
+   {
+    "rank": 5,
+    "cid": "b#5cfd03b070",
+    "head": "mod is_safe_command",
+    "tags": ""
+   }
+  ],
+  "drafts": [
+   {
+    "summary": "The assess_command_safety function evaluates whether a command should be executed safely by checking if it's known safe or allow-listed, then applying sandboxing based on policy settings.",
+    "claims": [
+     {
+      "claim": "The assess_command_safety function checks if a command is known safe or allow-listed, and if so, auto-approves it without sandboxing.",
+      "cid": "y#49db9fb174"
+     },
+     {
+      "claim": "If the command is not known safe or allow-listed, the function checks if sandboxing is unrestricted; if so, it auto-approves, otherwise it e",
+      "cid": "y#49db9fb174"
+     }
+    ]
+   }
+  ],
+  "verify": [
+   {
+    "g": [
+     0,
+     1
+    ],
+    "u": []
+   }
+  ],
+  "rel": [
+   {
+    "ok": true,
+    "why": "The answer directly explains the function's purpose and logic as described in the documents."
+   }
+  ]
+ },
+ {
+  "leg": "mxbai+demotion",
+  "qid": "ftc-use-unifieddiff",
+  "status": "fixed-control",
+  "run": 1,
+  "answered": true,
+  "refusal": "",
+  "symbol": "unified_diff_from_chunks",
+  "window": [
+   {
+    "rank": 1,
+    "cid": "b#44c8474d71",
+    "head": "fn unified_diff_from_chunks_with_context",
+    "tags": ""
+   },
+   {
+    "rank": 2,
+    "cid": "b#573acc6fca",
+    "head": "fn maybe_parse_apply_patch_verified",
+    "tags": ""
+   },
+   {
+    "rank": 3,
+    "cid": "b#7a597284d4",
+    "head": "fn derive_new_contents_from_chunks",
+    "tags": ""
+   },
+   {
+    "rank": 4,
+    "cid": "b#77f2795518",
+    "head": "fn apply_hunks_to_files",
+    "tags": ""
+   },
+   {
+    "rank": 5,
+    "cid": "b#d3962c361b",
+    "head": "fn compute_replacements",
+    "tags": ""
+   }
+  ],
+  "drafts": [
+   {
+    "summary": "The function `unified_diff_from_chunks` is called from within the `maybe_parse_apply_patch_verified` function when processing an UpdateFile hunk.",
+    "claims": [
+     {
+      "claim": "The function `unified_diff_from_chunks` is called from within the `maybe_parse_apply_patch_verified` function when processing an UpdateFile ",
+      "cid": "b#573acc6fca"
+     }
+    ]
+   }
+  ],
+  "verify": [
+   {
+    "g": [
+     0
+    ],
+    "u": []
+   }
+  ],
+  "rel": [
+   {
+    "ok": true,
+    "why": "The answer directly addresses the specific question by identifying which function calls unified_diff_from_chunks."
+   }
+  ]
+ },
+ {
+  "leg": "mxbai+demotion",
+  "qid": "ftc-use-unifieddiff",
+  "status": "fixed-control",
+  "run": 2,
+  "answered": true,
+  "refusal": "",
+  "symbol": "unified_diff_from_chunks",
+  "window": [
+   {
+    "rank": 1,
+    "cid": "b#44c8474d71",
+    "head": "fn unified_diff_from_chunks_with_context",
+    "tags": ""
+   },
+   {
+    "rank": 2,
+    "cid": "b#573acc6fca",
+    "head": "fn maybe_parse_apply_patch_verified",
+    "tags": ""
+   },
+   {
+    "rank": 3,
+    "cid": "b#7a597284d4",
+    "head": "fn derive_new_contents_from_chunks",
+    "tags": ""
+   },
+   {
+    "rank": 4,
+    "cid": "b#77f2795518",
+    "head": "fn apply_hunks_to_files",
+    "tags": ""
+   },
+   {
+    "rank": 5,
+    "cid": "b#d3962c361b",
+    "head": "fn compute_replacements",
+    "tags": ""
+   }
+  ],
+  "drafts": [
+   {
+    "summary": "The function `unified_diff_from_chunks` is called from within the `maybe_parse_apply_patch_verified` function when processing an UpdateFile hunk.",
+    "claims": [
+     {
+      "claim": "The function `unified_diff_from_chunks` is called from within the `maybe_parse_apply_patch_verified` function when processing an UpdateFile ",
+      "cid": "b#573acc6fca"
+     }
+    ]
+   }
+  ],
+  "verify": [
+   {
+    "g": [
+     0
+    ],
+    "u": []
+   }
+  ],
+  "rel": [
+   {
+    "ok": true,
+    "why": "The answer directly addresses the specific question by identifying which function calls unified_diff_from_chunks."
+   }
+  ]
+ }
+]

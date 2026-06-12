@@ -1,0 +1,358 @@
+[
+ {
+  "side": "BREACH",
+  "qid": "annual-report-12",
+  "span": "graphics segment",
+  "ce_titled_max": 0.7247222661972046,
+  "ce_bare_max": 0.6181253790855408,
+  "ce_titled_all": [
+   0.7247222661972046
+  ],
+  "n_cited": 1,
+  "emb_cos_max": 0.1853,
+  "emb_delta": -0.507
+ },
+ {
+  "side": "BREACH",
+  "qid": "annual-report-12",
+  "span": "margin nvidia",
+  "ce_titled_max": 0.9613789319992065,
+  "ce_bare_max": 0.9556478261947632,
+  "ce_titled_all": [
+   0.9613789319992065
+  ],
+  "n_cited": 1,
+  "emb_cos_max": 0.4722,
+  "emb_delta": -0.2201
+ },
+ {
+  "side": "BREACH",
+  "qid": "annual-report-12",
+  "span": "nvidia graphics",
+  "ce_titled_max": 0.8445309996604919,
+  "ce_bare_max": 0.7473968863487244,
+  "ce_titled_all": [
+   0.8445309996604919
+  ],
+  "n_cited": 1,
+  "emb_cos_max": 0.4318,
+  "emb_delta": -0.2604
+ },
+ {
+  "side": "BREACH",
+  "qid": "annual-report-12",
+  "span": "segment fiscal",
+  "ce_titled_max": 0.707215428352356,
+  "ce_bare_max": 0.6931544542312622,
+  "ce_titled_all": [
+   0.707215428352356
+  ],
+  "n_cited": 1,
+  "emb_cos_max": 0.2708,
+  "emb_delta": -0.4215
+ },
+ {
+  "side": "BREACH",
+  "qid": "technical-guidelines-13",
+  "span": "developer guidelines",
+  "ce_titled_max": 0.00037757548852823675,
+  "ce_bare_max": 0.0004845794755965471,
+  "ce_titled_all": [
+   0.00037757548852823675
+  ],
+  "n_cited": 1,
+  "emb_cos_max": 0.372,
+  "emb_delta": -0.1082
+ },
+ {
+  "side": "FP",
+  "qid": "annual-report-01",
+  "span": "nvidia total",
+  "ce_titled_max": 0.8986067175865173,
+  "ce_bare_max": 0.9123709797859192,
+  "ce_titled_all": [
+   0.8986067175865173
+  ],
+  "n_cited": 1,
+  "emb_cos_max": 0.4465,
+  "emb_delta": -0.2963
+ },
+ {
+  "side": "FP",
+  "qid": "annual-report-01",
+  "span": "revenue fiscal",
+  "ce_titled_max": 0.7361258268356323,
+  "ce_bare_max": 0.6592482924461365,
+  "ce_titled_all": [
+   0.7361258268356323
+  ],
+  "n_cited": 1,
+  "emb_cos_max": 0.3698,
+  "emb_delta": -0.373
+ },
+ {
+  "side": "FP",
+  "qid": "annual-report-03",
+  "span": "nvidia data",
+  "ce_titled_max": 0.7358867526054382,
+  "ce_bare_max": 0.7199113368988037,
+  "ce_titled_all": [
+   0.7358867526054382
+  ],
+  "n_cited": 1,
+  "emb_cos_max": 0.5613,
+  "emb_delta": -0.0978
+ },
+ {
+  "side": "FP",
+  "qid": "annual-report-05",
+  "span": "margin fiscal",
+  "ce_titled_max": 0.7232083082199097,
+  "ce_bare_max": 0.6644421815872192,
+  "ce_titled_all": [
+   0.7232083082199097
+  ],
+  "n_cited": 1,
+  "emb_cos_max": 0.2703,
+  "emb_delta": -0.4411
+ },
+ {
+  "side": "FP",
+  "qid": "annual-report-05",
+  "span": "nvidia gross",
+  "ce_titled_max": 0.9556058049201965,
+  "ce_bare_max": 0.9512521028518677,
+  "ce_titled_all": [
+   0.9556058049201965
+  ],
+  "n_cited": 1,
+  "emb_cos_max": 0.5752,
+  "emb_delta": -0.1362
+ },
+ {
+  "side": "FP",
+  "qid": "nist-zero-trust-02",
+  "span": "800-207 policy",
+  "ce_titled_max": 0.0005309428088366985,
+  "ce_bare_max": 0.0005744748050346971,
+  "ce_titled_all": [
+   0.0005309428088366985
+  ],
+  "n_cited": 1,
+  "emb_cos_max": 0.2263,
+  "emb_delta": -0.2858
+ },
+ {
+  "side": "FP",
+  "qid": "nist-zero-trust-02",
+  "span": "sp 800-207",
+  "ce_titled_max": 0.0003816561365965754,
+  "ce_bare_max": 0.0003594625450205058,
+  "ce_titled_all": [
+   0.0003816561365965754
+  ],
+  "n_cited": 1,
+  "emb_cos_max": 0.1441,
+  "emb_delta": -0.368
+ },
+ {
+  "side": "FP",
+  "qid": "nist-zero-trust-03",
+  "span": "trust component",
+  "ce_titled_max": 0.9057968258857727,
+  "ce_bare_max": 0.884772539138794,
+  "ce_titled_all": [
+   0.9057968258857727
+  ],
+  "n_cited": 1,
+  "emb_cos_max": 0.4913,
+  "emb_delta": -0.1241
+ },
+ {
+  "side": "FP",
+  "qid": "nist-zero-trust-05",
+  "span": "sp 800-207",
+  "ce_titled_max": 0.00019777250417973846,
+  "ce_bare_max": 0.00015509013610426337,
+  "ce_titled_all": [
+   0.00019777250417973846
+  ],
+  "n_cited": 1,
+  "emb_cos_max": 0.1214,
+  "emb_delta": -0.4171
+ },
+ {
+  "side": "FP",
+  "qid": "scientific-gte-01",
+  "span": "gte-base model",
+  "ce_titled_max": 0.9860419631004333,
+  "ce_bare_max": 0.9816380739212036,
+  "ce_titled_all": [
+   0.9860419631004333,
+   0.8839631676673889,
+   0.5721933245658875,
+   0.771552324295044
+  ],
+  "n_cited": 4,
+  "emb_cos_max": 0.5177,
+  "emb_delta": 0.0282
+ },
+ {
+  "side": "FP",
+  "qid": "scientific-gte-02",
+  "span": "encoder architecture",
+  "ce_titled_max": 0.8195369243621826,
+  "ce_bare_max": 0.761707603931427,
+  "ce_titled_all": [
+   0.8195369243621826,
+   0.8195369243621826
+  ],
+  "n_cited": 2,
+  "emb_cos_max": 0.3634,
+  "emb_delta": -0.1713
+ },
+ {
+  "side": "FP",
+  "qid": "scientific-gte-02",
+  "span": "gte embedding",
+  "ce_titled_max": 0.20312532782554626,
+  "ce_bare_max": 0.14586696028709412,
+  "ce_titled_all": [
+   0.20312532782554626,
+   0.20312532782554626
+  ],
+  "n_cited": 2,
+  "emb_cos_max": 0.4021,
+  "emb_delta": -0.1327
+ },
+ {
+  "side": "FP",
+  "qid": "linux-fundamentals-01",
+  "span": "file or",
+  "ce_titled_max": 0.0009057903662323952,
+  "ce_bare_max": 0.0010171487228944898,
+  "ce_titled_all": [
+   0.0009057903662323952
+  ],
+  "n_cited": 1,
+  "emb_cos_max": 0.2345,
+  "emb_delta": -0.3946
+ },
+ {
+  "side": "FP",
+  "qid": "linux-fundamentals-01",
+  "span": "or directory",
+  "ce_titled_max": 0.015478653833270073,
+  "ce_bare_max": 0.014966560527682304,
+  "ce_titled_all": [
+   0.015478653833270073
+  ],
+  "n_cited": 1,
+  "emb_cos_max": 0.2356,
+  "emb_delta": -0.3935
+ },
+ {
+  "side": "FP",
+  "qid": "linux-fundamentals-01",
+  "span": "permissions file",
+  "ce_titled_max": 0.0063648102805018425,
+  "ce_bare_max": 0.0065515125170350075,
+  "ce_titled_all": [
+   0.0063648102805018425
+  ],
+  "n_cited": 1,
+  "emb_cos_max": 0.4693,
+  "emb_delta": -0.1598
+ },
+ {
+  "side": "FP",
+  "qid": "linux-fundamentals-03",
+  "span": "always begin",
+  "ce_titled_max": 0.3839903175830841,
+  "ce_bare_max": 0.35909172892570496,
+  "ce_titled_all": [
+   0.3839903175830841
+  ],
+  "n_cited": 1,
+  "emb_cos_max": 0.3141,
+  "emb_delta": -0.3383
+ },
+ {
+  "side": "FP",
+  "qid": "linux-fundamentals-03",
+  "span": "linux always",
+  "ce_titled_max": 0.1659771353006363,
+  "ce_bare_max": 0.17306892573833466,
+  "ce_titled_all": [
+   0.1659771353006363
+  ],
+  "n_cited": 1,
+  "emb_cos_max": 0.3716,
+  "emb_delta": -0.2808
+ },
+ {
+  "side": "FP",
+  "qid": "cr350-xref-02",
+  "span": "cyber kill",
+  "ce_titled_max": 9.00912782526575e-05,
+  "ce_bare_max": 0.0001227411557920277,
+  "ce_titled_all": [
+   9.00912782526575e-05
+  ],
+  "n_cited": 1,
+  "emb_cos_max": 0.1958,
+  "emb_delta": -0.3395
+ },
+ {
+  "side": "FP",
+  "qid": "cr350-xref-02",
+  "span": "kill chain",
+  "ce_titled_max": 7.454620208591223e-05,
+  "ce_bare_max": 9.170476550934836e-05,
+  "ce_titled_all": [
+   7.454620208591223e-05
+  ],
+  "n_cited": 1,
+  "emb_cos_max": 0.146,
+  "emb_delta": -0.3893
+ },
+ {
+  "side": "FP",
+  "qid": "cr350-xref-02",
+  "span": "la cyber",
+  "ce_titled_max": 0.0003781228151638061,
+  "ce_bare_max": 0.0004542782553471625,
+  "ce_titled_all": [
+   0.0003781228151638061
+  ],
+  "n_cited": 1,
+  "emb_cos_max": 0.1743,
+  "emb_delta": -0.361
+ },
+ {
+  "side": "FP",
+  "qid": "cr350-xref-02",
+  "span": "reconnaissance de",
+  "ce_titled_max": 0.6922479271888733,
+  "ce_bare_max": 0.7798991203308105,
+  "ce_titled_all": [
+   0.6922479271888733
+  ],
+  "n_cited": 1,
+  "emb_cos_max": 0.3846,
+  "emb_delta": -0.1508
+ },
+ {
+  "side": "FP",
+  "qid": "technical-guidelines-01",
+  "span": "developer guidelines",
+  "ce_titled_max": 0.12174369394779205,
+  "ce_bare_max": 0.10576421022415161,
+  "ce_titled_all": [
+   0.12174369394779205
+  ],
+  "n_cited": 1,
+  "emb_cos_max": 0.5064,
+  "emb_delta": 0.1653
+ }
+]

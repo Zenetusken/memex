@@ -1,0 +1,114 @@
+[
+ {
+  "side": "BREACH",
+  "qid": "annual-report-12",
+  "nli_whole": 0.2602,
+  "nli_min_sentence": 0.2602,
+  "n_premise_units": 5,
+  "n_sentences": 1
+ },
+ {
+  "side": "BREACH",
+  "qid": "technical-guidelines-13",
+  "nli_whole": 0.0267,
+  "nli_min_sentence": 0.0267,
+  "n_premise_units": 4,
+  "n_sentences": 1
+ },
+ {
+  "side": "FP",
+  "qid": "annual-report-01",
+  "nli_whole": 0.6658,
+  "nli_min_sentence": 0.6658,
+  "n_premise_units": 5,
+  "n_sentences": 1
+ },
+ {
+  "side": "FP",
+  "qid": "annual-report-03",
+  "nli_whole": 0.1426,
+  "nli_min_sentence": 0.1426,
+  "n_premise_units": 4,
+  "n_sentences": 1
+ },
+ {
+  "side": "FP",
+  "qid": "annual-report-05",
+  "nli_whole": 0.9878,
+  "nli_min_sentence": 0.1142,
+  "n_premise_units": 5,
+  "n_sentences": 2
+ },
+ {
+  "side": "FP",
+  "qid": "nist-zero-trust-02",
+  "nli_whole": 0.9871,
+  "nli_min_sentence": 0.9871,
+  "n_premise_units": 18,
+  "n_sentences": 1
+ },
+ {
+  "side": "FP",
+  "qid": "nist-zero-trust-03",
+  "nli_whole": 0.996,
+  "nli_min_sentence": 0.996,
+  "n_premise_units": 18,
+  "n_sentences": 1
+ },
+ {
+  "side": "FP",
+  "qid": "nist-zero-trust-05",
+  "nli_whole": 0.0546,
+  "nli_min_sentence": 0.0546,
+  "n_premise_units": 13,
+  "n_sentences": 1
+ },
+ {
+  "side": "FP",
+  "qid": "scientific-gte-01",
+  "nli_whole": 0.9194,
+  "nli_min_sentence": 0.9194,
+  "n_premise_units": 56,
+  "n_sentences": 1
+ },
+ {
+  "side": "FP",
+  "qid": "scientific-gte-02",
+  "nli_whole": 0.9835,
+  "nli_min_sentence": 0.9835,
+  "n_premise_units": 20,
+  "n_sentences": 1
+ },
+ {
+  "side": "FP",
+  "qid": "linux-fundamentals-01",
+  "nli_whole": 0.0333,
+  "nli_min_sentence": 0.0333,
+  "n_premise_units": 3,
+  "n_sentences": 1
+ },
+ {
+  "side": "FP",
+  "qid": "linux-fundamentals-03",
+  "nli_whole": 0.9037,
+  "nli_min_sentence": 0.9037,
+  "n_premise_units": 3,
+  "n_sentences": 1
+ },
+ {
+  "side": "FP",
+  "qid": "cr350-xref-02",
+  "nli_whole": 0.0033,
+  "nli_min_sentence": 0.0033,
+  "n_premise_units": 3,
+  "n_sentences": 1
+ },
+ {
+  "side": "FP",
+  "qid": "technical-guidelines-01",
+  "nli_whole": 0.9973,
+  "nli_min_sentence": 0.9973,
+  "n_premise_units": 18,
+  "n_sentences": 1
+ }
+]
