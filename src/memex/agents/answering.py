@@ -2378,7 +2378,9 @@ async def _provenance_scope_violation(state: AnswerState) -> str | None:
         return None
     phrase, tokens = extracted
     window = {c.chunk_id: c for c in state.reranked}
-    grounded = set(state.verification.grounded) if state.verification else set()
+    grounded: set[int] = (
+        set(state.verification.grounded) if state.verification else set()
+    )
     cited = [
         window[c.source_chunk_id]
         for i, c in enumerate(state.draft.claims)
