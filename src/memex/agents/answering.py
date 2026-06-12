@@ -1790,6 +1790,25 @@ async def answer(state: AnswerState) -> AnswerStateUpdate:
         except ModelCallError as e:
             log.warning("answer.denial_reframe_failed", error=str(e)[:120])
 
+    # SUMMARY-SCOPE GUARD v2 (audit-17): rebuild the summary from claims when it asserts
+    # a query-subject bigram absent from EVERY claim AND EVERY evidence chunk (genuinely
+    # unsupported — the v1 claims-only trigger over-refused net -107 and was reverted).
+    # The flag routes assess_relevance to a deterministic subject-mismatch refusal.
+    scope_rebuilt = False
+    if (
+        state.summary_scope_guard
+        and draft.claims
+        and summary_subject_unsupported(
+            state.query,
+            draft.summary,
+            [c.claim for c in draft.claims],
+            [c.text or "" for c in answer_chunks],
+        )
+    ):
+        log.info("answer.summary_scope_rebuilt", original=draft.summary[:120])
+        draft = draft.model_copy(update={"summary": " ".join(c.claim for c in draft.claims)})
+        scope_rebuilt = True
+
     # Repair corrupted citation ids before they reach verify/compose.
     # The answer LLM sometimes mangles the long `docid#hash` ids it's
     # shown (bare hash, single-char flip); snapping them back to real
@@ -1799,28 +1818,6 @@ async def answer(state: AnswerState) -> AnswerStateUpdate:
         if repair_stats["suffix"] or repair_stats["fuzzy"] or repair_stats["unresolved"]:
             log.info("chunk_id_repair", **repair_stats)
         draft = draft.model_copy(update={"claims": repaired})
-
-    # SUMMARY-SCOPE GUARD v3 (audit-17): rebuild the summary from claims when it asserts a
-    # query-subject bigram absent from EVERY claim AND from the CITED chunks' text — the
-    # claim's own SUPPORT must carry the subject. (v1 claims-only over-refused net -107;
-    # v2 whole-window was too generous: a query ABOUT the guidelines retrieves guidelines
-    # chunks whose text carries the subject even though the CITED chunk is log_layer.rs —
-    # tg-13 re-breached.) Runs AFTER chunk-id repair so citations resolve; a dangling cite
-    # contributes no support. The flag routes assess_relevance to a deterministic refusal.
-    scope_rebuilt = False
-    if state.summary_scope_guard and draft.claims:
-        _by_id = {c.chunk_id: (c.text or "") for c in state.reranked}
-        cited_texts = [
-            _by_id[c.source_chunk_id] for c in draft.claims if c.source_chunk_id in _by_id
-        ]
-        if summary_subject_unsupported(
-            state.query, draft.summary, [c.claim for c in draft.claims], cited_texts
-        ):
-            log.info("answer.summary_scope_rebuilt", original=draft.summary[:120])
-            draft = draft.model_copy(
-                update={"summary": " ".join(c.claim for c in draft.claims)}
-            )
-            scope_rebuilt = True
 
     return {
         "draft": draft,
