@@ -72,7 +72,6 @@ from memex.core.text import (
     is_denial_framed_summary,
     relevance_reason_cites_world_knowledge,
     strip_table_rows_blocks,
-    summary_subject_unsupported,
 )
 from memex.core.types import (
     Chunk,
@@ -607,8 +606,6 @@ class AnswerState(BaseModel):
     relevance_world_knowledge_guard: bool = True
     # Set from `agents.denial_reframe_retry_enabled` in `answer_query` (fail-open).
     denial_reframe_retry: bool = True
-    # Set from `agents.summary_scope_guard_enabled` in `answer_query` (fail-open).
-    summary_scope_guard: bool = True
 
     nodes_traversed: int = 0
     max_nodes_traversed: int = 20
@@ -1786,23 +1783,6 @@ async def answer(state: AnswerState) -> AnswerStateUpdate:
         except ModelCallError as e:
             log.warning("answer.denial_reframe_failed", error=str(e)[:120])
 
-    # SUMMARY-SCOPE GUARD (audit-17): the draft summary can re-attribute a TRUE claim to
-    # the QUERY's subject ("Graphics segment gross margin was 71.1%" over a segment-free
-    # claim) — verify gates claims, so the mis-scoped framing shipped (the ar-12/tg-13
-    # counterfactual breaches, deterministic under sharper-reranker windows). When a
-    # query∩summary content-bigram is unsupported by EVERY claim, rebuild the summary
-    # from the claims HERE — so assess_relevance judges the honest text and refuses a
-    # subject mismatch. Rewrite-only-narrows ⇒ direction-safe by construction.
-    if (
-        state.summary_scope_guard
-        and draft.claims
-        and summary_subject_unsupported(
-            state.query, draft.summary, [c.claim for c in draft.claims]
-        )
-    ):
-        log.info("answer.summary_scope_rebuilt", original=draft.summary[:120])
-        draft = draft.model_copy(update={"summary": " ".join(c.claim for c in draft.claims)})
-
     # Repair corrupted citation ids before they reach verify/compose.
     # The answer LLM sometimes mangles the long `docid#hash` ids it's
     # shown (bare hash, single-char flip); snapping them back to real
@@ -2867,12 +2847,6 @@ async def answer_query(
     except (ConfigurationError, MemexError):
         denial_reframe_retry = True
 
-    # The summary-scope guard (audit-17), same fail-open pattern.
-    try:
-        summary_scope_guard = get_settings().agents.summary_scope_guard_enabled
-    except (ConfigurationError, MemexError):
-        summary_scope_guard = True
-
     # Graph expansion is the param ANDed with the settings kill-switch (default on),
     # read fail-open — so `MEMEX_AGENTS__GRAPH_EXPANSION_ENABLED=false` disables it
     # globally (for the earns-its-keep A/B) while an explicit param=False still wins.
@@ -2910,7 +2884,6 @@ async def answer_query(
         citation_retarget=citation_retarget,
         relevance_world_knowledge_guard=relevance_world_knowledge_guard,
         denial_reframe_retry=denial_reframe_retry,
-        summary_scope_guard=summary_scope_guard,
         scope_doc_ids=scope_doc_ids or [],
         # The grounded multi-turn chat's bounded prior-chunk carry (Surface A). Default
         # None/[] → byte-identical to a bare `/ask`; `retrieve` unions these into the

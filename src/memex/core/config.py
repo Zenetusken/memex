@@ -771,13 +771,6 @@ class AgentsSettings(BaseModel):
     # existing v5 feedback slot (no prompt-version change). The retried draft faces the
     # FULL verify gate ⇒ HARD-gate-safe. MEMEX_AGENTS__DENIAL_REFRAME_RETRY_ENABLED=false reverts.
     denial_reframe_retry_enabled: bool = True
-    # SUMMARY-SCOPE GUARD (audit-17, 2026-06-11): the draft summary can smuggle the
-    # query's subject into framing no claim supports (a TRUE grounded claim re-attributed
-    # to the asked subject — the ar-12/tg-13 counterfactual breaches). When detected, the
-    # summary is REBUILT from the claims BEFORE assess_relevance, which then judges the
-    # honest text (subject mismatch → refuse). Rewrite-only-narrows ⇒ direction-safe.
-    # MEMEX_AGENTS__SUMMARY_SCOPE_GUARD_ENABLED=false reverts.
-    summary_scope_guard_enabled: bool = True
     # The code-only FTS term-query path (Phase-3 Lever A, 2026-06-09, ADR-0021 / audits/13):
     # when a /ask query NAMES a code identifier (snake_case / camelCase — see
     # `index/code_query.query_has_code_identifier`), the BM25 arm builds an OR'd-quoted-WHOLE-
