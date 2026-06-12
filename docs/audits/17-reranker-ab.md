@@ -64,3 +64,34 @@ paraphrase answers don't — the chunk usually carries the subject). Its own inc
 **Standing state:** bge remains the shipped default (no breaches); the mxbai config CANNOT ship while
 the scope hole is open. The hole itself is PRE-EXISTING and reachable under bge (less often) — a
 first-class finding independent of the reranker verdict.
+
+## ARC CLOSED — mini-sweep FAIL; bge STAYS DEFAULT; mxbai = blocked-on-the-scope-hole (2026-06-12)
+
+Guard v3 (cited-chunk subject semantics) passed the 4-case breach validation (ar-12/tg-13 refuse 2/2;
+ar-14/hw-06 hold) but **FAILED the 30-query mini-sweep: 20/30 false refusals** — legit claims cite
+chunks whose text paraphrases/recases the subject, so verbatim-bigram absence over-fires regardless of
+evidence scope. **Three iterations (v1 claims-only −107 / v2 whole-window under-fires tg-13 / v3
+cited-chunks 20/30) establish the structural verdict: a deterministic LEXICAL trigger cannot price
+"subject genuinely unsupported" vs "subject reworded" at an acceptable base-rate.** The mini-sweep
+gate caught v3 at ~1/1000th of a ladder's cost — the v1 lesson institutionalized.
+
+**Dispositions:**
+- **bge-reranker-v2-m3 STAYS the default** (it was never changed in config; all mxbai work was env-scoped).
+- **mxbai-rerank-base-v2 = BLOCKED-ON-THE-SCOPE-HOLE**: its wins are real and recorded (the 10/10 rank
+  sweep; slide-decks +3; the autopsy at 11/18 incl. the synthesis residual img-01; codex recovered with
+  demotion; the French pass) but its windows make the PRE-EXISTING summary-scope hole deterministically
+  reachable (ar-12/tg-13), and no acceptable guard exists yet. Re-open WHEN the scope hole is closed.
+- **The scope hole itself is the arc's primary discovery** — a HARD-gate gap (the summary re-attributes
+  a true grounded claim to the question's subject; verify gates claims, nothing gates the framing)
+  reachable under ANY reranker. **The guard redesign is its own future increment**; candidate
+  directions recorded: a SEMANTIC judge dedicated to subject-match (not the conflated relevance gate),
+  claim-level subject annotation at draft time, or an embedding-similarity scope check — each needs
+  the mini-sweep gate before any ladder.
+- The retarget top-10 widening (built for ct-01-under-mxbai) reverted too — unvalidated under the bge
+  default; banked as a candidate for the scope-hole re-opening.
+- Demotion lever stays default-OFF (its mxbai synergy is recorded for the re-opening).
+
+**What the arc SHIPS:** the probe instrument (`scripts/reranker_ab_probe.py` + the stage-1/2 artifacts),
+the layer-attribution methodology (component-isolation legs), the mini-sweep discipline, the corpus
+slot calibrations, and this audit. The 4B window-composition brittleness + the summary-scope hole are
+the two durable findings that outlive the reranker question.
