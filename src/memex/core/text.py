@@ -8,6 +8,7 @@ no `agents/ → index/`).
 
 from __future__ import annotations
 
+import itertools
 import re
 from typing import TYPE_CHECKING, Final
 
@@ -274,6 +275,45 @@ _TABLE_ROWS_RE = re.compile(
 )
 _TABLE_ROWS_OPEN_RE = re.compile(r"\[table-rows\]", flags=re.DOTALL)
 _TABLE_ROWS_CLOSE_RE = re.compile(r"\[/table-rows\]", flags=re.DOTALL)
+
+
+_SUBJECT_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_-]+")
+_SUBJECT_STOP = frozenset(
+    {"the", "was", "what", "which", "according", "fiscal", "year", "their", "this",
+     "that", "does", "from", "with", "have", "has", "are", "is", "for", "and", "of",
+     "in", "to", "on", "a", "an", "per", "by", "at", "as", "its", "it", "how", "into"}
+)
+
+
+def _content_bigrams(text: str) -> set[tuple[str, str]]:
+    toks = [t for t in _SUBJECT_TOKEN_RE.findall(text.lower()) if t not in _SUBJECT_STOP]
+    return set(itertools.pairwise(toks))
+
+
+def summary_subject_unsupported(query: str, summary: str, claims: list[str]) -> bool:
+    """Whether the draft SUMMARY smuggles the QUERY's subject into framing that NO claim
+    supports — the audit-17 mis-scoping breach (ar-12: claim "Gross margin was 71.1%..."
+    [true, segment-free, grounded] but summary "The gross margin for NVIDIA's GRAPHICS
+    SEGMENT was 71.1%"; tg-13: claim "The maximum line length enforced is 120" but summary
+    "The DEVELOPER GUIDELINES specify..."). verify gates CLAIMS; nothing gated the summary's
+    subject, so a true fact shipped re-attributed to the asked subject.
+
+    Deterministic signature: a content-token BIGRAM shared by the query AND the summary
+    (the injected subject) that appears in NO claim. The caller then REBUILDS the summary
+    from the claims — removing only the unsupported framing — BEFORE assess_relevance,
+    which then judges the honest summary against the question (a subject mismatch refuses).
+    Direction-safe: the rewrite only narrows the summary to claim text; a legit answer
+    whose claims carry the subject never triggers.
+    """
+    if not claims:
+        return False
+    qs = _content_bigrams(query) & _content_bigrams(summary)
+    if not qs:
+        return False
+    claim_bigrams: set[tuple[str, str]] = set()
+    for c in claims:
+        claim_bigrams |= _content_bigrams(c)
+    return bool(qs - claim_bigrams)
 
 
 _DENIAL_MARKER_RE = re.compile(
