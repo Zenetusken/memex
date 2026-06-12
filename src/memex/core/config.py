@@ -696,6 +696,18 @@ class AgentsSettings(BaseModel):
     artifact_scope_enabled: bool = True
     partial_grounded_answers: bool = True
     graph_expansion_enabled: bool = False
+    # Provenance-scope backstop (audit-18 §9): when the query NAMES its source
+    # ("According to the developer guidelines, …") and that source matches a real
+    # vault document's identity, a grounded answer whose cited chunks provably come
+    # from a DIFFERENT document is non-responsive — the deterministic doc-identity
+    # check at the top of `assess_relevance` refuses it (the tg-13 false-provenance
+    # breach: "according to the developer guidelines" answered from log_layer.rs).
+    # ADVISORY-layer only (post-verify, can only narrow); fail-open on extraction
+    # ambiguity, artifact-noun sources (#256's domain), generic sources, unmatched
+    # sources, and store errors. Audit-18 measured every semantic arm dead here —
+    # this deterministic lever is the one that separates (the numeric-backstop
+    # precedent). Kill-switch: `MEMEX_AGENTS__PROVENANCE_SCOPE_ENABLED=false`.
+    provenance_scope_enabled: bool = True
     # Companion-merge (ADR-0018, spec docs/specs/companion-merge.md): align a lecture TRANSCRIPT to
     # its SLIDE-DECK and make slide+commentary jointly groundable. `companion_align_min_score` is the
     # cosine NULL floor — a transcript chunk whose best slide scores below it is an off-slide tangent

@@ -2348,6 +2348,80 @@ async def refuse(state: AnswerState) -> AnswerStateUpdate:
     return {"final": final, "nodes_traversed": new_nodes}
 
 
+async def _provenance_scope_violation(state: AnswerState) -> str | None:
+    """A non-responsive REASON when the query NAMES its source and the answer's cited
+    evidence provably comes from a different document — else ``None`` (no verdict).
+
+    The provenance-class summary-scope breach (audit-18 §9): "According to the
+    developer guidelines, what is the maximum line length…" answered from
+    ``tui/src/log_layer.rs`` — verify grounds the claim against its chunk (true), and
+    the 4B relevance judge hallucinates the source match; only a deterministic
+    document-identity check separates this from true-provenance answers (measured:
+    fires on tg-13 under every variant; clears `sp 800-207`/tg-01 where the cited
+    doc's identity carries the named source).
+
+    Fires ONLY when ALL of: (1) the query has a leading "according to X," clause whose
+    X yields usable identity tokens (artifact-noun/figure references, generic sources,
+    years, and <3-char tokens fail-open — see `extract_provenance_source`); (2) no
+    GROUNDED claim's cited chunk carries a token in its doc id, title, or heading_path
+    (a section titled "Developer Guidelines" inside a larger doc is true provenance);
+    (3) X matches ≥1 real vault document identity (else the source is unadjudicable —
+    "the course materials" names nothing checkable). Store errors fail-open: an
+    infrastructure failure must never manufacture a refusal (the assess_relevance
+    stance). ADVISORY layer, post-verify — can only narrow, never admit.
+    """
+    from memex.core.config import get_settings
+    from memex.core.text import extract_provenance_source, provenance_tokens_match
+
+    extracted = extract_provenance_source(state.query)
+    if extracted is None or state.draft is None:
+        return None
+    phrase, tokens = extracted
+    window = {c.chunk_id: c for c in state.reranked}
+    grounded = set(state.verification.grounded) if state.verification else set()
+    cited = [
+        window[c.source_chunk_id]
+        for i, c in enumerate(state.draft.claims)
+        if i in grounded and c.source_chunk_id in window
+    ]
+    if not cited:
+        return None
+    for ch in cited:
+        blob = " ".join([ch.document_id, ch.document_title, *ch.heading_path])
+        if provenance_tokens_match(tokens, blob):
+            return None  # the citation itself carries the named source
+    import sqlite3
+
+    from memex.core.errors import ConfigurationError, MemexError
+    from memex.index.fts_store import FTSStore
+
+    try:
+        store = await FTSStore.open(get_settings().vault_path)
+        try:
+            identities = await store.document_identities()
+        finally:
+            await store.close()
+    except (ImportError, ConfigurationError, MemexError, OSError, sqlite3.Error) as exc:
+        logger.bind(node="assess_relevance").warning(
+            "provenance_scope.store_failopen", error=str(exc)[:200]
+        )
+        return None
+    named = [
+        title or doc_id
+        for doc_id, title in identities
+        if provenance_tokens_match(tokens, f"{doc_id} {title}")
+    ]
+    if not named:
+        return None
+    cited_titles = sorted({c.document_title or c.document_id for c in cited})
+    cited_list = ", ".join(f'"{t}"' for t in cited_titles[:3])
+    return (
+        f'the question asks for an answer according to "{phrase}" '
+        f'(the vault document "{named[0]}"), but the answer\'s evidence is cited from '
+        f"{cited_list} — a different source. The named source does not state this."
+    )
+
+
 async def assess_relevance(state: AnswerState) -> AnswerStateUpdate:
     """Responsiveness gate — runs after verify (grounded path), before compose.
 
@@ -2357,6 +2431,13 @@ async def assess_relevance(state: AnswerState) -> AnswerStateUpdate:
     passed off as the answer. Conservative by design (defaults responsive) so
     it removes only clear question/answer topic mismatches. See
     `RelevanceAssessment`. Non-responsive routes to `refuse`.
+
+    The deterministic provenance-scope backstop (`_provenance_scope_violation`,
+    audit-18 §9) runs FIRST, before the LLM call: a query-named source the cited
+    evidence provably doesn't come from is non-responsive regardless of the 4B's
+    verdict (which audit-18 measured hallucinating the source match). Deterministic,
+    so it deliberately bypasses the world-knowledge override below — its reason names
+    vault documents, never textbook knowledge.
     """
     log = logger.bind(node="assess_relevance")
     log.info("start")
@@ -2367,6 +2448,27 @@ async def assess_relevance(state: AnswerState) -> AnswerStateUpdate:
             "relevance": RelevanceAssessment(responsive=True, reason="no grounded draft to assess"),
             "nodes_traversed": state.nodes_traversed + 1,
         }
+    # Provenance-scope backstop (audit-18 §9). Extraction is pure and needs no
+    # settings — the common no-provenance query (the overwhelming majority) never
+    # even reads settings (the #256 pattern); the flag read fails open so a
+    # non-bootstrapped fixture can never manufacture a refusal.
+    from memex.core.config import get_settings as _get_settings
+    from memex.core.errors import ConfigurationError as _ConfigurationError
+    from memex.core.text import extract_provenance_source as _extract_provenance
+
+    if _extract_provenance(state.query) is not None:
+        try:
+            _prov_enabled = _get_settings().agents.provenance_scope_enabled
+        except _ConfigurationError:
+            _prov_enabled = False
+        if _prov_enabled:
+            violation = await _provenance_scope_violation(state)
+            if violation is not None:
+                log.info("provenance_scope.violation", reason=violation[:200])
+                return {
+                    "relevance": RelevanceAssessment(responsive=False, reason=violation),
+                    "nodes_traversed": state.nodes_traversed + 1,
+                }
     grounded = set(state.verification.grounded)
     grounded_claims = [c.claim for i, c in enumerate(state.draft.claims) if i in grounded]
     prompt = render_prompt(

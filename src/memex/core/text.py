@@ -342,6 +342,96 @@ def strip_table_rows_blocks(text: str) -> str:
     return _TABLE_ROWS_RE.sub("", text)
 
 
+# --- Provenance-scope backstop (audit-18 §9) -------------------------------------
+#
+# The provenance-class summary-scope breach: a query names its SOURCE ("According to
+# the developer guidelines, …") and the shipped answer cites a chunk from a DIFFERENT
+# document entirely (tg-13: cited tui/src/log_layer.rs) — the answer asserts a false
+# provenance that verify (claims-vs-chunk) cannot see and the 4B relevance judge
+# hallucinates past. Audit-18 measured every semantic arm non-separating here; the
+# DETERMINISTIC document-identity check below is the lever that works (probed: fires
+# on tg-13 under every variant, clears the `sp 800-207`/tg-01 true-provenance cases).
+#
+# Deliberately TIGHT (the audit-17 v1 lesson — a deterministic refuse amplifies its
+# trigger's false-positive rate):
+#   - markers: "according to|per|selon|d'après" leading clause ONLY. Bare "In X," is a
+#     TOPIC frame in the measured query population ("In the Linux octal permission
+#     system, …"), not provenance — excluded wholesale.
+#   - X naming a SUB-document artifact (figure/table/module/deck…) is the #256
+#     artifact-scope domain; doc-identity cannot adjudicate it → no tokens (fail-open).
+#   - generic source nouns ("the course", "the deck", "the documentation") name no
+#     specific document; years and <3-char tokens are too unspecific to substring-match
+#     ("2026" matches half the vault; "sp" matches "transport") → dropped.
+# The CALLER (agents/answering.py) fires only when a usable token matches ≥1 document
+# identity in the VAULT (X is adjudicable — it names a real document) while NO CITED
+# chunk's identity (doc id + title + heading_path) matches: a vault-named source the
+# answer's own support provably does not come from.
+
+_PROVENANCE_SOURCE_RE = re.compile(
+    r"^(?:according to|per|selon|d['’]apr[eè]s)\s+(.{3,80}?)\s*,",
+    flags=re.IGNORECASE,
+)
+_PROVENANCE_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_-]+")
+# EN + FR determiners/function words that carry no source identity.
+_PROVENANCE_STOP = frozenset(
+    {"the", "a", "an", "this", "that", "its", "of", "in", "on", "for", "and",
+     "le", "la", "les", "un", "une", "de", "du", "des", "au", "aux", "ce", "cette"}
+)
+# Sub-document artifact nouns: X references something INSIDE a document — the #256
+# artifact-scope domain, not adjudicable at document level.
+_PROVENANCE_ARTIFACT_NOUNS = frozenset(
+    {"figure", "figures", "diagram", "diagrams", "diagramme", "diagrammes", "table",
+     "tables", "tableau", "tableaux", "chart", "charts", "graph", "graphs", "image",
+     "images", "timeline", "example", "examples", "exemple", "exemples", "deck",
+     "decks", "slide", "slides", "module", "modules", "chapter", "chapters",
+     "chapitre", "section", "sections", "page", "pages", "screenshot", "photo"}
+)
+# Generic source nouns: name no SPECIFIC document, so they cannot adjudicate.
+_PROVENANCE_GENERIC_NOUNS = frozenset(
+    {"course", "cours", "document", "documents", "documentation", "text", "texte",
+     "manual", "manuel", "paper", "papers", "materials", "material", "corpus",
+     "vault", "notes", "book", "books", "livre", "pdf", "file", "files", "source",
+     "sources", "transcript", "video", "lecture", "lesson"}
+)
+_PROVENANCE_YEAR_RE = re.compile(r"^(?:19|20)\d{2}$")
+_IDENT_NORM_RE = re.compile(r"[-_\s./|—–]")
+
+
+def extract_provenance_source(query: str) -> tuple[str, list[str]] | None:
+    """The (raw phrase, usable identity tokens) of a leading provenance clause, or
+    ``None`` when the query has no adjudicable named source. Returns ``None`` for
+    artifact-noun references, and an empty token list never escapes (treated as None).
+    """
+    m = _PROVENANCE_SOURCE_RE.match(query.strip())
+    if not m:
+        return None
+    phrase = m.group(1).strip()
+    toks = [
+        t for t in _PROVENANCE_TOKEN_RE.findall(phrase.lower())
+        if t not in _PROVENANCE_STOP
+    ]
+    if not toks or any(t in _PROVENANCE_ARTIFACT_NOUNS for t in toks):
+        return None
+    usable = [
+        t for t in toks
+        if t not in _PROVENANCE_GENERIC_NOUNS
+        and not _PROVENANCE_YEAR_RE.match(t)
+        and len(t) >= 3
+    ]
+    if not usable:
+        return None
+    return phrase, usable
+
+
+def provenance_tokens_match(tokens: list[str], identity_blob: str) -> bool:
+    """Whether ANY usable source token appears in *identity_blob* after separator
+    normalization (``-_ ./|`` stripped from both sides), so ``800-207`` matches
+    ``nist-sp-800-207`` and ``guidelines`` matches a doc titled ``guidelines``.
+    Substring direction: token-in-blob (a doc slug concatenates words)."""
+    blob = _IDENT_NORM_RE.sub("", identity_blob.lower())
+    return any(_IDENT_NORM_RE.sub("", t) in blob for t in tokens)
+
+
 def table_rows_spans(text: str) -> list[tuple[int, int]]:
     """Return `(start, end)` char offsets of each
     `[table-rows]...[/table-rows]` block in *text*.
