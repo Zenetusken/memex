@@ -405,16 +405,12 @@ def score(fp_path: str, out_path: str) -> None:
 _SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-ZÀ-Ý])")
 
 
-def hhem(fp_path: str, out_path: str) -> None:
-    import torch
-    from transformers import AutoModelForSequenceClassification
-
-    t0 = time.monotonic()
-    model = AutoModelForSequenceClassification.from_pretrained(
-        "vectara/hallucination_evaluation_model", trust_remote_code=True
-    )
-    model.eval()
-    print(f"[hhem] loaded HHEM-2.1-Open in {time.monotonic() - t0:.1f}s", flush=True)
+def _checker_cases(fp_path: str) -> list[dict[str, Any]]:
+    """The shared 14-case set (2 breach + 12 FP) for summary-level checkers, each with
+    raw and TABLE-LINEARIZED premise variants (the audit-18 §3c mitigation cell —
+    vanilla NLI false-lowed on GFM-table premises; production verify renders linearized
+    via `linearize_gfm_tables`, so the eventual integration point sees that form)."""
+    from memex.core.table_linearize import linearize_gfm_tables
 
     cases: list[dict[str, Any]] = []
     by_suffix = fetch_chunks_by_suffix([s for b in BREACHES for s in b["cited_suffixes"]])
@@ -429,33 +425,25 @@ def hhem(fp_path: str, out_path: str) -> None:
             cases.append(
                 {"side": "FP", "qid": r["qid"], "summary": r["summary"], "cited": cited}
             )
-
-    results: list[dict[str, Any]] = []
     for case in cases:
-        premise = "\n\n".join(f"{c['title']} — {c['text']}" for c in case["cited"])
-        sentences = [s.strip() for s in _SENT_SPLIT_RE.split(case["summary"]) if s.strip()]
-        hyps = [case["summary"], *sentences]
-        with torch.no_grad():
-            scores = [float(x) for x in model.predict([(premise, h) for h in hyps])]
-        row = {
-            "side": case["side"],
-            "qid": case["qid"],
-            "hhem_whole": round(scores[0], 4),
-            "hhem_min_sentence": round(min(scores[1:]), 4),
-            "n_sentences": len(sentences),
-            "summary": case["summary"],
-        }
-        results.append(row)
-        print(
-            f"[hhem] {case['side']:6} {case['qid']:24} whole={row['hhem_whole']:.3f} "
-            f"min_sent={row['hhem_min_sentence']:.3f} (n={len(sentences)})",
-            flush=True,
+        case["premise_raw"] = "\n\n".join(f"{c['title']} — {c['text']}" for c in case["cited"])
+        case["premise_lin"] = "\n\n".join(
+            f"{c['title']} — {linearize_gfm_tables(c['text'])}" for c in case["cited"]
         )
+        case["sentences"] = [
+            s.strip() for s in _SENT_SPLIT_RE.split(case["summary"]) if s.strip()
+        ]
+    return cases
 
+
+def _checker_report(results: list[dict[str, Any]], keys: tuple[str, ...], out_path: str,
+                    tag: str) -> None:
     json.dump(results, open(out_path, "w"), indent=1, ensure_ascii=False)
-    for key in ("hhem_whole", "hhem_min_sentence"):
-        br = sorted(r[key] for r in results if r["side"] == "BREACH")
-        fp = sorted(r[key] for r in results if r["side"] == "FP")
+    for key in keys:
+        br = sorted(r[key] for r in results if r["side"] == "BREACH" and key in r)
+        fp = sorted(r[key] for r in results if r["side"] == "FP" and key in r)
+        if not br or not fp:
+            continue
         margin = min(fp) - max(br)
         print(f"\n=== {key} (low = unsupported) ===")
         print(f"  BREACH (n={len(br)}): {br}")
@@ -464,7 +452,210 @@ def hhem(fp_path: str, out_path: str) -> None:
         print(
             f"  → {'SEPARATES' if margin > 0 else 'OVERLAP: ' + str(sum(1 for x in fp if x <= max(br))) + f'/{len(fp)} FP at-or-below top breach'}"
         )
-    print(f"\n[hhem] rows → {out_path}")
+    print(f"\n[{tag}] rows → {out_path}")
+
+
+def hhem(fp_path: str, out_path: str) -> None:
+    import torch
+    from transformers import AutoModelForSequenceClassification
+
+    t0 = time.monotonic()
+    model = AutoModelForSequenceClassification.from_pretrained(
+        "vectara/hallucination_evaluation_model", trust_remote_code=True
+    )
+    model.eval()
+    print(f"[hhem] loaded HHEM-2.1-Open in {time.monotonic() - t0:.1f}s", flush=True)
+
+    results: list[dict[str, Any]] = []
+    for case in _checker_cases(fp_path):
+        row: dict[str, Any] = {"side": case["side"], "qid": case["qid"],
+                               "n_sentences": len(case["sentences"])}
+        for label, premise in (("raw", case["premise_raw"]), ("lin", case["premise_lin"])):
+            hyps = [case["summary"], *case["sentences"]]
+            with torch.no_grad():
+                scores = [float(x) for x in model.predict([(premise, h) for h in hyps])]
+            row[f"hhem_whole_{label}"] = round(scores[0], 4)
+            row[f"hhem_min_sentence_{label}"] = round(min(scores[1:]), 4)
+        results.append(row)
+        print(
+            f"[hhem] {case['side']:6} {case['qid']:24} "
+            f"whole_raw={row['hhem_whole_raw']:.3f} min_raw={row['hhem_min_sentence_raw']:.3f} "
+            f"whole_lin={row['hhem_whole_lin']:.3f} min_lin={row['hhem_min_sentence_lin']:.3f}",
+            flush=True,
+        )
+    _checker_report(
+        results,
+        ("hhem_whole_raw", "hhem_min_sentence_raw", "hhem_whole_lin", "hhem_min_sentence_lin"),
+        out_path, "hhem",
+    )
+
+
+def minicheck_arm(fp_path: str, out_path: str) -> None:
+    """MiniCheck-Flan-T5-Large, faithful single-chunk reimplementation (the pip package's
+    overlay env resolved a broken torch/torchvision combo, so the recipe is transcribed
+    VERBATIM from minicheck/inference.py: input = 'predict: ' + doc + '</s>' + claim,
+    max_length 2048, one decoder step, P(support) = softmax(logits[[3, 209]])[1], max
+    over doc chunks. Chunking is a no-op here — every probe premise is far below the
+    1748-word chunk size, so the single-chunk path is exactly the package's behavior."""
+    import torch
+    from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+
+    ckpt = "lytang/MiniCheck-Flan-T5-Large"
+    t0 = time.monotonic()
+    tok = AutoTokenizer.from_pretrained(ckpt)
+    model = AutoModelForSeq2SeqLM.from_pretrained(ckpt)
+    model.eval()
+    print(f"[minicheck] loaded {ckpt} in {time.monotonic() - t0:.1f}s", flush=True)
+
+    def mc_score(premise: str, claim: str) -> float:
+        text = "predict: " + tok.eos_token.join([premise, claim])
+        enc = tok(text, max_length=2048, truncation=True, return_tensors="pt")
+        with torch.no_grad():
+            out = model(
+                input_ids=enc["input_ids"],
+                attention_mask=enc["attention_mask"],
+                decoder_input_ids=torch.zeros((1, 1), dtype=torch.long),
+            )
+        # token id 3 = no-support, 209 = support (the package's hardcoded label ids)
+        label_logits = out.logits.squeeze(1)[:, torch.tensor([3, 209])]
+        return float(torch.softmax(label_logits, dim=-1)[0, 1])
+
+    results: list[dict[str, Any]] = []
+    for case in _checker_cases(fp_path):
+        row: dict[str, Any] = {"side": case["side"], "qid": case["qid"],
+                               "n_sentences": len(case["sentences"])}
+        for label, premise in (("raw", case["premise_raw"]), ("lin", case["premise_lin"])):
+            whole = mc_score(premise, case["summary"])
+            min_sent = min(mc_score(premise, s) for s in case["sentences"])
+            row[f"mc_whole_{label}"] = round(whole, 4)
+            row[f"mc_min_sentence_{label}"] = round(min_sent, 4)
+        results.append(row)
+        print(
+            f"[minicheck] {case['side']:6} {case['qid']:24} "
+            f"whole_raw={row['mc_whole_raw']:.3f} min_raw={row['mc_min_sentence_raw']:.3f} "
+            f"whole_lin={row['mc_whole_lin']:.3f} min_lin={row['mc_min_sentence_lin']:.3f}",
+            flush=True,
+        )
+    _checker_report(
+        results,
+        ("mc_whole_raw", "mc_min_sentence_raw", "mc_whole_lin", "mc_min_sentence_lin"),
+        out_path, "minicheck",
+    )
+
+
+_LD_QA_TEMPLATE = (
+    "Briefly answer the following question:\n{question}\n"
+    "Bear in mind that your response should be strictly based on the following "
+    "{num_passages} passages:\n{context}\n"
+    'In case the passages do not contain the necessary information to answer the '
+    'question, please reply with: "Unable to answer based on given passages."\n'
+    "output:"
+)
+
+
+def lettuce_arm(fp_path: str, out_path: str, model_path: str) -> None:
+    """LettuceDetect token-span detector, faithful reimplementation (the pip overlay
+    env resolved a broken torch combo; recipe transcribed from
+    lettucedetect/detectors/transformer.py + prompts/qa_prompt_en.txt: passages block →
+    QA template → tokenizer(prompt, answer, truncation='only_first', max_length=4096)
+    → token-classification → class-1 spans in the answer region, confidence = max
+    class-1 prob). Two variants: question=REAL (the trained input shape — tests the
+    question-echo-benign risk) and question=EMPTY (evidence-only). Score = max span
+    confidence (0.0 = no span); INVERTED vs the entailment arms (high = breach)."""
+    import torch
+    from transformers import AutoModelForTokenClassification, AutoTokenizer
+
+    t0 = time.monotonic()
+    tok = AutoTokenizer.from_pretrained(model_path)
+    model = AutoModelForTokenClassification.from_pretrained(model_path)
+    model.eval()
+    print(f"[lettuce] loaded {model_path} in {time.monotonic() - t0:.1f}s", flush=True)
+
+    def ld_score(passages: list[str], question: str, answer: str) -> tuple[float, list[str]]:
+        ctx_block = "\n".join(f"passage {i + 1}: {p}" for i, p in enumerate(passages))
+        prompt = _LD_QA_TEMPLATE.format(
+            question=question, num_passages=len(passages), context=ctx_block
+        )
+        enc = tok(prompt, answer, truncation="only_first", max_length=4096,
+                  return_offsets_mapping=True, return_tensors="pt", add_special_tokens=True)
+        offsets = enc.pop("offset_mapping")[0]
+        answer_start = tok(prompt, add_special_tokens=True, return_tensors="pt")[
+            "input_ids"
+        ].shape[1]
+        with torch.no_grad():
+            logits = model(**enc).logits
+        preds = torch.argmax(logits, dim=-1)[0]
+        probs = torch.softmax(logits, dim=-1)[0]
+        answer_char_offset = (
+            offsets[answer_start][0].item() if answer_start < offsets.size(0) else 0
+        )
+        spans: list[dict[str, Any]] = []
+        current: dict[str, Any] | None = None
+        for i in range(answer_start, preds.size(0)):
+            t_start, t_end = offsets[i].tolist()
+            if t_start == t_end:
+                continue
+            if int(preds[i]) == 1:
+                conf = float(probs[i, 1])
+                rel_s, rel_e = t_start - answer_char_offset, t_end - answer_char_offset
+                if current is None:
+                    current = {"start": rel_s, "end": rel_e, "confidence": conf}
+                else:
+                    current["end"] = rel_e
+                    current["confidence"] = max(current["confidence"], conf)
+            elif current is not None:
+                spans.append(current)
+                current = None
+        if current is not None:
+            spans.append(current)
+        texts = [answer[s["start"]: s["end"]][:60] for s in spans]
+        return max((s["confidence"] for s in spans), default=0.0), texts
+
+    questions = {b["qid"]: b["question"] for b in BREACHES}
+    for r in json.load(open(fp_path)):
+        questions[r["qid"]] = r["question"]
+
+    # The Memex answer style appends a provenance tail ("…, as stated in the 2026
+    # Annual Review (Form 10-K).") that RAGTruth answers don't have — LD flags it as
+    # baseless. The "qs" variant strips the tail BEFORE scoring: if a breach signal
+    # survives only in the tail, the catch was style noise, not the binding.
+    tail_re = re.compile(r",?\s+as (?:stated|noted|reported) in [^.]*\.\s*$", re.IGNORECASE)
+
+    results: list[dict[str, Any]] = []
+    for case in _checker_cases(fp_path):
+        passages = [f"{c['title']} — {c['text']}" for c in case["cited"]]
+        stripped = tail_re.sub(".", case["summary"])
+        conf_q, spans_q = ld_score(passages, questions[case["qid"]], case["summary"])
+        conf_noq, spans_noq = ld_score(passages, "", case["summary"])
+        conf_qs, spans_qs = ld_score(passages, questions[case["qid"]], stripped)
+        row = {
+            "side": case["side"], "qid": case["qid"],
+            "ld_max_conf_q": round(conf_q, 4), "ld_spans_q": spans_q[:4],
+            "ld_max_conf_noq": round(conf_noq, 4), "ld_spans_noq": spans_noq[:4],
+            "ld_max_conf_qs": round(conf_qs, 4), "ld_spans_qs": spans_qs[:4],
+            "tail_stripped": stripped != case["summary"],
+        }
+        results.append(row)
+        print(
+            f"[lettuce] {case['side']:6} {case['qid']:24} "
+            f"conf_q={conf_q:.3f} {spans_q[:2]!r} conf_noq={conf_noq:.3f} "
+            f"conf_qs={conf_qs:.3f} {spans_qs[:2]!r}",
+            flush=True,
+        )
+
+    json.dump(results, open(out_path, "w"), indent=1, ensure_ascii=False)
+    for key in ("ld_max_conf_q", "ld_max_conf_noq", "ld_max_conf_qs"):
+        br = sorted(r[key] for r in results if r["side"] == "BREACH")
+        fp = sorted(r[key] for r in results if r["side"] == "FP")
+        margin = min(br) - max(fp)  # INVERTED: high = hallucinated
+        print(f"\n=== {key} (HIGH = hallucinated span found) ===")
+        print(f"  BREACH (n={len(br)}): {br}")
+        print(f"  FP     (n={len(fp)}): {fp}")
+        print(f"  margin (min BREACH − max FP) = {margin:.3f}")
+        print(
+            f"  → {'SEPARATES' if margin > 0 else 'OVERLAP: ' + str(sum(1 for x in fp if x >= min(br))) + f'/{len(fp)} FP at-or-above bottom breach'}"
+        )
+    print(f"\n[lettuce] rows → {out_path}")
 
 
 # ------------------------------------------------- nli (CPU, no daemon) — entailment arm
@@ -677,6 +868,17 @@ if __name__ == "__main__":
         hhem(
             sys.argv[2] if len(sys.argv) > 2 else "/tmp/scope_probe_fp.json",  # noqa: S108 — probe artifact
             sys.argv[3] if len(sys.argv) > 3 else "/tmp/scope_probe_hhem.json",  # noqa: S108 — probe artifact
+        )
+    elif cmd == "minicheck":
+        minicheck_arm(
+            sys.argv[2] if len(sys.argv) > 2 else "/tmp/scope_probe_fp.json",  # noqa: S108 — probe artifact
+            sys.argv[3] if len(sys.argv) > 3 else "/tmp/scope_probe_minicheck.json",  # noqa: S108 — probe artifact
+        )
+    elif cmd == "lettuce":
+        lettuce_arm(
+            sys.argv[2] if len(sys.argv) > 2 else "/tmp/scope_probe_fp.json",  # noqa: S108 — probe artifact
+            sys.argv[3] if len(sys.argv) > 3 else "/tmp/scope_probe_lettuce.json",  # noqa: S108 — probe artifact
+            sys.argv[4] if len(sys.argv) > 4 else "KRLabsOrg/lettucedect-base-modernbert-en-v1",
         )
     elif cmd == "nli":
         nli(

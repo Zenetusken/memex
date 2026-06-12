@@ -1,0 +1,128 @@
+[
+ {
+  "side": "BREACH",
+  "qid": "annual-report-12",
+  "n_sentences": 1,
+  "hhem_whole_raw": 0.8786,
+  "hhem_min_sentence_raw": 0.8786,
+  "hhem_whole_lin": 0.8786,
+  "hhem_min_sentence_lin": 0.8786
+ },
+ {
+  "side": "BREACH",
+  "qid": "technical-guidelines-13",
+  "n_sentences": 1,
+  "hhem_whole_raw": 0.2715,
+  "hhem_min_sentence_raw": 0.2715,
+  "hhem_whole_lin": 0.2715,
+  "hhem_min_sentence_lin": 0.2715
+ },
+ {
+  "side": "FP",
+  "qid": "annual-report-01",
+  "n_sentences": 1,
+  "hhem_whole_raw": 0.1462,
+  "hhem_min_sentence_raw": 0.1462,
+  "hhem_whole_lin": 0.1462,
+  "hhem_min_sentence_lin": 0.1462
+ },
+ {
+  "side": "FP",
+  "qid": "annual-report-03",
+  "n_sentences": 1,
+  "hhem_whole_raw": 0.1367,
+  "hhem_min_sentence_raw": 0.1367,
+  "hhem_whole_lin": 0.1367,
+  "hhem_min_sentence_lin": 0.1367
+ },
+ {
+  "side": "FP",
+  "qid": "annual-report-05",
+  "n_sentences": 2,
+  "hhem_whole_raw": 0.2672,
+  "hhem_min_sentence_raw": 0.195,
+  "hhem_whole_lin": 0.2672,
+  "hhem_min_sentence_lin": 0.195
+ },
+ {
+  "side": "FP",
+  "qid": "nist-zero-trust-02",
+  "n_sentences": 1,
+  "hhem_whole_raw": 0.135,
+  "hhem_min_sentence_raw": 0.135,
+  "hhem_whole_lin": 0.135,
+  "hhem_min_sentence_lin": 0.135
+ },
+ {
+  "side": "FP",
+  "qid": "nist-zero-trust-03",
+  "n_sentences": 1,
+  "hhem_whole_raw": 0.9668,
+  "hhem_min_sentence_raw": 0.9668,
+  "hhem_whole_lin": 0.9668,
+  "hhem_min_sentence_lin": 0.9668
+ },
+ {
+  "side": "FP",
+  "qid": "nist-zero-trust-05",
+  "n_sentences": 1,
+  "hhem_whole_raw": 0.21,
+  "hhem_min_sentence_raw": 0.21,
+  "hhem_whole_lin": 0.21,
+  "hhem_min_sentence_lin": 0.21
+ },
+ {
+  "side": "FP",
+  "qid": "scientific-gte-01",
+  "n_sentences": 1,
+  "hhem_whole_raw": 0.7998,
+  "hhem_min_sentence_raw": 0.7998,
+  "hhem_whole_lin": 0.7998,
+  "hhem_min_sentence_lin": 0.7998
+ },
+ {
+  "side": "FP",
+  "qid": "scientific-gte-02",
+  "n_sentences": 1,
+  "hhem_whole_raw": 0.5158,
+  "hhem_min_sentence_raw": 0.5158,
+  "hhem_whole_lin": 0.5158,
+  "hhem_min_sentence_lin": 0.5158
+ },
+ {
+  "side": "FP",
+  "qid": "linux-fundamentals-01",
+  "n_sentences": 1,
+  "hhem_whole_raw": 0.4611,
+  "hhem_min_sentence_raw": 0.4611,
+  "hhem_whole_lin": 0.4611,
+  "hhem_min_sentence_lin": 0.4611
+ },
+ {
+  "side": "FP",
+  "qid": "linux-fundamentals-03",
+  "n_sentences": 1,
+  "hhem_whole_raw": 0.7531,
+  "hhem_min_sentence_raw": 0.7531,
+  "hhem_whole_lin": 0.7531,
+  "hhem_min_sentence_lin": 0.7531
+ },
+ {
+  "side": "FP",
+  "qid": "cr350-xref-02",
+  "n_sentences": 1,
+  "hhem_whole_raw": 0.4838,
+  "hhem_min_sentence_raw": 0.4838,
+  "hhem_whole_lin": 0.4838,
+  "hhem_min_sentence_lin": 0.4838
+ },
+ {
+  "side": "FP",
+  "qid": "technical-guidelines-01",
+  "n_sentences": 1,
+  "hhem_whole_raw": 0.7495,
+  "hhem_min_sentence_raw": 0.7495,
+  "hhem_whole_lin": 0.7495,
+  "hhem_min_sentence_lin": 0.7495
+ }
+]

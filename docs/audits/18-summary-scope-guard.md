@@ -1,8 +1,9 @@
 # Audit 18 — The summary-scope guard: semantic-seam research + the Step-1 kill-test
 
-**Date:** 2026-06-12 · **Status:** kill-test COMPLETE — the recommended two-stage bge
-design is DEAD; the probe re-derived the correct mechanism split (see §5). Next step
-gated on one user decision (§6).
+**Date:** 2026-06-12 · **Status:** kill-test COMPLETE across ALL SEVEN arms (in-house
++ the user-authorized doc-trained checkers, §8) — no off-the-shelf scorer prices the
+content-class binding with a usable threshold; the provenance class has a deterministic
+in-house lever. Verdict + the production-exposure note in §9.
 
 Predecessor: `docs/audits/17-reranker-ab.md` (the summary-scope HOLE: the draft summary
 re-attributes a TRUE grounded claim to the question's subject; verify gates claims only;
@@ -132,10 +133,85 @@ session's permission policy correctly flagged: HHEM-2.1-Open loads via
 in minutes on CPU. Options: authorize one/all checkers; or proceed with the
 doc-identity lever only and accept the documented content-class residual.
 
-## 7. Artifacts
+## 8. The doc-trained checker round (user-authorized, same frozen 14 cases)
+
+All three checkers from the research's #2 design were scored. Ops notes: the
+`minicheck`/`lettucedetect` pip overlays resolved broken torch combos, so both run as
+FAITHFUL REIMPLEMENTATIONS transcribed verbatim from the cached package sources (input
+templates, label ids, span grouping — see the probe's `minicheck`/`lettuce`
+subcommands); HHEM ran via `trust_remote_code` as published. The
+`linearize_gfm_tables` mitigation cell returned NO-SIGNAL — the linearizer no-ops on
+these chunk bodies (raw == linearized premises), so the table-premise question stays
+open at the linearizer level, not answered.
+
+### 8a. HHEM-2.1-Open (whole-summary entailment) — DEAD
+
+ar-12 scores **0.879 = confidently supported** (its own pre-registered kill: an
+overlap-biased scorer passing the ~2-token-delta breach). tg-13 0.27 but 5/12 FPs score
+lower. Margin −0.744.
+
+### 8b. MiniCheck-Flan-T5-Large — the only arm that catches BOTH breaches; FP-swamped
+
+Breaches **0.121 / 0.149** — correct direction on both, including ar-12 (unique among
+all seven arms). But **7/12 FPs score below both breaches** (0.019–0.089), concentrated
+in TABLE/list-derived answers (e.g. ar-03's "$193.737 billion" derives from a table
+cell "193,737" — a unit transform no entailment scorer survives). Margin −0.130. No
+usable threshold; a table-exemption rule would exempt ar-12 itself (its chunk contains
+the segment table).
+
+### 8c. LettuceDetect (ModernBERT, RAGTruth) — cleanest FP profile; binding-blind
+
+With the REAL question (its trained shape): **9/12 FPs flag NOTHING** — including every
+table/bullet/FR case that broke NLI/MiniCheck. The 3 false-fires are all one systematic
+cause: the Memex answer style's citation tail ("…as stated in the 2026 Annual Review
+(Form 10-K)"), absent from RAGTruth answers. Both breaches flag (0.59 / 0.96) — BUT the
+**tail-strip sub-test kills the ar-12 catch: stripped of the citation tail, ar-12 →
+0.000, no spans.** Its flagged spans were the tail fragments, never "Graphics segment";
+the content-class catch was style noise. (The no-question variant is unusable —
+12/12 FP overlap — confirming the question-echo training dependence.) tg-13's flag
+survives stripping (0.957), though on the supported spans (`log layer`, `log_layer.rs`)
+rather than the false provenance — usable signal, wrong explanation.
+
+## 9. Final verdict (all seven arms measured)
+
+| arm | ar-12 content breach | tg-13 provenance breach | FP false-fires |
+|---|---|---|---|
+| bge span-as-query | **MISS** (0.73–0.96) | catch (0.00) | 9/22 spans ≈0 |
+| EmbeddingGemma cos/delta | overlap | overlap | 17–19/22 |
+| 4B evidence judge | **MISS** (mentioned=true 2/2) | catch | 18/22 |
+| vanilla NLI | catch (0.26, thin) | catch (0.03) | 4–5/12 (format) |
+| HHEM-2.1-Open | **MISS** (0.88) | weak (0.27) | 5/12 below it |
+| MiniCheck-FT5-L | catch (0.12) | catch (0.15) | **7/12 below both** |
+| LettuceDetect+q | **MISS** (tail-strip→0.0) | catch (0.96) | 3/12 (all citation-tail) |
+
+- **Content class (binding fabrication): no off-the-shelf scorer separates it on our
+  distribution.** The only catchers (MiniCheck, NLI) drown in table/unit-transform
+  false-lows. The remaining instrument is the banked in-domain fine-tune recipe
+  (TinyLettuce/FactCC entity-swap synthetic training, research design F) — now with a
+  frozen calibration set to gate it. Until then: a DOCUMENTED RESIDUAL.
+- **Provenance class: the deterministic doc-identity check stands** (catches tg-13
+  under every variant; clears the `sp 800-207` FPs with separator-normalized matching;
+  needs any-token matching + provenance-shaped span extraction). This is the buildable
+  increment.
+- **Production exposure note:** under the SHIPPED bge default the live breach is
+  tg-13 — the provenance class (`raw/prose_sweep`: answered=True under bge; ar-12
+  correctly refuses under bge and breaches only under the mxbai env). So the
+  doc-identity backstop closes the production hole; the content class is currently
+  mxbai-gated, which also keeps mxbai blocked.
+- LESSON (ops): pip-overlay envs (`uv run --with`) routinely resolve broken torch
+  combos against this project env — transcribe small checker recipes from the cached
+  package source instead (the MiniCheck/LettuceDetect pattern; verbatim templates +
+  label ids, measurement-faithful).
+- LESSON (instrument): a span detector's verdict is only as good as WHERE it fires —
+  always autopsy the spans (the tail-strip sub-test), never trust case-level
+  confidences alone.
+
+## 10. Artifacts
 
 `data-17-scope-calibration/`: `scope_probe_fp.json` (12 live FP tuples: summaries,
 claims, cited chunks, spans), `scope_probe_scores.json` (bge+embedder),
-`scope_probe_nli.json`, `scope_probe_judge.json`, `scope_probe_capture.log`,
+`scope_probe_nli.json`, `scope_probe_judge.json`, `scope_probe_hhem.json`,
+`scope_probe_minicheck.json`, `scope_probe_lettuce.json`, `scope_probe_capture.log`,
 `raw/` (the preserved /tmp evidence incl. both breach traces). Probe:
-`scripts/scope_guard_span_probe.py`.
+`scripts/scope_guard_span_probe.py` (subcommands: capture / score / nli / judge /
+hhem / minicheck / lettuce).

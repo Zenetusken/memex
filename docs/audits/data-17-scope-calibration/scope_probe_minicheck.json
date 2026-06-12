@@ -1,0 +1,128 @@
+[
+ {
+  "side": "BREACH",
+  "qid": "annual-report-12",
+  "n_sentences": 1,
+  "mc_whole_raw": 0.1206,
+  "mc_min_sentence_raw": 0.1206,
+  "mc_whole_lin": 0.1206,
+  "mc_min_sentence_lin": 0.1206
+ },
+ {
+  "side": "BREACH",
+  "qid": "technical-guidelines-13",
+  "n_sentences": 1,
+  "mc_whole_raw": 0.1488,
+  "mc_min_sentence_raw": 0.1488,
+  "mc_whole_lin": 0.1488,
+  "mc_min_sentence_lin": 0.1488
+ },
+ {
+  "side": "FP",
+  "qid": "annual-report-01",
+  "n_sentences": 1,
+  "mc_whole_raw": 0.0559,
+  "mc_min_sentence_raw": 0.0559,
+  "mc_whole_lin": 0.0559,
+  "mc_min_sentence_lin": 0.0559
+ },
+ {
+  "side": "FP",
+  "qid": "annual-report-03",
+  "n_sentences": 1,
+  "mc_whole_raw": 0.0191,
+  "mc_min_sentence_raw": 0.0191,
+  "mc_whole_lin": 0.0191,
+  "mc_min_sentence_lin": 0.0191
+ },
+ {
+  "side": "FP",
+  "qid": "annual-report-05",
+  "n_sentences": 2,
+  "mc_whole_raw": 0.0531,
+  "mc_min_sentence_raw": 0.0385,
+  "mc_whole_lin": 0.0531,
+  "mc_min_sentence_lin": 0.0385
+ },
+ {
+  "side": "FP",
+  "qid": "nist-zero-trust-02",
+  "n_sentences": 1,
+  "mc_whole_raw": 0.0282,
+  "mc_min_sentence_raw": 0.0282,
+  "mc_whole_lin": 0.0282,
+  "mc_min_sentence_lin": 0.0282
+ },
+ {
+  "side": "FP",
+  "qid": "nist-zero-trust-03",
+  "n_sentences": 1,
+  "mc_whole_raw": 0.9853,
+  "mc_min_sentence_raw": 0.9853,
+  "mc_whole_lin": 0.9853,
+  "mc_min_sentence_lin": 0.9853
+ },
+ {
+  "side": "FP",
+  "qid": "nist-zero-trust-05",
+  "n_sentences": 1,
+  "mc_whole_raw": 0.0841,
+  "mc_min_sentence_raw": 0.0841,
+  "mc_whole_lin": 0.0841,
+  "mc_min_sentence_lin": 0.0841
+ },
+ {
+  "side": "FP",
+  "qid": "scientific-gte-01",
+  "n_sentences": 1,
+  "mc_whole_raw": 0.3494,
+  "mc_min_sentence_raw": 0.3494,
+  "mc_whole_lin": 0.3494,
+  "mc_min_sentence_lin": 0.3494
+ },
+ {
+  "side": "FP",
+  "qid": "scientific-gte-02",
+  "n_sentences": 1,
+  "mc_whole_raw": 0.0397,
+  "mc_min_sentence_raw": 0.0397,
+  "mc_whole_lin": 0.0397,
+  "mc_min_sentence_lin": 0.0397
+ },
+ {
+  "side": "FP",
+  "qid": "linux-fundamentals-01",
+  "n_sentences": 1,
+  "mc_whole_raw": 0.0888,
+  "mc_min_sentence_raw": 0.0888,
+  "mc_whole_lin": 0.0888,
+  "mc_min_sentence_lin": 0.0888
+ },
+ {
+  "side": "FP",
+  "qid": "linux-fundamentals-03",
+  "n_sentences": 1,
+  "mc_whole_raw": 0.9721,
+  "mc_min_sentence_raw": 0.9721,
+  "mc_whole_lin": 0.9721,
+  "mc_min_sentence_lin": 0.9721
+ },
+ {
+  "side": "FP",
+  "qid": "cr350-xref-02",
+  "n_sentences": 1,
+  "mc_whole_raw": 0.7206,
+  "mc_min_sentence_raw": 0.7206,
+  "mc_whole_lin": 0.7206,
+  "mc_min_sentence_lin": 0.7206
+ },
+ {
+  "side": "FP",
+  "qid": "technical-guidelines-01",
+  "n_sentences": 1,
+  "mc_whole_raw": 0.977,
+  "mc_min_sentence_raw": 0.977,
+  "mc_whole_lin": 0.977,
+  "mc_min_sentence_lin": 0.977
+ }
+]

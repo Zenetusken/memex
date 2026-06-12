@@ -1,0 +1,193 @@
+[
+ {
+  "side": "BREACH",
+  "qid": "annual-report-12",
+  "ld_max_conf_q": 0.5928,
+  "ld_spans_q": [
+   " 2026",
+   " Review"
+  ],
+  "ld_max_conf_noq": 0.0,
+  "ld_spans_noq": [],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": true
+ },
+ {
+  "side": "BREACH",
+  "qid": "technical-guidelines-13",
+  "ld_max_conf_q": 0.9569,
+  "ld_spans_q": [
+   " log layer",
+   " in log_layer.rs."
+  ],
+  "ld_max_conf_noq": 0.9774,
+  "ld_spans_noq": [
+   " 120",
+   " the TUI log layer",
+   "LEN",
+   " in log_layer.rs."
+  ],
+  "ld_max_conf_qs": 0.9569,
+  "ld_spans_qs": [
+   " log layer",
+   " in log_layer.rs."
+  ],
+  "tail_stripped": false
+ },
+ {
+  "side": "FP",
+  "qid": "annual-report-01",
+  "ld_max_conf_q": 0.9961,
+  "ld_spans_q": [
+   " as stated in the 2026 Annual Review (Form 10-K)."
+  ],
+  "ld_max_conf_noq": 0.9958,
+  "ld_spans_noq": [
+   " as stated in the 2026 Annual Review (Form 10-K)."
+  ],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": true
+ },
+ {
+  "side": "FP",
+  "qid": "annual-report-03",
+  "ld_max_conf_q": 0.9996,
+  "ld_spans_q": [
+   " billion",
+   " as stated in the 2026 Annual Review (Form 10-K)."
+  ],
+  "ld_max_conf_noq": 0.9993,
+  "ld_spans_noq": [
+   " revenue in fiscal 2026 was $",
+   ".",
+   " billion, as stated in the 2026 Annual Review (Form 10-K)."
+  ],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": true
+ },
+ {
+  "side": "FP",
+  "qid": "annual-report-05",
+  "ld_max_conf_q": 0.9431,
+  "ld_spans_q": [
+   " 2026 Annual Review (Form 10-K)."
+  ],
+  "ld_max_conf_noq": 0.9426,
+  "ld_spans_noq": [
+   " 2026 Annual Review (Form 10-K)."
+  ],
+  "ld_max_conf_qs": 0.9431,
+  "ld_spans_qs": [
+   " 2026 Annual Review (Form 10-K)."
+  ],
+  "tail_stripped": false
+ },
+ {
+  "side": "FP",
+  "qid": "nist-zero-trust-02",
+  "ld_max_conf_q": 0.0,
+  "ld_spans_q": [],
+  "ld_max_conf_noq": 0.9737,
+  "ld_spans_noq": [
+   "In SP 800-207"
+  ],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": false
+ },
+ {
+  "side": "FP",
+  "qid": "nist-zero-trust-03",
+  "ld_max_conf_q": 0.0,
+  "ld_spans_q": [],
+  "ld_max_conf_noq": 0.0,
+  "ld_spans_noq": [],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": false
+ },
+ {
+  "side": "FP",
+  "qid": "nist-zero-trust-05",
+  "ld_max_conf_q": 0.0,
+  "ld_spans_q": [],
+  "ld_max_conf_noq": 0.9987,
+  "ld_spans_noq": [
+   "According to SP 800-207,"
+  ],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": false
+ },
+ {
+  "side": "FP",
+  "qid": "scientific-gte-01",
+  "ld_max_conf_q": 0.0,
+  "ld_spans_q": [],
+  "ld_max_conf_noq": 0.0,
+  "ld_spans_noq": [],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": true
+ },
+ {
+  "side": "FP",
+  "qid": "scientific-gte-02",
+  "ld_max_conf_q": 0.0,
+  "ld_spans_q": [],
+  "ld_max_conf_noq": 0.0,
+  "ld_spans_noq": [],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": false
+ },
+ {
+  "side": "FP",
+  "qid": "linux-fundamentals-01",
+  "ld_max_conf_q": 0.0,
+  "ld_spans_q": [],
+  "ld_max_conf_noq": 0.0,
+  "ld_spans_noq": [],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": false
+ },
+ {
+  "side": "FP",
+  "qid": "linux-fundamentals-03",
+  "ld_max_conf_q": 0.0,
+  "ld_spans_q": [],
+  "ld_max_conf_noq": 0.0,
+  "ld_spans_noq": [],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": false
+ },
+ {
+  "side": "FP",
+  "qid": "cr350-xref-02",
+  "ld_max_conf_q": 0.0,
+  "ld_spans_q": [],
+  "ld_max_conf_noq": 0.9932,
+  "ld_spans_noq": [
+   " de la Cyber Kill Chain"
+  ],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": false
+ },
+ {
+  "side": "FP",
+  "qid": "technical-guidelines-01",
+  "ld_max_conf_q": 0.0,
+  "ld_spans_q": [],
+  "ld_max_conf_noq": 0.0,
+  "ld_spans_noq": [],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": false
+ }
+]
