@@ -90,6 +90,51 @@ class TestExtractProvenanceSource:
     def test_year_only_source_fails_open(self) -> None:
         assert extract_provenance_source("According to the 2026, what changed?") is None
 
+    def test_colloquial_generic_sources_fail_open(self) -> None:
+        """The independent review's B2 catch: colloquial source words were probed
+        FALSE-FIRE-CAPABLE against the live vault ('guide' substring-matches the
+        guidelines doc; 'report' the 10-K; 'doc' project_doc.rs; 'user' 5 docs).
+        Pinned: every one must yield NO adjudicable tokens."""
+        for q in (
+            "According to the docs, how do I mount a USB key?",
+            "According to the guide, how do I mount a USB key?",
+            "According to the user guide, how do I change permissions?",
+            "According to the report, what was total revenue?",
+            "According to the design doc, how does retrieval work?",
+            "According to the spec, what is the chunk size?",
+            "According to the readme, how do I install it?",
+            "According to the study, what was the sample size?",
+            "Per user, how much memory is allocated?",
+            "According to the data, which quarter was strongest?",
+        ):
+            assert extract_provenance_source(q) is None, q
+
+    def test_lone_alphabetic_token_fails_open(self) -> None:
+        """The #256 single-token specificity gate: a lone usable token adjudicates
+        only with a digit (doc-number shape). 'the NVIDIA filing' -> lone 'nvidia'
+        (alphabetic) -> None; 'SP 800-207' -> lone '800-207' (digit) -> kept."""
+        assert extract_provenance_source("According to NVIDIA, what was revenue?") is None
+        got = extract_provenance_source("According to SP 800-207, who coined the term?")
+        assert got is not None and got[1] == ["800-207"]
+
+    def test_french_accents_tokenize_whole(self) -> None:
+        """ASCII-only tokenization shattered 'résumé'->'sum', 'l'étude'->'tude'
+        (which matched a real vault doc). Accented words must tokenize whole —
+        and these generic FR sources then fail open."""
+        for q in (
+            "Selon le résumé du cours, quelle est la première phase ?",
+            "D'après l'étude, quel est le résultat principal ?",
+            "Selon le schéma du réseau, quel port est utilisé ?",
+        ):
+            assert extract_provenance_source(q) is None, q
+
+    def test_french_specific_source_extracts_whole_tokens(self) -> None:
+        got = extract_provenance_source(
+            "Selon les directives de développement, quelle longueur maximale ?"
+        )
+        assert got is not None
+        assert "développement" in got[1] and "directives" in got[1]
+
 
 # ---------------------------------------------------------------- matching
 
@@ -137,7 +182,10 @@ class _FakeStore:
 
 
 def _patch_store(
-    monkeypatch: pytest.MonkeyPatch, identities: list[tuple[str, str]]
+    monkeypatch: pytest.MonkeyPatch,
+    identities: list[tuple[str, str]],
+    *,
+    fake_settings: bool = True,
 ) -> _FakeStore:
     store = _FakeStore(identities)
 
@@ -145,10 +193,11 @@ def _patch_store(
         return store
 
     monkeypatch.setattr("memex.index.fts_store.FTSStore.open", _open)
-    monkeypatch.setattr(
-        "memex.core.config.get_settings",
-        lambda: type("S", (), {"vault_path": "/nonexistent"})(),
-    )
+    if fake_settings:
+        monkeypatch.setattr(
+            "memex.core.config.get_settings",
+            lambda: type("S", (), {"vault_path": "/nonexistent"})(),
+        )
     return store
 
 
@@ -271,3 +320,56 @@ async def test_no_provenance_query_is_settings_free(monkeypatch: pytest.MonkeyPa
         update={"query": "What is the maximum line length?"}
     )
     assert await _provenance_scope_violation(state) is None
+
+
+# ----------------------------------------- node wiring (assess_relevance integration)
+
+
+@pytest.mark.asyncio
+async def test_node_violation_refuses_without_llm_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    """On a confirmed violation the node returns responsive=False DETERMINISTICALLY —
+    the relevance LLM is never called, and (pinning the M3 interaction the review
+    flagged) the world-knowledge override is structurally unreachable even when the
+    deterministic reason happens to contain 'standard'-class words."""
+    from memex.agents.answering import assess_relevance
+    from memex.core.config import MemexSettings, set_settings
+
+    set_settings(MemexSettings())
+    _patch_store(
+        monkeypatch,
+        [("std-001", "Standard Operating Procedures guidelines doc")],
+        fake_settings=False,  # the node reads the REAL settings (flag default-ON)
+    )
+
+    async def _explode(**_kw: object) -> tuple[object, int]:  # pragma: no cover
+        raise AssertionError("relevance LLM must not be called on a violation")
+
+    monkeypatch.setattr("memex.agents.answering.complete_structured", _explode)
+    out = await assess_relevance(_tg13_state(_LOG_LAYER_DOC, ["const _DEFAULT_MAX_LEN"]))
+    r = out["relevance"]
+    assert r.responsive is False
+    assert "according to" in r.reason
+
+
+@pytest.mark.asyncio
+async def test_node_kill_switch_skips_backstop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """provenance_scope_enabled=False -> the backstop never runs; the LLM verdict
+    is used unchanged."""
+    from memex.agents.answering import RelevanceAssessment, assess_relevance
+    from memex.core.config import MemexSettings, set_settings
+
+    settings = MemexSettings()
+    settings.agents.provenance_scope_enabled = False
+    set_settings(settings)
+
+    async def _store_explode(_path: object) -> None:  # pragma: no cover
+        raise AssertionError("store must not be opened with the kill-switch off")
+
+    monkeypatch.setattr("memex.index.fts_store.FTSStore.open", _store_explode)
+
+    async def _responsive(**_kw: object) -> tuple[RelevanceAssessment, int]:
+        return RelevanceAssessment(responsive=True, reason="on topic"), 7
+
+    monkeypatch.setattr("memex.agents.answering.complete_structured", _responsive)
+    out = await assess_relevance(_tg13_state(_LOG_LAYER_DOC, ["const _DEFAULT_MAX_LEN"]))
+    assert out["relevance"].responsive is True

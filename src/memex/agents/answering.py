@@ -2415,10 +2415,12 @@ async def _provenance_scope_violation(state: AnswerState) -> str | None:
         return None
     cited_titles = sorted({c.document_title or c.document_id for c in cited})
     cited_list = ", ".join(f'"{t}"' for t in cited_titles[:3])
+    # State only what is verified: the citation/source mismatch. (Whether the named
+    # source states the content elsewhere is NOT checked — don't overclaim.)
     return (
         f'the question asks for an answer according to "{phrase}" '
         f'(the vault document "{named[0]}"), but the answer\'s evidence is cited from '
-        f"{cited_list} — a different source. The named source does not state this."
+        f"{cited_list} — a different document than the named source."
     )
 
 
