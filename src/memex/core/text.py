@@ -8,7 +8,6 @@ no `agents/ → index/`).
 
 from __future__ import annotations
 
-import itertools
 import re
 from typing import TYPE_CHECKING, Final
 
@@ -275,49 +274,6 @@ _TABLE_ROWS_RE = re.compile(
 )
 _TABLE_ROWS_OPEN_RE = re.compile(r"\[table-rows\]", flags=re.DOTALL)
 _TABLE_ROWS_CLOSE_RE = re.compile(r"\[/table-rows\]", flags=re.DOTALL)
-
-
-_SUBJECT_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_-]+")
-_SUBJECT_STOP = frozenset(
-    {"the", "was", "what", "which", "according", "their", "this",
-     "that", "does", "from", "with", "have", "has", "are", "is", "for", "and", "of",
-     "in", "to", "on", "a", "an", "per", "by", "at", "as", "its", "it", "how", "into"}
-)
-
-
-def _content_bigrams(text: str) -> set[tuple[str, str]]:
-    toks = [t for t in _SUBJECT_TOKEN_RE.findall(text.lower()) if t not in _SUBJECT_STOP]
-    return set(itertools.pairwise(toks))
-
-
-def summary_subject_unsupported(
-    query: str, summary: str, claims: list[str], evidence_texts: list[str]
-) -> bool:
-    """v2 (audit-17): whether the draft SUMMARY smuggles the QUERY's subject into framing
-    that neither the CLAIMS nor the EVIDENCE support — the ar-12/tg-13 mis-scoping breach
-    (a TRUE grounded claim re-attributed by the summary to the asked subject).
-
-    v1 (claims-only absence) was REVERTED for catastrophic over-refusal (net -107 ANS):
-    legit answers routinely paraphrase, so an innocent query-summary bigram ("compilation
-    process") was often absent from the CLAIM WORDING while present in the evidence. v2
-    requires the shared subject-bigram to be absent from the claims AND from EVERY evidence
-    chunk text — the subject is genuinely unsupported by the retrieved material (ar-12: no
-    chunk states "Graphics segment" margins; tg-13: no chunk ties the cap to "the developer
-    guidelines"), not merely re-phrased. Both breaches still fire; a paraphrase answer
-    whose chunk carries the subject never does. Gated by a 30-query mini-sweep BEFORE any
-    ladder (the v1 lesson: a 4-case validation cannot price a base-rate).
-    """
-    if not claims:
-        return False
-    qs = _content_bigrams(query) & _content_bigrams(summary)
-    if not qs:
-        return False
-    supported: set[tuple[str, str]] = set()
-    for c in claims:
-        supported |= _content_bigrams(c)
-    for t in evidence_texts:
-        supported |= _content_bigrams(t)
-    return bool(qs - supported)
 
 
 _DENIAL_MARKER_RE = re.compile(

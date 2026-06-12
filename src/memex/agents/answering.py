@@ -72,7 +72,6 @@ from memex.core.text import (
     is_denial_framed_summary,
     relevance_reason_cites_world_knowledge,
     strip_table_rows_blocks,
-    summary_subject_unsupported,
 )
 from memex.core.types import (
     Chunk,
@@ -177,7 +176,6 @@ class AnswerStateUpdate(TypedDict, total=False):
     artifact_scope_doc_ids: list[str]
     sufficiency: SufficiencyAssessment
     draft: DraftAnswer
-    summary_scope_rebuilt: bool
     verification: VerificationResult
     relevance: RelevanceAssessment
     regenerate_attempts: int
@@ -608,11 +606,6 @@ class AnswerState(BaseModel):
     relevance_world_knowledge_guard: bool = True
     # Set from `agents.denial_reframe_retry_enabled` in `answer_query` (fail-open).
     denial_reframe_retry: bool = True
-    # Set from `agents.summary_scope_guard_enabled` in `answer_query` (fail-open).
-    summary_scope_guard: bool = True
-    # Set by the ANSWER node when the scope guard rebuilt the summary (v2: the subject is
-    # absent from claims AND evidence) — assess_relevance then refuses deterministically.
-    summary_scope_rebuilt: bool = False
 
     nodes_traversed: int = 0
     max_nodes_traversed: int = 20
@@ -1790,25 +1783,6 @@ async def answer(state: AnswerState) -> AnswerStateUpdate:
         except ModelCallError as e:
             log.warning("answer.denial_reframe_failed", error=str(e)[:120])
 
-    # SUMMARY-SCOPE GUARD v2 (audit-17): rebuild the summary from claims when it asserts
-    # a query-subject bigram absent from EVERY claim AND EVERY evidence chunk (genuinely
-    # unsupported — the v1 claims-only trigger over-refused net -107 and was reverted).
-    # The flag routes assess_relevance to a deterministic subject-mismatch refusal.
-    scope_rebuilt = False
-    if (
-        state.summary_scope_guard
-        and draft.claims
-        and summary_subject_unsupported(
-            state.query,
-            draft.summary,
-            [c.claim for c in draft.claims],
-            [c.text or "" for c in answer_chunks],
-        )
-    ):
-        log.info("answer.summary_scope_rebuilt", original=draft.summary[:120])
-        draft = draft.model_copy(update={"summary": " ".join(c.claim for c in draft.claims)})
-        scope_rebuilt = True
-
     # Repair corrupted citation ids before they reach verify/compose.
     # The answer LLM sometimes mangles the long `docid#hash` ids it's
     # shown (bare hash, single-char flip); snapping them back to real
@@ -1821,7 +1795,6 @@ async def answer(state: AnswerState) -> AnswerStateUpdate:
 
     return {
         "draft": draft,
-        "summary_scope_rebuilt": scope_rebuilt,
         "tokens_used": state.tokens_used + tokens,
         "nodes_traversed": state.nodes_traversed + 1,
     }
@@ -2399,21 +2372,6 @@ async def assess_relevance(state: AnswerState) -> AnswerStateUpdate:
             "relevance": RelevanceAssessment(responsive=True, reason="no grounded draft to assess"),
             "nodes_traversed": state.nodes_traversed + 1,
         }
-    # Deterministic scope verdict (audit-17 v2): the guard rebuilt this draft because its
-    # asserted subject is absent from claims AND evidence — by construction the grounded
-    # content cannot address the qualified subject, and the 4B judge hallucinates the
-    # match on rebuilt text (measured 2/2). Decide here, no LLM call.
-    if state.summary_scope_rebuilt:
-        log.info("relevance.scope_rebuilt_refuse")
-        return {
-            "relevance": RelevanceAssessment(
-                responsive=False,
-                reason="the answer's support does not address the specific subject the "
-                "question names; the summary had asserted it without claim or evidence support",
-            ),
-            "nodes_traversed": state.nodes_traversed + 1,
-        }
-
     grounded = set(state.verification.grounded)
     grounded_claims = [c.claim for i, c in enumerate(state.draft.claims) if i in grounded]
     prompt = render_prompt(
@@ -2889,12 +2847,6 @@ async def answer_query(
     except (ConfigurationError, MemexError):
         denial_reframe_retry = True
 
-    # The summary-scope guard v2 (audit-17), same fail-open pattern.
-    try:
-        summary_scope_guard = get_settings().agents.summary_scope_guard_enabled
-    except (ConfigurationError, MemexError):
-        summary_scope_guard = True
-
     # Graph expansion is the param ANDed with the settings kill-switch (default on),
     # read fail-open — so `MEMEX_AGENTS__GRAPH_EXPANSION_ENABLED=false` disables it
     # globally (for the earns-its-keep A/B) while an explicit param=False still wins.
@@ -2932,7 +2884,6 @@ async def answer_query(
         citation_retarget=citation_retarget,
         relevance_world_knowledge_guard=relevance_world_knowledge_guard,
         denial_reframe_retry=denial_reframe_retry,
-        summary_scope_guard=summary_scope_guard,
         scope_doc_ids=scope_doc_ids or [],
         # The grounded multi-turn chat's bounded prior-chunk carry (Surface A). Default
         # None/[] → byte-identical to a bare `/ask`; `retrieve` unions these into the

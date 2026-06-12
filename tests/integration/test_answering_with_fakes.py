@@ -424,17 +424,12 @@ async def test_initial_state_uses_python_ulid_api() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("patch_retrieve", "patch_prompt")
-async def test_verify_filters_phantom_indices(fake_llm: FakeLLM, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_verify_filters_phantom_indices(fake_llm: FakeLLM) -> None:
     """P3.3 v7 trace 2026-05-23: the verifier can emit indices > n-1
     when distracted by chunk content not in the draft. The verify node
     must filter those phantoms instead of treating them as real
     ungrounded claims (which would otherwise refuse a legitimate
     answer)."""
-    # Summary-scope guard OFF: this test pins the PHANTOM-INDEX filter; its fixture
-    # summary incidentally trips the guard (the guard has its own tests).
-    monkeypatch.setenv("MEMEX_AGENTS__SUMMARY_SCOPE_GUARD_ENABLED", "false")
-    from memex.core.config import MemexSettings as _MS2, set_settings as _ss2
-    _ss2(_MS2())
     fake_llm.respond(
         "assess_sufficiency",
         SufficiencyAssessment,
