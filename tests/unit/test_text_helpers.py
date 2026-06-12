@@ -378,7 +378,6 @@ def test_denial_does_not_match_affirmative_summaries() -> None:
 
 from memex.core.text import summary_subject_unsupported as _scope2
 
-
 AR12_CHUNK = "Gross margin was 71.1% for fiscal year 2026, up from 69.8%. Revenue grew across segments."
 TG13_CHUNK = ("## const _DEFAULT_MAX_LEN\n/// Maximum characters forwarded to the TUI. "
               "const _DEFAULT_MAX_LEN: usize = 120;")
