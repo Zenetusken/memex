@@ -3,7 +3,8 @@
 **Date:** 2026-06-12 · **Status:** kill-test COMPLETE across ALL SEVEN arms (in-house
 + the user-authorized doc-trained checkers, §8) — no off-the-shelf scorer prices the
 content-class binding with a usable threshold; the provenance class has a deterministic
-in-house lever. Verdict + the production-exposure note in §9.
+in-house lever. Verdict + the production-exposure note in §9. **The provenance-scope
+BACKSTOP is SHIPPED (§10) — full ladder PASS, default-ON.**
 
 Predecessor: `docs/audits/17-reranker-ab.md` (the summary-scope HOLE: the draft summary
 re-attributes a TRUE grounded claim to the question's subject; verify gates claims only;
@@ -206,7 +207,67 @@ rather than the false provenance — usable signal, wrong explanation.
   always autopsy the spans (the tail-strip sub-test), never trust case-level
   confidences alone.
 
-## 10. Artifacts
+## 10. The provenance-scope backstop — SHIPPED (2026-06-12, default-ON)
+
+The §9 verdict's buildable increment, validated through the full promotion ladder the
+audit-17 discipline demands.
+
+**Design** (`fix/provenance-scope-backstop`, 3 commits): `core/text.py::
+extract_provenance_source` (markers `according to|per|selon|d'après` LEADING clause
+only — bare "In X," is a topic frame in the measured query population; artifact-noun
+X → #256's domain, fail-open; generic/year/<3-char tokens dropped; a LONE usable
+token adjudicates only with a digit — the #256 single-token specificity gate) +
+`provenance_tokens_match` (NFD accent-fold + separator-strip, any-token substring) +
+`FTSStore.document_identities()` + `_provenance_scope_violation` at the TOP of
+`assess_relevance`, before its LLM call. Fires ONLY when the named source matches a
+real vault doc identity while NO grounded claim's cited chunk carries it (doc id +
+title + heading_path — a "Developer Guidelines" SECTION is true provenance). Fail-open
+on everything ambiguous (the #256 pattern incl. non-bootstrapped settings); ADVISORY
+layer, post-verify, can only narrow. Kill-switch
+`MEMEX_AGENTS__PROVENANCE_SCOPE_ENABLED=false`.
+
+**Independent review** (mid-arc, two blockers, both fixed + pinned): **B1** the ladder
+grader read non-existent eval-summary fields and would have printed PASS on a leak
+catastrophe (the audit-17 grader lesson, instance #2) → fail-loud `hallucination_count`
+/`summarize_correct_count`/`case_count`. **B2** colloquial source shapes probed
+FALSE-FIRE-CAPABLE on the live vault and INVISIBLE to the eval ladder ("the guide" →
+substring-matches `guidelines`; "the report" → the 10-K; "the design doc" →
+`project_doc.rs`; "Per user," → 5 docs; FR accents shattering to garbage tokens that
+matched a real doc) → generic-noun widening + accent-aware tokenization + the
+lone-token digit rule, each phrasing pinned as a fail-open unit test. The mid-ladder
+fix was reconciled by MEASUREMENT: old-vs-new outcomes identical on all 264 eval
+queries (one cosmetic token narrowing, same verdict); the 2 pre-fix ladder runs —
+whose corpora contain ZERO extracting queries — deleted and re-run on final code
+anyway.
+
+**Validation ladder (all PASS):**
+- Unit: 25 tests (pinned tg-13 breach fixture fires; true-provenance/heading-carried/
+  unadjudicable/store-error/dangling/colloquial/FR/lone-token all fail open; node
+  wiring: violation refuses WITHOUT the relevance LLM call — the M3 world-knowledge
+  override is structurally unreachable; kill-switch). Full suite 2009; pyright strict 0.
+- L0 offline: frozen 14-case set 14/14; all-264-queries sweep — 6 extract, 0 ANS
+  predicted-fires.
+- L1 mini-sweep (live, bge default): 30/30 answered identical to baseline; tg-13
+  refused 2/2.
+- LIVE breach exercise (mxbai env, where the breach reproduces deterministically):
+  refused 2/2 VIA THE BACKSTOP with the designed reason — twice (pre- and post-
+  hardening code).
+- L2 full ladder (14 corpora × N=2 + eval-summary, one grader, every gate):
+  **cf=1.0 ×28, 0 errors, ANS ≥ baseline on all 13 baselined corpora, codex 38
+  answered / atc 32 ×2, eval-summary 6/6 / 0 hallucinations / recall 1.0.**
+  technical-guidelines posts its first cf=1.0 — the only sub-baseline ANS delta is
+  tg-13's CORRECT refusal (the old answered=True WAS the breach).
+
+**Honest notes:** (1) under bge today tg-13 usually dies at verify before reaching the
+backstop (borderline drafting); the backstop is the deterministic guarantee for the
+runs where the claim DOES ground — proven under mxbai. (2) The grader gained a G5
+exemption mid-grade: a correct counterfactual refusal (refusal_correct=True ×2) is
+never a regression — without it the grader would have FAILED the ladder for the kill
+target doing exactly what it should. (3) The content-class residual (§9) is unchanged.
+
+Ladder artifacts + runners: `data-18-provenance-ladder/`.
+
+## 11. Artifacts
 
 `data-17-scope-calibration/`: `scope_probe_fp.json` (12 live FP tuples: summaries,
 claims, cited chunks, spans), `scope_probe_scores.json` (bge+embedder),

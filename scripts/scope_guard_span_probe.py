@@ -855,6 +855,117 @@ def judge(fp_path: str, out_path: str, n_runs: int = 2) -> None:
     print(f"\n[judge] rows → {out_path}")
 
 
+# --------------------------------------------- provenance (offline L0, no daemon/LLM)
+# The doc-identity backstop's offline validation (audit-18 §9): replay the PRODUCTION
+# decision (memex.core.text helpers, the same order as answering._provenance_scope_
+# violation) over (a) the frozen 14-case calibration set — tg-13 must FIRE, the other
+# 13 must PASS — and (b) EVERY eval query across all corpora, predicting the verdict
+# against each ANS query's GOLD chunks: any predicted fire on an ANS query is a
+# false-refusal bug to fix BEFORE a live run. Exit nonzero unless both gates hold.
+
+
+def _doc_blob_for_chunks(db: sqlite3.Connection, chunk_ids: list[str]) -> list[str]:
+    """Per cited chunk: 'doc_id title heading_path' (the production blob shape);
+    falls back to the chunk-id's doc prefix when the chunk no longer resolves."""
+    blobs = []
+    for cid in chunk_ids:
+        row = db.execute(
+            "SELECT document_id, document_title, heading_path FROM chunks_meta WHERE chunk_id=?",
+            (cid,),
+        ).fetchone()
+        if row:
+            heads = row[2].replace(" > ", " ") if row[2] else ""
+            blobs.append(f"{row[0]} {row[1] or ''} {heads}")
+        else:
+            blobs.append(cid.split("#")[0])
+    return blobs
+
+
+def provenance_l0(fp_path: str) -> None:
+    from memex.core.text import extract_provenance_source, provenance_tokens_match
+
+    db = sqlite3.connect(str(SQLITE))
+    identities = db.execute(
+        "SELECT DISTINCT document_id, document_title FROM chunks_meta"
+    ).fetchall()
+
+    def verdict(question: str, cited_chunk_ids: list[str]) -> str | None:
+        extracted = extract_provenance_source(question)
+        if extracted is None or not cited_chunk_ids:
+            return None
+        phrase, tokens = extracted
+        for blob in _doc_blob_for_chunks(db, cited_chunk_ids):
+            if provenance_tokens_match(tokens, blob):
+                return None
+        named = [t or d for d, t in identities if provenance_tokens_match(tokens, f"{d} {t}")]
+        if not named:
+            return None
+        return f"FIRE: '{phrase}' names {named[0]!r}"
+
+    failures = 0
+
+    # ---- leg (a): the frozen 14-case set ----
+    print("=== L0a: frozen calibration set ===")
+    for b in BREACHES:
+        by_suffix = fetch_chunks_by_suffix(b["cited_suffixes"])
+        cids = [by_suffix[s]["chunk_id"] for s in b["cited_suffixes"]]
+        v = verdict(b["question"], cids)
+        want_fire = b["qid"] == "technical-guidelines-13"
+        ok = (v is not None) == want_fire
+        failures += 0 if ok else 1
+        print(f"  [{'OK' if ok else 'FAIL'}] {b['qid']:24} want={'FIRE' if want_fire else 'PASS'} got={v or 'PASS'}")
+    for r in json.load(open(fp_path)):
+        cids = [c["chunk_id"] for c in r["cited"] if c["text"]]
+        v = verdict(r["question"], cids)
+        ok = v is None
+        failures += 0 if ok else 1
+        print(f"  [{'OK' if ok else 'FAIL'}] {r['qid']:24} want=PASS got={v or 'PASS'}")
+
+    # ---- leg (b): every eval query, verdict vs GOLD chunks ----
+    print("\n=== L0b: all-queries sweep (predicted verdict vs gold) ===")
+    n_q = n_extracted = n_ans_fire = n_cf_fire = n_stale = 0
+    for qfile in sorted(Path("tests/eval-data").glob("*/queries.json")):
+        data = json.load(open(qfile))
+        for q in data.get("queries", []):
+            question = q.get("question")
+            if not question:
+                continue
+            n_q += 1
+            extracted = extract_provenance_source(question)
+            if extracted is None:
+                continue
+            n_extracted += 1
+            gold = list(q.get("relevant_chunk_ids") or [])
+            is_cf = q.get("_answer_type") == "counterfactual" or not gold
+            resolved = [
+                g for g in gold
+                if db.execute(
+                    "SELECT 1 FROM chunks_meta WHERE chunk_id=?", (g,)
+                ).fetchone()
+            ]
+            if gold and not resolved:
+                n_stale += 1
+            v = verdict(question, resolved or gold)
+            tag = "CF" if is_cf else "ANS"
+            if v is not None:
+                if is_cf:
+                    n_cf_fire += 1
+                else:
+                    n_ans_fire += 1
+                    failures += 1
+                print(f"  [{'INFO' if is_cf else 'FAIL'}] {tag} {qfile.parent.name}/{q['qid']}: {v}")
+            else:
+                print(f"  [ok]   {tag} {qfile.parent.name}/{q['qid']}: extracted={extracted[1]} -> PASS")
+    db.close()
+    print(
+        f"\nL0b: {n_q} queries, {n_extracted} extracted, "
+        f"{n_ans_fire} ANS predicted-fires (gate: 0), {n_cf_fire} CF fires (informational), "
+        f"{n_stale} stale-gold (verdict on raw ids)"
+    )
+    print(f"\nL0 {'PASS — PROMOTE TO MINI-SWEEP' if failures == 0 else f'FAIL ({failures})'}")
+    sys.exit(0 if failures == 0 else 1)
+
+
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     if cmd == "capture":
@@ -873,6 +984,10 @@ if __name__ == "__main__":
         minicheck_arm(
             sys.argv[2] if len(sys.argv) > 2 else "/tmp/scope_probe_fp.json",  # noqa: S108 — probe artifact
             sys.argv[3] if len(sys.argv) > 3 else "/tmp/scope_probe_minicheck.json",  # noqa: S108 — probe artifact
+        )
+    elif cmd == "provenance":
+        provenance_l0(
+            sys.argv[2] if len(sys.argv) > 2 else "/tmp/scope_probe_fp.json",  # noqa: S108 — probe artifact
         )
     elif cmd == "lettuce":
         lettuce_arm(

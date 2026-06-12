@@ -1,0 +1,254 @@
+[
+ {
+  "qid": "annual-report-01",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 59.2
+ },
+ {
+  "qid": "annual-report-02",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 58.5
+ },
+ {
+  "qid": "annual-report-03",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 53.4
+ },
+ {
+  "qid": "annual-report-04",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 55.7
+ },
+ {
+  "qid": "annual-report-05",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 50.2
+ },
+ {
+  "qid": "nist-zero-trust-01",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 42.3
+ },
+ {
+  "qid": "nist-zero-trust-02",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 34.0
+ },
+ {
+  "qid": "nist-zero-trust-03",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 34.1
+ },
+ {
+  "qid": "nist-zero-trust-04",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 39.1
+ },
+ {
+  "qid": "nist-zero-trust-05",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 38.2
+ },
+ {
+  "qid": "scientific-gte-01",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 49.1
+ },
+ {
+  "qid": "scientific-gte-02",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 71.4
+ },
+ {
+  "qid": "scientific-gte-03",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 70.3
+ },
+ {
+  "qid": "scientific-gte-04",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 59.6
+ },
+ {
+  "qid": "scientific-gte-05",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 72.0
+ },
+ {
+  "qid": "linux-fundamentals-01",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 16.5
+ },
+ {
+  "qid": "linux-fundamentals-02",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 21.9
+ },
+ {
+  "qid": "linux-fundamentals-03",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 17.8
+ },
+ {
+  "qid": "linux-fundamentals-04",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 21.5
+ },
+ {
+  "qid": "linux-fundamentals-05",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 16.4
+ },
+ {
+  "qid": "cr350-xref-01",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 17.9
+ },
+ {
+  "qid": "cr350-xref-02",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 16.2
+ },
+ {
+  "qid": "cr350-xref-03",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 19.6
+ },
+ {
+  "qid": "cr350-xref-04",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 24.6
+ },
+ {
+  "qid": "cr350-xref-05",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 25.7
+ },
+ {
+  "qid": "technical-guidelines-01",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 21.1
+ },
+ {
+  "qid": "technical-guidelines-02",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 23.6
+ },
+ {
+  "qid": "technical-guidelines-03",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 30.5
+ },
+ {
+  "qid": "technical-guidelines-04",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 34.9
+ },
+ {
+  "qid": "technical-guidelines-05",
+  "answered": true,
+  "baseline_answered": true,
+  "refusal": "",
+  "regress": false,
+  "s": 36.1
+ },
+ {
+  "qid": "tg-13-run1",
+  "answered": false,
+  "refusal": "Verification returned no grounded claims; I won't ship a summary without citations to back it.",
+  "via_provenance": false
+ },
+ {
+  "qid": "tg-13-run2",
+  "answered": false,
+  "refusal": "Verification returned no grounded claims; I won't ship a summary without citations to back it.",
+  "via_provenance": false
+ }
+]

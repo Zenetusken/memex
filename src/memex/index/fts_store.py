@@ -400,6 +400,23 @@ class FTSStore:
 
         return await asyncio.to_thread(_read)
 
+    async def document_identities(self) -> list[tuple[str, str]]:
+        """Every distinct ``(document_id, document_title)`` in the index.
+
+        The provenance-scope backstop's vault-adjudication primitive (audit-18 §9):
+        a query's named source ("according to the developer guidelines") is checkable
+        only if it matches a real document's identity — this returns the identities
+        to match against. Driven off ``chunks_meta`` (the same source of truth as
+        every chunk read); ~hundreds of rows, milliseconds."""
+
+        def _read() -> list[tuple[str, str]]:
+            rows = self._db.execute(
+                "SELECT DISTINCT document_id, document_title FROM chunks_meta"
+            ).fetchall()
+            return [(r[0], r[1] or "") for r in rows]
+
+        return await asyncio.to_thread(_read)
+
     async def search(self, query: str, *, k: int, term_query: bool = False) -> list[Chunk]:
         """BM25 search over chunks_fts; returns top `k` joined with chunks_meta.
 

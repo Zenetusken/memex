@@ -342,6 +342,123 @@ def strip_table_rows_blocks(text: str) -> str:
     return _TABLE_ROWS_RE.sub("", text)
 
 
+# --- Provenance-scope backstop (audit-18 §9) -------------------------------------
+#
+# The provenance-class summary-scope breach: a query names its SOURCE ("According to
+# the developer guidelines, …") and the shipped answer cites a chunk from a DIFFERENT
+# document entirely (tg-13: cited tui/src/log_layer.rs) — the answer asserts a false
+# provenance that verify (claims-vs-chunk) cannot see and the 4B relevance judge
+# hallucinates past. Audit-18 measured every semantic arm non-separating here; the
+# DETERMINISTIC document-identity check below is the lever that works (probed: fires
+# on tg-13 under every variant, clears the `sp 800-207`/tg-01 true-provenance cases).
+#
+# Deliberately TIGHT (the audit-17 v1 lesson — a deterministic refuse amplifies its
+# trigger's false-positive rate):
+#   - markers: "according to|per|selon|d'après" leading clause ONLY. Bare "In X," is a
+#     TOPIC frame in the measured query population ("In the Linux octal permission
+#     system, …"), not provenance — excluded wholesale.
+#   - X naming a SUB-document artifact (figure/table/module/deck…) is the #256
+#     artifact-scope domain; doc-identity cannot adjudicate it → no tokens (fail-open).
+#   - generic source nouns ("the course", "the deck", "the documentation") name no
+#     specific document; years and <3-char tokens are too unspecific to substring-match
+#     ("2026" matches half the vault; "sp" matches "transport") → dropped.
+# The CALLER (agents/answering.py) fires only when a usable token matches ≥1 document
+# identity in the VAULT (X is adjudicable — it names a real document) while NO CITED
+# chunk's identity (doc id + title + heading_path) matches: a vault-named source the
+# answer's own support provably does not come from.
+
+_PROVENANCE_SOURCE_RE = re.compile(
+    r"^(?:according to|per|selon|d['’]apr[eè]s)\s+(.{3,80}?)\s*,",
+    flags=re.IGNORECASE,
+)
+# Accent-aware (the FR corpora): an ASCII-only class shatters "résumé" into garbage
+# fragments ('sum') that can spuriously match vault identities — the independent
+# review's B2 finding. Hyphen/underscore stay INSIDE tokens (the "800-207"/"w-9"
+# doc-number shape), unlike `atomise` which splits them.
+_PROVENANCE_TOKEN_RE = re.compile(r"[a-z0-9àâäçéèêëîïôöùûüÿœæ][a-z0-9àâäçéèêëîïôöùûüÿœæ_-]+")
+# EN + FR determiners/function words that carry no source identity.
+_PROVENANCE_STOP = frozenset(
+    {"the", "a", "an", "this", "that", "its", "of", "in", "on", "for", "and",
+     "le", "la", "les", "un", "une", "de", "du", "des", "au", "aux", "ce", "cette"}
+)
+# Sub-document artifact nouns: X references something INSIDE a document — the #256
+# artifact-scope domain, not adjudicable at document level.
+_PROVENANCE_ARTIFACT_NOUNS = frozenset(
+    {"figure", "figures", "diagram", "diagrams", "diagramme", "diagrammes", "table",
+     "tables", "tableau", "tableaux", "chart", "charts", "graph", "graphs", "image",
+     "images", "timeline", "example", "examples", "exemple", "exemples", "deck",
+     "decks", "slide", "slides", "module", "modules", "chapter", "chapters",
+     "chapitre", "section", "sections", "page", "pages", "screenshot", "photo",
+     "schéma", "schémas", "graphique", "graphiques", "croquis", "capture"}
+)
+# Generic source nouns: name no SPECIFIC document, so they cannot adjudicate. The
+# colloquial shapes ("the guide", "the report", "the design doc", "per user") were
+# probed FALSE-FIRE-CAPABLE against the live vault ("guide" substring-matches the
+# `guidelines` doc; "report" the 10-K; "doc" `project_doc.rs`) — and the eval ladder
+# cannot see them (no eval query phrases sources colloquially), so the list errs wide.
+_PROVENANCE_GENERIC_NOUNS = frozenset(
+    {"course", "cours", "document", "documents", "documentation", "text", "texte",
+     "manual", "manuel", "paper", "papers", "materials", "material", "corpus",
+     "vault", "notes", "book", "books", "livre", "pdf", "file", "files", "source",
+     "sources", "transcript", "video", "lecture", "lesson", "doc", "docs", "report",
+     "reports", "data", "spec", "specs", "specification", "guide", "guides",
+     "standard", "standards", "study", "studies", "readme", "article", "articles",
+     "benchmark", "benchmarks", "summary", "résumé", "resume", "user", "users",
+     "form", "forms", "content", "information", "info", "étude", "études"}
+)
+_PROVENANCE_YEAR_RE = re.compile(r"^(?:19|20)\d{2}$")
+_IDENT_NORM_RE = re.compile(r"[-_\s./|—–]")
+_DIACRITICS_RE = re.compile("[\\u0300-\\u036f]")  # NFD combining marks
+
+
+def extract_provenance_source(query: str) -> tuple[str, list[str]] | None:
+    """The (raw phrase, usable identity tokens) of a leading provenance clause, or
+    ``None`` when the query has no adjudicable named source. Returns ``None`` for
+    artifact-noun references, and an empty token list never escapes (treated as None).
+    A LONE usable token adjudicates only when it carries a digit (the "800-207"/"w-9"
+    doc-number shape) — the #256 single-token specificity gate: every measured legit
+    source is multi-token or a doc number, while lone alphabetic tokens ("guide",
+    "report") are the probed false-fire surface."""
+    m = _PROVENANCE_SOURCE_RE.match(query.strip())
+    if not m:
+        return None
+    phrase = m.group(1).strip()
+    toks = [
+        t for t in _PROVENANCE_TOKEN_RE.findall(phrase.lower())
+        if t not in _PROVENANCE_STOP
+    ]
+    if not toks or any(t in _PROVENANCE_ARTIFACT_NOUNS for t in toks):
+        return None
+    usable = [
+        t for t in toks
+        if t not in _PROVENANCE_GENERIC_NOUNS
+        and not _PROVENANCE_YEAR_RE.match(t)
+        and len(t) >= 3
+    ]
+    if not usable:
+        return None
+    if len(usable) == 1 and not any(ch.isdigit() for ch in usable[0]):
+        return None
+    return phrase, usable
+
+
+def _fold_identity(s: str) -> str:
+    """Lowercase, strip diacritics (NFD), drop separators — so 'réseau' matches a
+    title carrying 'réseau' or 'reseau', and '800-207' matches 'nist-sp-800-207'."""
+    import unicodedata
+
+    folded = _DIACRITICS_RE.sub("", unicodedata.normalize("NFD", s.lower()))
+    return _IDENT_NORM_RE.sub("", folded)
+
+
+def provenance_tokens_match(tokens: list[str], identity_blob: str) -> bool:
+    """Whether ANY usable source token appears in *identity_blob* after accent folding
+    and separator normalization. Substring direction: token-in-blob (a doc slug
+    concatenates words)."""
+    blob = _fold_identity(identity_blob)
+    return any(_fold_identity(t) in blob for t in tokens)
+
+
 def table_rows_spans(text: str) -> list[tuple[int, int]]:
     """Return `(start, end)` char offsets of each
     `[table-rows]...[/table-rows]` block in *text*.
