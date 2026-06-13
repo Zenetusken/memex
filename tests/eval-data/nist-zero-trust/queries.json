@@ -31,9 +31,26 @@
     ],
     "notes": "HARD GATES hold — refusal_cf=1.0 (incl. all 3 confabulation traps 16/17/18), 0 hallucinations. The 4 false-refusals are conservative retrieval/assess misses on long/dense chunks (q07+q10 share the §3.3.1 contextual-TA chunk #83f5557874 that doesn't reach top-5) — a chunk-granularity signal for P1.6, NOT fabrication. q11 answered correctly (2 verified claims) but cites a sibling network-location chunk outside the label → cp=0.0 (known not-comparable-across-siblings artifact). 8/12 ANS leaves discrimination headroom for the P2.1 reranker A/B."
   },
+  "_baseline_answer_text_2026_06_13": {
+    "stack": "Qwen3.5-4B-AWQ orchestrator (ADR-0015) + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3 (cpu, device-pinned), co_residence_mode=manual",
+    "purpose": "First PROSE corpus annotated with answer_must_mention → answer_mention_recall (audit-14 instrument, extended from codex-rs). Measures answer-TEXT correctness the HARD gates / recall@k / the `answered` flag are blind to.",
+    "answered_count": 12,
+    "answerable_count": 12,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "answer_text_checked": 12,
+    "answer_text_correct_count": 11,
+    "mean_answer_mention_recall": 0.9167,
+    "n_runs": 2,
+    "byte_stable": true,
+    "answer_text_failures": [
+      "nist-zero-trust-01"
+    ],
+    "notes": "All 12 ANS now answer (vs the 8B baseline's 8/12 — the 4B + ADR-0022 advisory-gate rebalance recovered the 4 prior false-refusals). Slots authored against the LIVE answers (scripts/capture_eval_answers.py) + pre-validated with the real scorer. THE METRIC'S FIRST CATCH: nist-zero-trust-01 STABLY answers '4 basic tenets' (NIST defines SEVEN) across N=2 — a deterministic answer-quality bug invisible to answered/refusal_cf/recall@k. It is an ANSWER-STAGE signal (the lever this metric gates), NOT a HARD-gate regression (refusal_cf=1.0 holds). Fixing it is downstream + measure-gated — do not whack-a-mole."
+  },
   "queries": [
     {
       "qid": "nist-zero-trust-01",
+      "answer_must_mention": [["seven", "7"]],
       "question": "How many basic tenets of zero trust does NIST SP 800-207 define?",
       "_anchor_phrase": "designed and deployed with adherence to the following zero trust basic tenets",
       "_expected_answer": "Seven (7) basic tenets.",
@@ -46,6 +63,7 @@
     },
     {
       "qid": "nist-zero-trust-02",
+      "answer_must_mention": [["policy engine", "pe"], ["policy administrator", "pa"]],
       "question": "In SP 800-207, the policy decision point (PDP) is broken down into which two logical components?",
       "_anchor_phrase": "the policy decision point (PDP) is broken down into two logical components",
       "_expected_answer": "The policy engine (PE) and the policy administrator (PA).",
@@ -58,6 +76,7 @@
     },
     {
       "qid": "nist-zero-trust-03",
+      "answer_must_mention": [["policy engine", "pe"]],
       "question": "Which zero trust component is responsible for the ultimate decision to grant access to a resource?",
       "_anchor_phrase": "responsible for the ultimate decision to grant access to a resource",
       "_expected_answer": "The policy engine (PE).",
@@ -70,6 +89,7 @@
     },
     {
       "qid": "nist-zero-trust-04",
+      "answer_must_mention": [["communication path", "communication"], ["establishing", "establish", "shutting", "shut"], ["token", "tokens", "credential", "credentials"]],
       "question": "What is the policy administrator (PA) responsible for in a zero trust architecture?",
       "_anchor_phrase": "establishing and/or shutting down the communication path between a subject and a resource",
       "_expected_answer": "Establishing and/or shutting down the communication path between a subject and a resource (via commands to the relevant PEPs); it executes the policy engine's decision and generates session-specific authentication tokens/credentials.",
@@ -82,6 +102,7 @@
     },
     {
       "qid": "nist-zero-trust-05",
+      "answer_must_mention": [["kindervag"], ["forrester"]],
       "question": "According to SP 800-207, who coined the term 'zero trust' and at which company?",
       "_anchor_phrase": "later coined by John Kindervag",
       "_expected_answer": "John Kindervag, while at Forrester.",
@@ -94,6 +115,7 @@
     },
     {
       "qid": "nist-zero-trust-06",
+      "answer_must_mention": [["criteria-based", "criteria", "binary"], ["singular", "contextual"]],
       "question": "Besides how factors are weighted, what are the two major characteristics SP 800-207 uses to differentiate trust algorithms?",
       "_anchor_phrase": "two other major characteristics that can be used to differentiate",
       "_expected_answer": "Criteria-based versus score-based, and singular versus contextual.",
@@ -106,6 +128,7 @@
     },
     {
       "qid": "nist-zero-trust-07",
+      "answer_must_mention": [["contextual"]],
       "question": "What type of trust algorithm does SP 800-207 say a ZTA should ideally use?",
       "_anchor_phrase": "a ZTA trust algorithm should be contextual",
       "_expected_answer": "A contextual trust algorithm (one that takes the subject's recent history into account).",
@@ -118,6 +141,7 @@
     },
     {
       "qid": "nist-zero-trust-08",
+      "answer_must_mention": [["criteria-based", "criteria"], ["attributes", "attribute", "qualified"], ["score-based", "score"], ["threshold", "confidence"]],
       "question": "What is the difference between a criteria-based and a score-based trust algorithm in SP 800-207?",
       "_anchor_phrase": "criteria-based TA assumes a set of qualified attributes that must be met",
       "_expected_answer": "A criteria-based TA grants access only if a set of enterprise-configured qualified attributes are all met; a score-based TA computes a confidence level from weighted data sources and grants access if the score exceeds the resource's configured threshold.",
@@ -130,6 +154,7 @@
     },
     {
       "qid": "nist-zero-trust-09",
+      "answer_must_mention": [["identity governance", "identity"], ["microsegmentation", "micro-segmentation", "micro segmentation"], ["network-based", "network infrastructure", "software defined perimeter", "software-defined"]],
       "question": "What three approaches to implementing a zero trust architecture does SP 800-207 describe?",
       "_anchor_phrase": "A full ZT solution will include elements of all three approaches",
       "_expected_answer": "Enhanced identity governance-driven, logical micro-segmentation, and network infrastructure / network-based segmentation (software defined perimeters).",
@@ -142,6 +167,7 @@
     },
     {
       "qid": "nist-zero-trust-10",
+      "answer_must_mention": [["20 to 30", "20-30"]],
       "question": "In SP 800-207's contextual trust-algorithm example, how many employee records does an HR employee typically access in a workday?",
       "_anchor_phrase": "normally accesses 20 to 30 employee records",
       "_expected_answer": "20 to 30 records in a typical workday (a contextual TA might alert if requests suddenly exceed 100).",
@@ -154,6 +180,7 @@
     },
     {
       "qid": "nist-zero-trust-11",
+      "answer_must_mention": [["network location", "location"], ["does not imply trust", "not imply trust", "no implicit trust", "implicit trust"]],
       "question": "What does SP 800-207 say about trust based on network location?",
       "_anchor_phrase": "Network location alone does not imply trust",
       "_expected_answer": "Network location alone does not imply trust; all communication must be secured regardless of network location (tenet 2), and access requests from enterprise-owned infrastructure must meet the same requirements as those from any other network.",
@@ -166,6 +193,7 @@
     },
     {
       "qid": "nist-zero-trust-12",
+      "answer_must_mention": [["control plane"], ["data plane"]],
       "question": "What separation between communication flows does SP 800-207 recommend for ZTA networks?",
       "_anchor_phrase": "control plane for network control communication and a data plane",
       "_expected_answer": "A separation (logical or physical) between the control plane (used to control/configure the network and make access decisions) and the data plane (used for actual application/service communication).",
