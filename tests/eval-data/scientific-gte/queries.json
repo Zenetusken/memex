@@ -29,9 +29,24 @@
     ],
     "notes": "HARD GATES hold — refusal_cf=1.0 (incl. cross-paper traps: C-MTEB belongs to BGE/C-Pack, GSM8K is a generative benchmark, text-embedding-3 postdates the paper), 0 hallucinations. 2 false-refusals (τ=0.01, ~800M pairs) are retrieval misses on §3.4 chunks. cite_prec_answered_only=0.80 AFTER a multi-chunk relabel per the eval-data README (raised from 0.60: 110M/A100 facts repeat across abstract/intro/Table 3); the 2 residual cp=0.0 (gte-03 InfoNCE objective, gte-10 MTEB 56/7 counts) are irreducible sibling-chunk artifacts where the concept spans several §3.4/§4.3 chunks — grounded correct answers, not fabrication. 10/12 ANS leaves headroom for the P2.1 reranker A/B; the 2-column scientific-paper retrieval profile is new to the matrix."
   },
+  "_baseline_answer_text_2026_06_13": {
+    "stack": "Qwen3.5-4B-AWQ orchestrator (ADR-0015) + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3 (cpu, device-pinned), co_residence_mode=manual",
+    "purpose": "answer_must_mention -> answer_mention_recall (audit-14 instrument). Measures answer-TEXT correctness the HARD gate / recall@k / the `answered` flag are blind to.",
+    "answered_count": 14,
+    "answerable_count": 14,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "answer_text_checked": 14,
+    "answer_text_correct_count": 14,
+    "mean_answer_mention_recall": 1.0,
+    "n_runs": 2,
+    "byte_stable": true,
+    "answer_text_failures": [],
+    "notes": "All 14 ANS answer correctly incl. the Table-RAG SQL aggregate (gte-19 14 GPUs) + superlative (gte-20 Quora / 84.8). SOFT OBSERVATION: gte-03 names the 'bidirectional contrastive' objective without the literal term 'InfoNCE' (valid paraphrase; the slot accepts either). Clean 1.0 regression-net baseline."
+  },
   "queries": [
     {
       "qid": "scientific-gte-01",
+      "answer_must_mention": [["110m", "110"]],
       "question": "How many parameters does the GTE-base model have?",
       "_anchor_phrase": "modest parameter count of 110M",
       "_expected_answer": "110M parameters (BERT-base initialized).",
@@ -47,6 +62,7 @@
     },
     {
       "qid": "scientific-gte-02",
+      "answer_must_mention": [["dual-encoder", "dual encoder", "transformer encoder", "encoder"], ["mean pooling", "mean-pooling", "pooling"]],
       "question": "What encoder architecture does the GTE embedding model use?",
       "_anchor_phrase": "vanilla dual-encoder architecture with mean pooling",
       "_expected_answer": "A vanilla dual-encoder: a deep Transformer encoder (BERT-initialized) with mean pooling over the contextualized token representations.",
@@ -59,6 +75,7 @@
     },
     {
       "qid": "scientific-gte-03",
+      "answer_must_mention": [["contrastive"], ["infonce", "bidirectional"]],
       "question": "What contrastive learning objective does GTE build on?",
       "_anchor_phrase": "the InfoNCE loss",
       "_expected_answer": "The InfoNCE loss (extended into an improved bidirectional contrastive loss using in-batch queries and documents as negatives).",
@@ -72,6 +89,7 @@
     },
     {
       "qid": "scientific-gte-04",
+      "answer_must_mention": [["0.01"]],
       "question": "What temperature value does GTE fix in its contrastive loss?",
       "_anchor_phrase": "is fixed to 0.01 in this work",
       "_expected_answer": "The temperature τ is fixed to 0.01.",
@@ -84,6 +102,7 @@
     },
     {
       "qid": "scientific-gte-05",
+      "answer_must_mention": [["800m", "800", "788m", "788"]],
       "question": "Approximately how many text pairs were used for GTE's unsupervised pre-training?",
       "_anchor_phrase": "800M text pairs",
       "_expected_answer": "About 800M text pairs (Table 1 totals 788M across 33 datasets).",
@@ -96,6 +115,7 @@
     },
     {
       "qid": "scientific-gte-06",
+      "answer_must_mention": [["3 million", "3m", "3"]],
       "question": "Approximately how many text pairs were used for GTE's supervised fine-tuning?",
       "_anchor_phrase": "3M pairs for fine-tuning",
       "_expected_answer": "About 3M pairs.",
@@ -108,6 +128,7 @@
     },
     {
       "qid": "scientific-gte-07",
+      "answer_must_mention": [["pre-training", "pretraining", "pre training"], ["fine-tuning", "finetuning", "fine tuning"]],
       "question": "What are the two training stages of GTE?",
       "_anchor_phrase": "two stages: unsupervised pre-training and supervised fine-tuning",
       "_expected_answer": "Unsupervised contrastive pre-training, then supervised contrastive fine-tuning.",
@@ -120,6 +141,7 @@
     },
     {
       "qid": "scientific-gte-08",
+      "answer_must_mention": [["multinomial"], ["0.5", "alpha"]],
       "question": "How does GTE sample data batches across sources of different sizes during pre-training?",
       "_anchor_phrase": "multinomial distribution to sample data batches",
       "_expected_answer": "With a multinomial distribution over sources weighted by size (α = 0.5), and all instances in a batch drawn from the same task.",
@@ -132,6 +154,7 @@
     },
     {
       "qid": "scientific-gte-09",
+      "answer_must_mention": [["a100"], ["80gb", "80"]],
       "question": "What GPUs was GTE trained on?",
       "_anchor_phrase": "8 NVIDIA A100 GPUs with 80GB memory",
       "_expected_answer": "Up to 8 NVIDIA A100 GPUs with 80GB memory (evaluation on up to 8 V100 32GB).",
@@ -145,6 +168,7 @@
     },
     {
       "qid": "scientific-gte-10",
+      "answer_must_mention": [["56"], ["7", "seven"]],
       "question": "How many datasets and task categories does the MTEB English benchmark used in the GTE paper cover?",
       "_anchor_phrase": "56 English datasets across seven distinct tasks",
       "_expected_answer": "56 English datasets across 7 task categories (classification, clustering, pairwise classification, reranking, retrieval, STS, summarization).",
@@ -157,6 +181,7 @@
     },
     {
       "qid": "scientific-gte-11",
+      "answer_must_mention": [["bert-large-uncased", "bert-large", "large-uncased"]],
       "question": "Which base language model is GTE-large initialized from?",
       "_anchor_phrase": "bert-large-uncased",
       "_expected_answer": "bert-large-uncased (330M params); GTE-base uses bert-base-uncased and GTE-small uses MiniLM.",
@@ -170,6 +195,7 @@
     },
     {
       "qid": "scientific-gte-12",
+      "answer_must_mention": [["six", "6"]],
       "question": "How many programming languages does the CodeSearchNet benchmark used by GTE cover?",
       "_anchor_phrase": "encompasses six programming languages",
       "_expected_answer": "Six programming languages (GTE handles code as text without per-language fine-tuning).",
@@ -243,6 +269,7 @@
     },
     {
       "qid": "scientific-gte-19",
+      "answer_must_mention": [["14"]],
       "question": "What was the combined total number of training GPUs reported across all GTE model variants?",
       "_anchor_phrase": "GTEsmall 2 GPUs, GTEbase 4 GPUs, GTElarge 8 GPUs",
       "_expected_answer": "14 GPUs (2 + 4 + 8), summed from the Training Details table.",
@@ -253,6 +280,7 @@
     },
     {
       "qid": "scientific-gte-20",
+      "answer_must_mention": [["quora"], ["84.8"]],
       "question": "On which MTEB benchmark dataset did the GTE-large model achieve its highest retrieval score?",
       "_anchor_phrase": "GTElarge column maximum is Quora 84.8",
       "_expected_answer": "Quora (nDCG@10 of 84.8) — the maximum of the GTElarge column in the Massive Text Embedding Benchmark table.",
