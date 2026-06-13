@@ -40,28 +40,9 @@ def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", text)
 
 
-def test_v6_is_the_active_version() -> None:
+def test_v5_is_the_active_version() -> None:
     load_prompt_spec.cache_clear()
-    assert load_prompt_spec("answer").version == "v6"
-
-
-def test_v6_adds_the_whole_is_not_part_scope_rule() -> None:
-    """The audit-19 generation-time faithfulness lever: a consolidated/whole figure is NOT a
-    named part's value (the ar-12 Graphics-segment binding breach). Surgical extension of the
-    existing 'naming an item is not the same as stating its value' rule — must (a) carry the
-    whole-vs-part rule + the Graphics-segment empty example, and (b) keep the razor-twin
-    escapes so ar-05 (consolidated) and per-part-revenue (ar-03) still answer."""
-    b = _norm(_body())
-    assert "Whole is not part" in b
-    # the worked example uses a DIFFERENT domain (EMEA/operating-margin), NOT the live
-    # ar-12 surface (NVIDIA/Graphics/71.1%) — embedding the literal breach output next to a
-    # draft instruction PRIMED the 4B to copy it (the v6-first-cut bge backfire, audit-19)
-    assert "EMEA" in b
-    assert "71.1" not in b and "Graphics segment" not in b  # no verbatim copy path for ar-12
-    # the part's OWN-figure escape must be present (ar-03 Data Center revenue must still answer)
-    assert "the part's OWN figure for the asked metric IS" in b
-    # the consolidated-question escape (ar-05 must still answer the total it has)
-    assert "asks for the WHOLE/consolidated figure itself" in b
+    assert load_prompt_spec("answer").version == "v5"
 
 
 def test_leads_with_the_subject_presence_test() -> None:
