@@ -227,15 +227,99 @@ def eligible_chunks(holdout_docs: set[str]) -> list[dict[str, str]]:
     return out
 
 
-def unit_transform(value: str, lang: str) -> str | None:
+_MILLIONS_RE = re.compile(r"^\$?\s?(\d{1,3}(?:,\d{3})+)$")  # "193,737" comma-grouped
+
+
+def unit_transforms(value: str, lang: str, *, millions_table: bool) -> list[str]:
+    """ALL supported surface forms of a cell value — these ARE the calibration FP
+    modes (ar-03 '$193,737' [millions] → '$193.737 billion'; gte unit words), so they
+    must exist as POSITIVES or the checker flags every legit unit rewrite."""
+    out: list[str] = []
     m = _PCT_RE.match(value)
     if m:
-        return f"{m.group(1)} {'pour cent' if lang == 'fr' else 'percent'}"
+        out.append(f"{m.group(1)} {'pour cent' if lang == 'fr' else 'percent'}")
     m = _MONEY_AB_RE.match(value)
     if m:
         word = {"B": "billion", "M": "million"}[m.group(2)]
-        return f"${m.group(1)} {word}"
-    return None
+        out.append(f"${m.group(1)} {word}")
+    m = _MILLIONS_RE.match(value)
+    if m and millions_table:
+        n = float(m.group(1).replace(",", ""))
+        if n >= 1000:
+            out.append(f"${n / 1000:g} billion")  # 193,737 (M) -> $193.737 billion
+        out.append(f"${n:,.0f} million")
+        out.append(f"${m.group(1)}")  # the dollar-sign surface form
+    return out
+
+
+def _is_millions_table(table: Any) -> bool:
+    blob = (table.section + " " + " ".join(table.header)).lower()
+    return "million" in blob or "(in millions" in blob or "in millions" in blob
+
+
+# Abstract skill-teaching positives the VAULT can't supply (the financial
+# unit-transform register lives only in the held-out 10-K; the meta-provenance FP
+# references doc structure). Synthesized standalone so they don't leak and directly
+# target the ar-03 (unit) and gte-01 (meta-provenance) calibration FPs. audit-19 §8.
+_SYNTH_METRICS = [
+    ("Data Center revenue", "Data Center"), ("total revenue", "total revenue"),
+    ("operating income", "operating income"), ("Gaming revenue", "Gaming"),
+    ("net income", "net income"), ("Professional Visualization revenue", "ProViz"),
+    ("Compute revenue", "Compute segment"), ("the cost of revenue", "cost of revenue"),
+]
+_SYNTH_STRUCT = {
+    "en": ["as stated in the abstract.", "as shown in the table.",
+           "as reported in multiple tables.", "as noted in the abstract and tables.",
+           "per the summary table.", "as listed in the results section."],
+    "fr": ["comme indiqué dans le tableau.", "selon le résumé.",
+           "comme présenté dans plusieurs tableaux."],
+}
+
+
+def mint_synthetic_positives(n_unit: int = 400, n_struct: int = 200) -> list[dict[str, Any]]:
+    samples: list[dict[str, Any]] = []
+
+    def synth_chunk(cid: str, text: str) -> dict[str, str]:
+        return {"chunk_id": f"synthetic#{cid}", "doc_id": "synthetic",
+                "title": "Financial Summary", "doc_title": "the 2026 report", "text": text}
+
+    for k in range(n_unit):
+        metric, _short = _SYNTH_METRICS[k % len(_SYNTH_METRICS)]
+        millions = 1000 + (_h("unit", k) % 499000)  # 1,000 .. 500,000 (in millions)
+        billions = millions / 1000
+        split = "dev" if _h("usplit", k) % 100 < 12 else "train"
+        # evidence states the comma-grouped millions form; answer the worded billions form
+        evidence = (f"The following table summarizes results (in millions): "
+                    f"|Item|Amount| |---|---| |{metric}|$ {millions:,}|")
+        forms = [f"${billions:g} billion", f"${millions:,} million", f"${millions:,}"]
+        ans_value = forms[_h("uform", k) % len(forms)]
+        answer = f"The {metric} was {ans_value}."
+        samples.append(make_sample(synth_chunk(f"u{k}", evidence), "en",
+                                   f"What was the {metric}?", answer, None,
+                                   "synth_unit_pos", split))
+    for k in range(n_struct):
+        metric, _short = _SYNTH_METRICS[k % len(_SYNTH_METRICS)]
+        lang = "fr" if k % 5 == 0 else "en"
+        val = f"{30 + (_h('s', k) % 60)}.{_h('s2', k) % 10}%"
+        split = "dev" if _h("ssplit", k) % 100 < 12 else "train"
+        evidence = (f"Abstract — The {metric} reached {val} this year. "
+                    f"Details appear in the results table below.")
+        struct = _SYNTH_STRUCT[lang][_h("struct", k) % len(_SYNTH_STRUCT[lang])]
+        if lang == "fr":
+            answer = f"Le {metric} était de {val}, {struct}"
+        else:
+            answer = f"The {metric} was {val}, {struct}"
+        samples.append(make_sample(synth_chunk(f"s{k}", evidence), lang,
+                                   f"What was the {metric}?", answer, None,
+                                   "synth_struct_pos", split))
+    return samples
+
+
+# When True, the question slot is BLANK in every minted prompt — train == the
+# evidence-only (noq) inference the checker must use, because the breach subject is
+# DEFINITIONALLY in the question (ar-12 fired at 0.0 with the question, 0.535 without:
+# the question-echo licenses the very subject the binding fabricates). audit-19 §8.
+QUESTION_BLIND = False
 
 
 def make_sample(
@@ -249,7 +333,8 @@ def make_sample(
 ) -> dict[str, Any]:
     passage = f"{chunk['title']} — {chunk['text']}"
     prompt = LD_QA_TEMPLATE.format(
-        question=question, num_passages=1, context=f"passage 1: {passage}"
+        question="" if QUESTION_BLIND else question,
+        num_passages=1, context=f"passage 1: {passage}",
     )
     return {
         "prompt": prompt,
@@ -295,6 +380,7 @@ def mint_table_phase(
             rows = [[clean_cell(c) for c in r] for r in table.rows]
             if len(rows) < 2 or len(header) < 2:
                 continue
+            millions = _is_millions_table(table)
             labels = [r[0] for r in rows]
             if len(set(labels)) != len(labels):  # ambiguous row identity
                 continue
@@ -392,9 +478,12 @@ def mint_table_phase(
                     emitted += 1
                     doc_counts[chunk["doc_id"]] += 1
 
-                # A3 unit-transform positive (the calibration FP mode as a positive)
-                tv = unit_transform(value, lang)
-                if tv and emitted < chunk_cap:
+                # A3 unit-transform positives (the calibration FP modes as positives):
+                # ALL supported surface forms, incl. the millions-table → billions
+                # rewrite that is the literal ar-03 FP shape.
+                for tv in unit_transforms(value, lang, millions_table=millions):
+                    if emitted >= chunk_cap:
+                        break
                     claim, _ = render(
                         ct, {"label": rows[i][0], "header": header[j], "value": tv}
                     )
@@ -442,7 +531,13 @@ def main() -> None:
     ap.add_argument("--limit-chunks", type=int, default=0)
     ap.add_argument("--max-candidates", type=int, default=1400)
     ap.add_argument("--reuse-p", default="", help="reuse phase-P samples from a prior mint file")
+    ap.add_argument("--question-blind", action="store_true",
+                    help="blank the question slot in every prompt (train == noq inference)")
     args = ap.parse_args()
+
+    if args.question_blind:
+        globals()["QUESTION_BLIND"] = True
+        print("[mint] QUESTION_BLIND: prompts emitted with an empty question slot", flush=True)
 
     holdout_docs, cal_chunk_ids, cal_texts = load_calibration()
     print(f"[mint] holdout docs: {len(holdout_docs)}", flush=True)
@@ -459,6 +554,12 @@ def main() -> None:
     if args.reuse_p:
         p_samples = [s for s in json.load(open(args.reuse_p))
                      if s["meta"]["kind"].startswith("prose_")]
+        if args.question_blind:  # rebuild the prompt with a blank question slot
+            blank_re = re.compile(
+                r"(Briefly answer the following question:\n).*?(\nBear in mind)", re.DOTALL
+            )
+            for s in p_samples:
+                s["prompt"] = blank_re.sub(r"\1\2", s["prompt"])
         print(f"[mint] phase P reused from {args.reuse_p}: {len(p_samples)}", flush=True)
         samples.extend(p_samples)
     elif args.phase in ("p", "all"):
@@ -470,6 +571,16 @@ def main() -> None:
         p_samples = f4_nli_discard(p_samples)
         print(f"[mint] phase P: {len(p_samples)}", flush=True)
         samples.extend(p_samples)
+
+    synth = mint_synthetic_positives()
+    if args.question_blind:
+        blank_re = re.compile(
+            r"(Briefly answer the following question:\n).*?(\nBear in mind)", re.DOTALL
+        )
+        for s in synth:
+            s["prompt"] = blank_re.sub(r"\1\2", s["prompt"])
+    print(f"[mint] synthetic skill positives (unit/struct): {len(synth)}", flush=True)
+    samples.extend(synth)
 
     chunks_by_id = {c["chunk_id"]: c for c in chunks}
     add_provenance_tails(samples, chunks_by_id)

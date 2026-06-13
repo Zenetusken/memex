@@ -898,18 +898,29 @@ def binding_gate(fp_path: str, out_path: str, model_dir: str, runs: int = 2) -> 
               flush=True)
         sys.exit(2)
     rows = rows_runs[0]
+    # A question-blind checker (the breach subject is in the question, so it was
+    # TRAINED with a blank question) is in-distribution only on the evidence-only
+    # score — gate on conf_noq; the question-bearing conf_q is OOD for it.
+    blind = bool(meta.get("question_blind"))
+    primary = "ld_max_conf_noq" if blind else "ld_max_conf_q"
+    print(f"[binding] gating on {primary} (question_blind={blind})", flush=True)
     br = {r["qid"]: r for r in rows if r["side"] == "BREACH"}
     fp = {r["qid"]: r for r in rows if r["side"] == "FP"}
-    missed = {q: r["ld_max_conf_q"] for q, r in br.items() if r["ld_max_conf_q"] < t}
-    tail_only = {q: r["ld_max_conf_qs"] for q, r in br.items()
-                 if r["ld_max_conf_q"] >= t and r["ld_max_conf_qs"] < t}
-    fired = {q: r["ld_max_conf_q"] for q, r in fp.items() if r["ld_max_conf_q"] >= t}
-    margin = (min(r["ld_max_conf_q"] for r in br.values())
-              - max(r["ld_max_conf_q"] for r in fp.values()))
-    print(f"\n[binding] breaches missed (conf_q < t): {missed or 'none'}")
+    missed = {q: r[primary] for q, r in br.items() if r[primary] < t}
+    # tail-strip sanity stays on conf_qs (question-present), the only tail-stripped
+    # variant the arm records; skipped for blind models (no noq-tail variant).
+    tail_only = (
+        {} if blind else
+        {q: r["ld_max_conf_qs"] for q, r in br.items()
+         if r["ld_max_conf_q"] >= t and r["ld_max_conf_qs"] < t}
+    )
+    fired = {q: r[primary] for q, r in fp.items() if r[primary] >= t}
+    margin = (min(r[primary] for r in br.values())
+              - max(r[primary] for r in fp.values()))
+    print(f"\n[binding] breaches missed ({primary} < t): {missed or 'none'}")
     print(f"[binding] breaches tail-only (conf_qs < t): {tail_only or 'none'}")
-    print(f"[binding] FPs fired (conf_q >= t): {fired or 'none'} ({len(fired)}/12)")
-    print(f"[binding] margin min(BREACH) - max(FP) on conf_q = {margin:.3f}"
+    print(f"[binding] FPs fired ({primary} >= t): {fired or 'none'} ({len(fired)}/12)")
+    print(f"[binding] margin min(BREACH) - max(FP) on {primary} = {margin:.3f}"
           + (" [KNIFE-EDGE]" if 0 < margin < 0.05 else ""))
     ok = not missed and not tail_only and not fired
     print(f"\n[binding] GATE: {'PASS' if ok else 'FAIL'}")

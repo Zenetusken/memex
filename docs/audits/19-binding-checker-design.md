@@ -464,3 +464,67 @@ only ~33 rows and the v2 lever is tails + possessive templates. 2,299 samples
 **Candidate 2 — lettucedect-base-modernbert-en-v1 continued-FT on mints v2 + replay**
 (the pre-declared arm 2; inherits the RAGTruth FP discipline; EN base accepted with
 the FR gap noted): training 2026-06-13.
+
+**Candidate 3 — mmBERT-base, question-blind mints v3 + synthetic skill positives,
+GATED in noq: GATE FAIL — but the DECISIVE one.** Dev excellent (example-F1 0.877,
+dev FP 0.009; K1 learnability cleared a THIRD time). Mints v3 added the question-blind
+prompt slot (train == noq inference) + 600 synthetic unit-transform/structure-reference
+positives (the ar-03/gte-01 FP modes, synthesized standalone because the financial
+millions-table register lives ONLY in the held-out 10-K). Result: **BOTH breaches now
+caught in noq** (ar-12 flags " Graphics segment" 0.772, tg-13 0.839 — the question-blind
+fix WORKED for recall) **but 8/12 FPs fire** (vs cand2's 3). Rows:
+`data-17-scope-calibration/scope_probe_binding_cand3.json`.
+
+## 9. VERDICT: K2 — the content class is NOT separable by a scoped checker (do not re-walk)
+
+Three trained candidates + eight zero-shot arms exhaust the design space, and the
+failure is STRUCTURAL, not a tuning miss:
+
+- **The question-echo entanglement (the core finding).** The breach subject is
+  DEFINITIONALLY in the question ("the gross margin of NVIDIA's *Graphics segment*"),
+  so a question-bearing checker treats it as licensed (cand1/2: ar-12 → 0.0 WITH the
+  question). Remove the question and the breach fires (cand3: ar-12 → 0.772) — but the
+  question was also the only **responsiveness anchor**, so the question-blind checker
+  now flags every answer entity not locally verbatim in the cited chunk: years
+  ("2026"), model names ("GTE"), OS names ("Linux"), doc numbers ("SP 800-207"),
+  cross-doc frameworks ("Cyber Kill Chain" 1.000). 8/12 FPs.
+- **The delta detector is anti-separating.** The obvious rescue — flag where noq ≫ q
+  (the question-echo signature) — fails decisively: breach deltas are +0.133 / −0.060
+  while 5 FP deltas are +0.86 … +1.00. The legitimate cross-references are MORE
+  question-suppressed than the breaches; no contrast threshold exists.
+- **The ar-12 / cr350-xref-02 mirror-twin.** ar-12 ("Reconnaissance OF the Graphics
+  segment", FALSE — 71.1% is consolidated) and cr350-xref-02 ("Reconnaissance phase OF
+  la Cyber Kill Chain", TRUE — supported across the doc set) are LOCALLY IDENTICAL in
+  the cited chunk: a summary subject not bound to the value there. Separating them
+  requires verifying the binding's TRUTH against COMPLETE evidence (the full segment
+  table / the full doc set), which a checker scoped to the cited window cannot do.
+
+**Why this is a true negative, not a give-up:** the binding signal IS learnable
+(dev example-F1 0.83–0.88 across all three candidates — K1 cleared every time). The
+kill is the train/real **responsiveness gap**: minted minimal pairs teach binding, but
+the checker cannot simultaneously hold "what is grounded vs fabricated" (needs the
+question) and "ignore the question's echo of the subject" (needs to drop it). That is a
+property of the single-pass (evidence, ±question, answer) scoping, not of the data or
+model scale — so a 4th candidate at the same scoping is not warranted (§6 risk-7: the
+candidate ladder is bounded, ≤3, each one gate run; K2 reached).
+
+**Dispositions (recorded, do-not-re-walk):**
+- The **content class stays a DOCUMENTED RESIDUAL.** The shipped deterministic
+  provenance backstop (audit-18) remains the production guarantee for the provenance
+  class; the content class (ar-12 binding fabrication) is reachable only under the
+  mxbai env today, so production exposure is unchanged.
+- **mxbai stays blocked** on the content class (audit-17 standing state unchanged).
+- **What the increment SHIPS as reusable artifacts** (no production-path code; HARD-gate
+  neutral by construction — the answer/grounding graph is untouched): the design
+  (§1–6), the minting/training/vendor stack (`scripts/mint_binding_data.py`,
+  `train_binding_checker.py`, `binding_checker_vendor.py`), the 8th zero-shot arm +
+  the `binding` gate subcommand in `scope_guard_span_probe.py`, the frozen breach
+  chunks, and unit tests. The trained candidates live in `~/.memex/binding-checker/`
+  (uncommitted weights) for any future re-probe.
+- **The only design that COULD price this class** (recorded for a far-future revisit,
+  NOT queued): a checker that (a) takes the question with the asked-subject MASKED, or
+  (b) verifies the binding's truth against the COMPLETE document evidence (full table /
+  full doc set), not the cited window — i.e. a retrieval-augmented entailment step, an
+  order of magnitude more machinery than an advisory backstop justifies. Reopen only if
+  the content-class breach becomes production-reachable (e.g. a future reranker swap
+  ships) AND that cost is warranted.

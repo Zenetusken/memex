@@ -1,0 +1,194 @@
+[
+ {
+  "side": "BREACH",
+  "qid": "annual-report-12",
+  "ld_max_conf_q": 0.6387,
+  "ld_spans_q": [
+   "202"
+  ],
+  "ld_max_conf_noq": 0.7717,
+  "ld_spans_noq": [
+   " Graphics segment",
+   "202"
+  ],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": true
+ },
+ {
+  "side": "BREACH",
+  "qid": "technical-guidelines-13",
+  "ld_max_conf_q": 0.8995,
+  "ld_spans_q": [
+   " TUI log layer"
+  ],
+  "ld_max_conf_noq": 0.8393,
+  "ld_spans_noq": [
+   " T",
+   " log layer"
+  ],
+  "ld_max_conf_qs": 0.8995,
+  "ld_spans_qs": [
+   " TUI log layer"
+  ],
+  "tail_stripped": false
+ },
+ {
+  "side": "FP",
+  "qid": "annual-report-01",
+  "ld_max_conf_q": 0.8483,
+  "ld_spans_q": [
+   "2026"
+  ],
+  "ld_max_conf_noq": 0.8622,
+  "ld_spans_noq": [
+   "2026"
+  ],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": true
+ },
+ {
+  "side": "FP",
+  "qid": "annual-report-03",
+  "ld_max_conf_q": 0.8968,
+  "ld_spans_q": [
+   "2026"
+  ],
+  "ld_max_conf_noq": 0.9082,
+  "ld_spans_noq": [
+   "202",
+   "2026"
+  ],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": true
+ },
+ {
+  "side": "FP",
+  "qid": "annual-report-05",
+  "ld_max_conf_q": 0.8854,
+  "ld_spans_q": [
+   "2026"
+  ],
+  "ld_max_conf_noq": 0.8892,
+  "ld_spans_noq": [
+   "2026"
+  ],
+  "ld_max_conf_qs": 0.8854,
+  "ld_spans_qs": [
+   "2026"
+  ],
+  "tail_stripped": false
+ },
+ {
+  "side": "FP",
+  "qid": "nist-zero-trust-02",
+  "ld_max_conf_q": 0.0,
+  "ld_spans_q": [],
+  "ld_max_conf_noq": 0.9332,
+  "ld_spans_noq": [
+   " SP ",
+   "207"
+  ],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": false
+ },
+ {
+  "side": "FP",
+  "qid": "nist-zero-trust-03",
+  "ld_max_conf_q": 0.0,
+  "ld_spans_q": [],
+  "ld_max_conf_noq": 0.8593,
+  "ld_spans_noq": [
+   " trust"
+  ],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": false
+ },
+ {
+  "side": "FP",
+  "qid": "nist-zero-trust-05",
+  "ld_max_conf_q": 0.0,
+  "ld_spans_q": [],
+  "ld_max_conf_noq": 0.0,
+  "ld_spans_noq": [],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": false
+ },
+ {
+  "side": "FP",
+  "qid": "scientific-gte-01",
+  "ld_max_conf_q": 0.0,
+  "ld_spans_q": [],
+  "ld_max_conf_noq": 0.0,
+  "ld_spans_noq": [],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": true
+ },
+ {
+  "side": "FP",
+  "qid": "scientific-gte-02",
+  "ld_max_conf_q": 0.0,
+  "ld_spans_q": [],
+  "ld_max_conf_noq": 0.9647,
+  "ld_spans_noq": [
+   " GTE"
+  ],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": false
+ },
+ {
+  "side": "FP",
+  "qid": "linux-fundamentals-01",
+  "ld_max_conf_q": 0.0,
+  "ld_spans_q": [],
+  "ld_max_conf_noq": 0.9315,
+  "ld_spans_noq": [
+   " Linux"
+  ],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": false
+ },
+ {
+  "side": "FP",
+  "qid": "linux-fundamentals-03",
+  "ld_max_conf_q": 0.0,
+  "ld_spans_q": [],
+  "ld_max_conf_noq": 0.0,
+  "ld_spans_noq": [],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": false
+ },
+ {
+  "side": "FP",
+  "qid": "cr350-xref-02",
+  "ld_max_conf_q": 0.0,
+  "ld_spans_q": [],
+  "ld_max_conf_noq": 0.9997,
+  "ld_spans_noq": [
+   " Cyber Kill Chain"
+  ],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": false
+ },
+ {
+  "side": "FP",
+  "qid": "technical-guidelines-01",
+  "ld_max_conf_q": 0.0,
+  "ld_spans_q": [],
+  "ld_max_conf_noq": 0.0,
+  "ld_spans_noq": [],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": false
+ }
+]

@@ -208,11 +208,17 @@ def main() -> None:
     fp_rate = sum(1 for s, y in zip(scores, truth, strict=True) if not y and s >= best_t) / max(
         1, sum(1 for y in truth if not y)
     )
+    # detect question-blind from the mints (the breach subject is in the question, so a
+    # question-blind checker must be GATED in noq mode — audit-19 §8)
+    question_blind = all(
+        "the following question:\n\nBear in mind" in s.prompt for s in mint_dev[:20]
+    )
     meta = {
         "threshold": best_t, "dev_example_f1": round(best_f1, 4),
         "dev_fp_rate": round(fp_rate, 4), "base": args.base,
         "span_mode": args.span_mode, "max_length": args.max_length,
         "train_size": len(train), "dev_size": len(mint_dev),
+        "question_blind": question_blind,
     }
     json.dump(meta, open(Path(args.out) / "threshold.json", "w"), indent=1)
     print(f"[train] frozen threshold {best_t} (dev example-F1 {best_f1:.3f}, "
