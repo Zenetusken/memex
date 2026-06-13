@@ -33,7 +33,25 @@ async def _run(query_set: Path) -> int:
     ans = [q for q in queries if not q.get("should_refuse", False)]
     out: list[dict[str, object]] = []
     for q in ans:
-        resp = await answer_query(q["question"])
+        try:
+            resp = await answer_query(q["question"])
+        except Exception as e:  # per-query resilience (mirrors eval/runner.run_eval):
+            # one query's failure (e.g. a context-overflow on a big deck) must not abort
+            # the whole corpus's capture. CancelledError/KeyboardInterrupt/SystemExit are
+            # BaseException, so this `except Exception` does not swallow cancellation.
+            out.append(
+                {
+                    "qid": q["qid"],
+                    "question": q["question"],
+                    "_expected_answer": q.get("_expected_answer", ""),
+                    "answered": False,
+                    "error": f"{type(e).__name__}: {str(e)[:200]}",
+                    "refusal_reason": "",
+                    "summary": "",
+                    "claims": [],
+                }
+            )
+            continue
         # Mirror run_eval's graded text exactly: summary + each claim text.
         out.append(
             {
