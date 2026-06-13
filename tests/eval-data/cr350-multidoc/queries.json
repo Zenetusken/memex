@@ -26,9 +26,25 @@
   "_labelling_rule": "ANS queries: per-query `_doc_id` names the lecture that owns the answer; `_anchor_phrase` is a distinctive substring of the answer-bearing chunk; `relevant_chunk_ids` is filled by `scripts/extend_corpus.py resolve` (multi-doc aware \u2014 resolves each query against ITS OWN _doc_id). REF queries: relevant_chunk_ids=[], should_refuse=true, content intentionally absent from ALL seven docs.",
   "_created": "2026-05-23",
   "_purpose": "P0 multi-doc validation \u2014 the first eval set that exercises retrieval disambiguation across multiple related documents (the milestone P0 has needed since the 4\u219210 doc vault expansion). HARD GATES: refusal_cf=1.0 (every REF must refuse), zero hallucinations.",
+  "_baseline_answer_text_2026_06_13": {
+    "stack": "Qwen3.5-4B-AWQ orchestrator (ADR-0015) + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3 (cpu, device-pinned), co_residence_mode=manual",
+    "purpose": "answer_must_mention -> answer_mention_recall (audit-14 instrument). Measures answer-TEXT correctness the HARD gate / recall@k / the `answered` flag are blind to.",
+    "refusal_rate_on_counterfactuals": 1.0,
+    "answer_text_checked": 13,
+    "answer_text_correct_count": 13,
+    "mean_answer_mention_recall": 1.0,
+    "n_runs": 2,
+    "byte_stable": true,
+    "answer_text_failures": [],
+    "dormant_refused_not_graded": [
+      "cr350-img-01"
+    ],
+    "notes": "13/13 answered correctly (French). cr350-img-01 = the DOCUMENTED synthesis-class FALSE-REFUSAL (refused both runs; dormant slot authored from gold, NOT graded). Clean baseline on the answered set."
+  },
   "queries": [
     {
       "qid": "cr350-xref-01",
+      "answer_must_mention": [["serveur de messagerie", "messagerie", "mail"]],
       "question": "Que signifie un enregistrement MX dans le DNS selon le cours ?",
       "_doc_id": "5c9f3e0e-cr350-cours-3",
       "_anchor_phrase": "Indique le serveur de messagerie responsable d'un domaine",
@@ -42,6 +58,7 @@
     },
     {
       "qid": "cr350-xref-02",
+      "answer_must_mention": [["reconnaissance"], ["informations", "collecter", "information"]],
       "question": "En quoi consiste la phase de Reconnaissance de la Cyber Kill Chain ?",
       "_doc_id": "7e7cd59e-cr350-semaine-5-attaques-r-seau-et-cha-ne-d-atta",
       "_anchor_phrase": "collecter le maximum d'informations sur une cible sans l'alerter",
@@ -55,6 +72,7 @@
     },
     {
       "qid": "cr350-xref-03",
+      "answer_must_mention": [["transport"]],
       "question": "Quelle est la couche 4 du mod\u00e8le TCP/IP pr\u00e9sent\u00e9 dans le cours ?",
       "_doc_id": "3973498d-cr350-cours-2",
       "_anchor_phrase": "Couche 4 : Transport",
@@ -69,6 +87,7 @@
     },
     {
       "qid": "cr350-xref-04",
+      "answer_must_mention": [["état", "etat", "contexte", "stateful"]],
       "question": "Qu'est-ce qu'un pare-feu \u00e0 inspection avec \u00e9tat (stateful inspection) ?",
       "_doc_id": "499c900d-cr350-cours-6-coupe-feu-serveurs-mandataires-d-t",
       "_anchor_phrase": "\u00c9valuent l'\u00e9tat ou le contexte du trafic r\u00e9seau",
@@ -82,6 +101,7 @@
     },
     {
       "qid": "cr350-xref-05",
+      "answer_must_mention": [["lan"], ["wan"]],
       "question": "Quelle est la diff\u00e9rence entre un r\u00e9seau LAN et un r\u00e9seau WAN ?",
       "_doc_id": "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a",
       "_anchor_phrase": "Couvre une petite zone g\u00e9ographique comme une maison",
@@ -95,6 +115,7 @@
     },
     {
       "qid": "cr350-xref-06",
+      "answer_must_mention": [["confiance", "trust"], ["vérification", "verification", "never trust", "authentification"]],
       "question": "Qu'est-ce que l'architecture Zero Trust selon le cours ?",
       "_doc_id": "5795b16a-pdf-cr350-cours-1",
       "_anchor_phrase": "Ne fait pas confiance automatiquement \u00e0 l'int\u00e9rieur ou \u00e0 l'ext\u00e9rieur du r\u00e9seau",
@@ -108,6 +129,7 @@
     },
     {
       "qid": "cr350-xref-07",
+      "answer_must_mention": [["arp"], ["mac"]],
       "question": "\u00c0 quoi sert le protocole ARP et entre quelles couches fonctionne-t-il ?",
       "_doc_id": "5c9f3e0e-cr350-cours-3",
       "_anchor_phrase": "ARP fonctionne entre la couche 2 et la couche 3",
@@ -121,6 +143,7 @@
     },
     {
       "qid": "cr350-xref-08",
+      "answer_must_mention": [["60"]],
       "question": "Quelle moyenne minimale faut-il obtenir pour r\u00e9ussir le cours CR350 ?",
       "_doc_id": "050df0d9-cr350-plan-de-cours-officiel-20262",
       "_anchor_phrase": "moyenne globale sup\u00e9rieure ou \u00e9gale \u00e0 60%",
@@ -134,6 +157,7 @@
     },
     {
       "qid": "cr350-xref-09",
+      "answer_must_mention": [["routeur", "router"], ["couche 3", "passerelle", "réseaux", "trafic", "internet"]],
       "question": "Quel est le r\u00f4le principal d'un routeur dans un r\u00e9seau ?",
       "_doc_id": "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a",
       "_anchor_phrase": "Sert de passerelle entre le r\u00e9seau local (LAN) et l'ext\u00e9rieur",
@@ -147,6 +171,7 @@
     },
     {
       "qid": "cr350-xref-10",
+      "answer_must_mention": [["couche 7", "applicatif", "application"]],
       "question": "\u00c0 quelle couche du mod\u00e8le OSI op\u00e8re un pare-feu de type passerelle applicative (proxy) ?",
       "_doc_id": "499c900d-cr350-cours-6-coupe-feu-serveurs-mandataires-d-t",
       "_anchor_phrase": "Op\u00e8re \u00e0 la couche 7 (couche Applicatif)",
@@ -161,6 +186,7 @@
     },
     {
       "qid": "cr350-xref-11",
+      "answer_must_mention": [["commutateur", "switch"], ["mac"]],
       "question": "Quel \u00e9quipement r\u00e9seau utilise les adresses MAC pour transmettre les donn\u00e9es uniquement au bon destinataire dans un r\u00e9seau local ?",
       "_doc_id": "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a",
       "_anchor_phrase": "Utilise les adresses MAC pour transmettre efficacement les donn\u00e9es uniquement au bon destinataire",
@@ -214,6 +240,7 @@
     },
     {
       "qid": "cr350-img-01",
+      "answer_must_mention": [["fa0/21", "tronc", "trunk"]],
       "question": "Selon le diagramme de configuration VLAN du commutateur, quel port sert de port tronc et vers quels VLAN ?",
       "_doc_id": "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a",
       "_anchor_phrase": "Le port Fa0/21 du switch est configur\u00e9 comme un trunk",
@@ -227,6 +254,7 @@
     },
     {
       "qid": "cr350-img-02",
+      "answer_must_mention": [["routeur", "router"], ["switch", "commutateur"]],
       "question": "D'apr\u00e8s le diagramme d'architecture r\u00e9seau, par quels \u00e9quipements le trafic passe-t-il entre Internet et l'ordinateur A ?",
       "_doc_id": "7f7ff186-cr350-semaine-4-routeurs-commutateurs-points-d-a",
       "_anchor_phrase": "dirig\u00e9 par le routeur vers un switch",
@@ -240,6 +268,7 @@
     },
     {
       "qid": "cr350-img-03",
+      "answer_must_mention": [["spoofing"], ["fragmentation"]],
       "question": "Selon le diagramme d'attaque du cours, quelles techniques l'attaquant combine-t-il pour perturber le r\u00e9assemblage des paquets ?",
       "_doc_id": "7e7cd59e-cr350-semaine-5-attaques-r-seau-et-cha-ne-d-atta",
       "_anchor_phrase": "malform\u00e9s afin de perturber le r\u00e9assemblage",
