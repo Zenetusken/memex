@@ -108,7 +108,31 @@ the answer node rebalanced surgically.** Three versioned, kill-switchable prompt
 - Any future answer-node loosening is proposed — re-confirm against the named-entity/numeric
   substitution tripwires before shipping.
 
+### Update 2026-06-13 — the summary-scope hole (reranker A/B arc, audits 17/18/19)
+
+The sharper-reranker A/B (`mxbai-rerank-base-v2`) surfaced a structural gap in this same advisory layer:
+the draft **summary** re-attributes a TRUE grounded claim to the question's subject, while `verify`
+gates the *claims* and nothing gated the *framing*. It splits two ways:
+
+- **Provenance class** (e.g. tg-13, a claim mis-cited "according to the developer guidelines") — **FIXED +
+  SHIPPED default-ON**: a deterministic doc-identity check at the TOP of `assess_relevance`
+  (`core/text.extract_provenance_source` + `provenance_tokens_match` + `FTSStore.document_identities()` →
+  `_provenance_scope_violation`; kill-switch `MEMEX_AGENTS__PROVENANCE_SCOPE_ENABLED`). It is an advisory
+  addition with no path to an answered counterfactual (`refusal_cf` can't regress); full-ladder PASS
+  (cf=1.0×28). `verify` and the backstops are untouched. See `docs/audits/18-summary-scope-guard.md`.
+- **Content class** (ar-12 binding fabrication: a true *consolidated* figure FALSELY bound to a named
+  part) — **DOCUMENTED RESIDUAL, do-not-re-walk**: a gate-detection fine-tune was a K2 structural
+  negative (question-echo entanglement) and a generation-time `answer@v6` "whole-is-not-part" prompt
+  clause was reverted (the THIRD instance of the answer-prompt-blast-radius lesson above — it regressed an
+  unrelated linux-18 counterfactual under the shipped bge env). The breach is mxbai-reachable only, so
+  production exposure is UNCHANGED and `mxbai` stays blocked; the only remaining instrument is far-future
+  complete-evidence-entailment / masked-subject machinery. See `docs/audits/19-binding-checker-design.md`
+  §9 (K2) + §10 (the v6 revert).
+
 ## References
+
+- `docs/audits/{17,18,19}` — the reranker A/B, the shipped provenance-scope backstop, and the
+  content-class binding-checker K2 negative + `answer@v6` revert (the 2026-06-13 update above).
 
 - `docs/audits/12-false-refusals.md` — the full taxonomy, per-class counts, root causes, and the
   three attribution-substitution tripwires (nist-zero-trust-19, slide-decks-34, french-course-07).

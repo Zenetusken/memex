@@ -879,6 +879,11 @@ def binding_gate(fp_path: str, out_path: str, model_dir: str, runs: int = 2) -> 
     lettuce_arm machinery (train == gate == wiring input shape), at the threshold
     FROZEN on the minted dev split (model_dir/threshold.json — never tuned here).
 
+    VERDICT — DO NOT RE-WALK (audit-19 §9): every candidate this gate scored FAILED
+    (K2 structural negative — question-echo entanglement); the companion answer@v6
+    generation lever was also reverted (§10). The gate is retained for a FUTURE
+    masked-subject / complete-evidence-entailment design only, not a re-tune.
+
     PASS bar (all): both breaches fire at >= t on conf_q AND survive the
     tail-strip variant (conf_qs >= t — a catch living only in the provenance tail
     is style noise, the lesson that killed the pip checkpoint); ZERO of the 12
