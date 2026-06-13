@@ -1,5 +1,15 @@
 """Fine-tune the binding-fabrication checker (audit-19 design §3).
 
+VERDICT — DO NOT RE-WALK (audit-19 §9 K2): the content class (ar-12 binding
+fabrication) is NOT separable by a scoped (evidence, ±question, answer) checker.
+Three trained candidates + eight zero-shot arms exhausted the design space; the
+kill is STRUCTURAL (question-echo entanglement, not data/scale — dev example-F1
+0.83-0.88 every candidate). The companion GENERATION-time lever (answer@v6) was
+ALSO tried + reverted (§10, prompt blast radius). This stack is retained ONLY as a
+re-runnable artifact for a future MASKED-SUBJECT / complete-evidence-entailment
+design — NOT a same-scoping tuning revisit. mxbai stays blocked on the content
+class until that (order-of-magnitude-larger) machinery is warranted.
+
 Training mix = vault mints (scripts/mint_binding_data.py) + RAGTruth-EN replay
 (preprocessed VERBATIM per the vendored lettucedetect recipe) + ragtruth-fr-translated
 replay — the replay keeps the general-hallucination skill and the clean-FP profile;

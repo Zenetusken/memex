@@ -1,6 +1,11 @@
 """Mint presence-preserving binding-fabrication training data from the vault
 (audit-19 design §2 — the content-class checker increment).
 
+VERDICT — DO NOT RE-WALK (audit-19 §9 K2): the checker this data trains was
+measured a STRUCTURAL negative (question-echo entanglement) and the companion
+answer@v6 generation lever was reverted (§10). Re-runnable artifact only, for a
+future masked-subject / complete-evidence-entailment design — not a tuning revisit.
+
 Every negative satisfies the core invariant: the swapped-in subject occurs
 VERBATIM in the passage, the predicate+value is true of some OTHER subject in
 the same passage, and the claim is false ONLY because of the rebind. Within a
