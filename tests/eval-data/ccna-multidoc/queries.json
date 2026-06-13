@@ -17,9 +17,23 @@
   "_labelling_rule": "Per-query _doc_id pins the owning deck; relevant_chunk_ids resolved from _anchor_phrase via scripts/extend_corpus.py resolve. Source decks stay LOCAL (only this query set + the pinned baseline ship).",
   "_created": "2026-05-26",
   "_purpose": "Persistent regression artifact for the Office/.pptx + diagram ingest path; gives the P2.3 VLM-swap a diagram-rich discrimination set.",
+  "_baseline_answer_text_2026_06_13": {
+    "stack": "Qwen3.5-4B-AWQ orchestrator (ADR-0015) + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3 (cpu, device-pinned), co_residence_mode=manual",
+    "purpose": "answer_must_mention -> answer_mention_recall (audit-14 instrument). Measures answer-TEXT correctness the HARD gate / recall@k / the `answered` flag are blind to.",
+    "refusal_rate_on_counterfactuals": 1.0,
+    "answer_text_checked": 8,
+    "answer_text_correct_count": 8,
+    "mean_answer_mention_recall": 1.0,
+    "n_runs": 2,
+    "byte_stable": true,
+    "answer_text_failures": [],
+    "dormant_refused_not_graded": [],
+    "notes": "All 8 ANS answer correctly. SOFT OBS (content-correct, not a failure): ccna-02 answered IN FRENCH on an English query (language drift; 'domaines de diffusion' = broadcast domains). Clean baseline on the answered set."
+  },
   "queries": [
     {
       "qid": "ccna-01",
+      "answer_must_mention": [["source mac", "source"], ["port"]],
       "question": "How does a switch populate its MAC address table?",
       "_doc_id": "812d8c84-srwe-module-2-2021wef",
       "_anchor_phrase": "source MAC address",
@@ -33,6 +47,7 @@
     },
     {
       "qid": "ccna-02",
+      "answer_must_mention": [["broadcast", "diffusion"]],
       "question": "What does a VLAN segment a switched network into?",
       "_doc_id": "cbe4bab8-srwe-module-3-2021",
       "_anchor_phrase": "broadcast domains",
@@ -46,6 +61,7 @@
     },
     {
       "qid": "ccna-03",
+      "answer_must_mention": [["loop-free", "loop free", "loop"]],
       "question": "What kind of topology does Spanning Tree Protocol create in a switched network with redundant paths?",
       "_doc_id": "753a17ed-srwe-module-5-2021",
       "_anchor_phrase": "loop-free topology with a single path",
@@ -58,6 +74,7 @@
     },
     {
       "qid": "ccna-04",
+      "answer_must_mention": [["public"]],
       "question": "According to the NAT module, what kind of address does NAT translate a private IPv4 address into?",
       "_doc_id": "bbef665b-ensa-module-6-2021",
       "_anchor_phrase": "private IPv4 address",
@@ -71,6 +88,7 @@
     },
     {
       "qid": "ccna-05",
+      "answer_must_mention": [["high"], ["medium"], ["low"]],
       "question": "In the traffic-prioritization diagram, what are the three priority queues?",
       "_doc_id": "1306f455-ensa-module-9-2021",
       "_anchor_phrase": "Packets are shown as red envelopes, directed into the",
@@ -84,6 +102,7 @@
     },
     {
       "qid": "ccna-06",
+      "answer_must_mention": [["router id", "router-id"]],
       "question": "What does OSPF use to uniquely identify each router in the routing domain?",
       "_doc_id": "3e8de4e9-ensa-module-1-2021",
       "_anchor_phrase": "Router ID of the sending router",
@@ -96,6 +115,7 @@
     },
     {
       "qid": "ccna-07",
+      "answer_must_mention": [["dhcp snooping", "snooping"]],
       "question": "Which switch security feature mitigates DHCP spoofing attacks?",
       "_doc_id": "1c481d1a-srwe-module-10-2021",
       "_anchor_phrase": "Prevents DHCP starvation and DHCP spoofing attacks",
@@ -108,6 +128,7 @@
     },
     {
       "qid": "ccna-08",
+      "answer_must_mention": [["access-list", "access list"]],
       "question": "What configuration command creates a numbered standard IPv4 ACL?",
       "_doc_id": "d401e0bd-ensa-module-5-2021",
       "_anchor_phrase": "To create a numbered standard ACL, use the access-list command",

@@ -31,9 +31,23 @@
     ],
     "notes": "HARD GATES hold: refusal_cf=1.0 (all 4 in-corpus-unanswerable C++ counterfactuals refused without fabricating training-known facts - ++ etymology, latest standard, IDE, memory model), 0 hallucinations, citation precision 1.0. ANS 4/6 - the headline facts answer FROM the transcribed handwriting: developer/year/org (Stroustrup/1979/Bell Labs), original name 'C with Classes', 'middle-level' + the reasoning, and the supported paradigms. The 2 false-refusals are NON-fabrication misses, not quality failures: (05 'compiled or interpreted?') verify returned no grounded claims - the note says 'It is an imperative and a compiled language' and the grounder won't bridge the pronoun 'It'->C++ (the same conservatism that prevents hallucination); (06 'compilation stages?') retrieval dilution - the tiny note's compilation chunk lost the rerank competition to the large mixed vault's CUDA/networking chunks. Both are small-doc-in-large-vault / pronoun-grounding limits orthogonal to the handwritten path; scoping to the doc (the doc-picker) recovers 04 and the path itself is proven. The fence-strip recovered +1 (handwritten-04 paradigms: 3/6 -> 4/6). FIRST corpus to exercise the scan->VLM parse route end-to-end (handwriting -> faithful transcription -> retrieval -> grounded answer / counterfactual refusal)."
   },
+  "_baseline_answer_text_2026_06_13": {
+    "stack": "Qwen3.5-4B-AWQ orchestrator (ADR-0015) + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3 (cpu, device-pinned), co_residence_mode=manual",
+    "purpose": "answer_must_mention -> answer_mention_recall (audit-14 instrument). Measures answer-TEXT correctness the HARD gate / recall@k / the `answered` flag are blind to.",
+    "refusal_rate_on_counterfactuals": 1.0,
+    "answer_text_checked": 6,
+    "answer_text_correct_count": 6,
+    "mean_answer_mention_recall": 1.0,
+    "n_runs": 2,
+    "byte_stable": true,
+    "answer_text_failures": [],
+    "dormant_refused_not_graded": [],
+    "notes": "All 6 ANS answer correctly (VLM scan transcription; the 'Bjørne' Stroustrup spelling matches the note's own handwriting per gold). Clean baseline."
+  },
   "queries": [
     {
       "qid": "handwritten-01",
+      "answer_must_mention": [["stroustrup"], ["1979"], ["bell"]],
       "question": "According to the notes, who developed C++, and in what year and at what organization?",
       "_anchor_phrase": "Stroustrup",
       "_expected_answer": "C++ was developed by Bjarne (the note spells it 'Bj\u00f8rne') Stroustrup in 1979 at Bell Labs.",
@@ -46,6 +60,7 @@
     },
     {
       "qid": "handwritten-02",
+      "answer_must_mention": [["c with classes"]],
       "question": "What was C++ originally called, according to the notes?",
       "_anchor_phrase": "C with Classes",
       "_expected_answer": "C++ was originally named 'C with Classes'.",
@@ -58,6 +73,7 @@
     },
     {
       "qid": "handwritten-03",
+      "answer_must_mention": [["middle-level", "middle level"]],
       "question": "What 'level' of programming language do the notes describe C++ as, and why?",
       "_anchor_phrase": "middle-level",
       "_expected_answer": "C++ is described as a 'middle-level' language because it encapsulates both high-level and low-level language features.",
@@ -70,6 +86,7 @@
     },
     {
       "qid": "handwritten-04",
+      "answer_must_mention": [["object-oriented", "object oriented"], ["procedural"], ["generic"]],
       "question": "Which programming paradigms do the notes say C++ supports?",
       "_anchor_phrase": "supports \"object-oriented\", \"procedural\" and \"generic\" programming",
       "_expected_answer": "C++ supports object-oriented, procedural, and generic programming.",
@@ -82,6 +99,7 @@
     },
     {
       "qid": "handwritten-05",
+      "answer_must_mention": [["compiled"]],
       "question": "According to the notes, is C++ a compiled or interpreted language?",
       "_anchor_phrase": "imperative and a compiled language",
       "_expected_answer": "C++ is a compiled language (the notes also describe it as imperative).",
@@ -94,6 +112,7 @@
     },
     {
       "qid": "handwritten-06",
+      "answer_must_mention": [["source code", "source"], ["compile"], ["machine code", "machine"]],
       "question": "What are the stages of the C++ compilation process shown in the notes?",
       "_anchor_phrase": "C++ Compilation Process",
       "_expected_answer": "Source Code \u2192 Compile \u2192 Machine Code (the source code is compiled into machine/binary code).",

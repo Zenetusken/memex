@@ -11,9 +11,25 @@
   "_labelling_rule": "ANS queries: _anchor_phrase = distinctive substring from the chunk with the answer; resolved via scripts/extend_corpus.py resolve. REF queries: should_refuse=true; relevant_chunk_ids=[].",
   "_created": "2026-05-23",
   "_purpose": "Third corpus for the eval matrix (after slide-decks + french-course + annual-report). Validates the scaffolding workflow on a real chart-tutorial PDF and tests prose-retrieval over chart-knowledge content.",
+  "_baseline_answer_text_2026_06_13": {
+    "stack": "Qwen3.5-4B-AWQ orchestrator (ADR-0015) + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3 (cpu, device-pinned), co_residence_mode=manual",
+    "purpose": "answer_must_mention -> answer_mention_recall (audit-14 instrument). Measures answer-TEXT correctness the HARD gate / recall@k / the `answered` flag are blind to.",
+    "refusal_rate_on_counterfactuals": 1.0,
+    "answer_text_checked": 7,
+    "answer_text_correct_count": 6,
+    "mean_answer_mention_recall": 0.9762,
+    "n_runs": 2,
+    "byte_stable": true,
+    "answer_text_failures": [
+      "chart-types-09"
+    ],
+    "dormant_refused_not_graded": [],
+    "notes": "THE CATCH: chart-types-09 answers only 5 of 6 GIF-project assignees (Emily/Kevin/Mariasa/Piper/Ryan, MISSING Stephanie) -> recall 0.833, DETERMINISTIC across N=2. An answered+cited but INCOMPLETE-list answer, invisible to refusal_cf/recall@k/the `answered` flag. An answer-stage signal (the lever this metric gates), NOT a HARD-gate regression. 6/7 other ANS correct."
+  },
   "queries": [
     {
       "qid": "chart-types-01",
+      "answer_must_mention": [["rodgers"], ["bloom"]],
       "question": "Who wrote the Tableau paper on which chart or graph to use?",
       "_anchor_phrase": "Tracy Rodgers Product Marketing Manager",
       "_expected_answer": "Tracy Rodgers (Product Marketing Manager) and Robert Bloom (Tableau Engineer).",
@@ -26,6 +42,7 @@
     },
     {
       "qid": "chart-types-02",
+      "answer_must_mention": [["compare", "comparing", "comparison"], ["categories", "category"]],
       "question": "When should you use a bar chart according to this paper?",
       "_anchor_phrase": "Compare data across categories",
       "_expected_answer": "To compare data across categories (best suited for data that can be split into several groups, e.g., volume of shirts in different sizes, website traffic by referrer).",
@@ -38,6 +55,7 @@
     },
     {
       "qid": "chart-types-03",
+      "answer_must_mention": [["compare", "comparing", "comparison"]],
       "question": "What is the main weakness of pie charts according to this paper?",
       "_anchor_phrase": "pie chart doesn't give the viewer a way to quickly and accurately compare",
       "_expected_answer": "Pie charts don't give viewers a way to quickly and accurately compare information; the viewer has to create context on their own, missing key points.",
@@ -50,6 +68,7 @@
     },
     {
       "qid": "chart-types-04",
+      "answer_must_mention": [["accumulation", "accumulate"], ["bar"]],
       "question": "What is a Pareto chart?",
       "_anchor_phrase": "Pareto chart showing the accumulation of multiple categories",
       "_expected_answer": "A chart showing the accumulation of multiple categories \u2014 created by combining bar charts with table calculations.",
@@ -62,6 +81,7 @@
     },
     {
       "qid": "chart-types-05",
+      "answer_must_mention": [["map", "maps"], ["filter", "drill", "intuitive"]],
       "question": "Why do bar charts work well combined with maps?",
       "_anchor_phrase": "Maps are a powerful and intuitive way to visualize data",
       "_expected_answer": "Maps are a powerful and intuitive way to visualize data; using a map as a filter lets viewers drill down and find detailed answers.",
@@ -94,6 +114,7 @@
     },
     {
       "qid": "chart-types-08",
+      "answer_must_mention": [["22"], ["8"]],
       "question": "In the Gantt chart project status example shown in the paper, how many projects are 'On Time' versus 'Late'?",
       "_anchor_phrase": "On Time 22",
       "_expected_answer": "22 projects on time, 8 late (from the Gantt chart example figure).",
@@ -107,6 +128,7 @@
     },
     {
       "qid": "chart-types-09",
+      "answer_must_mention": [["emily"], ["kevin"], ["mariasa"], ["piper"], ["ryan"], ["stephanie"]],
       "question": "Which team members in the Gantt chart example are assigned to GIF projects?",
       "_anchor_phrase": "Emily",
       "_expected_answer": "Emily, Kevin, Mariasa, Piper, Ryan, and Stephanie (from the Gantt chart's project-by-owner figure).",

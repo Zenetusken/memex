@@ -16,9 +16,23 @@
   "_labelling_rule": "ANS queries: relevant_chunk_ids enumerates every chunk that contains a piece of the literal answer (the agent's citation_precision counts hits against this whitelist). REF queries: relevant_chunk_ids=[] and should_refuse=true \u2014 content is intentionally NOT in the corpus.",
   "_created": "2026-05-22",
   "_purpose": "Phase 1 of the French support hardening sequence \u2014 baseline eval data to A/B prompt changes against. Pinned during the multilingual ship (commit e6f821b).",
+  "_baseline_answer_text_2026_06_13": {
+    "stack": "Qwen3.5-4B-AWQ orchestrator (ADR-0015) + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3 (cpu, device-pinned), co_residence_mode=manual",
+    "purpose": "answer_must_mention -> answer_mention_recall (audit-14 instrument). Measures answer-TEXT correctness the HARD gate / recall@k / the `answered` flag are blind to.",
+    "refusal_rate_on_counterfactuals": 1.0,
+    "answer_text_checked": 5,
+    "answer_text_correct_count": 5,
+    "mean_answer_mention_recall": 1.0,
+    "n_runs": 2,
+    "byte_stable": true,
+    "answer_text_failures": [],
+    "dormant_refused_not_graded": [],
+    "notes": "All 5 ANS answer correctly (French). SOFT OBS: fc-03 OVER-lists secure protocols beyond gold's 3 (FTP/SSH/HTTPS + IPSec/SSL/VPN) — recall-safe. Clean baseline."
+  },
   "queries": [
     {
       "qid": "french-course-01",
+      "answer_must_mention": [["tounou"]],
       "question": "Qui est le charg\u00e9 de cours du CR350 ?",
       "relevant_chunk_ids": [
         "5795b16a-pdf-cr350-cours-1#54da5e4ebd"
@@ -31,6 +45,7 @@
     },
     {
       "qid": "french-course-02",
+      "answer_must_mention": [["collection", "ensemble", "entités", "interconnect"], ["communiquer", "partager", "ressources"]],
       "question": "Qu'est-ce qu'un r\u00e9seau selon le cours CR350 ?",
       "relevant_chunk_ids": [
         "5795b16a-pdf-cr350-cours-1#f64a3fc0ec"
@@ -43,6 +58,7 @@
     },
     {
       "qid": "french-course-03",
+      "answer_must_mention": [["ssh"], ["https"], ["ftp"]],
       "question": "Quels sont les protocoles s\u00e9curis\u00e9s mentionn\u00e9s dans le cours ?",
       "relevant_chunk_ids": [
         "5795b16a-pdf-cr350-cours-1#32bb0255f4"
@@ -55,6 +71,7 @@
     },
     {
       "qid": "french-course-04",
+      "answer_must_mention": [["arpanet"], ["protection", "vulnérab", "vulnerab", "sécurité", "securite", "données"]],
       "question": "Pourquoi ARPANET est-il \u00e0 l'origine des probl\u00e8mes de s\u00e9curit\u00e9 d'Internet ?",
       "relevant_chunk_ids": [
         "5795b16a-pdf-cr350-cours-1#f64a3fc0ec"
@@ -67,6 +84,7 @@
     },
     {
       "qid": "french-course-05",
+      "answer_must_mention": [["couches", "layers"], ["défense", "defense", "protection"]],
       "question": "Qu'est-ce que la d\u00e9fense en profondeur en s\u00e9curit\u00e9 r\u00e9seau ?",
       "relevant_chunk_ids": [
         "5795b16a-pdf-cr350-cours-1#ec266a82f0"

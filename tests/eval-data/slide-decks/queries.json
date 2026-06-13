@@ -4,9 +4,32 @@
   "_query_count": 33,
   "_mix": "20 answerable (17 prose + 3 chart-content) + 5 empty-retrieval refusals + 8 near-miss refusals",
   "_labelling_rule": "For each answerable query, run `memex search --k 10`; `relevant_chunk_ids` = every chunk in the top-10 whose text contains the literal answer (or equivalent paraphrase). Single-chunk labels appear when only one chunk has the answer text; multi-chunk labels appear when the chunker's overlap creates near-duplicate chunks.",
+  "_baseline_answer_text_2026_06_13": {
+    "stack": "Qwen3.5-4B-AWQ orchestrator (ADR-0015) + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3 (cpu, device-pinned), co_residence_mode=manual",
+    "purpose": "answer_must_mention -> answer_mention_recall (audit-14 instrument). Measures answer-TEXT correctness the HARD gate / recall@k / the `answered` flag are blind to.",
+    "refusal_rate_on_counterfactuals": 1.0,
+    "answer_text_checked": 13,
+    "answer_text_correct_count": 13,
+    "mean_answer_mention_recall": 1.0,
+    "n_runs": 2,
+    "byte_stable": true,
+    "answer_text_failures": [],
+    "dormant_refused_not_graded": [
+      "slide-decks-03",
+      "slide-decks-04",
+      "slide-decks-05",
+      "slide-decks-16",
+      "slide-decks-17",
+      "slide-decks-21",
+      "slide-decks-25",
+      "slide-decks-31"
+    ],
+    "notes": "13/13 ANSWERED correctly (CUDA deck chart/table numerics: 0.5x/0.06x/0.12x/900 GB/s/2,070 ms etc.). The 8 dormant (sd-03/04/05/16/17/21/25/31) are the DOCUMENTED residual FALSE-REFUSALS (refused both runs; dormant slots from gold, NOT graded). SOFT OBS: sd-07 says 'half' correctly but adds a WRONG bfloat16 aside (recall-safe; a precision blemish the recall metric doesn't flag). Clean baseline on the answered set."
+  },
   "queries": [
     {
       "qid": "slide-decks-01",
+      "answer_must_mention": [["0.5x", "0.5"]],
       "question": "What is the energy cost of FP16 matrix multiplication relative to FP32, in FMA operations?",
       "relevant_chunk_ids": [
         "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#59c9cfc717",
@@ -24,6 +47,7 @@
     },
     {
       "qid": "slide-decks-02",
+      "answer_must_mention": [["data movement", "movement"], ["computation", "compute"]],
       "question": "What are the two main categories where modern processors spend power, according to the slides?",
       "relevant_chunk_ids": [
         "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#04775b8330"
@@ -35,6 +59,7 @@
     },
     {
       "qid": "slide-decks-03",
+      "answer_must_mention": [["square"], ["mantissa"]],
       "question": "How does the power cost of floating point arithmetic scale with the mantissa length?",
       "relevant_chunk_ids": [
         "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#f2cc18240f",
@@ -50,6 +75,7 @@
     },
     {
       "qid": "slide-decks-04",
+      "answer_must_mention": [["density"], ["efficiency", "power efficiency"]],
       "question": "What changed about transistor density and power efficiency between 2004 and 2022, per the TSMC chart?",
       "relevant_chunk_ids": [
         "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#92f9379a5c",
@@ -61,6 +87,7 @@
     },
     {
       "qid": "slide-decks-05",
+      "answer_must_mention": [["data movement", "movement"]],
       "question": "Why is data movement a key concern for power efficiency in modern processors?",
       "relevant_chunk_ids": [
         "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#04775b8330"
@@ -72,6 +99,7 @@
     },
     {
       "qid": "slide-decks-06",
+      "answer_must_mention": [["0.06x", "0.06"]],
       "question": "What is the energy cost of FP8 tensor core matrix multiplication relative to an FP32 FMA?",
       "relevant_chunk_ids": [
         "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#59c9cfc717",
@@ -88,6 +116,7 @@
     },
     {
       "qid": "slide-decks-07",
+      "answer_must_mention": [["half", "fp16"]],
       "question": "Which floating-point format has a 5-bit exponent and 10-bit mantissa?",
       "relevant_chunk_ids": [
         "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#98c8843dfc",
@@ -168,6 +197,7 @@
     },
     {
       "qid": "slide-decks-16",
+      "answer_must_mention": [["6x", "6"]],
       "question": "By how much has NVRTC compilation time improved since CUDA 11.8 for a hello-world kernel?",
       "relevant_chunk_ids": [
         "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#2516c9617d"
@@ -178,6 +208,7 @@
     },
     {
       "qid": "slide-decks-17",
+      "answer_must_mention": [["3"], ["1"]],
       "question": "In the deck's basic kernel-fusion example, how many kernel launches does the unfused FP32→FP16 multiplication require versus the single fused version?",
       "relevant_chunk_ids": [
         "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#1a4c247e8f",
@@ -189,6 +220,7 @@
     },
     {
       "qid": "slide-decks-18",
+      "answer_must_mention": [["900"]],
       "question": "What is the NVLink C2C bandwidth between the Grace CPU and Hopper GPU?",
       "relevant_chunk_ids": [
         "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#93511aaf82",
@@ -203,6 +235,7 @@
     },
     {
       "qid": "slide-decks-19",
+      "answer_must_mention": [["c++", "cpp"], ["python"]],
       "question": "Which two programming-language abstractions does CUTLASS provide for tensor cores?",
       "relevant_chunk_ids": [
         "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#79bf710bec",
@@ -214,6 +247,7 @@
     },
     {
       "qid": "slide-decks-20",
+      "answer_must_mention": [["minimal"]],
       "question": "What new NVRTC flag reduces front-end compilation time by excluding rarely-used compile-time-expensive features?",
       "relevant_chunk_ids": [
         "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#e07a98ccd9"
@@ -224,6 +258,7 @@
     },
     {
       "qid": "slide-decks-21",
+      "answer_must_mention": [["1.6x", "1.6"]],
       "question": "How much lower are the overheads of the NVRTC '-minimal' flag compared to the default '-O3'?",
       "relevant_chunk_ids": [
         "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#e07a98ccd9"
@@ -234,6 +269,7 @@
     },
     {
       "qid": "slide-decks-22",
+      "answer_must_mention": [["lu"], ["iterative", "refine", "refinement", "gmres"]],
       "question": "What method does the deck describe for getting IEEE-754 FP64-accurate results from FP16 tensor cores?",
       "relevant_chunk_ids": [
         "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#73dcb4f9de",
@@ -246,6 +282,7 @@
     },
     {
       "qid": "slide-decks-23",
+      "answer_must_mention": [["address space"], ["grace"], ["hopper"]],
       "question": "What does the Grace-Hopper unified memory address space refer to in the deck?",
       "relevant_chunk_ids": [
         "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#14510cc140",
@@ -257,6 +294,7 @@
     },
     {
       "qid": "slide-decks-24",
+      "answer_must_mention": [["0.12x", "0.12"]],
       "question": "What is the energy cost of an FP16 Tensor Core MMA matrix multiply relative to an FP32 FMA?",
       "relevant_chunk_ids": [
         "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#59c9cfc717",
@@ -273,6 +311,7 @@
     },
     {
       "qid": "slide-decks-25",
+      "answer_must_mention": [["performance per watt", "per watt", "watt"]],
       "question": "What is the deck's central thesis about the right performance metric to optimise in modern accelerators?",
       "relevant_chunk_ids": [
         "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#2fdfa63753"
@@ -319,6 +358,7 @@
     },
     {
       "qid": "slide-decks-30",
+      "answer_must_mention": [["python"], ["warp"]],
       "question": "What programming language must I use to write CUDA kernels — only C++, or are other options supported?",
       "relevant_chunk_ids": [
         "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#fe9722a3c6"
@@ -329,6 +369,7 @@
     },
     {
       "qid": "slide-decks-31",
+      "answer_must_mention": [["minimal lead-time", "inter-operability", "pythonic", "platform-agnostic"]],
       "question": "What four design principles does the nvmath-python architecture figure highlight?",
       "relevant_chunk_ids": [
         "2f96ae1c-s62400-cuda-new-features-and-beyond-171114580640#59c55cabec"
@@ -340,6 +381,7 @@
     },
     {
       "qid": "slide-decks-32",
+      "answer_must_mention": [["2,070", "2070"]],
       "question": "What duration is shown for the CameraGestureBase_accumulate_values operation in the Nsight Systems timeline figure?",
       "relevant_chunk_ids": [],
       "should_refuse": false,
@@ -349,6 +391,7 @@
     },
     {
       "qid": "slide-decks-33",
+      "answer_must_mention": [["numpy"], ["scipy"], ["cupy"], ["pytorch"], ["scikit-learn", "scikit learn"], ["scikit-image", "scikit image"]],
       "question": "Per the nvmath-python architectural figure, which existing Python numeric libraries does it interoperate with?",
       "relevant_chunk_ids": [],
       "should_refuse": false,

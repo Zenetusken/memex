@@ -27,9 +27,23 @@
     "false_refusals": ["forms-w9-05"],
     "notes": "HARD GATES hold — refusal_cf=1.0 (incl. all 3 tax-form confabulation traps: Form 1040 standard deduction, 401k limit, W-2 filing deadline — adjacent IRS content NOT in W-9), 0 hallucinations. 1 false-refusal (w9-05 'who should use W-9' — the Purpose-of-Form chunk didn't reach top-5; retrieval/assess miss, not fabrication). w9-07 (ITIN/W-7) answered correctly but cp=0.0 — sibling-chunk artifact (the How-to-get-a-TIN / W-7/SS-4/SS-5 content spans chunks). The fillable form PAGE parsed into a [chart-text] block (FTS-stripped), so answerable anchors target the instruction prose; form-field content is dense-retrievable only. 11/12 ANS leaves headroom for the P2.1 reranker A/B."
   },
+  "_baseline_answer_text_2026_06_13": {
+    "stack": "Qwen3.5-4B-AWQ orchestrator (ADR-0015) + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3 (cpu, device-pinned), co_residence_mode=manual",
+    "purpose": "answer_must_mention -> answer_mention_recall (audit-14 instrument). Measures answer-TEXT correctness the HARD gate / recall@k / the `answered` flag are blind to.",
+    "refusal_rate_on_counterfactuals": 1.0,
+    "answer_text_checked": 12,
+    "answer_text_correct_count": 12,
+    "mean_answer_mention_recall": 1.0,
+    "n_runs": 2,
+    "byte_stable": true,
+    "answer_text_failures": [],
+    "dormant_refused_not_graded": [],
+    "notes": "All 12 ANS answer correctly (W-9 form scan: penalties / percentages / form numbers W-7/W-8/8233). Clean baseline."
+  },
   "queries": [
     {
       "qid": "forms-w9-01",
+      "answer_must_mention": [["24"]],
       "question": "What percentage does backup withholding take from applicable payments under Form W-9?",
       "_anchor_phrase": "withhold and pay to the IRS 24% of such payments",
       "_expected_answer": "24%.",
@@ -42,6 +56,7 @@
     },
     {
       "qid": "forms-w9-02",
+      "answer_must_mention": [["50"]],
       "question": "What is the penalty for failing to furnish your correct TIN to a requester?",
       "_anchor_phrase": "subject to a penalty of $50 for each such failure",
       "_expected_answer": "$50 for each failure (unless due to reasonable cause and not willful neglect).",
@@ -54,6 +69,7 @@
     },
     {
       "qid": "forms-w9-03",
+      "answer_must_mention": [["500"]],
       "question": "What is the civil penalty for making a false statement that results in no backup withholding?",
       "_anchor_phrase": "you are subject to a $500 penalty",
       "_expected_answer": "$500.",
@@ -66,6 +82,7 @@
     },
     {
       "qid": "forms-w9-04",
+      "answer_must_mention": [["criminal"], ["fine", "fines", "imprisonment"]],
       "question": "What can happen if you willfully falsify certifications on Form W-9?",
       "_anchor_phrase": "Willfully falsifying certifications or affirmations may subject you to criminal penalties",
       "_expected_answer": "Criminal penalties including fines and/or imprisonment.",
@@ -78,6 +95,7 @@
     },
     {
       "qid": "forms-w9-05",
+      "answer_must_mention": [["u.s.", "us person", "resident alien"], ["tin"]],
       "question": "Who should use Form W-9?",
       "_anchor_phrase": "Use Form W-9 only if you are a U.S. person",
       "_expected_answer": "A U.S. person (including a resident alien), to provide their correct TIN to a requester.",
@@ -90,6 +108,7 @@
     },
     {
       "qid": "forms-w9-06",
+      "answer_must_mention": [["w-8", "w8", "8233"]],
       "question": "What form should a foreign person use instead of Form W-9?",
       "_anchor_phrase": "use the appropriate Form W-8 or Form 8233",
       "_expected_answer": "The appropriate Form W-8 (or Form 8233) \u2014 a foreign person does not use Form W-9.",
@@ -102,6 +121,7 @@
     },
     {
       "qid": "forms-w9-07",
+      "answer_must_mention": [["w-7", "w7"]],
       "question": "Which IRS form do you use to apply for an ITIN?",
       "_anchor_phrase": "Use Form W-7, Application for IRS Individual Taxpayer Identification Number, to apply for an ITIN",
       "_expected_answer": "Form W-7 (SS-5 is for an SSN; SS-4 is for an EIN).",
@@ -114,6 +134,7 @@
     },
     {
       "qid": "forms-w9-08",
+      "answer_must_mention": [["real estate"], ["not subject", "not"]],
       "question": "Are real estate transactions subject to backup withholding under Form W-9?",
       "_anchor_phrase": "Real estate transactions are not subject to backup withholding",
       "_expected_answer": "No \u2014 real estate transactions are not subject to backup withholding.",
@@ -126,6 +147,7 @@
     },
     {
       "qid": "forms-w9-09",
+      "answer_must_mention": [["account holders", "account"], ["specified", "u.s. persons"]],
       "question": "What does FATCA require a participating foreign financial institution to report?",
       "_anchor_phrase": "requires a participating foreign financial institution to report all U.S. account holders",
       "_expected_answer": "All U.S. account holders that are specified U.S. persons.",
@@ -138,6 +160,7 @@
     },
     {
       "qid": "forms-w9-10",
+      "answer_must_mention": [["citizen", "resident alien"], ["partnership", "corporation", "domestic"]],
       "question": "According to Form W-9, who is considered a U.S. person for federal tax purposes?",
       "_anchor_phrase": "you are considered a U.S. person if you are",
       "_expected_answer": "A U.S. citizen or resident alien; a partnership/corporation/company organized in the U.S.; a domestic estate; or a domestic trust.",
@@ -150,6 +173,7 @@
     },
     {
       "qid": "forms-w9-11",
+      "answer_must_mention": [["civil"], ["criminal"]],
       "question": "What happens if a requester misuses TINs in violation of federal law?",
       "_anchor_phrase": "If the requester discloses or uses TINs in violation of federal law",
       "_expected_answer": "The requester may be subject to civil and criminal penalties.",
@@ -162,6 +186,7 @@
     },
     {
       "qid": "forms-w9-12",
+      "answer_must_mention": [["each"], ["w-9", "w9"]],
       "question": "For a joint account documented to an FFI, what must each U.S.-person holder provide?",
       "_anchor_phrase": "each holder of the account that is a U.S. person must provide a Form W-9",
       "_expected_answer": "Each U.S.-person holder must provide their own Form W-9.",
