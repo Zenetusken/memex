@@ -528,3 +528,61 @@ candidate ladder is bounded, ≤3, each one gate run; K2 reached).
   order of magnitude more machinery than an advisory backstop justifies. Reopen only if
   the content-class breach becomes production-reachable (e.g. a future reranker swap
   ships) AND that cost is warranted.
+
+## 10. The generation-time prompt lever (answer@v6) — BUILT, 2 iterations, REVERTED
+
+After the K2 gate-detection negative (§9), the natural follow-on was to PREVENT the
+ar-12 binding fabrication at GENERATION time rather than detect it at the gate: a
+"whole is not part" scope clause on the answer node (a consolidated/whole figure is
+NOT a named part's value → empty claims → the existing refuse path). The appeal: the
+question-echo entanglement that doomed the gate doesn't bite at generation (the model
+decides what to assert, with the question as task framing). It was scoped, built as
+`answer@v6` (a surgical extension of v5's "naming an item is not the same as stating
+its value" rule), and validated through the mini-sweep + a two-env ladder. **VERDICT:
+REVERTED — the heavily-tuned 4B answer prompt has unpredictable blast radius; the
+clause regressed OTHER counterfactuals under the SHIPPED bge env. Do not re-walk
+without a different mechanism.**
+
+**The arc (each step measured, N=3 controlled A/Bs):**
+1. **v6-first-cut: bge BACKFIRE.** The mxbai pair probe passed (ar-12 refuses 3/3),
+   but the full ladder's FIRST result flagged ar-12 ANSWERING under bge. Controlled
+   A/B (ar-12, bge, N=3): **v5 refuses 3/3, v6-first-cut ANSWERS 3/3 with the exact
+   fabrication.** Cause: worked example #5 embedded the literal breach output
+   (NVIDIA/Graphics/71.1%) next to a "DRAFT 71.1%" instruction — on a small model a
+   negative example that CONTAINS the bad output TEACHES it (the 4B pattern-matched the
+   live query and copied the salient draft action). LESSON: validate a generation lever
+   under EVERY env it touches (the one-env mxbai validation masked the bge regression).
+2. **v6-cleaned: bge-neutral, but a NEW regression.** Rewrote the example to a DIFFERENT
+   domain (EMEA/operating-margin, no verbatim copy path) + dropped the literal draft
+   value. Re-validated BOTH envs N=3: ar-12 refuses 3/3 under bge (bge-neutral, matches
+   v5) AND 3/3 under mxbai (the fix); razor twins answer. The ladder relaunched and the
+   first 12 arm-A corpora held refusal_cf=1.0 — EXCEPT **linux-fundamentals cf=0.800.**
+   Controlled A/B (linux-18, bge, N=3): **v5 refuses 3/3, v6-cleaned ANSWERS 3/3.**
+   linux-18 ("what exact compression ratio does the chapter state gzip achieves?", gold
+   REFUSE — the chapter gives a byte EXAMPLE, not a stated ratio) is NOT a whole-vs-part
+   shape — the clause has BLAST RADIUS on an unrelated "specific-value-absent"
+   counterfactual: its "if the value IS present, draft it normally / a literal answer"
+   emphasis tipped the answer-bias so the model drafts the byte example as the ratio.
+
+**Why REVERT (not a 3rd iteration):**
+- This is the THIRD instance of the same ADR-0022 lesson (the answer prompt resists
+  surgical change: the v4 Cisco-PIX breach, the v6 worked-example backfire, the v6
+  linux-18 blast radius). Each "fix" broke a different counterfactual. A 3rd iteration to
+  rescue linux-18 risks a 4th regression — the whack-a-mole the discipline forbids.
+- **The cost/benefit is net-negative.** ar-12 has ZERO production exposure under bge —
+  it ALREADY refuses there on v5 (the breach is mxbai-only, and mxbai is not shipped).
+  So v6's only production value is enabling a future mxbai ship (#141), and it costs a
+  SHIPPED-env counterfactual breach (linux-18 → fabricated ratio). Trading a shipped-env
+  HARD-gate breach for an unshipped-env fix is clearly wrong.
+- Reverted cleanly: `answer/v6.md` deleted (loader falls back to the unchanged v5), the
+  test restored; the `/ask` graph + every gate are byte-identical to pre-v6 main.
+
+**Disposition (do-not-re-walk):** the generation-time prompt lever JOINS the
+gate-detection fine-tune (§9 K2) as a TRIED-AND-REVERTED lever for the content class.
+Both are recorded negatives. **The content class remains a DOCUMENTED RESIDUAL**; the
+shipped provenance backstop (audit-18) stays the production guarantee for the provenance
+class; mxbai stays blocked (audit-17 standing state UNCHANGED — the content-class
+blocker is NOT closed). The only remaining direction is the §9 "complete-evidence
+entailment / masked-subject" machinery, an order of magnitude more than warranted while
+the breach is unshipped-env-only. Artifacts: `data-19-binding-checker/v6-ladder/`
+(the pair probe, mini-sweep, the two backfire A/Bs, the partial ladder).
