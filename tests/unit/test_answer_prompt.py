@@ -53,9 +53,13 @@ def test_v6_adds_the_whole_is_not_part_scope_rule() -> None:
     escapes so ar-05 (consolidated) and per-part-revenue (ar-03) still answer."""
     b = _norm(_body())
     assert "Whole is not part" in b
-    assert "Graphics segment" in b
+    # the worked example uses a DIFFERENT domain (EMEA/operating-margin), NOT the live
+    # ar-12 surface (NVIDIA/Graphics/71.1%) — embedding the literal breach output next to a
+    # draft instruction PRIMED the 4B to copy it (the v6-first-cut bge backfire, audit-19)
+    assert "EMEA" in b
+    assert "71.1" not in b and "Graphics segment" not in b  # no verbatim copy path for ar-12
     # the part's OWN-figure escape must be present (ar-03 Data Center revenue must still answer)
-    assert "the part's OWN asked value" in b or "the part's OWN figure for the asked metric IS" in b
+    assert "the part's OWN figure for the asked metric IS" in b
     # the consolidated-question escape (ar-05 must still answer the total it has)
     assert "asks for the WHOLE/consolidated figure itself" in b
 
