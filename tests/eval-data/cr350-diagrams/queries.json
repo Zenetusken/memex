@@ -16,9 +16,23 @@
   "_labelling_rule": "ANS queries: `_anchor_phrase` is a distinctive substring of the VLM-transcribed answer-bearing chunk; `relevant_chunk_ids` is minted by scripts/extend_corpus.py resolve (FTS). REF queries: should_refuse=true, verified absent from the diagram transcription (HARD GATE).",
   "_created": "2026-05-25",
   "_purpose": "VLM-path validation \u2014 proves the escalation pipeline (image-area trigger -> Qwen2.5-VL -> re-stitch) recovers diagram content that the text parsers cannot, and that the agent answers grounded diagram questions while refusing absent-from-diagram counterfactuals.",
+  "_baseline_answer_text_2026_06_13": {
+    "stack": "Qwen3.5-4B-AWQ orchestrator (ADR-0015) + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3 (cpu, device-pinned), co_residence_mode=manual",
+    "purpose": "answer_must_mention -> answer_mention_recall (audit-14 instrument). Measures answer-TEXT correctness the HARD gate / recall@k / the `answered` flag are blind to.",
+    "refusal_rate_on_counterfactuals": 1.0,
+    "answer_text_checked": 11,
+    "answer_text_correct_count": 11,
+    "mean_answer_mention_recall": 1.0,
+    "n_runs": 2,
+    "byte_stable": true,
+    "answer_text_failures": [],
+    "dormant_refused_not_graded": [],
+    "notes": "All 11 ANS answer correctly (French; pfSense/802.1X diagram + table content). SOFT OBS: diag-04 OVER-lists IDS software beyond gold's Snort (recall-safe). Clean baseline."
+  },
   "queries": [
     {
       "qid": "cr350-diag-01",
+      "answer_must_mention": [["single-tier", "single tier"], ["two-tier", "two tier"], ["three-tier", "three tier"]],
       "question": "Quelles architectures de coupe-feu (firewall) le cours pr\u00e9sente-t-il ?",
       "_doc_id": "ccd09479-cr350-network-diagrams",
       "_anchor_phrase": "Single-tier",
@@ -32,6 +46,7 @@
     },
     {
       "qid": "cr350-diag-02",
+      "answer_must_mention": [["routeur", "router"], ["pare-feu", "coupe-feu", "firewall"]],
       "question": "Dans l'architecture single-tier, quels \u00e9quipements relient Internet au r\u00e9seau priv\u00e9 ?",
       "_doc_id": "ccd09479-cr350-network-diagrams",
       "_anchor_phrase": "Internet -> Router -> Firewall -> Private Network",
@@ -45,6 +60,7 @@
     },
     {
       "qid": "cr350-diag-03",
+      "answer_must_mention": [["transaction"]],
       "question": "Quel segment r\u00e9seau appara\u00eet uniquement dans les architectures \u00e0 trois niveaux (three-tier) ?",
       "_doc_id": "ccd09479-cr350-network-diagrams",
       "_anchor_phrase": "Transaction Subnet",
@@ -59,6 +75,7 @@
     },
     {
       "qid": "cr350-diag-04",
+      "answer_must_mention": [["snort"]],
       "question": "Quel logiciel de d\u00e9tection d'intrusion (IDS) est pr\u00e9sent\u00e9 dans le cours ?",
       "_doc_id": "ccd09479-cr350-network-diagrams",
       "_anchor_phrase": "specifically focusing on Snort, which is a popular open-source IDS",
@@ -72,6 +89,7 @@
     },
     {
       "qid": "cr350-diag-05",
+      "answer_must_mention": [["arping"], ["autoconfigbackup", "autoconfig"], ["bandwidthd"], ["nmap"]],
       "question": "Quels paquets sont install\u00e9s dans la configuration pfSense pr\u00e9sent\u00e9e ?",
       "_doc_id": "ccd09479-cr350-network-diagrams",
       "_anchor_phrase": "arping",
@@ -85,6 +103,7 @@
     },
     {
       "qid": "cr350-diag-06",
+      "answer_must_mention": [["security", "sécurité", "securite"]],
       "question": "Dans quelle cat\u00e9gorie le paquet nmap est-il class\u00e9 ?",
       "_doc_id": "ccd09479-cr350-network-diagrams",
       "_anchor_phrase": "nmap",
@@ -98,6 +117,7 @@
     },
     {
       "qid": "cr350-diag-07",
+      "answer_must_mention": [["net-mgmt", "net mgmt", "gestion réseau", "gestion"]],
       "question": "Dans quelle cat\u00e9gorie le paquet bandwidthd est-il class\u00e9 d'apr\u00e8s l'interface pfSense ?",
       "_doc_id": "ccd09479-cr350-network-diagrams",
       "_anchor_phrase": "bandwidthd",
@@ -111,6 +131,7 @@
     },
     {
       "qid": "cr350-diag-08",
+      "answer_must_mention": [["supplicant", "client"], ["authenticator", "commutateur", "switch", "catalyst"], ["radius", "authentification"]],
       "question": "Quelles sont les trois composantes du processus d'authentification 802.1X ?",
       "_doc_id": "ccd09479-cr350-network-diagrams",
       "_anchor_phrase": "Authentication server (RADIUS)",
@@ -125,6 +146,7 @@
     },
     {
       "qid": "cr350-diag-09",
+      "answer_must_mention": [["eapol-start", "eapol start"]],
       "question": "Quel message le client envoie-t-il pour amorcer l'authentification 802.1X ?",
       "_doc_id": "ccd09479-cr350-network-diagrams",
       "_anchor_phrase": "EAPOL-Start",
@@ -138,6 +160,7 @@
     },
     {
       "qid": "cr350-diag-10",
+      "answer_must_mention": [["radius"]],
       "question": "Quel type de serveur r\u00e9alise l'authentification dans le processus 802.1X ?",
       "_doc_id": "ccd09479-cr350-network-diagrams",
       "_anchor_phrase": "and an Authentication server (RADIUS)",
@@ -151,6 +174,7 @@
     },
     {
       "qid": "cr350-diag-11",
+      "answer_must_mention": [["eapol-logoff", "eapol logoff"]],
       "question": "Quel message provoque la d\u00e9connexion (logoff) du client dans le processus 802.1X ?",
       "_doc_id": "ccd09479-cr350-network-diagrams",
       "_anchor_phrase": "EAPOL-Logoff",
