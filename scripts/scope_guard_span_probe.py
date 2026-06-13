@@ -413,17 +413,27 @@ def _checker_cases(fp_path: str) -> list[dict[str, Any]]:
     from memex.core.table_linearize import linearize_gfm_tables
 
     cases: list[dict[str, Any]] = []
-    by_suffix = fetch_chunks_by_suffix([s for b in BREACHES for s in b["cited_suffixes"]])
+    # The breach chunk TEXTS are frozen alongside the FP tuples (a reindex churns
+    # chunk_ids — the chart-types 06-01 lesson); live fetch is the loud fallback.
+    frozen_path = Path(fp_path).parent / "breach_chunks_frozen.json"
+    if frozen_path.exists():
+        by_suffix = json.load(open(frozen_path))
+    else:
+        print(f"[checker] WARNING: {frozen_path} missing — live-fetching breach chunks "
+              "from search.sqlite (chunk ids churn on reindex)", flush=True)
+        by_suffix = fetch_chunks_by_suffix([s for b in BREACHES for s in b["cited_suffixes"]])
     for b in BREACHES:
         cited = [by_suffix[s] for s in b["cited_suffixes"]]
         cases.append(
-            {"side": "BREACH", "qid": b["qid"], "summary": b["summary"], "cited": cited}
+            {"side": "BREACH", "qid": b["qid"], "question": b["question"],
+             "summary": b["summary"], "cited": cited}
         )
     for r in json.load(open(fp_path)):
         cited = [c for c in r["cited"] if c["text"]]
         if r["answered"] and r["summary"] and cited:
             cases.append(
-                {"side": "FP", "qid": r["qid"], "summary": r["summary"], "cited": cited}
+                {"side": "FP", "qid": r["qid"], "question": r["question"],
+                 "summary": r["summary"], "cited": cited}
             )
     for case in cases:
         case["premise_raw"] = "\n\n".join(f"{c['title']} — {c['text']}" for c in case["cited"])
@@ -453,6 +463,79 @@ def _checker_report(results: list[dict[str, Any]], keys: tuple[str, ...], out_pa
             f"  → {'SEPARATES' if margin > 0 else 'OVERLAP: ' + str(sum(1 for x in fp if x <= max(br))) + f'/{len(fp)} FP at-or-below top breach'}"
         )
     print(f"\n[{tag}] rows → {out_path}")
+
+
+_ATTRSCORE_PROMPT = (
+    "As an Attribution Validator, your task is to verify whether a given reference can "
+    "support the given claim. A claim can be either a plain sentence or a question "
+    "followed by its answer. Specifically, your response should clearly indicate the "
+    "relationship: Attributable, Contradictory or Extrapolatory. A contradictory error "
+    "occurs when you can infer that the answer contradicts the fact presented in the "
+    "context, while an extrapolatory error means that you cannot infer the correctness "
+    "of the answer based on the information provided in the context. \n\n"
+    "Claim: {claim} \n Reference: {reference}"
+)
+
+
+def attrscore_arm(fp_path: str, out_path: str) -> None:
+    """osunlp/attrscore-flan-t5-large (apache-2.0) — the design-§6 K4 windfall probe:
+    the only off-the-shelf checkpoint with attribution-error supervision (3-way
+    Attributable/Contradictory/Extrapolatory, Yue et al. 2023). Prompt transcribed
+    VERBATIM from the AttrScore repo README. Claim = question + answer (the repo's QA
+    form) with a summary-only variant; score = P(Attributable) over the three labels'
+    first decoder tokens (single step, the MiniCheck scoring shape); the generated
+    label is recorded alongside for honesty."""
+    import torch
+    from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+
+    ckpt = "osunlp/attrscore-flan-t5-large"
+    t0 = time.monotonic()
+    tok = AutoTokenizer.from_pretrained(ckpt)
+    model = AutoModelForSeq2SeqLM.from_pretrained(ckpt)
+    model.eval()
+    label_ids = [tok(lbl, add_special_tokens=False).input_ids[0]
+                 for lbl in ("Attributable", "Contradictory", "Extrapolatory")]
+    assert len(set(label_ids)) == 3, f"label first-tokens collide: {label_ids}"  # noqa: S101 — probe invariant
+    print(f"[attrscore] loaded {ckpt} in {time.monotonic() - t0:.1f}s "
+          f"label_ids={label_ids}", flush=True)
+
+    def at_score(reference: str, claim: str) -> tuple[float, str]:
+        text = _ATTRSCORE_PROMPT.format(claim=claim, reference=reference)
+        enc = tok(text, max_length=2048, truncation=True, return_tensors="pt")
+        with torch.no_grad():
+            out = model(
+                input_ids=enc["input_ids"],
+                attention_mask=enc["attention_mask"],
+                decoder_input_ids=torch.zeros((1, 1), dtype=torch.long),
+            )
+        logits = out.logits.squeeze(1)[:, torch.tensor(label_ids)]
+        probs = torch.softmax(logits, dim=-1)[0]
+        label = ("Attributable", "Contradictory", "Extrapolatory")[int(probs.argmax())]
+        return float(probs[0]), label
+
+    results: list[dict[str, Any]] = []
+    for case in _checker_cases(fp_path):
+        row: dict[str, Any] = {"side": case["side"], "qid": case["qid"]}
+        for label, premise in (("raw", case["premise_raw"]), ("lin", case["premise_lin"])):
+            p_qa, lbl_qa = at_score(premise, f"{case['question']} {case['summary']}")
+            p_noq, lbl_noq = at_score(premise, case["summary"])
+            row[f"at_p_attr_qa_{label}"] = round(p_qa, 4)
+            row[f"at_label_qa_{label}"] = lbl_qa
+            row[f"at_p_attr_noq_{label}"] = round(p_noq, 4)
+            row[f"at_label_noq_{label}"] = lbl_noq
+        results.append(row)
+        print(
+            f"[attrscore] {case['side']:6} {case['qid']:24} "
+            f"qa_raw={row['at_p_attr_qa_raw']:.3f}({row['at_label_qa_raw'][:6]}) "
+            f"noq_raw={row['at_p_attr_noq_raw']:.3f}({row['at_label_noq_raw'][:6]}) "
+            f"qa_lin={row['at_p_attr_qa_lin']:.3f}({row['at_label_qa_lin'][:6]})",
+            flush=True,
+        )
+    _checker_report(
+        results,
+        ("at_p_attr_qa_raw", "at_p_attr_noq_raw", "at_p_attr_qa_lin", "at_p_attr_noq_lin"),
+        out_path, "attrscore",
+    )
 
 
 def hhem(fp_path: str, out_path: str) -> None:
@@ -984,6 +1067,11 @@ if __name__ == "__main__":
         minicheck_arm(
             sys.argv[2] if len(sys.argv) > 2 else "/tmp/scope_probe_fp.json",  # noqa: S108 — probe artifact
             sys.argv[3] if len(sys.argv) > 3 else "/tmp/scope_probe_minicheck.json",  # noqa: S108 — probe artifact
+        )
+    elif cmd == "attrscore":
+        attrscore_arm(
+            sys.argv[2] if len(sys.argv) > 2 else "/tmp/scope_probe_fp.json",  # noqa: S108 — probe artifact
+            sys.argv[3] if len(sys.argv) > 3 else "/tmp/scope_probe_attrscore.json",  # noqa: S108 — probe artifact
         )
     elif cmd == "provenance":
         provenance_l0(
