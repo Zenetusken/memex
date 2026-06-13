@@ -56,9 +56,24 @@
     "notes": "HARD GATES HOLD \u2014 refusal_cf=1.0 across N=3 with ZERO hallucinations, 0 errors, 13/13 answerable answered, fully DETERMINISTIC (identical metrics all 3 runs). The load-bearing counterfactual is q18 (in-corpus-unanswerable: gzip ratio \u2014 the topic IS in-vault but the specific value is absent; verified by grep), which refused 3/3 \u2014 proof the gate isn't just lexical no-match (cf. the easy out-of-corpus q14/q17 + fabricated q15/q16). The 4 low-citation-precision ANS queries (q04=0.33/q06=0.40/q07=0.17/q11=0.0) are the documented SINGLE-CHUNK-GOLD SIBLING ARTIFACT, NOT answer failures \u2014 spot-checked LIVE: q11 answered correctly ('hard + symbolic links') citing module-18 BODY chunks (gold anchored the heading); q07 answered correctly+richly (sort + -t/-k/-n) citing module-10 siblings (1 of 6 cites is the gold chunk \u2192 0.17). Gold was NOT re-anchored to chase the metric (overfit-gold avoidance, advisor-confirmed); the defensible signal is answered-correctly 13/13, not cite_prec. Silent-failure-mode queries also spot-checked: q02 (execute=1, exact value) + q13 (/proc list: top,free,mount,unmount) both correct. SHARED-VAULT PERTURBATION CLEARED: after adding these 16 Linux docs, cr350-multidoc + ccna-multidoc still hold refusal_cf=1.0 (0 errors) \u2014 the new domain didn't break the networking corpora's gates. Corpus = 16 born-digital text PDFs, ~378 chunks total.",
     "spot_checked_live": ["linux-fundamentals-02", "linux-fundamentals-07", "linux-fundamentals-11", "linux-fundamentals-13"]
   },
+  "_baseline_answer_text_2026_06_13": {
+    "stack": "Qwen3.5-4B-AWQ orchestrator (ADR-0015) + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3 (cpu, device-pinned), co_residence_mode=manual",
+    "purpose": "answer_must_mention -> answer_mention_recall (audit-14 instrument). Measures answer-TEXT correctness the HARD gate / recall@k / the `answered` flag are blind to.",
+    "answered_count": 13,
+    "answerable_count": 13,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "answer_text_checked": 13,
+    "answer_text_correct_count": 13,
+    "mean_answer_mention_recall": 1.0,
+    "n_runs": 2,
+    "byte_stable": true,
+    "answer_text_failures": [],
+    "notes": "All 13 ANS answer correctly. Clean 1.0 regression-net baseline; 0 answer-text failures."
+  },
   "queries": [
     {
       "qid": "linux-fundamentals-01",
+      "answer_must_mention": [["chmod"]],
       "question": "Which Linux command is used to change the permissions on a file or directory?",
       "_anchor_phrase": "chmod (change mode) command is used to change permissions",
       "_expected_answer": "The chmod (change mode) command.",
@@ -72,6 +87,7 @@
     },
     {
       "qid": "linux-fundamentals-02",
+      "answer_must_mention": [["1"]],
       "question": "In the Linux octal permission system, what numeric value is assigned to the execute permission?",
       "_anchor_phrase": "4 = Read, 2 = Write, 1 = Execute",
       "_expected_answer": "1 (execute = 1; read = 4, write = 2).",
@@ -85,6 +101,7 @@
     },
     {
       "qid": "linux-fundamentals-03",
+      "answer_must_mention": [["/", "slash"]],
       "question": "What character does an absolute path in Linux always begin with?",
       "_anchor_phrase": "always begins with the / character",
       "_expected_answer": "The / (slash) character \u2014 the root directory.",
@@ -98,6 +115,7 @@
     },
     {
       "qid": "linux-fundamentals-04",
+      "answer_must_mention": [["smaller", "reduce", "reduces"]],
       "question": "In Linux, what does compression do to files?",
       "_anchor_phrase": "Makes the files smaller by removing redundant information",
       "_expected_answer": "Compression makes files smaller by removing redundant information (vs archiving, which combines multiple files into one).",
@@ -111,6 +129,7 @@
     },
     {
       "qid": "linux-fundamentals-05",
+      "answer_must_mention": [["/etc/passwd", "passwd"], ["/etc/shadow", "shadow"]],
       "question": "Which two files store Linux user account and authentication information?",
       "_anchor_phrase": "stored in the /etc/passwd and /etc/shadow files",
       "_expected_answer": "/etc/passwd and /etc/shadow.",
@@ -124,6 +143,7 @@
     },
     {
       "qid": "linux-fundamentals-06",
+      "answer_must_mention": [["manual"], ["help", "documentation", "document"]],
       "question": "What is a man page in Linux?",
       "_anchor_phrase": "help documents called man pages",
       "_expected_answer": "A manual page \u2014 a help document describing a command's purpose and its available options.",
@@ -137,6 +157,7 @@
     },
     {
       "qid": "linux-fundamentals-07",
+      "answer_must_mention": [["rearranges", "rearrange", "order", "sorts"], ["lines", "line"]],
       "question": "What does the Linux sort command do?",
       "_anchor_phrase": "rearrange the lines of files or input in either dictionary or numeric order",
       "_expected_answer": "It rearranges the lines of files or input in dictionary or numeric order.",
@@ -150,6 +171,7 @@
     },
     {
       "qid": "linux-fundamentals-08",
+      "answer_must_mention": [["software"], ["manages", "manage"], ["hardware"]],
       "question": "According to the course, what is an operating system?",
       "_anchor_phrase": "manages the hardware and software components that make up the system",
       "_expected_answer": "Software that runs on a computing device and manages the hardware and software components of the system.",
@@ -163,6 +185,7 @@
     },
     {
       "qid": "linux-fundamentals-09",
+      "answer_must_mention": [["sudo"], ["su"]],
       "question": "Instead of logging in as root, what does the course recommend for running commands that require root privileges?",
       "_anchor_phrase": "recommended to use sudo or su command to execute commands as root",
       "_expected_answer": "Use the sudo or su command to execute commands as root.",
@@ -176,6 +199,7 @@
     },
     {
       "qid": "linux-fundamentals-10",
+      "answer_must_mention": [["case sensitive", "case-sensitive"]],
       "question": "Are file and directory names case sensitive in Linux?",
       "_anchor_phrase": "everything in Linux is case sensitive",
       "_expected_answer": "Yes \u2014 everything in Linux is case sensitive.",
@@ -189,6 +213,7 @@
     },
     {
       "qid": "linux-fundamentals-11",
+      "answer_must_mention": [["hard"], ["symbolic", "soft"]],
       "question": "What are the two kinds of links in Linux?",
       "_anchor_phrase": "Hard Links and Symbolic Links",
       "_expected_answer": "Hard links and symbolic (soft) links.",
@@ -202,6 +227,7 @@
     },
     {
       "qid": "linux-fundamentals-12",
+      "answer_must_mention": [["source"], ["available"], ["license"]],
       "question": "What does the GNU General Public License version 2 (GPLv2) require regarding source code?",
       "_anchor_phrase": "source code must be made available to anyone and that anyone can make changes",
       "_expected_answer": "The source code must be made available to anyone, and anyone can make changes (which must be released under the same license).",
@@ -215,6 +241,7 @@
     },
     {
       "qid": "linux-fundamentals-13",
+      "answer_must_mention": [["top"], ["free"], ["mount"], ["unmount"]],
       "question": "Which commands does the course list as reading from the /proc directory?",
       "_anchor_phrase": "commands that read from /proc include",
       "_expected_answer": "top, free, mount, and unmount.",

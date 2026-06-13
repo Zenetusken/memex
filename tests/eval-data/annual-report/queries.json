@@ -11,9 +11,24 @@
   "_labelling_rule": "ANS queries: _anchor_phrase = distinctive substring (5-12 words) from the chunk with the literal answer; populated via scripts/extend_corpus.py resolve. REF queries: should_refuse=true; relevant_chunk_ids=[].",
   "_created": "2026-05-23",
   "_purpose": "Extension of the eval matrix to a real-world hybrid corpus (financial annual report). Demonstrates the scaffolding workflow (extend_corpus.py) and adds a third corpus to the eval matrix alongside slide-decks (English) and french-course (French).",
+  "_baseline_answer_text_2026_06_13": {
+    "stack": "Qwen3.5-4B-AWQ orchestrator (ADR-0015) + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3 (cpu, device-pinned), co_residence_mode=manual",
+    "purpose": "answer_must_mention -> answer_mention_recall (audit-14 instrument). Measures answer-TEXT correctness the HARD gate / recall@k / the `answered` flag are blind to.",
+    "answered_count": 10,
+    "answerable_count": 10,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "answer_text_checked": 10,
+    "answer_text_correct_count": 10,
+    "mean_answer_mention_recall": 1.0,
+    "n_runs": 2,
+    "byte_stable": true,
+    "answer_text_failures": [],
+    "notes": "All 10 ANS answer correctly incl. the Table-RAG SQL aggregate (ar-14 $956,250) + superlative (ar-15 Ellen Ochoa / $321,309). ar-05 = the WHOLE-COMPANY gross margin 71.1% (the LEGITIMATE value; distinct from the ar-12 Graphics-SEGMENT binding breach that mxbai surfaces). Clean 1.0 regression-net baseline; 0 answer-text failures."
+  },
   "queries": [
     {
       "qid": "annual-report-01",
+      "answer_must_mention": [["215.9", "216"]],
       "question": "What was NVIDIA's total revenue in fiscal 2026?",
       "_anchor_phrase": "Revenue grew 65 percent to 216 billion",
       "_expected_answer": "$216 billion (revenue grew 65% year over year; the precise figure is $215.9 billion).",
@@ -26,6 +41,7 @@
     },
     {
       "qid": "annual-report-02",
+      "answer_must_mention": [["4.90", "4.9"]],
       "question": "What was NVIDIA's diluted earnings per share in fiscal 2026?",
       "_anchor_phrase": "Diluted EPS increased 67 percent to",
       "_expected_answer": "$4.90 (up 67% year over year).",
@@ -38,6 +54,7 @@
     },
     {
       "qid": "annual-report-03",
+      "answer_must_mention": [["193.737", "193,737", "194"]],
       "question": "What was NVIDIA's Data Center revenue in fiscal 2026?",
       "_anchor_phrase": "Data Center revenue reached 194 billion",
       "_expected_answer": "$194 billion (up 68% year over year).",
@@ -51,6 +68,7 @@
     },
     {
       "qid": "annual-report-04",
+      "answer_must_mention": [["1 trillion", "trillion"]],
       "question": "How much cumulative Blackwell and Rubin revenue does NVIDIA see visibility into through 2027?",
       "_anchor_phrase": "more than 1 trillion in cumulative Blackwell and Rubin revenue",
       "_expected_answer": "More than $1 trillion (from the start of 2025 through 2027).",
@@ -63,6 +81,7 @@
     },
     {
       "qid": "annual-report-05",
+      "answer_must_mention": [["71.1"]],
       "question": "What was NVIDIA's gross margin in fiscal 2026?",
       "_anchor_phrase": "Gross margin was 71.1",
       "_expected_answer": "71.1%",
@@ -105,6 +124,7 @@
     },
     {
       "qid": "annual-report-09",
+      "answer_must_mention": [["peer companies", "peer"]],
       "question": "According to the Compensation Committee process timeline figure, what did the CC do in December 2024?",
       "_anchor_phrase": "CC determined peer companies",
       "_expected_answer": "The CC determined peer companies. (From the CC process timeline figure.)",
@@ -116,6 +136,7 @@
     },
     {
       "qid": "annual-report-10",
+      "answer_must_mention": [["march 2026", "march"]],
       "question": "Per the Compensation Committee timeline figure, when did the CC certify achievement and payouts for the Fiscal 2026 Variable Cash Plan?",
       "_anchor_phrase": "CC certified achievement and payouts for Fiscal 2026",
       "_expected_answer": "March 2026 (according to the CC process timeline figure).",
@@ -147,6 +168,7 @@
     },
     {
       "qid": "annual-report-13",
+      "answer_must_mention": [["16,042", "16.042", "16042"]],
       "question": "What was NVIDIA's Gaming revenue in fiscal 2026?",
       "_anchor_phrase": "16,042",
       "_expected_answer": "$16,042 million (\u2248 $16.0 billion) \u2014 a table-only value, now answerable via Phase-1 table linearization ([table-rows] KV block).",
@@ -159,6 +181,7 @@
     },
     {
       "qid": "annual-report-14",
+      "answer_must_mention": [["956,250", "956250"]],
       "question": "What was the total amount of fees earned or paid in cash to all of NVIDIA's directors in fiscal 2026?",
       "should_refuse": false,
       "_answer_type": "aggregate",
@@ -170,6 +193,7 @@
     },
     {
       "qid": "annual-report-15",
+      "answer_must_mention": [["ellen ochoa", "ochoa"], ["321,309", "321309"]],
       "question": "Which NVIDIA director received the lowest total compensation in fiscal 2026?",
       "should_refuse": false,
       "_answer_type": "superlative",
