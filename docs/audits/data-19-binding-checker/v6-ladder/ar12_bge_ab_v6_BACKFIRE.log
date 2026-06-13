@@ -1,0 +1,12 @@
+=== V5/BGE control ===
+--- v5bge: answer@v5 ---
+  v5bge r1: answered=False claims=0 | The retrieved material addresses a related topic but not your specific question. The answer states the documents do not contain th
+  v5bge r2: answered=False claims=0 | The retrieved material addresses a related topic but not your specific question. The answer states the documents do not contain th
+  v5bge r3: answered=False claims=0 | The retrieved material addresses a related topic but not your specific question. The answer states the documents do not contain th
+  v5bge: refused 3/3
+=== V6/BGE ===
+--- v6bge: answer@v6 ---
+  v6bge r1: answered=True claims=1 | The gross margin of NVIDIA's Graphics segment in fiscal 2026 is 71.1%.
+  v6bge r2: answered=True claims=1 | The gross margin of NVIDIA's Graphics segment in fiscal 2026 is 71.1%.
+  v6bge r3: answered=True claims=1 | The gross margin of NVIDIA's Graphics segment in fiscal 2026 is 71.1%.
+  v6bge: refused 0/3

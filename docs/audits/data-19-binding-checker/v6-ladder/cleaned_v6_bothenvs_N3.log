@@ -1,0 +1,54 @@
+########## CLEANED v6 under BGE (must be bge-neutral: ar-12 refuse 3/3) ##########
+=== answer prompt active version: v6 ===
+r1 ok annual-report-12     want=REFUSE got=REFUSE | Verification returned no grounded claims; I won't ship a summary without citations to back it.
+r1 ok annual-report-05     want=ANSWER got=ANSWER | NVIDIA's gross margin in fiscal 2026 was 71.1%, as stated in the 2026 Annual Review (Form 10-K). This represents a decrease of 3.9 points from the pre
+r1 ok annual-report-03     want=ANSWER got=ANSWER | NVIDIA's Data Center revenue in fiscal 2026 was $193.737 billion, as stated in the 2026 Annual Review (Form 10-K).
+r1 ok annual-report-01     want=ANSWER got=ANSWER | NVIDIA's total revenue in fiscal 2026 was $215.9 billion, as stated in the 2026 Annual Review (Form 10-K).
+r1 ok annual-report-11     want=REFUSE got=REFUSE | The retrieved chunks contain NVIDIA's overall operating income and segment breakdowns but do not provide a specific operating income figure for the Au
+---
+r2 ok annual-report-12     want=REFUSE got=REFUSE | Verification returned no grounded claims; I won't ship a summary without citations to back it.
+r2 ok annual-report-05     want=ANSWER got=ANSWER | NVIDIA's gross margin in fiscal 2026 was 71.1%, as stated in the 2026 Annual Review (Form 10-K). This represents a decrease of 3.9 points from the pre
+r2 ok annual-report-03     want=ANSWER got=ANSWER | NVIDIA's Data Center revenue in fiscal 2026 was $193.737 billion, as stated in the 2026 Annual Review (Form 10-K).
+r2 ok annual-report-01     want=ANSWER got=ANSWER | NVIDIA's total revenue in fiscal 2026 was $215.9 billion, as stated in the 2026 Annual Review (Form 10-K).
+r2 ok annual-report-11     want=REFUSE got=REFUSE | The retrieved chunks contain NVIDIA's overall operating income and segment breakdowns but do not provide a specific operating income figure for the Au
+---
+r3 ok annual-report-12     want=REFUSE got=REFUSE | Verification returned no grounded claims; I won't ship a summary without citations to back it.
+r3 ok annual-report-05     want=ANSWER got=ANSWER | NVIDIA's gross margin in fiscal 2026 was 71.1%, as stated in the 2026 Annual Review (Form 10-K). This represents a decrease of 3.9 points from the pre
+r3 ok annual-report-03     want=ANSWER got=ANSWER | NVIDIA's Data Center revenue in fiscal 2026 was $193.737 billion, as stated in the 2026 Annual Review (Form 10-K).
+r3 ok annual-report-01     want=ANSWER got=ANSWER | NVIDIA's total revenue in fiscal 2026 was $215.9 billion, as stated in the 2026 Annual Review (Form 10-K).
+r3 ok annual-report-11     want=REFUSE got=REFUSE | The retrieved chunks contain NVIDIA's overall operating income and segment breakdowns but do not provide a specific operating income figure for the Au
+---
+=== SUMMARY ===
+annual-report-12     want=REFUSE runs=['REFUSE', 'REFUSE', 'REFUSE'] PASS  (Graphics segment gross margin)
+annual-report-05     want=ANSWER runs=['ANSWER', 'ANSWER', 'ANSWER'] PASS  (consolidated gross margin)
+annual-report-03     want=ANSWER runs=['ANSWER', 'ANSWER', 'ANSWER'] PASS  (Data Center revenue)
+annual-report-01     want=ANSWER runs=['ANSWER', 'ANSWER', 'ANSWER'] PASS  (total revenue)
+annual-report-11     want=REFUSE runs=['REFUSE', 'REFUSE', 'REFUSE'] PASS  (Automotive operating income)
+VERDICT: PASS
+########## CLEANED v6 under MXBAI (the fix: ar-12 refuse 3/3) ##########
+=== answer prompt active version: v6 ===
+r1 ok annual-report-12     want=REFUSE got=REFUSE | Verification returned no grounded claims; I won't ship a summary without citations to back it.
+r1 ok annual-report-05     want=ANSWER got=ANSWER | NVIDIA's gross margin in fiscal 2026 was 71.1%.
+r1 ok annual-report-03     want=ANSWER got=ANSWER | NVIDIA's Data Center revenue in fiscal 2026 was $193.737 billion.
+r1 ok annual-report-01     want=ANSWER got=ANSWER | NVIDIA's total revenue in fiscal 2026 was $215.9 billion, as stated in the 2026 Annual Review (Form 10-K).
+r1 ok annual-report-11     want=REFUSE got=REFUSE | The retrieved material addresses a related topic but not your specific question. The answer correctly identifies that the specific operating income fi
+---
+r2 ok annual-report-12     want=REFUSE got=REFUSE | Verification returned no grounded claims; I won't ship a summary without citations to back it.
+r2 ok annual-report-05     want=ANSWER got=ANSWER | NVIDIA's gross margin in fiscal 2026 was 71.1%.
+r2 ok annual-report-03     want=ANSWER got=ANSWER | NVIDIA's Data Center revenue in fiscal 2026 was $193.737 billion.
+r2 ok annual-report-01     want=ANSWER got=ANSWER | NVIDIA's total revenue in fiscal 2026 was $215.9 billion, as stated in the 2026 Annual Review (Form 10-K).
+r2 ok annual-report-11     want=REFUSE got=REFUSE | The retrieved material addresses a related topic but not your specific question. The answer correctly identifies that the specific operating income fi
+---
+r3 ok annual-report-12     want=REFUSE got=REFUSE | Verification returned no grounded claims; I won't ship a summary without citations to back it.
+r3 ok annual-report-05     want=ANSWER got=ANSWER | NVIDIA's gross margin in fiscal 2026 was 71.1%.
+r3 ok annual-report-03     want=ANSWER got=ANSWER | NVIDIA's Data Center revenue in fiscal 2026 was $193.737 billion.
+r3 ok annual-report-01     want=ANSWER got=ANSWER | NVIDIA's total revenue in fiscal 2026 was $215.9 billion, as stated in the 2026 Annual Review (Form 10-K).
+r3 ok annual-report-11     want=REFUSE got=REFUSE | The retrieved material addresses a related topic but not your specific question. The answer correctly identifies that the specific operating income fi
+---
+=== SUMMARY ===
+annual-report-12     want=REFUSE runs=['REFUSE', 'REFUSE', 'REFUSE'] PASS  (Graphics segment gross margin)
+annual-report-05     want=ANSWER runs=['ANSWER', 'ANSWER', 'ANSWER'] PASS  (consolidated gross margin)
+annual-report-03     want=ANSWER runs=['ANSWER', 'ANSWER', 'ANSWER'] PASS  (Data Center revenue)
+annual-report-01     want=ANSWER runs=['ANSWER', 'ANSWER', 'ANSWER'] PASS  (total revenue)
+annual-report-11     want=REFUSE runs=['REFUSE', 'REFUSE', 'REFUSE'] PASS  (Automotive operating income)
+VERDICT: PASS

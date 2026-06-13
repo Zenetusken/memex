@@ -1,0 +1,10 @@
+=== V5/BGE ===
+  answer@v5 linux-fundamentals-18 r1: answered=False | Verification returned no grounded claims; I won't ship a summary without citations to back
+  answer@v5 linux-fundamentals-18 r2: answered=False | Verification returned no grounded claims; I won't ship a summary without citations to back
+  answer@v5 linux-fundamentals-18 r3: answered=False | Verification returned no grounded claims; I won't ship a summary without citations to back
+  answer@v5 linux-fundamentals-18: refused 3/3
+=== V6/BGE ===
+  answer@v6 linux-fundamentals-18 r1: answered=True | The chunks state that gzip compressed a file from 66540 bytes to 341 bytes, which represen
+  answer@v6 linux-fundamentals-18 r2: answered=True | The chunks state that gzip compressed a file from 66540 bytes to 341 bytes, which represen
+  answer@v6 linux-fundamentals-18 r3: answered=True | The chunks state that gzip compressed a file from 66540 bytes to 341 bytes, which represen
+  answer@v6 linux-fundamentals-18: refused 0/3
