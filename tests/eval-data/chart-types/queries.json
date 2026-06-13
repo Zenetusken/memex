@@ -24,7 +24,7 @@
       "chart-types-09"
     ],
     "dormant_refused_not_graded": [],
-    "notes": "THE CATCH: chart-types-09 answers only 5 of 6 GIF-project assignees (Emily/Kevin/Mariasa/Piper/Ryan, MISSING Stephanie) -> recall 0.833, DETERMINISTIC across N=2. An answered+cited but INCOMPLETE-list answer, invisible to refusal_cf/recall@k/the `answered` flag. An answer-stage signal (the lever this metric gates), NOT a HARD-gate regression. 6/7 other ANS correct."
+    "notes": "THE CATCH: chart-types-09 answers only 5 of 6 GIF-project assignees (Emily/Kevin/Mariasa/Piper/Ryan, MISSING Stephanie) -> recall 0.833, DETERMINISTIC across N=2. An answered+cited but INCOMPLETE-list answer, invisible to refusal_cf/recall@k/the `answered` flag. 6/7 other ANS correct. ROOT-CAUSED 2026-06-13 (workflow-verified) → DEFER (do-not-re-walk): the chart-OCR 'Projects by Owner' table is a MULTI-PROJECT-per-person layout — Stephanie's named row is 'CSS', and her GIF is on an empty-name CONTINUATION row (`|  | GIF |`); the LLM attributes only first-rows and misses it (Stephanie IS a GIF assignee → gold is right). An UPSTREAM chart-OCR/parse limitation, NOT a HARD-gate regression (refusal_cf=1.0 holds). A `table_linearize` forward-fill of empty leading cells is UNSAFE (18 docs/49 chunks have empty-leading table rows; OSI/TCP-IP comparison tables have LEGIT non-continuation empties it would corrupt) AND ineffective (the table is header-gate-skipped → the LLM reads raw GFM, not a linearized KV) AND churns chunk_ids — for one eval slot. Do NOT retry forward-fill without re-measuring."
   },
   "queries": [
     {
