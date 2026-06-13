@@ -68,6 +68,8 @@ LD_QA_TEMPLATE = (
 CLAIM_TEMPLATES = {
     ("en", "num"): [
         "The {header} for {label} was {value}.",
+        "{label}'s {header} was {value}.",
+        "The {header} of {label} came to {value}.",
         "{label} recorded a {header} of {value}.",
         "For {label}, the {header} reached {value}.",
         "The {header} of {label} stood at {value}.",
@@ -217,6 +219,7 @@ def eligible_chunks(holdout_docs: set[str]) -> list[dict[str, str]]:
                 "chunk_id": cid,
                 "doc_id": did,
                 "title": (heading or title or "none")[:80],
+                "doc_title": (title or "the document")[:90],
                 "text": text,
             }
         )
@@ -277,10 +280,13 @@ def mint_table_phase(
         if doc_counts[chunk["doc_id"]] >= per_doc_cap:
             continue
         tables = extract_tables(chunk["doc_id"], chunk["text"])
-        if not tables:
-            continue
         lang = detect_lang(chunk["text"])
         split = "dev" if _h("split", chunk["doc_id"]) % 100 < 12 else "train"
+        agg = mint_aggregate_bind(chunk, tables, lang, split)
+        samples.extend(agg)
+        doc_counts[chunk["doc_id"]] += len(agg)
+        if not tables:
+            continue
         emitted = 0
         for table in tables:
             if emitted >= per_chunk_cap * 2:
@@ -435,6 +441,7 @@ def main() -> None:
     ap.add_argument("--out", default="/tmp/binding_mints.json")  # noqa: S108 — mint artifact
     ap.add_argument("--limit-chunks", type=int, default=0)
     ap.add_argument("--max-candidates", type=int, default=1400)
+    ap.add_argument("--reuse-p", default="", help="reuse phase-P samples from a prior mint file")
     args = ap.parse_args()
 
     holdout_docs, cal_chunk_ids, cal_texts = load_calibration()
@@ -449,7 +456,12 @@ def main() -> None:
         t_samples = enforce_template_cap(mint_table_phase(chunks))
         print(f"[mint] phase T: {len(t_samples)}", flush=True)
         samples.extend(t_samples)
-    if args.phase in ("p", "all"):
+    if args.reuse_p:
+        p_samples = [s for s in json.load(open(args.reuse_p))
+                     if s["meta"]["kind"].startswith("prose_")]
+        print(f"[mint] phase P reused from {args.reuse_p}: {len(p_samples)}", flush=True)
+        samples.extend(p_samples)
+    elif args.phase in ("p", "all"):
         import asyncio as _aio
 
         p_samples = _aio.run(mint_prose_phase(chunks, max_candidates=args.max_candidates))
@@ -458,6 +470,11 @@ def main() -> None:
         p_samples = f4_nli_discard(p_samples)
         print(f"[mint] phase P: {len(p_samples)}", flush=True)
         samples.extend(p_samples)
+
+    chunks_by_id = {c["chunk_id"]: c for c in chunks}
+    add_provenance_tails(samples, chunks_by_id)
+    n_tail = sum(1 for s in samples if s["meta"]["kind"].endswith("_tail"))
+    print(f"[mint] provenance tails applied: {n_tail}", flush=True)
     leak_assert(samples, cal_chunk_ids, cal_texts)
 
     kinds = Counter(s["meta"]["kind"] for s in samples)
@@ -758,6 +775,128 @@ async def mint_prose_phase(
         if done % 200 == 0 or done == len(cands):
             print(f"[mint-p] {done}/{len(cands)} chunks -> {len(samples)} samples", flush=True)
     return samples
+
+
+_METRIC_SENT_RE = re.compile(
+    r"\b([A-Za-z][a-zA-Z &/'-]{2,40}?)\s+"
+    r"(?:was|is|are|reached|totaled|rose to|grew to|increased to|stood at|defaults to|"
+    r"s'élevait à|était de|est de|est|a atteint)\s+"
+    r"(\$?\d[\d.,]*\s?(?:%|billion|million|trillion|B|M|GB|MB|Mbit/s|Gbit/s|bits?|bytes?|seconds?|ms|days?|hours?|characters?|octets?)?)(?=[\s,.;)])"
+)
+# key-value lines ("Access Points: 10") — the vault's dominant prose-binding shape
+_KV_LINE_RE = re.compile(r"^\s*[-*•]?\s*([A-Za-z][\w &/'()-]{2,40}?)\s*:\s+(\$?\d[\d.,]*\s?[\w%/]{0,8})\b",
+                         re.MULTILINE)
+
+_TAILS = {
+    "en": [", as stated in the {doc}.", ", as noted in the {doc}.", " ({doc})."],
+    "fr": [", selon {doc}.", ", comme indiqué dans {doc}."],
+}
+
+
+def add_provenance_tails(samples: list[dict[str, Any]], chunks_by_id: dict[str, dict[str, str]],
+                         rate_pct: int = 35) -> None:
+    """Style symmetry for the Memex citation-tail answer shape (the documented
+    audit-18 FP mode — cand1 fired on '2026 Annual Review (Form 10-K)' tokens
+    because NO training positive ever carried a doc-name tail). Applied at the
+    same rate to BOTH classes; breach spans live in the claim body so appending
+    a tail never moves them."""
+    for s in samples:
+        if _h("tail", s["meta"]["chunk_id"], s["answer"][:40]) % 100 >= rate_pct:
+            continue
+        chunk = chunks_by_id.get(s["meta"]["chunk_id"])
+        if chunk is None:
+            continue
+        lang = s["language"]
+        bank = _TAILS.get(lang, _TAILS["en"])
+        tail = bank[_h("tailtpl", s["meta"]["chunk_id"], s["answer"][:40]) % len(bank)]
+        doc = chunk["doc_title"]
+        base = s["answer"][:-1] if s["answer"].endswith(".") else s["answer"]
+        s["answer"] = base + tail.format(doc=doc)
+        s["meta"]["kind"] += "_tail"
+
+
+def mint_aggregate_bind(chunk: dict[str, str], tables: list[Any], lang: str,
+                        split: str, cap: int = 4) -> list[dict[str, Any]]:
+    """The deliberate §2.3 NEG-aggregate-bind class — the literal ar-12 generator:
+    a value stated in PROSE (consolidated/document-level) rebound to a co-present
+    table row label, plus the true consolidated positive. Deterministic, LLM-free."""
+    text = chunk["text"]
+    prose = text
+    for t in tables:
+        prose = prose.replace(text[t.char_start:t.char_end], " ")
+    labels = [
+        clean_cell(r[0])
+        for t in tables
+        for r in t.rows
+        if clean_cell(r[0]) and 2 <= len(clean_cell(r[0])) <= 60
+        and not _TOTAL_RE.match(clean_cell(r[0]))
+    ]
+    kv = [(clean_cell(k), v.strip()) for k, v in _KV_LINE_RE.findall(prose)]
+    kv = [(k, v) for k, v in kv if 2 <= len(k) <= 50]
+    out: list[dict[str, Any]] = []
+
+    # KV sibling rebind: the value re-attributed to a co-present sibling key
+    if len({k for k, _ in kv}) >= 2:
+        for i, (k, v) in enumerate(kv):
+            if len(out) >= cap:
+                break
+            sibs = [k2 for j, (k2, v2) in enumerate(kv)
+                    if j != i and v2 != v and not _coreferent(k2, k)
+                    and not _f1_conflict(text, k2, v)]
+            if not sibs:
+                continue
+            is_fr = lang == "fr"
+            pos_tpl = "Le {header} est {value}." if is_fr else "The {header} is {value}."
+            claim, _ = render(pos_tpl, {"header": k, "value": v})
+            q = (f"Quelle est la valeur de {k} ?" if is_fr else f"What is the {k}?")
+            out.append(make_sample(chunk, lang, q, claim, None, "kv_pos", split))
+            k2 = sibs[_h("kv", chunk["chunk_id"], k) % len(sibs)]
+            neg, spans = render(pos_tpl, {"header": k2, "value": v})
+            qn = (f"Quelle est la valeur de {k2} ?" if is_fr else f"What is the {k2}?")
+            out.append(make_sample(chunk, lang, qn, neg, spans["header"], "kv_neg_bind", split))
+
+    if not labels and not kv:
+        return out
+    seen_metrics: set[str] = set()
+    for m in _METRIC_SENT_RE.finditer(prose):
+        if len(out) >= cap * 2:
+            break
+        metric, value = m.group(1).strip(), m.group(2).strip()
+        ml = metric.lower()
+        if ml in seen_metrics or ml.split()[-1] in _PROSE_METRIC_STOP:
+            continue
+        seen_metrics.add(ml)
+        # the true consolidated positive (verbatim value, metric phrase from prose)
+        pos_tpl = ("Le {header} était de {value}." if lang == "fr"
+                   else "The {header} was {value}.")
+        claim, _ = render(pos_tpl, {"header": metric, "value": value})
+        q = (f"Quel était le {metric} ?" if lang == "fr" else f"What was the {metric}?")
+        out.append(make_sample(chunk, lang, q, claim, None, "agg_pos", split))
+        # the rebind: the prose value attributed to a co-present row label
+        pool = [
+            lab for lab in labels + [k for k, _ in kv]
+            if not _coreferent(lab, metric) and not _f1_conflict(text, lab, value)
+        ]
+        if not pool:
+            continue
+        lab = pool[_h("agg", chunk["chunk_id"], metric) % len(pool)]
+        neg_bank = (
+            ["Le {header} de {label} était de {value}.",
+             "Pour {label}, le {header} était de {value}."]
+            if lang == "fr"
+            else ["The {header} for {label} was {value}.",
+                  "{label}'s {header} was {value}.",
+                  "The {header} of {label} was {value}."]
+        )
+        nt = neg_bank[_h("aggneg", chunk["chunk_id"], metric) % len(neg_bank)]
+        neg, spans = render(nt, {"header": metric, "label": lab, "value": value})
+        qn = (f"Quel était le {metric} de {lab} ?" if lang == "fr"
+              else f"What was the {metric} for {lab}?")
+        out.append(make_sample(chunk, lang, qn, neg, spans["label"], "agg_neg_bind", split))
+    return out
+
+
+_PROSE_METRIC_STOP = frozenset({"it", "this", "that", "which", "there", "he", "she"})
 
 
 def f4_nli_discard(samples: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -160,6 +160,8 @@ def main() -> None:
     device = torch.device("cpu" if args.cpu or not torch.cuda.is_available() else "cuda")
     tokenizer = AutoTokenizer.from_pretrained(args.base)
     model = AutoModelForTokenClassification.from_pretrained(args.base, num_labels=2)
+    if device.type == "cuda":
+        model.gradient_checkpointing_enable()  # seq-4096 activations on a 12 GB card
 
     mint_train, mint_dev = load_mints(args.mints, args.span_mode)
     en = load_ragtruth_en(Path(args.ragtruth_dir), args.replay_en)

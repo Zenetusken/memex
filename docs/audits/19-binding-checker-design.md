@@ -434,3 +434,33 @@ the frozen 14 cases via the UNCHANGED lettuce_arm machinery (train == gate == wi
 input shape), asserts N=2 byte-stability, applies the §4 bar at the threshold frozen
 in `<model_dir>/threshold.json`: both breaches ≥ t on conf_q AND surviving tail-strip
 (conf_qs ≥ t), 0/12 FPs ≥ t, margin reported with a knife-edge flag.
+
+## 8. The candidate ladder (one gate run each — §6 risk 7 discipline)
+
+**Candidate 1 — mmBERT-base fresh, mints v1 + replay: GATE FAIL (2026-06-13).**
+Dev was excellent (token P=1.000/R=0.707/F1=0.829; example-F1 0.870 at t=0.5, dev FP
+0.000; the K1 learnability bar CLEARED — the binding class IS learnable from minimal
+pairs). The calibration gate inverted it: ar-12 MISSED at 0.0 (tg-13 caught 0.704),
+6/12 FPs FIRED at 0.70–0.95. Span autopsy (the audit-18 instrument lesson): every FP
+fire sits on PROVENANCE-TAIL/doc-name tokens ("2026 Annual Review (Form 10-K",
+"SP 800-207", " Linux") — the documented audit-18 citation-tail FP mode, which §2.5
+spec'd as a REQUIRED positive class and mint v1 under-delivered (~0 tail-style rows,
+2 unit-transform rows); ar-12's metric-possessive production shape ("the gross margin
+for X … was V, as stated in …") was likewise absent (the §2.3 deliberate
+aggregate-bind class effectively didn't materialize). Verdict: a TRAIN/PRODUCTION
+style gap — an implementation-vs-spec shortfall, not a learnability kill. Rows:
+`data-17-scope-calibration/scope_probe_binding_cand1.json`.
+
+**Mint v2 (completing the §2.3/§2.5 spec):** provenance-tail style symmetry (", as
+stated in the {doc_title}." appended to ~35% of BOTH classes, 814 rows — tails must
+be a POSITIVE style, never a breach signal); possessive metric templates ("{label}'s
+{header} was {value}"); the deliberate aggregate-bind + key-value sibling-rebind
+miners. **Corpus fact (honest):** the financial metric-prose register ("X was 71.1%")
+exists in ZERO non-holdout chunks — it lives in the held-out 10-K; the vault's real
+binding shapes are "is N" technicals and "K: V" lines, so the agg/kv classes yield
+only ~33 rows and the v2 lever is tails + possessive templates. 2,299 samples
+(803 breach / 1,496 ok), prose phase reused from v1 (deterministic re-mint, no LLM).
+
+**Candidate 2 — lettucedect-base-modernbert-en-v1 continued-FT on mints v2 + replay**
+(the pre-declared arm 2; inherits the RAGTruth FP discipline; EN base accepted with
+the FR gap noted): training 2026-06-13.
