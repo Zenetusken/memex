@@ -27,9 +27,24 @@
     "false_refusals": ["technical-guidelines-01"],
     "notes": "HARD GATES hold — refusal_cf=1.0 (incl. local-first-contradiction traps: cloud deploy, SaaS pricing, npm install), 0 hallucinations. PERFECT citation precision (1.0) — prose-anchored questions, no sibling-chunk artifact (contrast scientific-gte). 1 false-refusal (gl-01, MemexError inheritance) is a retrieval/assess miss — the answer is in the labeled coding-standards chunk (gl-02/03/04 answered from it), the agent just didn't surface it for that phrasing; not fabrication. Best ANS of the 3 new corpora (11/12). The MD→PDF→parse round-trip surfaced real technical-docs parse artifacts (code-comment-as-heading, code-fence fragmentation) — the value this category adds."
   },
+  "_baseline_answer_text_2026_06_13": {
+    "stack": "Qwen3.5-4B-AWQ orchestrator (ADR-0015) + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3 (cpu, device-pinned), co_residence_mode=manual",
+    "purpose": "answer_must_mention -> answer_mention_recall (audit-14 instrument). Measures answer-TEXT correctness the HARD gate / recall@k / the `answered` flag are blind to.",
+    "answered_count": 12,
+    "answerable_count": 12,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "answer_text_checked": 12,
+    "answer_text_correct_count": 12,
+    "mean_answer_mention_recall": 1.0,
+    "n_runs": 2,
+    "byte_stable": true,
+    "answer_text_failures": [],
+    "notes": "All 12 ANS answer correctly. SOFT OBSERVATION (content-correct, NOT a failure / not a gate issue): tg-07 answered IN FRENCH on an English query (language drift; the SQLite + 30-day facts are correct, slot matched the FR text) — an answer-stage UX signal worth a future look. Clean 1.0 regression-net baseline."
+  },
   "queries": [
     {
       "qid": "technical-guidelines-01",
+      "answer_must_mention": [["memexerror"], ["context"]],
       "question": "According to the developer guidelines, what must every custom exception inherit from, and what field must it include?",
       "_anchor_phrase": "Every custom exception inherits from",
       "_expected_answer": "Every custom exception inherits from MemexError and includes a `context: dict` field.",
@@ -42,6 +57,7 @@
     },
     {
       "qid": "technical-guidelines-02",
+      "answer_must_mention": [["pydantic"], ["module boundaries", "boundaries", "boundary"]],
       "question": "What is the guidelines' rule about passing data across module boundaries?",
       "_anchor_phrase": "Pydantic models cross module boundaries, dicts don't",
       "_expected_answer": "Pydantic models cross module boundaries, not dicts \u2014 a shared payload is a pydantic model in core/types.py, not dict[str, Any].",
@@ -54,6 +70,7 @@
     },
     {
       "qid": "technical-guidelines-03",
+      "answer_must_mention": [["pyright"], ["strict"], ["0 errors", "0 error"]],
       "question": "What pyright policy do the guidelines mandate for src/memex in CI?",
       "_anchor_phrase": "0 errors / 0 warnings",
       "_expected_answer": "pyright --strict runs in CI and src/memex is kept at 0 errors / 0 warnings.",
@@ -66,6 +83,7 @@
     },
     {
       "qid": "technical-guidelines-04",
+      "answer_must_mention": [["async", "async-first"], ["sync"], ["i/o", "io"]],
       "question": "What is the guidelines' rule about async versus sync code?",
       "_anchor_phrase": "Async-first for I/O, sync for CPU",
       "_expected_answer": "Async-first for I/O (filesystem, HTTP, model calls, DB writes); sync for pure CPU computation (parsing tokens, formatting).",
@@ -78,6 +96,7 @@
     },
     {
       "qid": "technical-guidelines-05",
+      "answer_must_mention": [["ingest"], ["parse"], ["enrich"], ["index"], ["retrieve"]],
       "question": "How many stages does a document flow through in the Memex pipeline, and what are they?",
       "_anchor_phrase": "A document flows through Memex in five stages",
       "_expected_answer": "Five stages: ingest \u2192 parse \u2192 enrich \u2192 index \u2192 retrieve.",
@@ -90,6 +109,7 @@
     },
     {
       "qid": "technical-guidelines-06",
+      "answer_must_mention": [["ulid"], ["ingest"], ["query"]],
       "question": "What type of identifier is the correlation_id, and when is it generated?",
       "_anchor_phrase": "It's a ULID generated at ingest",
       "_expected_answer": "A ULID, generated at ingest (for documents) or at query receipt (for retrievals); it threads through every event, log line, trace, and model call.",
@@ -102,6 +122,7 @@
     },
     {
       "qid": "technical-guidelines-07",
+      "answer_must_mention": [["sqlite"], ["30"]],
       "question": "Where and for how long are pipeline events persisted?",
       "_anchor_phrase": "persisted to SQLite in a rolling 30-day window",
       "_expected_answer": "To SQLite, in a rolling 30-day window (enabling debugging replay, recovery, and evaluation).",
@@ -114,6 +135,7 @@
     },
     {
       "qid": "technical-guidelines-08",
+      "answer_must_mention": [["internals", "internal"], ["private"]],
       "question": "What does the module-boundary rule forbid a module from doing?",
       "_anchor_phrase": "import private symbols (anything prefixed with",
       "_expected_answer": "A module may not reach into another module's internals, write to another module's data store, or import private symbols (anything prefixed with _).",
@@ -126,6 +148,7 @@
     },
     {
       "qid": "technical-guidelines-09",
+      "answer_must_mention": [["50"], ["10"]],
       "question": "In Memex's hybrid retrieval, how many fused candidates does the reranker take and how many does it return?",
       "_anchor_phrase": "second stage on the top 50 fused candidates",
       "_expected_answer": "bge-reranker-v2-m3 reranks the top 50 fused candidates and returns the top 10 (BM25 + dense vector combined via reciprocal rank fusion).",
@@ -138,6 +161,7 @@
     },
     {
       "qid": "technical-guidelines-10",
+      "answer_must_mention": [["ryugraph"], ["kuzu"]],
       "question": "What knowledge-graph database does Memex use, and what is it a fork of?",
       "_anchor_phrase": "RyuGraph (the maintained fork of Kuzu",
       "_expected_answer": "RyuGraph, the maintained fork of Kuzu (see ADR-0005).",
@@ -150,6 +174,7 @@
     },
     {
       "qid": "technical-guidelines-11",
+      "answer_must_mention": [["memory"], ["on-disk", "on disk", "disk"], ["vault"]],
       "question": "What are the three caching tiers described in the guidelines?",
       "_anchor_phrase": "Three tiers, all content-addressed",
       "_expected_answer": "Memory (LRU ~500MB, session model outputs), on-disk (~/.cache/memex, default 5GB cap), and vault (forever) \u2014 all content-addressed.",
@@ -162,6 +187,7 @@
     },
     {
       "qid": "technical-guidelines-12",
+      "answer_must_mention": [["mcp"]],
       "question": "What do the guidelines call the public API of Memex?",
       "_anchor_phrase": "the public API of Memex",
       "_expected_answer": "The MCP server (anything an external agent should be able to do is an MCP tool; anything not exposed is internal). The CLI is the canonical interface.",
