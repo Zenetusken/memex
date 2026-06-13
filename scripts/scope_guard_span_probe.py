@@ -413,17 +413,27 @@ def _checker_cases(fp_path: str) -> list[dict[str, Any]]:
     from memex.core.table_linearize import linearize_gfm_tables
 
     cases: list[dict[str, Any]] = []
-    by_suffix = fetch_chunks_by_suffix([s for b in BREACHES for s in b["cited_suffixes"]])
+    # The breach chunk TEXTS are frozen alongside the FP tuples (a reindex churns
+    # chunk_ids — the chart-types 06-01 lesson); live fetch is the loud fallback.
+    frozen_path = Path(fp_path).parent / "breach_chunks_frozen.json"
+    if frozen_path.exists():
+        by_suffix = json.load(open(frozen_path))
+    else:
+        print(f"[checker] WARNING: {frozen_path} missing — live-fetching breach chunks "
+              "from search.sqlite (chunk ids churn on reindex)", flush=True)
+        by_suffix = fetch_chunks_by_suffix([s for b in BREACHES for s in b["cited_suffixes"]])
     for b in BREACHES:
         cited = [by_suffix[s] for s in b["cited_suffixes"]]
         cases.append(
-            {"side": "BREACH", "qid": b["qid"], "summary": b["summary"], "cited": cited}
+            {"side": "BREACH", "qid": b["qid"], "question": b["question"],
+             "summary": b["summary"], "cited": cited}
         )
     for r in json.load(open(fp_path)):
         cited = [c for c in r["cited"] if c["text"]]
         if r["answered"] and r["summary"] and cited:
             cases.append(
-                {"side": "FP", "qid": r["qid"], "summary": r["summary"], "cited": cited}
+                {"side": "FP", "qid": r["qid"], "question": r["question"],
+                 "summary": r["summary"], "cited": cited}
             )
     for case in cases:
         case["premise_raw"] = "\n\n".join(f"{c['title']} — {c['text']}" for c in case["cited"])
@@ -453,6 +463,79 @@ def _checker_report(results: list[dict[str, Any]], keys: tuple[str, ...], out_pa
             f"  → {'SEPARATES' if margin > 0 else 'OVERLAP: ' + str(sum(1 for x in fp if x <= max(br))) + f'/{len(fp)} FP at-or-below top breach'}"
         )
     print(f"\n[{tag}] rows → {out_path}")
+
+
+_ATTRSCORE_PROMPT = (
+    "As an Attribution Validator, your task is to verify whether a given reference can "
+    "support the given claim. A claim can be either a plain sentence or a question "
+    "followed by its answer. Specifically, your response should clearly indicate the "
+    "relationship: Attributable, Contradictory or Extrapolatory. A contradictory error "
+    "occurs when you can infer that the answer contradicts the fact presented in the "
+    "context, while an extrapolatory error means that you cannot infer the correctness "
+    "of the answer based on the information provided in the context. \n\n"
+    "Claim: {claim} \n Reference: {reference}"
+)
+
+
+def attrscore_arm(fp_path: str, out_path: str) -> None:
+    """osunlp/attrscore-flan-t5-large (apache-2.0) — the design-§6 K4 windfall probe:
+    the only off-the-shelf checkpoint with attribution-error supervision (3-way
+    Attributable/Contradictory/Extrapolatory, Yue et al. 2023). Prompt transcribed
+    VERBATIM from the AttrScore repo README. Claim = question + answer (the repo's QA
+    form) with a summary-only variant; score = P(Attributable) over the three labels'
+    first decoder tokens (single step, the MiniCheck scoring shape); the generated
+    label is recorded alongside for honesty."""
+    import torch
+    from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+
+    ckpt = "osunlp/attrscore-flan-t5-large"
+    t0 = time.monotonic()
+    tok = AutoTokenizer.from_pretrained(ckpt)
+    model = AutoModelForSeq2SeqLM.from_pretrained(ckpt)
+    model.eval()
+    label_ids = [tok(lbl, add_special_tokens=False).input_ids[0]
+                 for lbl in ("Attributable", "Contradictory", "Extrapolatory")]
+    assert len(set(label_ids)) == 3, f"label first-tokens collide: {label_ids}"  # noqa: S101 — probe invariant
+    print(f"[attrscore] loaded {ckpt} in {time.monotonic() - t0:.1f}s "
+          f"label_ids={label_ids}", flush=True)
+
+    def at_score(reference: str, claim: str) -> tuple[float, str]:
+        text = _ATTRSCORE_PROMPT.format(claim=claim, reference=reference)
+        enc = tok(text, max_length=2048, truncation=True, return_tensors="pt")
+        with torch.no_grad():
+            out = model(
+                input_ids=enc["input_ids"],
+                attention_mask=enc["attention_mask"],
+                decoder_input_ids=torch.zeros((1, 1), dtype=torch.long),
+            )
+        logits = out.logits.squeeze(1)[:, torch.tensor(label_ids)]
+        probs = torch.softmax(logits, dim=-1)[0]
+        label = ("Attributable", "Contradictory", "Extrapolatory")[int(probs.argmax())]
+        return float(probs[0]), label
+
+    results: list[dict[str, Any]] = []
+    for case in _checker_cases(fp_path):
+        row: dict[str, Any] = {"side": case["side"], "qid": case["qid"]}
+        for label, premise in (("raw", case["premise_raw"]), ("lin", case["premise_lin"])):
+            p_qa, lbl_qa = at_score(premise, f"{case['question']} {case['summary']}")
+            p_noq, lbl_noq = at_score(premise, case["summary"])
+            row[f"at_p_attr_qa_{label}"] = round(p_qa, 4)
+            row[f"at_label_qa_{label}"] = lbl_qa
+            row[f"at_p_attr_noq_{label}"] = round(p_noq, 4)
+            row[f"at_label_noq_{label}"] = lbl_noq
+        results.append(row)
+        print(
+            f"[attrscore] {case['side']:6} {case['qid']:24} "
+            f"qa_raw={row['at_p_attr_qa_raw']:.3f}({row['at_label_qa_raw'][:6]}) "
+            f"noq_raw={row['at_p_attr_noq_raw']:.3f}({row['at_label_noq_raw'][:6]}) "
+            f"qa_lin={row['at_p_attr_qa_lin']:.3f}({row['at_label_qa_lin'][:6]})",
+            flush=True,
+        )
+    _checker_report(
+        results,
+        ("at_p_attr_qa_raw", "at_p_attr_noq_raw", "at_p_attr_qa_lin", "at_p_attr_noq_lin"),
+        out_path, "attrscore",
+    )
 
 
 def hhem(fp_path: str, out_path: str) -> None:
@@ -790,6 +873,60 @@ def _judge_call(evidence: str, span: str) -> bool | None:
         return None
 
 
+def binding_gate(fp_path: str, out_path: str, model_dir: str, runs: int = 2) -> None:
+    """The audit-19 §4 ONE-SHOT calibration gate for a trained binding-checker
+    candidate. Scores the frozen 14-case set with the candidate via the UNCHANGED
+    lettuce_arm machinery (train == gate == wiring input shape), at the threshold
+    FROZEN on the minted dev split (model_dir/threshold.json — never tuned here).
+
+    PASS bar (all): both breaches fire at >= t on conf_q AND survive the
+    tail-strip variant (conf_qs >= t — a catch living only in the provenance tail
+    is style noise, the lesson that killed the pip checkpoint); ZERO of the 12
+    FPs fire on conf_q. N=runs determinism asserted byte-stable.
+    """
+    meta = json.load(open(Path(model_dir) / "threshold.json"))
+    t = float(meta["threshold"])
+    print(f"[binding] candidate {model_dir} | frozen threshold {t} "
+          f"(dev F1 {meta.get('dev_example_f1')}, dev FP {meta.get('dev_fp_rate')})",
+          flush=True)
+    rows_runs = []
+    for _ in range(runs):
+        lettuce_arm(fp_path, out_path, model_dir)
+        rows_runs.append(json.load(open(out_path)))
+    if rows_runs[0] != rows_runs[-1]:
+        print("[binding] FATAL: non-deterministic scoring across runs — harness bug",
+              flush=True)
+        sys.exit(2)
+    rows = rows_runs[0]
+    # A question-blind checker (the breach subject is in the question, so it was
+    # TRAINED with a blank question) is in-distribution only on the evidence-only
+    # score — gate on conf_noq; the question-bearing conf_q is OOD for it.
+    blind = bool(meta.get("question_blind"))
+    primary = "ld_max_conf_noq" if blind else "ld_max_conf_q"
+    print(f"[binding] gating on {primary} (question_blind={blind})", flush=True)
+    br = {r["qid"]: r for r in rows if r["side"] == "BREACH"}
+    fp = {r["qid"]: r for r in rows if r["side"] == "FP"}
+    missed = {q: r[primary] for q, r in br.items() if r[primary] < t}
+    # tail-strip sanity stays on conf_qs (question-present), the only tail-stripped
+    # variant the arm records; skipped for blind models (no noq-tail variant).
+    tail_only = (
+        {} if blind else
+        {q: r["ld_max_conf_qs"] for q, r in br.items()
+         if r["ld_max_conf_q"] >= t and r["ld_max_conf_qs"] < t}
+    )
+    fired = {q: r[primary] for q, r in fp.items() if r[primary] >= t}
+    margin = (min(r[primary] for r in br.values())
+              - max(r[primary] for r in fp.values()))
+    print(f"\n[binding] breaches missed ({primary} < t): {missed or 'none'}")
+    print(f"[binding] breaches tail-only (conf_qs < t): {tail_only or 'none'}")
+    print(f"[binding] FPs fired ({primary} >= t): {fired or 'none'} ({len(fired)}/12)")
+    print(f"[binding] margin min(BREACH) - max(FP) on {primary} = {margin:.3f}"
+          + (" [KNIFE-EDGE]" if 0 < margin < 0.05 else ""))
+    ok = not missed and not tail_only and not fired
+    print(f"\n[binding] GATE: {'PASS' if ok else 'FAIL'}")
+    sys.exit(0 if ok else 1)
+
+
 def _doc_meta(chunk_ids: list[str]) -> dict[str, tuple[str, str]]:
     db = sqlite3.connect(str(SQLITE))
     try:
@@ -985,6 +1122,11 @@ if __name__ == "__main__":
             sys.argv[2] if len(sys.argv) > 2 else "/tmp/scope_probe_fp.json",  # noqa: S108 — probe artifact
             sys.argv[3] if len(sys.argv) > 3 else "/tmp/scope_probe_minicheck.json",  # noqa: S108 — probe artifact
         )
+    elif cmd == "attrscore":
+        attrscore_arm(
+            sys.argv[2] if len(sys.argv) > 2 else "/tmp/scope_probe_fp.json",  # noqa: S108 — probe artifact
+            sys.argv[3] if len(sys.argv) > 3 else "/tmp/scope_probe_attrscore.json",  # noqa: S108 — probe artifact
+        )
     elif cmd == "provenance":
         provenance_l0(
             sys.argv[2] if len(sys.argv) > 2 else "/tmp/scope_probe_fp.json",  # noqa: S108 — probe artifact
@@ -994,6 +1136,12 @@ if __name__ == "__main__":
             sys.argv[2] if len(sys.argv) > 2 else "/tmp/scope_probe_fp.json",  # noqa: S108 — probe artifact
             sys.argv[3] if len(sys.argv) > 3 else "/tmp/scope_probe_lettuce.json",  # noqa: S108 — probe artifact
             sys.argv[4] if len(sys.argv) > 4 else "KRLabsOrg/lettucedect-base-modernbert-en-v1",
+        )
+    elif cmd == "binding":
+        binding_gate(
+            sys.argv[2] if len(sys.argv) > 2 else "/tmp/scope_probe_fp.json",  # noqa: S108 — probe artifact
+            sys.argv[3] if len(sys.argv) > 3 else "/tmp/scope_probe_binding.json",  # noqa: S108 — probe artifact
+            sys.argv[4],
         )
     elif cmd == "nli":
         nli(

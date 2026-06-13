@@ -1,0 +1,204 @@
+[
+ {
+  "side": "BREACH",
+  "qid": "annual-report-12",
+  "ld_max_conf_q": 0.0,
+  "ld_spans_q": [],
+  "ld_max_conf_noq": 0.0,
+  "ld_spans_noq": [],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": true
+ },
+ {
+  "side": "BREACH",
+  "qid": "technical-guidelines-13",
+  "ld_max_conf_q": 0.7036,
+  "ld_spans_q": [
+   "."
+  ],
+  "ld_max_conf_noq": 0.6813,
+  "ld_spans_noq": [
+   "."
+  ],
+  "ld_max_conf_qs": 0.7036,
+  "ld_spans_qs": [
+   "."
+  ],
+  "tail_stripped": false
+ },
+ {
+  "side": "FP",
+  "qid": "annual-report-01",
+  "ld_max_conf_q": 0.9487,
+  "ld_spans_q": [
+   "2026 Annual Review (Form 10-K"
+  ],
+  "ld_max_conf_noq": 0.9538,
+  "ld_spans_noq": [
+   " as",
+   "2026 Annual Review (Form 10-K"
+  ],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": true
+ },
+ {
+  "side": "FP",
+  "qid": "annual-report-03",
+  "ld_max_conf_q": 0.9497,
+  "ld_spans_q": [
+   "2026 Annual Review (Form 10-K"
+  ],
+  "ld_max_conf_noq": 0.9458,
+  "ld_spans_noq": [
+   "2026 Annual Review (Form 10-K"
+  ],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": true
+ },
+ {
+  "side": "FP",
+  "qid": "annual-report-05",
+  "ld_max_conf_q": 0.951,
+  "ld_spans_q": [
+   "2026",
+   " (Form 10-K)."
+  ],
+  "ld_max_conf_noq": 0.9545,
+  "ld_spans_noq": [
+   "026 Annual",
+   " (Form 10-K)."
+  ],
+  "ld_max_conf_qs": 0.951,
+  "ld_spans_qs": [
+   "2026",
+   " (Form 10-K)."
+  ],
+  "tail_stripped": false
+ },
+ {
+  "side": "FP",
+  "qid": "nist-zero-trust-02",
+  "ld_max_conf_q": 0.9042,
+  "ld_spans_q": [
+   " SP",
+   "800-207"
+  ],
+  "ld_max_conf_noq": 0.9368,
+  "ld_spans_noq": [
+   " SP",
+   "800-207"
+  ],
+  "ld_max_conf_qs": 0.9042,
+  "ld_spans_qs": [
+   " SP",
+   "800-207"
+  ],
+  "tail_stripped": false
+ },
+ {
+  "side": "FP",
+  "qid": "nist-zero-trust-03",
+  "ld_max_conf_q": 0.0,
+  "ld_spans_q": [],
+  "ld_max_conf_noq": 0.0,
+  "ld_spans_noq": [],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": false
+ },
+ {
+  "side": "FP",
+  "qid": "nist-zero-trust-05",
+  "ld_max_conf_q": 0.7054,
+  "ld_spans_q": [
+   "0",
+   "0"
+  ],
+  "ld_max_conf_noq": 0.9554,
+  "ld_spans_noq": [
+   " SP",
+   "800-207"
+  ],
+  "ld_max_conf_qs": 0.7054,
+  "ld_spans_qs": [
+   "0",
+   "0"
+  ],
+  "tail_stripped": false
+ },
+ {
+  "side": "FP",
+  "qid": "scientific-gte-01",
+  "ld_max_conf_q": 0.0,
+  "ld_spans_q": [],
+  "ld_max_conf_noq": 0.0,
+  "ld_spans_noq": [],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": true
+ },
+ {
+  "side": "FP",
+  "qid": "scientific-gte-02",
+  "ld_max_conf_q": 0.0,
+  "ld_spans_q": [],
+  "ld_max_conf_noq": 0.0,
+  "ld_spans_noq": [],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": false
+ },
+ {
+  "side": "FP",
+  "qid": "linux-fundamentals-01",
+  "ld_max_conf_q": 0.0,
+  "ld_spans_q": [],
+  "ld_max_conf_noq": 0.0,
+  "ld_spans_noq": [],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": false
+ },
+ {
+  "side": "FP",
+  "qid": "linux-fundamentals-03",
+  "ld_max_conf_q": 0.7149,
+  "ld_spans_q": [
+   " Linux"
+  ],
+  "ld_max_conf_noq": 0.0,
+  "ld_spans_noq": [],
+  "ld_max_conf_qs": 0.7149,
+  "ld_spans_qs": [
+   " Linux"
+  ],
+  "tail_stripped": false
+ },
+ {
+  "side": "FP",
+  "qid": "cr350-xref-02",
+  "ld_max_conf_q": 0.0,
+  "ld_spans_q": [],
+  "ld_max_conf_noq": 0.9703,
+  "ld_spans_noq": [
+   " Cyber Kill Chain"
+  ],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": false
+ },
+ {
+  "side": "FP",
+  "qid": "technical-guidelines-01",
+  "ld_max_conf_q": 0.0,
+  "ld_spans_q": [],
+  "ld_max_conf_noq": 0.0,
+  "ld_spans_noq": [],
+  "ld_max_conf_qs": 0.0,
+  "ld_spans_qs": [],
+  "tail_stripped": false
+ }
+]
