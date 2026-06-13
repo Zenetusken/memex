@@ -382,3 +382,55 @@ audit). 5. Vendor trainer; train candidate 1 under `pause_vllm_for_gpu`; freeze 
 dev. 6. One-shot calibration gate via the new `binding` probe subcommand. 7. (PASS) wire
 `_binding_violation` default-OFF → full ladder N≥2–3 → flip default-ON. 8. (FAIL) ladder to
 candidate 2/3 or record the negative per K1–K3.
+
+---
+
+## 7. Build log (2026-06-12/13, branch `feat/binding-checker`)
+
+**Kill-target re-confirmed on shipped main `be0a209`:** ar-12 breaches 3/3 under the
+mxbai env with the provenance backstop ON (correctly silent — content subject, not a
+named source). The verified CLAIM is clean ("Gross margin was 71.1%…"); the SUMMARY
+carries the binding — confirming the checker gates the final surfaced text.
+
+**attrscore (the §6 windfall probe): DEAD — the 8th measured arm.** Both breaches
+labeled Attributable (qa_raw 0.460/0.614); 7/12 FPs at-or-below the top breach on
+every variant (margin −0.401/−0.495). Same overlap-bias family as HHEM. Verbatim
+template from the AttrScore repo; rows in `data-17-scope-calibration/scope_probe_attrscore.json`.
+
+**P0 tokenizer probe: mmBERT GO.** 7/8 identical to the known-working lettucedect-en
+control (FR accents, GFM, span boundaries all clean). The shared 8th case exposed an
+UPSTREAM recipe bug: `answer_start_token = len(encode(context alone))` loses the
+answer entirely when the context alone exceeds max_length. Vendored fix: locate the
+answer region via fast-tokenizer `sequence_ids()` — exact on both tokenizers under
+truncation. Pinned by `tests/unit/test_binding_checker_vendor.py`.
+
+**Pre-req hardening:** breach chunk texts frozen into
+`data-17-scope-calibration/breach_chunks_frozen.json` (reindex churns chunk ids — the
+chart-types 06-01 lesson); `_checker_cases` prefers frozen, live fetch is the loud
+fallback; `question` threaded through the cases for claim-format checkers.
+
+**Minter (`scripts/mint_binding_data.py`) deltas vs the §2 spec, all measured-in:**
+- Numeric-metric tables are SCARCE outside the held-out 10-K (vault probe: 243
+  rebindable tables, mostly CCNA/Linux command-option tables; 13 tables in
+  gte/chart/nist of which 9 numeric-majority) → numeric-first cell ordering + a 2×
+  per-chunk cap for numeric tables; value-typed template banks (metric verbs only on
+  numeric cells — a "Long Option reached COMMENT" tell would leak class signal).
+- THE DAEMON SILENTLY IGNORES vLLM's bare `guided_json` (deprecated) — extraction came
+  back fenced/free-form. Fixed to the OpenAI-standard
+  `response_format={"type":"json_schema"}` (what production `models/client.py` uses).
+- Subjects constrained to the chunk's OTTER entities ∪ table row labels, passed INTO
+  the extraction prompt — kills generic-NP subjects ("Examples of fuzzers") and
+  guarantees the rebind pool is kind-matched; a per-language verb gate drops
+  title-shaped extractions.
+- F4 NLI discard: free-VRAM pre-check (≥4 GB) + per-batch OOM→CPU fallback (first full
+  run died OOM beside the 6 GB daemon — forward was unguarded); phase-P raw samples
+  now saved pre-F4 so a crash can't lose LLM work.
+- Phase-T manual audit (the §2 50-row check): rebinds are genuinely
+  presence-preserving (PF-as-fuzzer, category rebinds, key-value swaps); spans land on
+  the swapped slot; hard positives present.
+
+**Gate harness:** `scope_guard_span_probe.py binding <fp> <out> <model_dir>` — scores
+the frozen 14 cases via the UNCHANGED lettuce_arm machinery (train == gate == wiring
+input shape), asserts N=2 byte-stability, applies the §4 bar at the threshold frozen
+in `<model_dir>/threshold.json`: both breaches ≥ t on conf_q AND surviving tail-strip
+(conf_qs ≥ t), 0/12 FPs ≥ t, margin reported with a knife-edge flag.

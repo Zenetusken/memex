@@ -873,6 +873,49 @@ def _judge_call(evidence: str, span: str) -> bool | None:
         return None
 
 
+def binding_gate(fp_path: str, out_path: str, model_dir: str, runs: int = 2) -> None:
+    """The audit-19 §4 ONE-SHOT calibration gate for a trained binding-checker
+    candidate. Scores the frozen 14-case set with the candidate via the UNCHANGED
+    lettuce_arm machinery (train == gate == wiring input shape), at the threshold
+    FROZEN on the minted dev split (model_dir/threshold.json — never tuned here).
+
+    PASS bar (all): both breaches fire at >= t on conf_q AND survive the
+    tail-strip variant (conf_qs >= t — a catch living only in the provenance tail
+    is style noise, the lesson that killed the pip checkpoint); ZERO of the 12
+    FPs fire on conf_q. N=runs determinism asserted byte-stable.
+    """
+    meta = json.load(open(Path(model_dir) / "threshold.json"))
+    t = float(meta["threshold"])
+    print(f"[binding] candidate {model_dir} | frozen threshold {t} "
+          f"(dev F1 {meta.get('dev_example_f1')}, dev FP {meta.get('dev_fp_rate')})",
+          flush=True)
+    rows_runs = []
+    for _ in range(runs):
+        lettuce_arm(fp_path, out_path, model_dir)
+        rows_runs.append(json.load(open(out_path)))
+    if rows_runs[0] != rows_runs[-1]:
+        print("[binding] FATAL: non-deterministic scoring across runs — harness bug",
+              flush=True)
+        sys.exit(2)
+    rows = rows_runs[0]
+    br = {r["qid"]: r for r in rows if r["side"] == "BREACH"}
+    fp = {r["qid"]: r for r in rows if r["side"] == "FP"}
+    missed = {q: r["ld_max_conf_q"] for q, r in br.items() if r["ld_max_conf_q"] < t}
+    tail_only = {q: r["ld_max_conf_qs"] for q, r in br.items()
+                 if r["ld_max_conf_q"] >= t and r["ld_max_conf_qs"] < t}
+    fired = {q: r["ld_max_conf_q"] for q, r in fp.items() if r["ld_max_conf_q"] >= t}
+    margin = (min(r["ld_max_conf_q"] for r in br.values())
+              - max(r["ld_max_conf_q"] for r in fp.values()))
+    print(f"\n[binding] breaches missed (conf_q < t): {missed or 'none'}")
+    print(f"[binding] breaches tail-only (conf_qs < t): {tail_only or 'none'}")
+    print(f"[binding] FPs fired (conf_q >= t): {fired or 'none'} ({len(fired)}/12)")
+    print(f"[binding] margin min(BREACH) - max(FP) on conf_q = {margin:.3f}"
+          + (" [KNIFE-EDGE]" if 0 < margin < 0.05 else ""))
+    ok = not missed and not tail_only and not fired
+    print(f"\n[binding] GATE: {'PASS' if ok else 'FAIL'}")
+    sys.exit(0 if ok else 1)
+
+
 def _doc_meta(chunk_ids: list[str]) -> dict[str, tuple[str, str]]:
     db = sqlite3.connect(str(SQLITE))
     try:
@@ -1082,6 +1125,12 @@ if __name__ == "__main__":
             sys.argv[2] if len(sys.argv) > 2 else "/tmp/scope_probe_fp.json",  # noqa: S108 — probe artifact
             sys.argv[3] if len(sys.argv) > 3 else "/tmp/scope_probe_lettuce.json",  # noqa: S108 — probe artifact
             sys.argv[4] if len(sys.argv) > 4 else "KRLabsOrg/lettucedect-base-modernbert-en-v1",
+        )
+    elif cmd == "binding":
+        binding_gate(
+            sys.argv[2] if len(sys.argv) > 2 else "/tmp/scope_probe_fp.json",  # noqa: S108 — probe artifact
+            sys.argv[3] if len(sys.argv) > 3 else "/tmp/scope_probe_binding.json",  # noqa: S108 — probe artifact
+            sys.argv[4],
         )
     elif cmd == "nli":
         nli(

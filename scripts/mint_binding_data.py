@@ -453,6 +453,8 @@ def main() -> None:
         import asyncio as _aio
 
         p_samples = _aio.run(mint_prose_phase(chunks, max_candidates=args.max_candidates))
+        json.dump(p_samples, open(args.out + ".rawp", "w"), indent=1, ensure_ascii=False)
+        print(f"[mint] phase P raw (pre-F4) -> {args.out}.rawp", flush=True)
         p_samples = f4_nli_discard(p_samples)
         print(f"[mint] phase P: {len(p_samples)}", flush=True)
         samples.extend(p_samples)
@@ -771,12 +773,13 @@ def f4_nli_discard(samples: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ckpt = "MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli"
     tok = AutoTokenizer.from_pretrained(ckpt)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    try:
-        model = AutoModelForSequenceClassification.from_pretrained(ckpt).to(device)
-    except Exception:
-        device = "cpu"
-        model = AutoModelForSequenceClassification.from_pretrained(ckpt)
+    if device == "cuda":
+        free, _total = torch.cuda.mem_get_info()
+        if free < 4.0 * 1024**3:  # the co-resident daemon leaves too little headroom
+            device = "cpu"
+    model = AutoModelForSequenceClassification.from_pretrained(ckpt).to(device)
     model.eval()
+    print(f"[mint-p] F4 NLI on {device}", flush=True)
     ent_idx = int(model.config.label2id.get("entailment", 0))
     drop: set[int] = set()
     with torch.no_grad():
@@ -791,7 +794,15 @@ def f4_nli_discard(samples: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 pairs.append((prompt[start:end][:4000], samples[i]["answer"]))
             enc = tok([p for p, _ in pairs], [h for _, h in pairs], truncation=True,
                       max_length=1024, padding=True, return_tensors="pt").to(device)
-            probs = torch.softmax(model(**enc).logits, dim=-1)[:, ent_idx]
+            try:
+                probs = torch.softmax(model(**enc).logits, dim=-1)[:, ent_idx]
+            except torch.OutOfMemoryError:
+                # co-residence squeeze mid-pass: finish on CPU (forward-only, exact)
+                device = "cpu"
+                model = model.to(device)
+                enc = {k: v.to(device) for k, v in enc.items()}
+                probs = torch.softmax(model(**enc).logits, dim=-1)[:, ent_idx]
+                print("[mint-p] F4 OOM -> CPU fallback", flush=True)
             for i, p in zip(idxs, probs.tolist(), strict=True):
                 if p > 0.5:
                     drop.add(i)
