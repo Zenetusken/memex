@@ -122,7 +122,7 @@
       "_note": "CHART-TARGETED: content exists ONLY in the chart-extracted block of the Gantt chart figure ('On Time 22 ... Late 8'). Under PyMuPDF, the figure is not OCR'd so the agent should refuse. Under Docling+chart-OCR it should answer. Anchor unresolvable via FTS because chart-extracted blocks are stripped from BM25 (P3.3-v3 defense); the chunk lives in dense embeddings only.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "1797d794-which-chart-or-graph-is-right-for-you#257fc3050e"
+        "1797d794-which-chart-or-graph-is-right-for-you#bd6227f3a3"
       ],
       "_unresolved": true
     },
@@ -136,8 +136,7 @@
       "_note": "CHART-TARGETED: chart-extracted-block content (the team-by-project Gantt table). Under PyMuPDF, refuse. Under Docling+chart-OCR, answer. Anchor unresolvable via FTS by design.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "1797d794-which-chart-or-graph-is-right-for-you#257fc3050e",
-        "1797d794-which-chart-or-graph-is-right-for-you#cf183ca71c"
+        "1797d794-which-chart-or-graph-is-right-for-you#bd6227f3a3"
       ],
       "_unresolved": true
     }

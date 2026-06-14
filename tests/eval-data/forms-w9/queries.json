@@ -51,7 +51,7 @@
       "_note": "What is backup withholding section. Distinctive numeric.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "2d420cbb-irs-w9#fd9b98acb3"
+        "2d420cbb-irs-w9#c673fec4df"
       ]
     },
     {
@@ -103,7 +103,7 @@
       "_note": "Purpose of Form.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "2d420cbb-irs-w9#a39bea5629"
+        "2d420cbb-irs-w9#08b7a6ab64"
       ]
     },
     {
@@ -142,7 +142,7 @@
       "_note": "What is backup withholding section.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "2d420cbb-irs-w9#fd9b98acb3"
+        "2d420cbb-irs-w9#c673fec4df"
       ]
     },
     {
@@ -168,7 +168,8 @@
       "_note": "Definition of a U.S. person.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "2d420cbb-irs-w9#c133856e2f"
+        "2d420cbb-irs-w9#bdc863989c",
+        "2d420cbb-irs-w9#08b7a6ab64"
       ]
     },
     {
@@ -194,7 +195,7 @@
       "_note": "Line 1 / joint-account instructions.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "2d420cbb-irs-w9#3e9c440947"
+        "2d420cbb-irs-w9#82e128482e"
       ]
     },
     {
