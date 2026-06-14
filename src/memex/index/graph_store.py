@@ -19,7 +19,7 @@ import math
 import re
 import threading
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import structlog
 from pydantic import BaseModel
@@ -114,6 +114,32 @@ class DocumentCitations(BaseModel):
 
     cites: list[CitationLink] = []
     cited_by: list[CitationLink] = []
+
+
+class CitationReach(BaseModel):
+    """A document reachable from a seed via a TRANSITIVE `CITES` chain. `hops` is the
+    shortest citation distance; `path` is the title chain along an example shortest route,
+    always reading in citation order (the citing document first → … → the cited document)."""
+
+    doc_id: str
+    title: str
+    hops: int
+    path: list[str]
+
+
+class CitationPaths(BaseModel):
+    """Multi-hop `CITES` traversal from a seed document — the transitive citation lineage,
+    the successor to the 1-hop `DocumentCitations` (unblocked once the vault holds a
+    citation-LINKED cluster dense enough to traverse). `direction="cites"` follows OUTGOING
+    edges (what the seed transitively references — its ancestry); `direction="cited_by"`
+    follows INCOMING (its transitive citing descendants). `reached` is each distinct
+    reachable document at its SHORTEST hop-distance, ranked by `hops` then title. Empty when
+    ryugraph is absent or the seed has no transitive citations."""
+
+    seed_doc_id: str
+    direction: Literal["cites", "cited_by"]
+    depth: int
+    reached: list[CitationReach] = []
 
 
 # Entity-specificity threshold for `related_documents`: an entity mentioned by MORE than
@@ -759,6 +785,59 @@ class GraphStore:
 
         def _run() -> DocumentCitations:
             return DocumentCitations(cites=_one("out"), cited_by=_one("in"))
+
+        return await asyncio.to_thread(_run)
+
+    async def citation_paths(
+        self,
+        doc_id: str,
+        *,
+        depth: int = 3,
+        direction: Literal["cites", "cited_by"] = "cites",
+    ) -> CitationPaths:
+        """Multi-hop `CITES` traversal from `doc_id` — the transitive citation lineage, the
+        successor to the 1-hop `citations()` (unblocked once the vault holds a citation-LINKED
+        cluster; the build/defer bar is `scripts/citation_graph_audit.py`). `direction="cites"`
+        follows OUTGOING `CITES` edges up to `depth` hops (what the seed transitively
+        references — its ancestry); `"cited_by"` follows INCOMING (its transitive citing
+        descendants). Returns each DISTINCT reachable document at its SHORTEST hop-distance +
+        an example shortest path (titles in citation order). The seed itself is excluded
+        (a cycle back to it is not a reach). Read-only ⇒ HARD-gate-neutral."""
+        d = max(1, min(depth, 6))  # bound the traversal on a possibly-cyclic subgraph
+        arrow = f"-[:CITES*1..{d}]->" if direction == "cites" else f"<-[:CITES*1..{d}]-"
+
+        def _run() -> CitationPaths:
+            result = self._conn.execute(
+                f"MATCH p = (a:Document {{doc_id: $id}}){arrow}(o:Document) RETURN nodes(p);",
+                {"id": doc_id},
+            )
+            # Keep the SHORTEST node-path per reached doc (ryugraph may enumerate longer or
+            # cyclic walks; the shortest chain is the meaningful one).
+            best: dict[str, list[dict[str, Any]]] = {}
+            while result.has_next():
+                nodes = cast("list[dict[str, Any]]", result.get_next()[0])
+                reached_id = str(nodes[-1]["doc_id"])
+                if reached_id == doc_id:  # a cycle back to the seed — not a reach
+                    continue
+                if reached_id not in best or len(nodes) < len(best[reached_id]):
+                    best[reached_id] = nodes
+            reaches: list[CitationReach] = []
+            for rid, nodes in best.items():
+                # `nodes` is seed→…→reached; reverse for cited_by so `path` reads in citation
+                # order (the citing document first → … → the seed).
+                ordered = nodes if direction == "cites" else list(reversed(nodes))
+                reaches.append(
+                    CitationReach(
+                        doc_id=rid,
+                        title=str(nodes[-1].get("title") or rid),
+                        hops=len(nodes) - 1,
+                        path=[str(n.get("title") or n["doc_id"]) for n in ordered],
+                    )
+                )
+            reaches.sort(key=lambda r: (r.hops, r.title))
+            return CitationPaths(
+                seed_doc_id=doc_id, direction=direction, depth=d, reached=reaches
+            )
 
         return await asyncio.to_thread(_run)
 

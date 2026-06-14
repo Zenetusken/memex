@@ -418,6 +418,53 @@ async def test_document_citations_tool(
 
 
 @pytest.mark.asyncio
+async def test_citation_paths_tool(
+    settings: MemexSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The `citation_paths` tool surfaces the TRANSITIVE (multi-hop) CITES lineage, coerces an
+    unknown `direction` to "cites", and is fail-open (empty) when the graph is unavailable."""
+    from memex.index.graph_store import CitationPaths, CitationReach
+    from memex.mcp.server import citation_paths
+
+    class _FakeStore:
+        @classmethod
+        async def open(cls, vault_path: Path) -> "_FakeStore":
+            return cls()
+
+        async def citation_paths(
+            self, doc_id: str, *, depth: int, direction: str
+        ) -> CitationPaths:
+            return CitationPaths(
+                seed_doc_id=doc_id,
+                direction=cast("Any", direction),
+                depth=depth,
+                reached=[
+                    CitationReach(doc_id="b", title="B", hops=1, path=["A", "B"]),
+                    CitationReach(doc_id="c", title="C", hops=2, path=["A", "B", "C"]),
+                ],
+            )
+
+        async def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("memex.index.graph_store.GraphStore.open", staticmethod(_FakeStore.open))
+    out = await citation_paths("a", depth=3)
+    assert out.seed_doc_id == "a" and out.direction == "cites"
+    assert [(r.doc_id, r.hops) for r in out.reached] == [("b", 1), ("c", 2)]
+    # an unknown direction coerces to "cites" (never crashes the tool)
+    assert (await citation_paths("a", direction="sideways")).direction == "cites"
+    # cited_by is honoured
+    assert (await citation_paths("a", direction="cited_by")).direction == "cited_by"
+
+    def _boom(vault_path: Path) -> Any:
+        raise ImportError("no ryugraph")
+
+    monkeypatch.setattr("memex.index.graph_store.GraphStore.open", staticmethod(_boom))
+    empty = await citation_paths("a", depth=3)
+    assert empty.reached == [] and empty.seed_doc_id == "a"
+
+
+@pytest.mark.asyncio
 async def test_entity_overview_tool_returns_profile_and_passages(
     settings: MemexSettings,
     monkeypatch: pytest.MonkeyPatch,

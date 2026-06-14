@@ -901,10 +901,23 @@ def register(app: typer.Typer) -> None:
     @app.command()
     def cites(
         document: str = _Option(..., "--document", "-d", help="doc_id."),
+        depth: int = _Option(
+            1,
+            "--depth",
+            help="Transitive CITES depth. 1 (default) = the 1-hop References; >1 follows "
+            "multi-hop citation CHAINS (the transitive lineage).",
+        ),
+        cited_by: bool = _Option(
+            False,
+            "--cited-by",
+            help="With --depth>1: follow INCOMING edges (documents that TRANSITIVELY cite "
+            "this one) instead of what it cites.",
+        ),
     ) -> None:
-        """References: the document's 1-hop CITES neighbourhood — what it cites + what
-        cites it (the resolved IN-VAULT citations). Transitive chain-following is
-        data-gated; this is the honest 1-hop surface."""
+        """References: the document's CITES neighbourhood. `--depth 1` (default) is the 1-hop
+        references — what it cites + what cites it. `--depth N>1` follows the transitive
+        citation LINEAGE: multi-hop chain following over the in-vault CITES edges, each
+        reachable document with its shortest hop-distance + an example chain."""
 
         async def _run():
             from memex.core.config import get_settings
@@ -912,6 +925,12 @@ def register(app: typer.Typer) -> None:
             bootstrap()
             store = await GraphStore.open(get_settings().vault_path)
             try:
+                if depth > 1:
+                    return await store.citation_paths(
+                        document,
+                        depth=depth,
+                        direction="cited_by" if cited_by else "cites",
+                    )
                 return await store.citations(document)
             finally:
                 await store.close()
