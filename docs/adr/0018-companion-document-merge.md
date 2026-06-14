@@ -169,3 +169,33 @@ page-map `0340eb9`/`6b6bfd9`/`52fb439`, webui page-jump fix `15264ce`). All thre
   MUST re-parse with VLM enabled (`MEMEX_PARSE__DISABLE_VLM=false`, cache-replays byte-identical), since
   `memex parse`'s default `disable_vlm=True` would otherwise drop the VLM transcriptions; a documented
   follow-on like every other re-parse migration, not auto-applied.
+
+## Amendment (2026-06-14): the augment default-ON decision — MEASURED → DEFER (stays opt-in)
+
+The "Revisit when … the augmentation eval clears with a measured win → consider default-ON" gate
+(decision-3 fast-follow; spec §12 G1) was MEASURED and does NOT clear. A 15-query joint-grounding eval
+(`tests/eval-data/companion-augment/`, candidates discovered by a per-pair workflow + content-verified
+over the 6 linked CR350 transcript↔deck pairs) was run `companion_augment_enabled` OFF vs ON (N=2,
+device-pinned):
+
+- **Net-zero, double-edged.** answered 8/15 BOTH OFF and ON; `refusal_cf=1.0` both; the augment mechanism
+  fired (13 `augment_companion.added` events per ON run). Two DETERMINISTIC per-query flips CANCEL:
+  `-03` (MAC/OUI structure) refuse→correct — a genuine joint-grounding WIN (the deck ARP slide wins
+  retrieval; augment pulls the transcript's OUI commentary the slide never writes) — but `-09`
+  (rate-limiting threshold) correct→REFUSE, a CROWDING regression: the appended counterparts tipped the
+  assess/answer gate to over-refuse a query whose answer ("100 requests/second") was still in the chunks.
+- **Why.** The CR350 modalities are too REDUNDANT for augment to net-win: when the teacher elaborates a
+  fact, a natural query usually retrieves the elaborating modality DIRECTLY, so the counterpart is a
+  no-op; augment only helps the narrow slice where the answer-less modality out-retrieves the
+  answer-bearing one (`-03`), and its additive-to-`reranked` appends dilute borderline queries (`-09`) —
+  the same shape as `expand_graph` (default-off, cited 0 of its added chunks) and `usage_intent_demotion`
+  (double-edged → opt-in).
+
+**Decision: `companion_augment_enabled` stays DEFAULT-OFF (opt-in, kill-switch-able).** HARD-gate-safe
+throughout (`refusal_cf=1.0` — additive-pure, no hallucination), so the infra + the `--use-video`
+keyframe alignment that feeds it are kept; only the default flip is declined. The DP default-on
+(`companion_align_dp_enabled`) is SUBSUMED — its sole consumer (the augment) is default-off and its
+alignment-accuracy win still lacks a transcript→slide alignment gold; both stay opt-in. **Revisit if** a
+less-redundant transcript/deck corpus appears OR the crowding regression is fixed (insert each counterpart
+adjacent to its winner instead of appending; or a crowding-resistant assess) — a future lever, not built.
+Eval gold + the A/B baseline: `tests/eval-data/companion-augment/queries.json` (`_baseline_2026_06_14`).
