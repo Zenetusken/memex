@@ -36,7 +36,7 @@
       "_note": "Headline financial metric from the CEO letter. Should match exactly.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "0e725ba0-2026-annual-report-web#5738dccc13"
+        "0e725ba0-2026-annual-report-web#477a63d8d7"
       ]
     },
     {
@@ -49,7 +49,7 @@
       "_note": "Bottom-line metric. The number 4.90 appears in both the CEO letter and the financials section.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "0e725ba0-2026-annual-report-web#5738dccc13"
+        "0e725ba0-2026-annual-report-web#477a63d8d7"
       ]
     },
     {
@@ -62,7 +62,7 @@
       "_note": "Segment-level revenue. Tests whether segment-specific figures are retrievable.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "0e725ba0-2026-annual-report-web#20c284a968"
+        "0e725ba0-2026-annual-report-web#299dce7724"
       ],
       "_unresolved": true
     },
@@ -76,7 +76,7 @@
       "_note": "Forward-looking figure. The 'trillion' number is distinctive and appears once.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "0e725ba0-2026-annual-report-web#b43550d1df"
+        "0e725ba0-2026-annual-report-web#28ddfbc1eb"
       ]
     },
     {
@@ -89,7 +89,7 @@
       "_note": "Margin metric. Tests precise-number retrieval from a financial summary table.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "0e725ba0-2026-annual-report-web#926420bc1c"
+        "0e725ba0-2026-annual-report-web#6688b1c5c3"
       ]
     },
     {
@@ -131,7 +131,9 @@
       "_answer_type": "chart_content",
       "_note": "CHART-TARGETED: content exists ONLY in the chart-extracted block of the Compensation Committee timeline graphic. Under PyMuPDF, the figure is not OCR'd, so the agent should refuse. Under Docling+chart-OCR, it should answer. Anchor unresolvable via FTS because chart-extracted blocks are stripped from BM25 (P3.3-v3 defense); the chunk lives in dense embeddings only.",
       "should_refuse": false,
-      "relevant_chunk_ids": [],
+      "relevant_chunk_ids": [
+        "0e725ba0-2026-annual-report-web#9e53a6d4e2"
+      ],
       "_unresolved": true
     },
     {
@@ -176,7 +178,7 @@
       "_note": "Phase-1 table-RAG win: a table-only value (Gaming platform/segment revenue) made answerable by linearization. Verified ANS 2026-05-24.",
       "should_refuse": false,
       "relevant_chunk_ids": [
-        "0e725ba0-2026-annual-report-web#53d244669d"
+        "0e725ba0-2026-annual-report-web#8360bd02be"
       ]
     },
     {
@@ -199,8 +201,8 @@
       "_answer_type": "superlative",
       "_anchor_phrase": "321,309",
       "relevant_chunk_ids": [
-        "0e725ba0-2026-annual-report-web#f8cd00400f",
-        "0e725ba0-2026-annual-report-web#790e6b1bff"
+        "0e725ba0-2026-annual-report-web#f7710a7eef",
+        "0e725ba0-2026-annual-report-web#c556a9fb2f"
       ],
       "_expected_answer": "Ellen Ochoa \u2014 the unique minimum 'Total ($)' ($321,309) in the Director Compensation for Fiscal 2026 table. Phase-2 row-superlative with the verified-extremum gate: SQL ORDER BY total__num ASC LIMIT 1, the returned row independently confirmed to hold the column minimum, so the agent confidently attributes 'which director'.",
       "_note": "Phase-2 row-superlative recompute gate (2026-05-24 follow-up): an independent Python check confirms the returned row IS the column extremum before framing it as such, so the 'which X is highest/lowest' attribution answers instead of conservatively refusing. A wrong ORDER BY \u2192 mismatch \u2192 no framing \u2192 refuse (HARD-gate-safe)."
