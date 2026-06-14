@@ -1,0 +1,137 @@
+{
+  "_description": "Joint-grounding eval for the companion-merge augment_companion default-ON decision (ADR-0018 B4, spec §12). Each ANS query targets a fact that lives in ONE modality (lecture TRANSCRIPT or its SLIDE DECK) and is genuinely absent from / sparse in the aligned counterpart — so the win for `companion_augment_enabled` is a refuse/miss→answer flip when augment pulls the reranked winner's aligned counterpart. The 6 CR350 transcript↔deck pairs are linked in the vault (companion_alignments.json). Candidates discovered + verified 2026-06-14.",
+  "_multi_doc": true,
+  "_doc_id": "<multi>",
+  "_mix": {"ans": 11, "ref": 4},
+  "_purpose": "Measure whether augment ON produces an answer/recall WIN over OFF (decision: default-ON iff a clean measured win + refusal_cf=1.0; else measured-defer to default-OFF opt-in).",
+  "_note": "Run augment-OFF (baseline) vs augment-ON (MEMEX_AGENTS__COMPANION_AUGMENT_ENABLED=true) and compare answered_count + mean_answer_mention_recall. relevant_chunk_ids intentionally omitted (cp is not the metric here).",
+  "_baseline_2026_06_14": {
+    "stack": "Qwen3.5-4B-AWQ (ADR-0015) + EmbeddingGemma-300M + bge-reranker-v2-m3 (cpu-pinned), co_residence_mode=manual",
+    "ab": "companion_augment_enabled OFF (baseline) vs ON (MEMEX_AGENTS__COMPANION_AUGMENT_ENABLED=true), N=2 each, over the 6 linked CR350 transcript↔deck pairs (companion_alignments.json).",
+    "result": "DOUBLE-EDGED, NET-ZERO. answered 8/15 BOTH OFF and ON; refusal_cf=1.0 both; mean_answer_mention_recall 1.0 both (answered subset). Two DETERMINISTIC per-query flips CANCEL: -03 (MAC/OUI) refuse→correct = a genuine joint-grounding WIN (the deck ARP slide wins retrieval, augment pulls the transcript OUI commentary) BUT -09 (rate-limiting threshold) correct→REFUSE = a CROWDING regression (augment's appended counterparts tipped the assess/answer gate to over-refuse a query whose answer '100 requests/second' was STILL present in the chunks). Mechanism fired (13 augment_companion.added events/run ON, 0 OFF).",
+    "decision": "MEASURED-DEFER → companion_augment_enabled stays DEFAULT-OFF (opt-in). No clean win (net-zero) + a real crowding regression; the decision rule (~3-4 clean flips, no degradation) is NOT met. The CR350 modalities are too REDUNDANT (the teacher elaborates the slides, but the answer is usually in the directly-retrieved modality) for augment to net-win, and additive-to-reranked appends dilute borderline queries (the expand_graph / usage_intent_demotion precedent). HARD-gate-safe (refusal_cf=1.0 — no hallucination). REVISIT IF: a less-redundant transcript/deck corpus appears OR the crowding regression is fixed (insert counterparts adjacent to their winner / a crowding-resistant assess) — a future lever, NOT built.",
+    "refusal_rate_on_counterfactuals": 1.0,
+    "answered_off": 8,
+    "answered_on": 8,
+    "wins": ["companion-augment-03"],
+    "regressions": ["companion-augment-09"]
+  },
+  "queries": [
+    {
+      "qid": "companion-augment-01",
+      "answer_must_mention": [["72"], ["8"]],
+      "question": "Quelles sont les durées de bail DHCP recommandées dans le cours pour un employé régulier et pour un visiteur?",
+      "_expected_answer": "72 heures pour un employé régulier; 8 heures maximum pour un visiteur (transcript-only; the deck shows only the generic DORA process).",
+      "should_refuse": false,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "companion-augment-02",
+      "answer_must_mention": [["13"], ["1 700", "1700"]],
+      "question": "Combien d'adresses logiques les serveurs racine DNS ont-ils, et combien d'instances physiques existent réellement grâce à l'anycast?",
+      "_expected_answer": "13 adresses logiques (transcript) mais plus de 1 700 instances physiques (deck) — the answer is SPLIT across both modalities.",
+      "should_refuse": false,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "companion-augment-03",
+      "answer_must_mention": [["octets"], ["fabricant", "fabriquant"]],
+      "question": "Comment est structurée une adresse MAC au niveau de ses octets, et à quoi correspond la partie de poids fort?",
+      "_expected_answer": "6 octets; les 3 octets de poids fort identifient le fabricant (OUI). Transcript-only; the deck ARP section does not break down the MAC structure.",
+      "should_refuse": false,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "companion-augment-04",
+      "answer_must_mention": [["tcp"], ["transfert", "zone"]],
+      "question": "Quel protocole de transport DNS utilise-t-il pour les transferts de zone, par opposition aux requêtes standard?",
+      "_expected_answer": "TCP pour les transferts de zone, UDP pour les requêtes standard.",
+      "should_refuse": false,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "companion-augment-05",
+      "answer_must_mention": [["10"]],
+      "question": "Quel exemple de seuil d'échecs de connexion le cours donne-t-il pour la détection heuristique d'intrusion?",
+      "_expected_answer": "10 échecs de connexion en 5 minutes.",
+      "should_refuse": false,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "companion-augment-06",
+      "answer_must_mention": [["six", "6"], ["mois"]],
+      "question": "À quelle fréquence le cours recommande-t-il de changer les mots de passe des équipements réseau?",
+      "_expected_answer": "Tous les six mois (transcript-only; the slide lists only a generic 'politique de mots de passe robuste').",
+      "should_refuse": false,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "companion-augment-07",
+      "answer_must_mention": [["agreement"], ["objective"]],
+      "question": "Que signifient les acronymes SLA et SLO selon le cours?",
+      "_expected_answer": "SLA = Service Level Agreement; SLO = Service Level Objective.",
+      "should_refuse": false,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "companion-augment-08",
+      "answer_must_mention": [["multi-layer", "multicouche", "multi couche", "multi-couche"]],
+      "question": "Que signifie l'abréviation MLS pour un commutateur, selon le cours?",
+      "_expected_answer": "Multi-Layer Switch (un équipement de niveau 2 transformable en niveau 3).",
+      "should_refuse": false,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "companion-augment-09",
+      "answer_must_mention": [["100"]],
+      "question": "Quel exemple de seuil d'activité anormale le cours donne-t-il pour déclencher le rate limiting d'un pare-feu?",
+      "_expected_answer": "Plus de 100 requêtes sans tentative de connexion en une seule seconde.",
+      "should_refuse": false,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "companion-augment-10",
+      "answer_must_mention": [["schtroumpf", "schtroumpfs", "smurf"]],
+      "question": "Quel exemple mnémonique le professeur utilise-t-il pour se souvenir de l'attaque smurf?",
+      "_expected_answer": "Les Schtroumpfs (Smurfs).",
+      "should_refuse": false,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "companion-augment-11",
+      "answer_must_mention": [["ipconfig"], ["ping"], ["traceroute", "tracert"], ["nslookup"]],
+      "question": "Quelle séquence d'outils le cours décrit-il pour diagnostiquer un problème réseau en remontant la pile TCP/IP?",
+      "_expected_answer": "ipconfig → ping → traceroute → nslookup.",
+      "should_refuse": false,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "companion-augment-cf-01",
+      "question": "Quel est le prix annuel de la licence pfSense Plus mentionné dans le cours?",
+      "_expected_answer": "REFUSE — no pfSense price is given anywhere in the lectures.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "companion-augment-cf-02",
+      "question": "Combien de gigaoctets de RAM le routeur de laboratoire du cours possède-t-il?",
+      "_expected_answer": "REFUSE — no such hardware spec in the lectures.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "companion-augment-cf-03",
+      "question": "Quelle version exacte de Snort le cours recommande-t-il d'installer?",
+      "_expected_answer": "REFUSE — Snort is named (cr350-diagrams) but no version is specified.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "companion-augment-cf-04",
+      "question": "Quel pourcentage exact d'attaques le pare-feu bloque-t-il selon les statistiques du cours?",
+      "_expected_answer": "REFUSE — no such block-rate statistic is presented.",
+      "should_refuse": true,
+      "relevant_chunk_ids": []
+    }
+  ]
+}

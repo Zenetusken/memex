@@ -274,6 +274,10 @@ re-`create`; in the `reindex --force` teardown (regenerable — alongside `asr_c
   calibrate `τ_null` + the (query,doc) vs (doc,doc) A/B; report a coarse accuracy, honestly framed
   against the ~0.53 transcript-only floor (NOT 0.82). Clips/labels stay LOCAL.
 - **G1 HARD-gate** — §9: `refusal_cf=1.0` holds with augmentation ON; a measured answer/recall win.
+  **MEASURED 2026-06-14 → DEFER:** `refusal_cf=1.0` held with augment ON, but the answer/recall win was
+  NET-ZERO + double-edged (1 joint-grounding win cancelled by 1 crowding regression) on the redundant
+  CR350 pairs → `companion_augment_enabled` stays default-OFF (opt-in). Eval gold + A/B:
+  `tests/eval-data/companion-augment/`; full record: ADR-0018 Amendment 2026-06-14.
 
 ## 13. Out of scope (deferred, each its own arc) — 2026-06-05 resolutions inline
 
