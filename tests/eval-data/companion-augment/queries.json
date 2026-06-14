@@ -14,7 +14,8 @@
     "answered_off": 8,
     "answered_on": 8,
     "wins": ["companion-augment-03"],
-    "regressions": ["companion-augment-09"]
+    "regressions": ["companion-augment-09"],
+    "compete_experiment_2026_06_14": "The crowding fix was TESTED: a COMPETE variant (re-rank window+counterparts, keep the window SIZE so counterparts compete instead of unconditionally appending) A/B'd N=2 → scored IDENTICAL to OFF on EVERY query (-03 win vanished WITH -09 regression). Structural reason: a companion counterpart is aligned-by-companion, not retrieved, so it can't out-rank the already-best top-k → always cut → augment becomes a no-op; the -03 win existed ONLY via append's UNCONDITIONAL entry. → the win and the crowding regression are INSEPARABLE; NO code fix exists (counterpart-adjacent insertion changes order not the set; re-rank neuters). Code reverted. Revisit ONLY with a genuinely less-redundant corpus (a curator/data question)."
   },
   "queries": [
     {

@@ -195,7 +195,19 @@ device-pinned):
 throughout (`refusal_cf=1.0` — additive-pure, no hallucination), so the infra + the `--use-video`
 keyframe alignment that feeds it are kept; only the default flip is declined. The DP default-on
 (`companion_align_dp_enabled`) is SUBSUMED — its sole consumer (the augment) is default-off and its
-alignment-accuracy win still lacks a transcript→slide alignment gold; both stay opt-in. **Revisit if** a
-less-redundant transcript/deck corpus appears OR the crowding regression is fixed (insert each counterpart
-adjacent to its winner instead of appending; or a crowding-resistant assess) — a future lever, not built.
-Eval gold + the A/B baseline: `tests/eval-data/companion-augment/queries.json` (`_baseline_2026_06_14`).
+alignment-accuracy win still lacks a transcript→slide alignment gold; both stay opt-in.
+
+**The crowding-fix was TESTED 2026-06-14 and proven to NEUTER the feature — the win and the regression are
+INSEPARABLE, so no code fix exists.** A "COMPETE" variant (re-rank `window + counterparts`, keep the window
+SIZE so counterparts compete instead of unconditionally appending) was built + A/B'd (N=2): it scored
+**identical to OFF on every query** — `-03`'s win VANISHED with `-09`'s regression. The reason is structural:
+a companion counterpart is aligned-by-companion, not retrieved, so it wasn't good enough to make the original
+top-50 and can NEVER out-rank the already-best top-`k` in a re-rank → it is always cut → augment becomes a
+no-op. The `-03` win existed ONLY because append adds the counterpart UNCONDITIONALLY (bypassing the
+competition that would reject it); remove unconditional entry and the win goes with the regression. So the
+two named code levers are dead ends: counterpart-adjacent insertion changes order not the set (the answer
+node reads the whole augmented `reranked`), and the COMPETE/re-rank route neuters. Code reverted (no-op).
+**Revisit ONLY if a genuinely LESS-REDUNDANT transcript/deck corpus appears** (where the answer-bearing
+modality reliably LOSES retrieval to its counterpart) — a curator/data question, not a code fix; the augment
+default-OFF is fundamental at this corpus class. Eval gold + the A/B baselines:
+`tests/eval-data/companion-augment/queries.json` (`_baseline_2026_06_14` + the COMPETE three-way).
