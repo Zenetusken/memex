@@ -69,7 +69,7 @@ _Intended soon — the most actionable._
   *Unblock (re-runnable):* if a real force-docling'd dense UNNUMBERED doc with a clean dominant-tier-under-rare-scatter shape appears, re-run `uv run python scripts/docling_heading_histogram.py <doc> --post-demote`; build the gate only if the histogram shows a SEPARABLE dominant tier. See [[docling-retier-nogo-2026-06-06]].  
   *Sources:* scripts/docling_heading_histogram.py; docling_worker.py::bucketed_header_heights / _recover_heading_levels; audits/10:169
 
-## ⛔ Data-gated / blocked (39)
+## ⛔ Data-gated / blocked (38)
 
 _Would do, but blocked on curator corpus data, a model/hardware availability, or large-corpus scale._
 
@@ -109,9 +109,8 @@ _Would do, but blocked on curator corpus data, a model/hardware availability, or
 - **Specificity-ranked expand_graph re-introduction at large-corpus scale** — Re-enable graph expansion in the RAG path using related_documents IDF×kind specificity ranking (not unranked neighbors()); the hook is documented but unshipped.  
   *Unblock:* At 47 docs k=50 recall is near-total so expansion adds nothing (default-OFF, A/B byte-identical). Blocked until the corpus grows large enough that hybrid retrieval demonstrably misses relevant docs.  
   *Sources:* ADR-0011; graph-discovery.md; db_audit_2026_05_28; ROADMAP.md:372
-- **Citation-chain following (transitive multi-hop CITES traversal)** — Follow CITES Document->Document edges multi-hop (citation_paths()); 1-hop References shipped, transitive chains did not. Pre-registered design + audit harness scripts/citation_graph_audit.py shipped.  
-  *Unblock:* DATA-GATED: the graph is a depth-1 star (~6 CITES edges, 0 multi-hop, academic=0). Bar = >=15 edges / >=5 docs / >=1 multi-hop on a curator-supplied 5-10 paper citation-linked cluster; build IFF the bar clears.  
-  *Sources:* ROADMAP.md:196; ADR-0011 build-out; graph-discovery.md; next_priorities.md:60; db_audit_2026_05_28; ner_leverage_buildout; graph_store.py:112/735; mcp/server.py:211-275
+- **✅ Citation-chain following (transitive multi-hop CITES traversal) — SHIPPED 2026-06-14.** `citation_paths()` (`index/graph_store.py`); CLI `memex cites --document D --depth N [--cited-by]` + MCP `citation_paths`. The pre-registered data bar CLEARED: ingesting a 6-paper embedder-lineage citation cluster into the main vault took CITES **6 → 34** (15 academic / ≥5 docs / real multi-hop, BGE→Contriever→SimCSE). Returns each reachable doc at its SHORTEST hop-distance + an example chain in citation order; read-only ⇒ HARD-gate-neutral. Closes the LAST ADR-0011 discovery build-out item.  
+  *Sources:* graph-discovery.md § "Transitive chain-following"; ADR-0011 (Update 2026-06-14); graph_store.py::citation_paths; scripts/citation_graph_audit.py
 - **Confidence-weighted discovery ranking** — Weight related_documents/co-occurring ranking by OTTER MENTIONS extraction confidence.  
   *Unblock:* MEASURED but NOT shipped: it reshuffles ranking but measures extraction-TYPICALITY not topical SPECIFICITY, so it risks fighting the validated IDF×kind ranking. Unvalidatable without a labelled should-relate gold set; future lever IF a discovery-quality eval is built.  
   *Sources:* graph-discovery.md; ner_leverage_buildout_2026_05_29:22; ROADMAP.md:16; src/memex CLAUDE.md

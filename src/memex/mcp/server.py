@@ -30,7 +30,12 @@ from memex.core.config import get_settings
 from memex.core.errors import ConfigurationError
 from memex.core.scope_sets import ScopeSet, get_scope_set, list_scope_sets
 from memex.core.types import Chunk
-from memex.index.graph_store import DocumentCitations, GraphNeighbor, RelatedDocument
+from memex.index.graph_store import (
+    CitationPaths,
+    DocumentCitations,
+    GraphNeighbor,
+    RelatedDocument,
+)
 from memex.mcp.auth import BearerAuthMiddleware, validate_bind
 from memex.retrieve import (
     EntityOverview,
@@ -290,6 +295,34 @@ async def document_citations(doc_id: str) -> DocumentCitations:
     return cites
 
 
+async def citation_paths(doc_id: str, depth: int = 3, direction: str = "cites") -> CitationPaths:
+    """The document's TRANSITIVE citation lineage — multi-hop `CITES` chain following.
+
+    Follows the in-vault `CITES` Document→Document edges up to `depth` hops. `direction="cites"`
+    returns what the document TRANSITIVELY references (its ancestry); `"cited_by"` returns
+    documents that transitively cite it. Each reachable document carries its SHORTEST
+    hop-distance + an example chain (titles in citation order). The successor to the 1-hop
+    `document_citations`, usable once the vault holds a citation-linked cluster. Returns empty
+    when RyuGraph isn't installed (or a concurrent writer holds the exclusive lock).
+    """
+    from memex.index.graph_store import open_graph_for_read
+
+    settings = get_settings()
+    dir_ = "cited_by" if direction == "cited_by" else "cites"
+    log = logger.bind(tool="citation_paths", doc_id=doc_id, depth=depth, direction=dir_)
+    log.info("mcp.tool.start")
+    store = await open_graph_for_read(settings.vault_path)
+    if store is None:
+        # Report the same clamped depth the store would (CitationPaths.depth == max(1, min(depth, 6))).
+        return CitationPaths(seed_doc_id=doc_id, direction=dir_, depth=max(1, min(depth, 6)))
+    try:
+        paths = await store.citation_paths(doc_id, depth=depth, direction=dir_)
+    finally:
+        await store.close()
+    log.info("mcp.tool.done", reached=len(paths.reached))
+    return paths
+
+
 async def entity_overview(
     name: str,
     max_docs: int = 50,
@@ -332,6 +365,7 @@ server.tool(name="list_scope_sets")(list_scope_sets_tool)
 server.tool()(get_graph_neighbors)
 server.tool()(related_documents)
 server.tool()(document_citations)
+server.tool()(citation_paths)
 server.tool()(entity_overview)
 
 

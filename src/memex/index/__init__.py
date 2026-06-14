@@ -18,6 +18,8 @@ from memex.index.embed_prompts import (
 from memex.index.fts_store import FTSStore
 from memex.index.graph_store import (
     CitationLink,
+    CitationPaths,
+    CitationReach,
     CoOccurringEntity,
     DocumentCitations,
     EntityMention,
@@ -43,6 +45,8 @@ __all__ = [
     "EMBEDDING_DIM",
     "EMBED_QUERY_PROMPT_NAME",
     "CitationLink",
+    "CitationPaths",
+    "CitationReach",
     "CoOccurringEntity",
     "DocumentCitations",
     "EntityMention",

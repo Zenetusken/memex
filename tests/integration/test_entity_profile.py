@@ -401,6 +401,54 @@ async def test_citations_one_hop_references(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_citation_paths_multihop(tmp_path: Path) -> None:
+    """Transitive CITES chain following: each reachable doc at its SHORTEST hop-distance with
+    an example path in citation order. The multi-hop successor to the 1-hop citations()."""
+    graph = await GraphStore.open(tmp_path)
+    try:
+        for d in ("a", "b", "c", "d"):
+            await graph.upsert_document(d, d.upper())
+        # chain A -> B -> C -> D, plus a SHORTCUT A -> C (so C is reachable at hop 1, not 2).
+        await graph.link_cites("a", "b", "ref", 0.9)
+        await graph.link_cites("b", "c", "ref", 0.9)
+        await graph.link_cites("c", "d", "ref", 0.9)
+        await graph.link_cites("a", "c", "ref", 0.9)
+
+        # A transitively cites B(1), C(1 via the shortcut — NOT 2), D(2 via A->C->D).
+        out = await graph.citation_paths("a", depth=3, direction="cites")
+        assert {r.doc_id: r.hops for r in out.reached} == {"b": 1, "c": 1, "d": 2}
+        d_reach = next(r for r in out.reached if r.doc_id == "d")
+        assert d_reach.path == ["A", "C", "D"]  # the SHORTEST chain, citation order
+        assert out.reached == sorted(out.reached, key=lambda r: (r.hops, r.title))  # ranked
+
+        # depth=1 → only the DIRECT cites (B, C); D (2 hops) excluded.
+        shallow = await graph.citation_paths("a", depth=1, direction="cites")
+        assert {r.doc_id for r in shallow.reached} == {"b", "c"}
+
+        # cited_by from D: who transitively cites D → C(1), then A(2) + B(2) via C.
+        inc = await graph.citation_paths("d", depth=3, direction="cited_by")
+        assert {r.doc_id: r.hops for r in inc.reached} == {"c": 1, "a": 2, "b": 2}
+        c_in = next(r for r in inc.reached if r.doc_id == "c")
+        assert c_in.path == ["C", "D"]  # citing doc first → seed (citation order)
+
+        # A leaf (D cites nothing) → empty, no crash.
+        assert (await graph.citation_paths("d", depth=3, direction="cites")).reached == []
+
+        # CYCLE: add a back-edge D -> A. The seed is still excluded, and the cycle's longer
+        # walks (A->C->D->A->B = 4 hops) never displace the shortest path (A->B = 1 hop).
+        await graph.link_cites("d", "a", "ref", 0.9)
+        cyc = await graph.citation_paths("a", depth=3, direction="cites")
+        assert {r.doc_id: r.hops for r in cyc.reached} == {"b": 1, "c": 1, "d": 2}
+        assert all(r.doc_id != "a" for r in cyc.reached)  # the seed is never a reach
+
+        # depth is clamped to [1, 6] and the clamped value is surfaced on the result.
+        assert (await graph.citation_paths("a", depth=99)).depth == 6
+        assert (await graph.citation_paths("a", depth=0)).depth == 1
+    finally:
+        await graph.close()
+
+
+@pytest.mark.asyncio
 async def test_mention_chunk_id_round_trips(tmp_path: Path) -> None:
     """A representative attested chunk_id on the MENTIONS edge round-trips into
     EntityMention.chunk_id; an edge written without one reads back as None (→ FTS fallback)."""

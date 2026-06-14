@@ -113,12 +113,14 @@ introduce a hallucination or alter a refusal. Independent of the answering agent
   - ✅ **co-occurring noise reduction** (shared-docs floor; the curated `entity_stopwords` list was later REMOVED 2026-05-29 — see below) — shipped
     2026-05-28 (`3d00ae7`); see "Co-occurring noise reduction" below.
 - ✅ **CITES 1-hop "References"** (`citations()`; `memex cites` / MCP `document_citations` /
-  webui) — shipped 2026-05-29 (`38647e7`); reads the previously write-only CITES edges. Transitive
-  chain-following stays ⏳ **DATA-GATED**; see "Citations" below.
+  webui) — shipped 2026-05-29 (`38647e7`); reads the previously write-only CITES edges.
+- ✅ **transitive citation-chain following** (`citation_paths()`; `memex cites --depth N
+  [--cited-by]` / MCP `citation_paths`) — shipped 2026-06-14 once the data bar cleared (CITES
+  6 → 34 after the embedder-lineage cluster ingest); see "Citations" below.
 - ✅ **a "Related documents" panel in `/ask`** + ✅ **scope-set suggestions** — shipped
   2026-05-29 (`ffe23fe` + `04ef4e9`); see "/ask Related panel" + "Scope-set suggestions"
-  below. This CLOSES the ADR-0011 discovery build-out (citation-chain is data-gated; the
-  BERT-NER swap is the remaining, separately-gated lever).
+  below. This CLOSES the ADR-0011 discovery build-out (the BERT-NER swap is the remaining,
+  separately-gated lever).
 - ✅ **MCP/CLI parity for the answer's related docs + attested-chunk passages** — shipped
   2026-05-29 (`ac4b1ba` + `8acaad3`, the NER-leverage build-out). `FinalResponse.related_documents`
   (the /ask panel's data on MCP/CLI too, via the shared `retrieve/related.py`); `entity_overview`
@@ -254,29 +256,32 @@ MCP `document_citations`, webui doc-view "References" (reuses `.related-*`, fail
 HARD-gate-neutral. Live: 10 CITES edges (the CR350 syllabus `cites`=6 lectures, each lecture
 `cited_by`=1). This is the honest 1-hop fallback the chain-following deferral named.
 
-**Transitive chain-following — still data-first (⏳ pending data).**
-Traversing the `CITES` edges TRANSITIVELY ("what cites this / what does this cite", multi-hop) is
-an ADR-0011 build-out item — but it has **no data to run on yet**, and the
-blocker is DATA, not engineering. Measured on the live graph (`scripts/citation_graph_audit.py`):
-**6 CITES edges**, all course cross-references from ONE syllabus → 6 lectures — a **depth-1
-star** with **zero multi-hop paths** (`CITES*2..4` → 0) and **0 academic citations**. Only 7 of
-47 docs touch CITES; `DEFINES`/`RELATES_TO` are unpopulated (0 each). Chain-following is
-structurally impossible here, and those 6 refs are already clickable `[[wikilinks]]` in the body.
+**Transitive chain-following — ✅ SHIPPED 2026-06-14 (the data bar cleared).**
+Traversing the `CITES` edges TRANSITIVELY ("what does this cite / what cites this", multi-hop)
+was the last ADR-0011 discovery build-out item — gated on DATA, not engineering. The
+make-or-break data condition: `CITES` is Document→Document WITHIN the vault
+(`enrich/citations.py` resolves a citation surface form against OTHER vault docs → `link_cites`),
+so a **lone paper yields ZERO edges** and real depth needs a **citation-LINKED cluster** (a
+survey + several papers it cites, all ingested). At the original measurement the live graph was a
+**depth-1 star** — 6 CITES edges, all one syllabus → 6 lectures, 0 academic, 0 multi-hop.
 
-**The make-or-break data condition:** `CITES` is Document→Document WITHIN the vault
-(`enrich/citations.py` resolves a citation surface form against OTHER vault docs → `link_cites`).
-So a **lone paper yields ZERO edges** — its references aren't in-vault to resolve against. Real
-density+depth needs a **citation-LINKED cluster** (a survey + several papers it cites, all
-ingested). The academic resolver already works (pinned by `test_enrich_resolves_citations_against_vault_docs`).
+**The experiment ran (2026-06-14):** ingested a 6-paper embedder-lineage cluster
+(BGE/C-Pack → GTE, E5, Contriever, SimCSE, Sentence-BERT, GTR) into the main vault (backed up
+first). `scripts/citation_graph_audit.py` went **6 → 34 CITES edges** (15 genuine academic, the
+rest course-refs), **≥5 docs with edges**, and **real multi-hop chains** (BGE→Contriever→SimCSE).
+The **pre-registered bar (≥15 edges / ≥5 docs / ≥1 multi-hop) CLEARED → BUILD**.
 
-**The experiment** (curator-gated on a user-provided cluster): back up the vault → `memex ingest`
-the cluster → re-run `scripts/citation_graph_audit.py` → compare to the baseline. **Pre-registered
-decision bar:** build chain-following only if real data yields a genuine subgraph — roughly
-**≥15 CITES edges, ≥5 docs with edges, and ≥1 multi-hop chain** — else stay deferred (an honest
-1-hop "References" surface is the fallback — **now shipped, above**). **Pre-registered design
-IF the bar clears:** `citation_paths(doc_id, depth)` over `MATCH (d)-[:CITES*1..N]->(o)`,
-mirroring `related_documents`, surfaced CLI/MCP/webui — building on the shipped 1-hop
-`citations()`, complementing (not duplicating) the body wikilinks.
+**The build (`index/graph_store.py::citation_paths`):** `citation_paths(doc_id, *, depth=3,
+direction="cites"|"cited_by") -> CitationPaths` over `MATCH p = (a {doc_id})-[:CITES*1..N]->(o)`
+(`<-…-` for `cited_by`), mirroring `citations()`/`related_documents`. Returns each reachable
+document at its **SHORTEST** hop-distance (`CitationReach{doc_id, title, hops, path}`) with an
+example chain — `path` titles always read in CITATION ORDER (citing doc first → cited doc), so
+`cited_by` reverses the raw traversal order. `depth` is clamped to `[1, 6]`; the seed is excluded;
+results sort by `(hops, title)`. Surfaced **CLI** (`memex cites --document D --depth N [--cited-by]`),
+**MCP** (`citation_paths(doc_id, depth, direction)`, fail-open empty via `open_graph_for_read`),
+building on the shipped 1-hop `citations()` and complementing (not duplicating) the body
+wikilinks. Read-only ⇒ HARD-gate-neutral. Pinned by `test_entity_profile.py::test_citation_paths_multihop`
+(live Cypher) + `test_mcp_server.py::test_citation_paths_tool`.
 
 ## /ask "Related documents" panel (shipped 2026-05-29)
 

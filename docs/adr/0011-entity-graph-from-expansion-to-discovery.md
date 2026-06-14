@@ -108,9 +108,14 @@ specificity primitive:
   - **Update 2026-05-29:** scope-set suggestions + the `/ask` "Related" panel **SHIPPED**
     (`ffe23fe` + `04ef4e9`, the shared `_related_for_docs`), closing the discovery build-out;
     and the **BERT-NER enrich swap SHIPPED as the root-cause fix — ADR-0012 (OTTER)** (the
-    curated corpus-stopword pass was tried then removed in favour of it). Still deferred:
-    **citation-chain following** — only ~6 `CITES` edges, structurally data-gated (see
-    `docs/specs/graph-discovery.md` § "Citation-chain following").
+    curated corpus-stopword pass was tried then removed in favour of it).
+  - **Update 2026-06-14:** **citation-chain following SHIPPED** (`citation_paths()`; CLI
+    `memex cites --depth N [--cited-by]` / MCP `citation_paths`). The pre-registered data bar
+    (≥15 CITES edges / ≥5 docs / ≥1 multi-hop) CLEARED after ingesting a 6-paper
+    embedder-lineage citation cluster into the main vault: CITES **6 → 34** (15 academic), real
+    multi-hop chains (BGE→Contriever→SimCSE). This was the LAST deferred discovery item — the
+    ADR-0011 build-out is now fully shipped. See `docs/specs/graph-discovery.md` §
+    "Transitive chain-following".
 
 ## Alternatives in Detail
 
