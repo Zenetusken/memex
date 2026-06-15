@@ -153,8 +153,10 @@ def build_form_field_chunk(query: str, chunks: list[Chunk]) -> Chunk | None:
     """Resolve a form-field query to ONE synthetic value chunk, or None (no-op).
 
     Scans the reranked chunks for either form idiom and routes the query to the single dominant
-    match — only when the value is VERBATIM in the source chunk (the fabrication boundary). The
-    first chunk that yields a confident route wins:
+    match. The first chunk that yields a confident route wins. The fabrication boundary is STRUCTURAL:
+    the value is sliced from `c.text` by a `$`-anchored regex, so the synthetic chunk can only ever
+    carry a number the document literally states (the `value in c.text` re-check below is then
+    always-true defense-in-depth, not a live gate). Idioms:
 
     1. **labeled monetary bullets** (Increment A) — `• <label>, $<value>` → `{concept} for {label}: {value}`.
     2. **multiply worksheet lines** (Increment D) — `Multiply <desc> by $<value>` → the verbatim span
@@ -179,7 +181,7 @@ def build_form_field_chunk(query: str, chunks: list[Chunk]) -> Chunk | None:
         routed = route_form_field(query, bullets) if bullets else None
         if routed is not None:
             concept, label, value = routed
-            if label in c.text and value in c.text:  # verbatim-or-drop
+            if label in c.text and value in c.text:  # always-true for a routed match (verbatim slice)
                 prefix = f"{concept} for " if concept else ""
                 return _synthetic_field_chunk(c, "field0001", f"{prefix}{label}: {value}")
         # 2) multiply worksheet lines (Increment D)
