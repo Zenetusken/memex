@@ -1,0 +1,455 @@
+{
+  "_description": "Real-world structured FORMS (US-gov, public domain): IRS Form 1040 (2025, U.S. Individual Income Tax Return) + IRS Form W-4 (2026, Employee's Withholding Certificate). Extends the forms category beyond forms-w9 with richer layouts (numbered lines, worksheets, tables). Source PDFs stay LOCAL; only queries+baseline ship.",
+  "_doc_id": "3d31c226-f1040",
+  "_multi_doc": true,
+  "_doc_ids": [
+    "3d31c226-f1040",
+    "92444d88-fw4"
+  ],
+  "_query_count": 24,
+  "_mix": {
+    "ans": 18,
+    "ref": 6
+  },
+  "_labelling_rule": "ANS: a concrete fact literally in the named doc; _anchor_phrase = a verbatim substring for gold resolution; answer_must_mention = whole-token any-of slots encoding the correct fact. REF (should_refuse): a plausible question whose specific answer is absent from BOTH corpus docs -> the system must refuse.",
+  "_created": "2026-06-15",
+  "_source_note": "Source PDFs are public-domain US-government works (17 USC 105), kept LOCAL (never committed); only this query set + the baseline ship. Authored by an adversarially-verified multi-agent pass, then resolved + live-eval-validated.",
+  "_baseline_answer_text_2026_06_15": {
+    "stack": "Qwen3.5-4B-AWQ orchestrator (ADR-0015) + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3 (cpu, device-pinned), co_residence_mode=manual",
+    "purpose": "First REAL-WORLD multi-form answer-eval corpus (IRS Form 1040 [2025] + Form W-4 [2026] \u2014 public-domain US-gov). Extends the forms category beyond forms-w9 with dense numbered-line / worksheet / table layouts. Multi-doc: tests form-field retrieval + cross-doc/cross-year disambiguation.",
+    "answered_count": 11,
+    "answerable_count": 18,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "answer_text_checked": 11,
+    "answer_text_correct_count": 10,
+    "mean_answer_mention_recall": 0.909,
+    "n_runs": 2,
+    "byte_stable": true,
+    "false_refusals": [
+      "f1040-03",
+      "f1040-05",
+      "f1040-06",
+      "f1040-07",
+      "f1040-09",
+      "fw4-01",
+      "fw4-02"
+    ],
+    "answer_text_failures": [
+      "f1040-04"
+    ],
+    "notes": "FINDING (this corpus's payoff) \u2014 FORMS ARE A SYSTEM WEAK SPOT. refusal_cf=1.0 (HARD gate holds: no absent-fact hallucination), byte-stable N=2. But only 11/18 ANS answered: (1) ONE real CATCH f1040-04 answered '$16,100' (the W-4's 2026 single standard deduction) for the 2025 Form 1040's '$15,750' -> a CROSS-DOC/CROSS-YEAR confusion (recall=0; the slot correctly fails it); (2) 7 FALSE-REFUSALS on clearly-answerable form facts (HoH std deduction $23,625, $3 campaign fund, Form 8995/8995-A, Cat. No. 11320B, born-before-Jan-2-1961, $2,200/child, $500/dependent) -- every fact is LITERALLY in the doc but lives in DENSE table-linearized |cell|cell| chunks the prose-tuned retrieval/grounding can't pinpoint (even f1040-02 MFJ-$31,500 answered while f1040-03 HoH-$23,625 from the SAME chunk refused). ROOT: form-field Q&A over table-dense chunks is hard -- a NEW tracked weakness, NOT a HARD-gate breach (failures are SAFE refusals + 1 cross-doc catch, never a hallucination). Source PDFs public-domain US-gov (17 USC 105), kept LOCAL."
+  },
+  "queries": [
+    {
+      "qid": "f1040-01",
+      "question": "What is the OMB control number printed on the 2025 Form 1040?",
+      "_doc_id": "3d31c226-f1040",
+      "_anchor_phrase": "OMB No. 1545-0074",
+      "_expected_answer": "OMB No. 1545-0074",
+      "_answer_type": "single_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "1545-0074"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "3d31c226-f1040#855d5fbe00",
+        "3d31c226-f1040#5d3f9f1a65"
+      ]
+    },
+    {
+      "qid": "f1040-02",
+      "question": "On the 2025 Form 1040, what is the standard deduction amount for a taxpayer who is Married filing jointly or a Qualifying surviving spouse?",
+      "_doc_id": "3d31c226-f1040",
+      "_anchor_phrase": "Married filing jointly or Qualifying surviving spouse, $31,500",
+      "_expected_answer": "$31,500",
+      "_answer_type": "single_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "31,500",
+          "31500"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "3d31c226-f1040#86a02ed29c",
+        "3d31c226-f1040#705e6bf62a"
+      ]
+    },
+    {
+      "qid": "f1040-03",
+      "question": "What standard deduction amount does the 2025 Form 1040 list for Head of household filers?",
+      "_doc_id": "3d31c226-f1040",
+      "_anchor_phrase": "Head of household, $23,625",
+      "_expected_answer": "$23,625",
+      "_answer_type": "single_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "23,625",
+          "23625"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "3d31c226-f1040#86a02ed29c",
+        "3d31c226-f1040#705e6bf62a"
+      ]
+    },
+    {
+      "qid": "f1040-04",
+      "question": "What standard deduction amount is shown on the 2025 Form 1040 for someone who is Single or Married filing separately?",
+      "_doc_id": "3d31c226-f1040",
+      "_anchor_phrase": "Single or Married filing separately, $15,750",
+      "_expected_answer": "$15,750",
+      "_answer_type": "single_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "15,750",
+          "15750"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "3d31c226-f1040#86a02ed29c",
+        "3d31c226-f1040#705e6bf62a"
+      ]
+    },
+    {
+      "qid": "f1040-05",
+      "question": "On the 2025 Form 1040, before which date must a taxpayer have been born to check the age box on line 12d?",
+      "_doc_id": "3d31c226-f1040",
+      "_anchor_phrase": "Were born before January 2, 1961",
+      "_expected_answer": "January 2, 1961",
+      "_answer_type": "single_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "1961"
+        ],
+        [
+          "january",
+          "jan"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "3d31c226-f1040#86a02ed29c"
+      ]
+    },
+    {
+      "qid": "f1040-06",
+      "question": "How much can a taxpayer direct to the Presidential Election Campaign fund by checking the box on the 2025 Form 1040?",
+      "_doc_id": "3d31c226-f1040",
+      "_anchor_phrase": "want $3 to go to this fund",
+      "_expected_answer": "$3",
+      "_answer_type": "single_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "3",
+          "three"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "3d31c226-f1040#855d5fbe00"
+      ]
+    },
+    {
+      "qid": "f1040-07",
+      "question": "Which forms does line 13a of the 2025 Form 1040 use to figure the qualified business income deduction?",
+      "_doc_id": "3d31c226-f1040",
+      "_anchor_phrase": "Qualified business income deduction from Form 8995 or Form 8995-A",
+      "_expected_answer": "Form 8995 or Form 8995-A",
+      "_answer_type": "multi_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "8995"
+        ],
+        [
+          "8995-a"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "3d31c226-f1040#86a02ed29c"
+      ]
+    },
+    {
+      "qid": "f1040-08",
+      "question": "On the 2025 Form 1040, from which form is the American opportunity credit (line 29) carried?",
+      "_doc_id": "3d31c226-f1040",
+      "_anchor_phrase": "American opportunity credit from Form 8863, line 8",
+      "_expected_answer": "Form 8863, line 8",
+      "_answer_type": "single_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "8863"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "3d31c226-f1040#4ec9728c0c"
+      ]
+    },
+    {
+      "qid": "f1040-09",
+      "question": "What is the catalog number (Cat. No.) printed at the bottom of the 2025 Form 1040?",
+      "_doc_id": "3d31c226-f1040",
+      "_anchor_phrase": "Cat. No. 11320B Form",
+      "_expected_answer": "Cat. No. 11320B",
+      "_answer_type": "single_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "11320b"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "3d31c226-f1040#705e6bf62a"
+      ]
+    },
+    {
+      "qid": "f1040-10",
+      "question": "What is the exact dollar amount of the additional child tax credit refund a taxpayer receives on the 2025 Form 1040?",
+      "_doc_id": "",
+      "_anchor_phrase": "",
+      "_expected_answer": "Absent: the blank form only labels the additional child tax credit line (line 28) and references Schedule 8812; it contains no filled-in dollar amount for any taxpayer. (The sibling W-4 gives a $2,200 per-qualifying-child credit figure in Step 3a, but that is the W-4 withholding calc, not a Form 1040 ACTC refund amount.)",
+      "_answer_type": "counterfactual",
+      "should_refuse": true,
+      "answer_must_mention": [],
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "f1040-11",
+      "question": "What is the maximum income threshold for claiming the Earned Income Credit on the 2025 Form 1040?",
+      "_doc_id": "",
+      "_anchor_phrase": "",
+      "_expected_answer": "Absent: the 1040 only names the Earned income credit (line 27a) and references Schedule EIC; it states no income thresholds or eligibility amounts. The sibling W-4 does not mention the EIC at all.",
+      "_answer_type": "counterfactual",
+      "should_refuse": true,
+      "answer_must_mention": [],
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "f1040-12",
+      "question": "What filing deadline date does the 2025 Form 1040 specify for submitting the return to the IRS?",
+      "_doc_id": "",
+      "_anchor_phrase": "",
+      "_expected_answer": "Absent: the 1040 states the tax-year period (Jan. 1-Dec. 31, 2025) and a 'Created 9/5/25' print date but no return filing/submission due date. The sibling W-4's only date, 'February 16, 2027', is the deadline to submit a NEW Form W-4 for an exemption claim, not a tax-return filing deadline.",
+      "_answer_type": "counterfactual",
+      "should_refuse": true,
+      "answer_must_mention": [],
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "fw4-01",
+      "question": "On the 2026 Form W-4, what amount do you multiply the number of qualifying children under age 17 by in Step 3(a)?",
+      "_doc_id": "92444d88-fw4",
+      "_anchor_phrase": "Multiply the number of qualifying children under age 17 by $2,200",
+      "_expected_answer": "$2,200",
+      "_answer_type": "single_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "2,200",
+          "2200"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "92444d88-fw4#9a9bfe192b"
+      ]
+    },
+    {
+      "qid": "fw4-02",
+      "question": "In Step 3(b) of the 2026 Form W-4, what amount do you multiply the number of other dependents by?",
+      "_doc_id": "92444d88-fw4",
+      "_anchor_phrase": "Multiply the number of other dependentsby $500",
+      "_expected_answer": "$500",
+      "_answer_type": "single_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "500"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "92444d88-fw4#9a9bfe192b"
+      ]
+    },
+    {
+      "qid": "fw4-03",
+      "question": "By what date must someone who claims exemption from withholding on the 2026 Form W-4 submit a new Form W-4?",
+      "_doc_id": "92444d88-fw4",
+      "_anchor_phrase": "You will need to submit a new Form W-4 by February 16, 2027.",
+      "_expected_answer": "February 16, 2027",
+      "_answer_type": "single_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "february"
+        ],
+        [
+          "16"
+        ],
+        [
+          "2027"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "92444d88-fw4#f071df7a19"
+      ]
+    },
+    {
+      "qid": "fw4-04",
+      "question": "On the 2026 Form W-4, Step 3 applies if your total income will be how much or less (or, if married filing jointly)?",
+      "_doc_id": "92444d88-fw4",
+      "_anchor_phrase": "If your total income will be $200,000 or less ($400,000 or less if married filing jointly)",
+      "_expected_answer": "$200,000 or less ($400,000 or less if married filing jointly)",
+      "_answer_type": "multi_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "200,000",
+          "200000"
+        ],
+        [
+          "400,000",
+          "400000"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "92444d88-fw4#9a9bfe192b"
+      ]
+    },
+    {
+      "qid": "fw4-05",
+      "question": "What is the OMB control number printed on the 2026 Form W-4?",
+      "_doc_id": "92444d88-fw4",
+      "_anchor_phrase": "OMB No. 1545-0074",
+      "_expected_answer": "OMB No. 1545-0074",
+      "_answer_type": "single_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "1545-0074"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "92444d88-fw4#e4ada7d707"
+      ]
+    },
+    {
+      "qid": "fw4-06",
+      "question": "On the 2026 Form W-4 Multiple Jobs Worksheet, what number do you enter on line 3 if the highest paying job pays every other week?",
+      "_doc_id": "92444d88-fw4",
+      "_anchor_phrase": "if it pays every other week, enter 26; if it pays monthly, enter 12",
+      "_expected_answer": "26 (every other week / biweekly)",
+      "_answer_type": "single_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "26"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "92444d88-fw4#f0f7943762"
+      ]
+    },
+    {
+      "qid": "fw4-07",
+      "question": "On the 2026 Form W-4 Deductions Worksheet line 1a, up to what amount of qualified tips can you estimate (if your total income is less than $150,000 / $300,000 MFJ)?",
+      "_doc_id": "92444d88-fw4",
+      "_anchor_phrase": "enter an estimate of your qualified tips up to $25,000",
+      "_expected_answer": "Up to $25,000",
+      "_answer_type": "single_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "25,000",
+          "25000"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "92444d88-fw4#be4b715a95"
+      ]
+    },
+    {
+      "qid": "fw4-08",
+      "question": "What standard deduction amounts does line 11 of the 2026 Form W-4 Deductions Worksheet list for married filing jointly versus single?",
+      "_doc_id": "92444d88-fw4",
+      "_anchor_phrase": "$32,200 if you\u2019re married filing jointly or a qualifying surviving spouse",
+      "_expected_answer": "$32,200 if married filing jointly (or qualifying surviving spouse); $16,100 if single or married filing separately",
+      "_answer_type": "multi_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "32,200",
+          "32200"
+        ],
+        [
+          "16,100",
+          "16100"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "92444d88-fw4#bc323c60c2"
+      ]
+    },
+    {
+      "qid": "fw4-09",
+      "question": "On the 2026 Form W-4 Deductions Worksheet line 1c, your total income must be less than what amount (single) for qualified passenger vehicle loan interest, and up to what amount can you enter?",
+      "_doc_id": "92444d88-fw4",
+      "_anchor_phrase": "your qualified passenger vehicle loan interest up to $10,000",
+      "_expected_answer": "Total income less than $100,000 ($200,000 if married filing jointly); up to $10,000",
+      "_answer_type": "multi_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "100,000",
+          "100000"
+        ],
+        [
+          "10,000",
+          "10000"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "92444d88-fw4#be4b715a95"
+      ]
+    },
+    {
+      "qid": "fw4-10",
+      "question": "On the 2026 Form W-4, what is the exact percentage rate at which you can multiply your overtime work hours to qualify for the new overtime bonus tax credit?",
+      "_doc_id": "",
+      "_anchor_phrase": "",
+      "_expected_answer": "Absent. The form discusses qualified overtime compensation deductions with dollar caps ($12,500 / $25,000 MFJ on line 1b) but states NO percentage multiplier and no 'overtime bonus tax credit' \u2014 confirmed absent in both fw4 and the sibling f1040.",
+      "_answer_type": "counterfactual",
+      "should_refuse": true,
+      "answer_must_mention": [],
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "fw4-11",
+      "question": "What is the IRS phone number listed on the 2026 Form W-4 for calling the IRS withholding helpline?",
+      "_doc_id": "",
+      "_anchor_phrase": "",
+      "_expected_answer": "Absent. The form lists only the SSA number (800-772-1213) for name-mismatch questions and gives no IRS withholding helpline phone number \u2014 confirmed absent in both fw4 (only 800-772-1213 present) and the sibling f1040 (no phone number).",
+      "_answer_type": "counterfactual",
+      "should_refuse": true,
+      "answer_must_mention": [],
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "fw4-12",
+      "question": "What is the penalty dollar amount the 2026 Form W-4 says you will owe if you under-withhold your federal income tax?",
+      "_doc_id": "",
+      "_anchor_phrase": "",
+      "_expected_answer": "Absent. The form notes you 'may owe a penalty' if too little is withheld but states NO specific penalty dollar amount \u2014 confirmed absent in both fw4 and the sibling f1040 (f1040 line 38 only labels an 'Estimated tax penalty' line, no amount).",
+      "_answer_type": "counterfactual",
+      "should_refuse": true,
+      "answer_must_mention": [],
+      "relevant_chunk_ids": []
+    }
+  ],
+  "_resolved_at": "2026-06-15T02:57:08Z"
+}
