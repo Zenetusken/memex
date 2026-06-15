@@ -89,7 +89,9 @@
 
 {% if citations.cites or citations.cited_by %}
 <section class="mb-5">
-  <h2 class="related-title">References</h2>
+  <h2 class="related-title">References
+    <a class="related-lineage-link" href="/graph/{{ document.ref.doc_id }}?group=citations"
+       title="Follow the multi-hop citation lineage">full lineage →</a></h2>
   {% if citations.cites %}
   <ul class="related-list">
     {% for c in citations.cites %}

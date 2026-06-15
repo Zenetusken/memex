@@ -589,6 +589,17 @@ html { scroll-behavior: smooth; }
   color: rgb(161 161 170);                 /* zinc-400 — eyebrow, mirrors .ans-eyebrow */
   margin: 0 0 0.5rem;
 }
+/* The "full lineage →" link in the References eyebrow → the /graph citations lens (the
+   deep, transitive view of these 1-hop refs). Quiet: not uppercased, the action blue. */
+.related-lineage-link {
+  margin-left: 0.6rem;
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 0.72rem;
+  color: rgb(96 165 250);                  /* blue-400, the action accent */
+  text-decoration: none;
+}
+.related-lineage-link:hover { text-decoration: underline; }
 .related-list { list-style: none; padding: 0; margin: 0; }
 .related-item {
   padding: 0.3rem 0;

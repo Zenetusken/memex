@@ -279,9 +279,13 @@ example chain — `path` titles always read in CITATION ORDER (citing doc first 
 `cited_by` reverses the raw traversal order. `depth` is clamped to `[1, 6]`; the seed is excluded;
 results sort by `(hops, title)`. Surfaced **CLI** (`memex cites --document D --depth N [--cited-by]`),
 **MCP** (`citation_paths(doc_id, depth, direction)`, fail-open empty via `open_graph_for_read`),
-building on the shipped 1-hop `citations()` and complementing (not duplicating) the body
-wikilinks. Read-only ⇒ HARD-gate-neutral. Pinned by `test_entity_profile.py::test_citation_paths_multihop`
-(live Cypher) + `test_mcp_server.py::test_citation_paths_tool`.
+and **webui** (the `/graph/{doc_id}?group=citations&depth=N` lens — a third lens beside
+concept/document — rendering both directions as *References* / *Cited by* columns with per-reach
+hop badges + multi-hop example chains + a no-JS depth selector; the doc-view References eyebrow
+links into it via "full lineage →"; see `src/memex/webui/CLAUDE.md`). Builds on the shipped 1-hop
+`citations()` and complements (not duplicates) the body wikilinks. Read-only ⇒ HARD-gate-neutral.
+Pinned by `test_entity_profile.py::test_citation_paths_multihop` (live Cypher) +
+`test_mcp_server.py::test_citation_paths_tool` + `test_webui.py::test_graph_citations_lens_*`.
 
 ## /ask "Related documents" panel (shipped 2026-05-29)
 
