@@ -17,16 +17,15 @@
   "_baseline_answer_text_2026_06_15": {
     "stack": "Qwen3.5-4B-AWQ orchestrator (ADR-0015) + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3 (cpu, device-pinned), co_residence_mode=manual",
     "purpose": "First REAL-WORLD multi-form answer-eval corpus (IRS Form 1040 [2025] + Form W-4 [2026] \u2014 public-domain US-gov). Extends the forms category beyond forms-w9 with dense numbered-line / worksheet / table layouts. Multi-doc: tests form-field retrieval + cross-doc/cross-year disambiguation.",
-    "answered_count": 11,
+    "answered_count": 12,
     "answerable_count": 18,
     "refusal_rate_on_counterfactuals": 1.0,
     "answer_text_checked": 11,
-    "answer_text_correct_count": 10,
-    "mean_answer_mention_recall": 0.909,
+    "answer_text_correct_count": 12,
+    "mean_answer_mention_recall": 1.0,
     "n_runs": 2,
     "byte_stable": true,
     "false_refusals": [
-      "f1040-03",
       "f1040-05",
       "f1040-06",
       "f1040-07",
@@ -34,10 +33,8 @@
       "fw4-01",
       "fw4-02"
     ],
-    "answer_text_failures": [
-      "f1040-04"
-    ],
-    "notes": "FINDING (this corpus's payoff) \u2014 FORMS ARE A SYSTEM WEAK SPOT. refusal_cf=1.0 (HARD gate holds: no absent-fact hallucination), byte-stable N=2. But only 11/18 ANS answered: (1) ONE real CATCH f1040-04 answered '$16,100' (the W-4's 2026 single standard deduction) for the 2025 Form 1040's '$15,750' -> a CROSS-DOC/CROSS-YEAR confusion (recall=0; the slot correctly fails it); (2) 7 FALSE-REFUSALS on clearly-answerable form facts (HoH std deduction $23,625, $3 campaign fund, Form 8995/8995-A, Cat. No. 11320B, born-before-Jan-2-1961, $2,200/child, $500/dependent) -- every fact is LITERALLY in the doc but lives in DENSE table-linearized |cell|cell| chunks the prose-tuned retrieval/grounding can't pinpoint (even f1040-02 MFJ-$31,500 answered while f1040-03 HoH-$23,625 from the SAME chunk refused). ROOT: form-field Q&A over table-dense chunks is hard -- a NEW tracked weakness, NOT a HARD-gate breach (failures are SAFE refusals + 1 cross-doc catch, never a hallucination). Source PDFs public-domain US-gov (17 USC 105), kept LOCAL."
+    "answer_text_failures": [],
+    "notes": "POST Increment A (form-field resolver `agents/form_fields.py`, default-ON). The corpus surfaced that FORMS ARE A SYSTEM WEAK SPOT (form-field values in dense run-on `|cell|` walls defeat the LLM gates). ROOT-CAUSED (all measured, retrieval is fine \u2014 the gold fact-chunk is always in the top-5 window): the failures are at the gates/answer (3 assess + 2 relevance + 2 verify), with two sub-causes \u2014 DENSE-FORMAT (the 4B can't pick the asked value from among adjacent distractors in a run-on cell, drafts 'not available') + TRUNCATION (2 facts sit past truncate(1800) in 2.7-3.6KB chunks). INCREMENT A fixes the deduction-bullet disambiguation deterministically (route a `\u2022 label, $value` query to the dominant label, inject a verbatim `label: value` synthetic chunk): f1040-03 (refusal->$23,625) + f1040-04 (cross-doc catch $16,100->$15,750) FIXED. Result N=2 byte-stable: answered 11->12, amr 0.909->1.0, catches 1->0, false-refusals 7->6, refusal_cf=1.0. No-regression confirmed on annual-report (dense 10-K tables) + nist (byte-identical; resolver fires on 2 f1040 chunks vault-wide). RESIDUAL (6 false-refusals): 2 TRUNCATION (f1040-06 $3-campaign, f1040-09 Cat.No.11320B -> Increment B, a gate-render truncation lift) + 4 NARRATIVE-pattern (f1040-05 born-before-1961, f1040-07 Form-8995, fw4-01 $2,200, fw4-02 $500 -> brittle per-pattern regexes, documented residual). Source PDFs public-domain US-gov, kept LOCAL."
   },
   "queries": [
     {
