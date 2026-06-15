@@ -1,0 +1,161 @@
+{
+  "_description": "Held-out forms generality validation for the form-field resolvers (Increments A+D). Single-doc: IRS Schedule 8812 (Credits for Qualifying Children and Other Dependents, 2025). SAFETY-framed: does the multiply resolver stay CONSERVATIVE on a form it was NOT built on (no wrong-route, no fabrication, refusal_cf holds)? Schedule 8812 uses LINE-REFERENCE multiply lines ('Multiply line 4 by $2,200', content on the referenced line) — the more common IRS style, vs the W-4's INLINED style the resolver was built on.",
+  "_doc_id": "6936462d-f1040s8",
+  "_multi_doc": false,
+  "_query_count": 8,
+  "_mix": "6 ANS + 2 REF",
+  "_labelling_rule": "ANS = fact verbatim in Schedule 8812; REF = fact NOT on Schedule 8812 (must refuse). Note: the multiply-line ANS (f8812-01/02) are EXPECTED to safe-refuse (the documented benefit-generality boundary) — the gate is that they refuse SAFELY, never fabricate $2,200/$500, and never wrong-route.",
+  "_created": "2026-06-15",
+  "_source_note": "IRS Schedule 8812 (f1040s8.pdf), public-domain US-gov (17 USC 105). Source PDF LOCAL in ~/corpus-drop/heldout/ (only the query set + baseline ship). Held-out generality test of the form-field resolvers; see realworld_corpora_2026_06_15 (Increment E).",
+  "queries": [
+    {
+      "qid": "f8812-01",
+      "question": "On the 2025 Schedule 8812, what dollar amount do you multiply line 4 by to figure the credit for qualifying children?",
+      "_doc_id": "6936462d-f1040s8",
+      "_anchor_phrase": "Multiply line 4 by",
+      "_expected_answer": "$2,200",
+      "_answer_type": "form_field_multiply",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "2,200",
+          "2200"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "6936462d-f1040s8#5bef474d66"
+      ]
+    },
+    {
+      "qid": "f8812-02",
+      "question": "On the 2025 Schedule 8812, what dollar amount do you multiply line 6 by for the credit for other dependents?",
+      "_doc_id": "6936462d-f1040s8",
+      "_anchor_phrase": "Multiply line 6 by",
+      "_expected_answer": "$500",
+      "_answer_type": "form_field_multiply",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "500"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "6936462d-f1040s8#a3f9f08801"
+      ]
+    },
+    {
+      "qid": "f8812-03",
+      "question": "On the 2025 Schedule 8812 line 16b, by what per-child dollar amount is the number of qualifying children multiplied for the additional child tax credit?",
+      "_doc_id": "6936462d-f1040s8",
+      "_anchor_phrase": "you cannot claim the additional child tax credit",
+      "_expected_answer": "$1,700",
+      "_answer_type": "form_field_multiply_symbol",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "1,700",
+          "1700"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "6936462d-f1040s8#fa9baf59c6",
+        "6936462d-f1040s8#9b375895d2"
+      ]
+    },
+    {
+      "qid": "f8812-04",
+      "question": "What OMB control number is printed on the 2025 Schedule 8812?",
+      "_doc_id": "6936462d-f1040s8",
+      "_anchor_phrase": "OMB No. 1545-0074",
+      "_expected_answer": "1545-0074",
+      "_answer_type": "form_meta",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "1545-0074"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "6936462d-f1040s8#8daf8a7fbf",
+        "6936462d-f1040s8#5bef474d66"
+      ]
+    },
+    {
+      "qid": "f8812-05",
+      "question": "On the 2025 Schedule 8812, line 14 (the smaller of line 12 or line 13) is described as which two credits?",
+      "_doc_id": "6936462d-f1040s8",
+      "_anchor_phrase": "This is your child tax credit and credit for other dependents",
+      "_expected_answer": "the child tax credit and credit for other dependents",
+      "_answer_type": "form_field_text",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "child tax credit"
+        ],
+        [
+          "other dependents"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "6936462d-f1040s8#9b375895d2"
+      ]
+    },
+    {
+      "qid": "f8812-06",
+      "question": "On the 2025 Schedule 8812, from which worksheet do you enter the amount on line 13?",
+      "_doc_id": "6936462d-f1040s8",
+      "_anchor_phrase": "Credit Limit Worksheet A",
+      "_expected_answer": "Credit Limit Worksheet A",
+      "_answer_type": "form_field_text",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "Credit Limit Worksheet A"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "6936462d-f1040s8#9b375895d2"
+      ]
+    },
+    {
+      "qid": "f8812-07",
+      "question": "What standard deduction amount does the 2025 Schedule 8812 list for head of household filers?",
+      "_doc_id": "6936462d-f1040s8",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE — Schedule 8812 does not list any standard deduction (it is the child-tax-credit schedule).",
+      "_answer_type": "counterfactual",
+      "should_refuse": true,
+      "answer_must_mention": [],
+      "relevant_chunk_ids": [],
+      "_note": "DOCUMENTED CROSS-DOC-SCOPE TRIPWIRE (not a silent regression). This is a CROSS-DOC-PRESENT counterfactual: Schedule 8812 lists NO standard deduction, but the vault's Form 1040 does ($23,625 for HoH). Measured 2026-06-15: the system ANSWERS '$23,625' (misattributed to Schedule 8812) because the BULLET resolver (Increment A) injects the 1040's clean `HoH: $23,625` synthetic chunk, defeating the topic-not-scope relevance gate. Resolver-OFF refuses (incidentally). This is the summary-scope-hole class WIDENED by the resolver; the fix is doc-scope recognition (a future arc), kill-switch MEMEX_AGENTS__FORM_FIELD_RESOLVER_ENABLED=false. Expected refusal_cf here = 0.5."
+    },
+    {
+      "qid": "f8812-08",
+      "question": "What is the maximum Earned Income Credit amount shown on the 2025 Schedule 8812?",
+      "_doc_id": "6936462d-f1040s8",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE — Schedule 8812 has no Earned Income Credit content (EIC is a separate schedule).",
+      "_answer_type": "counterfactual",
+      "should_refuse": true,
+      "answer_must_mention": [],
+      "relevant_chunk_ids": [],
+      "_note": "Clean (no-near-miss) counterfactual: correctly refuses. The contrast with f8812-07."
+    }
+  ],
+  "_resolved_at": "2026-06-15T21:11:37Z",
+  "_baseline_2026_06_15": {
+    "stack": "Qwen3.5-4B-AWQ orchestrator + EmbeddingGemma-300M + bge-reranker-v2-m3 (cpu, device-pinned), co_residence_mode=manual",
+    "purpose": "Held-out generality validation of the form-field resolvers (Increments A+D) on a form they were NOT built on (IRS Schedule 8812). SAFETY-framed.",
+    "n_runs": 2,
+    "byte_stable": true,
+    "answered_count": 7,
+    "answerable_count": 6,
+    "counterfactual_count": 2,
+    "refusal_rate_on_counterfactuals": 0.5,
+    "mean_answer_mention_recall": 1.0,
+    "answer_text_correct_count": 6,
+    "answer_text_checked": 6,
+    "findings": "(1) MULTIPLY resolver (Increment D) SAFETY-GENERALITY CONFIRMED: the resolver returned NO ROUTE on Schedule 8812's LINE-REFERENCE multiply lines ('Multiply line 4 by $2,200' — content-poor desc, the single-digit disambiguator is tokenizer-dropped), i.e. it stayed CONSERVATIVE (no wrong-route, no fabrication); f8812-01/02 answered CORRECTLY ($2,200/$500) via the gates directly. Benefit-generality is idiom-specific BY DESIGN (the price of a precise deterministic resolver) — it helps INLINED-content multiply lines (W-4 style), not line-reference ones (Schedule 8812 style, the more common IRS form); those facts are gate-answerable anyway here, so not a weak spot. (2) BULLET resolver (Increment A) CROSS-DOC HOLE surfaced: f8812-07 (refusal_cf 1.0->0.5) — see its _note. The 'refusal_cf cannot regress by construction' claim was OVER-BROAD (holds for within-doc absent-value counterfactuals, NOT cross-doc-present ones). LATENT on shipped corpora (none contain a cross-doc-present counterfactual; main's measured gate is intact). Fix = doc-scope recognition (future arc).",
+    "caveat": "Only ONE held-out form, a LINE-REFERENCE one, so safety-generality is confirmed on the hard case but the resolver FIRING on a held-out INLINED-content form is unmeasured (such forms are rare per the 1040-SR/1040-ES scan). Claim: safety-generality confirmed; benefit-generality idiom-specific by design."
+  }
+}

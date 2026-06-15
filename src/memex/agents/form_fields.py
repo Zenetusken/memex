@@ -162,9 +162,23 @@ def build_form_field_chunk(query: str, chunks: list[Chunk]) -> Chunk | None:
     2. **multiply worksheet lines** (Increment D) — `Multiply <desc> by $<value>` → the verbatim span
        (the W-4 Step-3 `$2,200` / `$500` per-dependent credits the bullet shape can't reach).
 
-    Both are ADDITIVE + verbatim-or-drop ⇒ HARD-gate-safe by construction (the `query_tables`
-    synthetic-chunk seam); `verify` still grounds the draft against the original chunks and
-    `route_after_verify` still refuses a zero-grounded answer, so `refusal_cf` cannot regress.
+    Both are ADDITIVE + verbatim-or-drop ⇒ HARD-gate-safe (the `query_tables` synthetic-chunk seam):
+    `verify` still grounds the draft against the original chunks and `route_after_verify` refuses a
+    zero-grounded answer, so the resolver cannot FABRICATE a value, and refusal_cf cannot regress for
+    an ABSENT-value (within-doc) counterfactual — the value injected is always real document text.
+
+    **SCOPE CAVEAT — refusal_cf CAN regress on a CROSS-DOC-PRESENT counterfactual** (held-out
+    measurement 2026-06-15, Schedule 8812): when the query NAMES doc B but whole-vault retrieval pulls
+    a same-shaped bullet from doc A into `reranked`, the resolver injects doc A's verbatim value as a
+    CLEAN, topic-responsive synthetic chunk, and the (topic-not-scope) relevance gate answers it as if
+    it were doc B's — a cross-doc MISATTRIBUTION (real value, wrong source), not a fabrication. Measured:
+    "what standard deduction does Schedule 8812 list for head of household" → the 1040's `$23,625`
+    (refusal_cf 1.0→0.5; resolver-OFF refuses, but only INCIDENTALLY — the relevance gate rejects the
+    raw dense bullet as non-responsive-reading, not by doc, so the resolver merely makes the cross-doc
+    value gate-LEGIBLE). The resolver WIDENS a pre-existing topic-not-scope hole (the summary-scope-hole
+    class). The proper fix is DOC-SCOPE RECOGNITION (treat form/schedule NAMES as doc-scope references
+    so the cross-doc chunk leaves the pool) — a logged future arc, NOT a reactive resolver patch.
+    Mitigation: kill-switch `MEMEX_AGENTS__FORM_FIELD_RESOLVER_ENABLED=false`.
 
     Two deliberate, gate-safe design properties (audit-confirmed, no clean tightening): (1) the
     idioms are GENERAL, not IRS-anchored — a lone prose `Multiply <x> by $N` with >= 2 query-token
