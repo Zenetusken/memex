@@ -16,12 +16,12 @@
   "_source_note": "Source PDFs are public-domain US-government works (17 USC 105), kept LOCAL (never committed); only this query set + the baseline ship. Authored by an adversarially-verified multi-agent pass, then resolved + live-eval-validated.",
   "_baseline_answer_text_2026_06_15": {
     "stack": "Qwen3.5-4B-AWQ orchestrator (ADR-0015) + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3 (cpu, device-pinned), co_residence_mode=manual",
-    "purpose": "First REAL-WORLD multi-form answer-eval corpus (IRS Form 1040 [2025] + Form W-4 [2026] \u2014 public-domain US-gov). Extends the forms category beyond forms-w9 with dense numbered-line / worksheet / table layouts. Multi-doc: tests form-field retrieval + cross-doc/cross-year disambiguation.",
-    "answered_count": 12,
+    "purpose": "First REAL-WORLD multi-form answer-eval corpus (IRS Form 1040 [2025] + Form W-4 [2026] — public-domain US-gov). Extends the forms category beyond forms-w9 with dense numbered-line / worksheet / table layouts. Multi-doc: tests form-field retrieval + cross-doc/cross-year disambiguation.",
+    "answered_count": 14,
     "answerable_count": 18,
     "refusal_rate_on_counterfactuals": 1.0,
-    "answer_text_checked": 11,
-    "answer_text_correct_count": 12,
+    "answer_text_checked": 14,
+    "answer_text_correct_count": 14,
     "mean_answer_mention_recall": 1.0,
     "n_runs": 2,
     "byte_stable": true,
@@ -29,12 +29,10 @@
       "f1040-05",
       "f1040-06",
       "f1040-07",
-      "f1040-09",
-      "fw4-01",
-      "fw4-02"
+      "f1040-09"
     ],
     "answer_text_failures": [],
-    "notes": "POST Increment A (form-field resolver `agents/form_fields.py`, default-ON). The corpus surfaced that FORMS ARE A SYSTEM WEAK SPOT (form-field values in dense run-on `|cell|` walls defeat the LLM gates). ROOT-CAUSED (all measured, retrieval is fine \u2014 the gold fact-chunk is always in the top-5 window): the failures are at the gates/answer (3 assess + 2 relevance + 2 verify), with two sub-causes \u2014 DENSE-FORMAT (the 4B can't pick the asked value from among adjacent distractors in a run-on cell, drafts 'not available') + TRUNCATION (2 facts sit past truncate(1800) in 2.7-3.6KB chunks). INCREMENT A fixes the deduction-bullet disambiguation deterministically (route a `\u2022 label, $value` query to the dominant label, inject a verbatim `label: value` synthetic chunk): f1040-03 (refusal->$23,625) + f1040-04 (cross-doc catch $16,100->$15,750) FIXED. Result N=2 byte-stable: answered 11->12, amr 0.909->1.0, catches 1->0, false-refusals 7->6, refusal_cf=1.0. No-regression confirmed on annual-report (dense 10-K tables) + nist (byte-identical; resolver fires on 2 f1040 chunks vault-wide). RESIDUAL (6 false-refusals): 2 TRUNCATION (f1040-06 $3-campaign, f1040-09 Cat.No.11320B -> Increment B, a gate-render truncation lift) + 4 NARRATIVE-pattern (f1040-05 born-before-1961, f1040-07 Form-8995, fw4-01 $2,200, fw4-02 $500 -> brittle per-pattern regexes). RESIDUAL = a DOCUMENTED DEFER: Increment B (gate-render truncate lift) was PROBED-then-DEFERRED 2026-06-15 (measured negative \u2014 NOT surgical: 297 table-dense chunks vault-wide, no pipe-density threshold isolates the forms from the embedder papers, so it is a broad shared-gate change needing a full re-baseline, not justified for 2 cases). The 6 residual false-refusals are recorded, not chased. Source PDFs public-domain US-gov, kept LOCAL."
+    "notes": "POST Increment D (the churn-free `Multiply <desc> by $N` resolver extension to `agents/form_fields.py`, default-ON). Increment A (the `• label, $value` bullet resolver) fixed f1040-03/04; Increment D adds the IRS-worksheet `Multiply ... by $N` idiom (W-4 Step 3), routing fw4-01 ($2,200 / qualifying children) and fw4-02 ($500 / other dependents) to a verbatim synthetic chunk. RESULT (forms N=2 byte-stable): answered 12->14, refusal_cf=1.0, amr=1.0, atc=14/14, ZERO regressions (all 12 previously-answered held). This is the ADDITIVE counterpart to the index-time form linearizer (Increment C), which was BUILT then REVERTED as a measured negative (net -1) because re-rendering the chunking body churns retrieval; an additive synthetic-chunk injection cannot. Blast radius: bullets fire on 2 f1040 cells, multiply on 1 W-4 Step-3 cell (3 chunks vault-wide). HARD-gate-safe by construction (additive + verbatim-or-drop; verify still grounds; zero-grounded refuses). RESIDUAL = 4 false-refusals (f1040-05 born-1961 line-item, f1040-06 $3 campaign checkbox, f1040-07 Form-8995 line-ref, f1040-09 Cat.No. truncation) — narrative/truncation patterns the additive resolver does not target; documented defer. Adversarially reviewed (3-lens workflow): HARD-gate-safety clean; the general-pattern + reranked-order properties are gate-safe documented tradeoffs."
   },
   "queries": [
     {
@@ -374,7 +372,7 @@
       "qid": "fw4-08",
       "question": "What standard deduction amounts does line 11 of the 2026 Form W-4 Deductions Worksheet list for married filing jointly versus single?",
       "_doc_id": "92444d88-fw4",
-      "_anchor_phrase": "$32,200 if you\u2019re married filing jointly or a qualifying surviving spouse",
+      "_anchor_phrase": "$32,200 if you’re married filing jointly or a qualifying surviving spouse",
       "_expected_answer": "$32,200 if married filing jointly (or qualifying surviving spouse); $16,100 if single or married filing separately",
       "_answer_type": "multi_fact",
       "should_refuse": false,
@@ -419,7 +417,7 @@
       "question": "On the 2026 Form W-4, what is the exact percentage rate at which you can multiply your overtime work hours to qualify for the new overtime bonus tax credit?",
       "_doc_id": "",
       "_anchor_phrase": "",
-      "_expected_answer": "Absent. The form discusses qualified overtime compensation deductions with dollar caps ($12,500 / $25,000 MFJ on line 1b) but states NO percentage multiplier and no 'overtime bonus tax credit' \u2014 confirmed absent in both fw4 and the sibling f1040.",
+      "_expected_answer": "Absent. The form discusses qualified overtime compensation deductions with dollar caps ($12,500 / $25,000 MFJ on line 1b) but states NO percentage multiplier and no 'overtime bonus tax credit' — confirmed absent in both fw4 and the sibling f1040.",
       "_answer_type": "counterfactual",
       "should_refuse": true,
       "answer_must_mention": [],
@@ -430,7 +428,7 @@
       "question": "What is the IRS phone number listed on the 2026 Form W-4 for calling the IRS withholding helpline?",
       "_doc_id": "",
       "_anchor_phrase": "",
-      "_expected_answer": "Absent. The form lists only the SSA number (800-772-1213) for name-mismatch questions and gives no IRS withholding helpline phone number \u2014 confirmed absent in both fw4 (only 800-772-1213 present) and the sibling f1040 (no phone number).",
+      "_expected_answer": "Absent. The form lists only the SSA number (800-772-1213) for name-mismatch questions and gives no IRS withholding helpline phone number — confirmed absent in both fw4 (only 800-772-1213 present) and the sibling f1040 (no phone number).",
       "_answer_type": "counterfactual",
       "should_refuse": true,
       "answer_must_mention": [],
@@ -441,7 +439,7 @@
       "question": "What is the penalty dollar amount the 2026 Form W-4 says you will owe if you under-withhold your federal income tax?",
       "_doc_id": "",
       "_anchor_phrase": "",
-      "_expected_answer": "Absent. The form notes you 'may owe a penalty' if too little is withheld but states NO specific penalty dollar amount \u2014 confirmed absent in both fw4 and the sibling f1040 (f1040 line 38 only labels an 'Estimated tax penalty' line, no amount).",
+      "_expected_answer": "Absent. The form notes you 'may owe a penalty' if too little is withheld but states NO specific penalty dollar amount — confirmed absent in both fw4 and the sibling f1040 (f1040 line 38 only labels an 'Estimated tax penalty' line, no amount).",
       "_answer_type": "counterfactual",
       "should_refuse": true,
       "answer_must_mention": [],
