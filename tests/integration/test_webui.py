@@ -1413,18 +1413,57 @@ async def test_document_edit_form_includes_hidden_expected_sha(
     assert ref.content_sha256 in r.text
 
 
-def _fake_graph_store():
-    """A fake GraphStore for the /graph view tests: a fixed two-doc neighbourhood bridged by
-    a shared 'methodology' entity (+ 'reflexivity' on one doc). Provides BOTH lenses the route
-    calls — `related_documents` (document lens) and `related_bridges` (concept lens)."""
-    from memex.index.graph_store import BridgeDoc, DocumentBridge, RelatedDocument
+def _fake_graph_store(*, with_related: bool = True, with_citations: bool = True):
+    """A fake GraphStore for the /graph view tests: by default a fixed two-doc neighbourhood
+    bridged by a shared 'methodology' entity (+ 'reflexivity' on one doc) AND a transitive
+    citation lineage. Provides ALL THREE lenses the route calls — `related_documents` (document
+    lens), `related_bridges` (concept lens), and `citation_paths` (citations lens). The two
+    flags carve out the empty branches: `with_related=False` → a citation-ONLY doc (no
+    entity-relatedness, exercises the empty-state relaxation + the inline "see citations" notes);
+    `with_citations=False` → a related-but-uncited doc (exercises the citations-lens empty note
+    while the depth selector + lens toggle still render)."""
+    from memex.index.graph_store import (
+        BridgeDoc,
+        CitationPaths,
+        CitationReach,
+        DocumentBridge,
+        RelatedDocument,
+    )
 
     class _FakeStore:
         @classmethod
         async def open(cls, vault_path):
             return cls()
 
+        async def citation_paths(self, doc_id, *, depth=3, direction="cites"):
+            d = max(1, min(depth, 6))
+            if not with_citations:
+                return CitationPaths(seed_doc_id=doc_id, direction=direction, depth=d, reached=[])
+            if direction == "cites":
+                reached = [
+                    CitationReach(
+                        doc_id="abc12345-neighbor-a", title="Neighbor A", hops=1,
+                        path=["Center", "Neighbor A"],
+                    ),
+                    CitationReach(
+                        doc_id="def67890-neighbor-b", title="Neighbor B", hops=2,
+                        path=["Center", "Neighbor A", "Neighbor B"],
+                    ),
+                ]
+            else:
+                reached = [
+                    CitationReach(
+                        doc_id="jkl00000-citing-survey", title="Citing Survey", hops=1,
+                        path=["Citing Survey", "Center"],
+                    ),
+                ]
+            # honour the depth cap so the depth-1 selector test can assert truncation
+            reached = [r for r in reached if r.hops <= d]
+            return CitationPaths(seed_doc_id=doc_id, direction=direction, depth=d, reached=reached)
+
         async def related_documents(self, doc_id, *, limit=10, max_entities=8):
+            if not with_related:
+                return []
             return [
                 RelatedDocument(
                     doc_id="abc12345-neighbor-a",
@@ -1443,6 +1482,8 @@ def _fake_graph_store():
         async def related_bridges(
             self, doc_id, *, limit_bridges=24, max_docs_per_bridge=50, max_via=5
         ):
+            if not with_related:
+                return []
             return [
                 DocumentBridge(
                     entity="methodology",
@@ -1534,6 +1575,108 @@ async def test_graph_document_lens_renders_ranked_list(
     assert "/documents/abc12345-neighbor-a" in r.text
     assert "/entity?name=reflexivity" in r.text  # connecting entity as a traversal link
     assert "cytoscape" not in r.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_graph_citations_lens_renders_transitive_lineage(
+    settings: MemexSettings,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`?group=citations` renders the TRANSITIVE CITES lineage (both directions): each reached
+    doc with its shortest hop-distance + the multi-hop chain, plus the depth selector. The
+    deep view of the doc-view's 1-hop References."""
+    ref = await ingest_markdown_passthrough("# Center\n\nThe centerpiece.\n", source_stem="center3")
+    monkeypatch.setattr("memex.webui.app.GraphStore.open", staticmethod(_fake_graph_store().open))
+
+    r = client.get(f"/graph/{ref.doc_id}?group=citations&depth=3")
+    assert r.status_code == 200
+    # both directions render with their column titles
+    assert "References" in r.text and "Cited by" in r.text
+    # the cites direction: a 1-hop AND a 2-hop reach, each a doc link
+    assert "Neighbor A" in r.text and "/documents/abc12345-neighbor-a" in r.text
+    assert "Neighbor B" in r.text and "2 hops" in r.text  # the multi-hop reach + its badge
+    # the multi-hop example chain (path titles in citation order)
+    assert "Neighbor A" in r.text and "Neighbor B" in r.text
+    # the cited_by direction
+    assert "Citing Survey" in r.text and "/documents/jkl00000-citing-survey" in r.text
+    # the lens toggle marks citations active + the depth selector is present
+    assert "lens-opt-active" in r.text and "group=citations" in r.text
+    assert "cite-depth" in r.text and "depth=1" in r.text and "depth=6" in r.text
+
+
+@pytest.mark.asyncio
+async def test_graph_citations_lens_depth_one_truncates_multihop(
+    settings: MemexSettings,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """At `depth=1` the citations lens shows only the DIRECT (1-hop) reaches — the 2-hop
+    Neighbor B is excluded (the depth selector actually re-scopes the traversal)."""
+    ref = await ingest_markdown_passthrough("# Center\n\nThe centerpiece.\n", source_stem="center4")
+    monkeypatch.setattr("memex.webui.app.GraphStore.open", staticmethod(_fake_graph_store().open))
+
+    r = client.get(f"/graph/{ref.doc_id}?group=citations&depth=1")
+    assert r.status_code == 200
+    assert "Neighbor A" in r.text  # the 1-hop reach survives
+    assert "Neighbor B" not in r.text  # the 2-hop reach is excluded at depth 1
+    assert "cite-depth-active" in r.text  # depth 1 marked active
+
+
+@pytest.mark.asyncio
+async def test_graph_citations_lens_empty_keeps_selector_and_toggle(
+    settings: MemexSettings,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A doc with related entities but NO in-vault CITES edges: the citations lens shows the
+    "no in-vault citation links" note, yet the depth selector + lens toggle STILL render
+    (they live OUTSIDE the empty-state block — a regression that swallowed them would break)."""
+    ref = await ingest_markdown_passthrough("# Center\n\nbody.\n", source_stem="cite_empty")
+    monkeypatch.setattr(
+        "memex.webui.app.GraphStore.open",
+        staticmethod(_fake_graph_store(with_citations=False).open),
+    )
+
+    r = client.get(f"/graph/{ref.doc_id}?group=citations&depth=3")
+    assert r.status_code == 200
+    assert "no in-vault citation links" in r.text  # the lens-specific empty note
+    # the page chrome still renders — the note must NOT swallow these
+    assert "cite-depth" in r.text and "depth=6" in r.text  # depth selector present
+    assert "lens-opt-active" in r.text and "group=document" in r.text  # lens toggle present
+    # the page did NOT fall through to the page-level "No related documents found" gate
+    assert "No related documents found" not in r.text
+
+
+@pytest.mark.asyncio
+async def test_graph_citation_only_doc_renders_despite_no_related(
+    settings: MemexSettings,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A citation-ONLY doc (no entity-related neighbours, but CITES-linked) must STILL render the
+    connections page — the empty-state relaxation (`neighbor_count == 0 and not has_citations`).
+    The default concept lens shows the inline "see the citations view" note, and the citations
+    lens renders the lineage."""
+    ref = await ingest_markdown_passthrough("# Center\n\nbody.\n", source_stem="cite_only")
+    monkeypatch.setattr(
+        "memex.webui.app.GraphStore.open",
+        staticmethod(_fake_graph_store(with_related=False).open),
+    )
+
+    # The page renders (NOT the page-level empty note) even though there are no related docs.
+    r = client.get(f"/graph/{ref.doc_id}")
+    assert r.status_code == 200
+    assert "No related documents found" not in r.text  # the relaxed gate did not fire
+    assert "group=citations" in r.text  # the citations tab is offered
+    # the default concept lens points the user at the citations view
+    assert "citations" in r.text and f"/graph/{ref.doc_id}?group=citations" in r.text
+
+    # and the citations lens itself renders the lineage for this doc
+    rc = client.get(f"/graph/{ref.doc_id}?group=citations")
+    assert rc.status_code == 200
+    assert "References" in rc.text and "Cited by" in rc.text
+    assert "Neighbor A" in rc.text and "Citing Survey" in rc.text
 
 
 @pytest.mark.asyncio

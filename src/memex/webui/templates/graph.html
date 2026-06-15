@@ -21,6 +21,19 @@
 </li>
 {% endmacro %}
 
+{% macro cite_row(r) %}
+{# A transitively-reached document: the title (link) + its SHORTEST hop-distance, and for a
+   multi-hop reach the example chain (path titles in citation order; plain text — the path
+   carries titles, not doc-ids, so only the reached doc is a link). #}
+<li class="cite-doc">
+  <a class="related-link" href="/documents/{{ r.doc_id }}">{{ r.title }}</a>
+  <span class="cite-hops">{{ r.hops }} hop{{ '' if r.hops == 1 else 's' }}</span>
+  {%- if r.hops >= 2 and r.path %}
+  <span class="cite-chain">{% for t in r.path %}{%- if not loop.first %} <span class="cite-arrow" aria-hidden="true">→</span> {% endif -%}{{ t }}{% endfor %}</span>
+  {%- endif %}
+</li>
+{% endmacro %}
+
 <nav class="text-sm text-zinc-400 mb-3">
   <a href="/documents" class="hover:text-zinc-300">Documents</a>
   <span class="mx-2 text-zinc-700">/</span>
@@ -56,10 +69,11 @@
   connections can’t be computed. The document itself still
   <a class="related-link" href="/documents/{{ document.ref.doc_id }}">opens normally</a>.
 </p>
-{% elif neighbor_count == 0 %}
+{% elif neighbor_count == 0 and not has_citations %}
 <p class="graph-empty">
   No related documents found. Nothing else in the vault shares a specific entity with this
-  document — it may be the only one on its topic, or it hasn’t been enriched yet.
+  document, and it has no in-vault citation links — it may be the only one on its topic, or
+  it hasn’t been enriched yet.
 </p>
 {% else %}
 
@@ -67,21 +81,80 @@
   <span class="tabular">{{ neighbor_count }}</span> related document{{ '' if neighbor_count == 1 else 's' }}
   <span class="graph-intro-sep">·</span>
   <span class="tabular">{{ bridge_count }}</span> bridging concept{{ '' if bridge_count == 1 else 's' }}
+  {%- if has_citations %}
+  <span class="graph-intro-sep">·</span>
+  <span class="tabular">{{ citation_count }}</span> citation link{{ '' if citation_count == 1 else 's' }}
+  {%- endif %}
 </p>
 
-<div class="lens-toggle" role="group" aria-label="group related documents by">
-  <span class="lens-toggle-label">group by</span>
+<div class="lens-toggle" role="group" aria-label="view this document's connections by">
+  <span class="lens-toggle-label">view</span>
   <a class="lens-opt {{ 'lens-opt-active' if group == 'concept' else '' }}"
      href="/graph/{{ document.ref.doc_id }}?group=concept"
      {% if group == 'concept' %}aria-current="true"{% endif %}>concept</a>
   <a class="lens-opt {{ 'lens-opt-active' if group == 'document' else '' }}"
      href="/graph/{{ document.ref.doc_id }}?group=document"
      {% if group == 'document' %}aria-current="true"{% endif %}>document</a>
+  <a class="lens-opt {{ 'lens-opt-active' if group == 'citations' else '' }}"
+     href="/graph/{{ document.ref.doc_id }}?group=citations&depth={{ depth }}"
+     {% if group == 'citations' %}aria-current="true"{% endif %}>citations</a>
 </div>
 
-{% if group == 'document' %}
+{% if group == 'citations' %}
+{# Citations lens — the TRANSITIVE CITES lineage (multi-hop), both directions: the deep view
+   of the doc-view's 1-hop "References". A no-JS depth selector re-runs the traversal; each
+   reached doc shows its SHORTEST hop-distance + (for a multi-hop reach) the example chain. #}
+<div class="cite-depth" role="group" aria-label="citation traversal depth">
+  <span class="cite-depth-label">depth</span>
+  {% for d in range(1, 7) %}
+  <a class="cite-depth-opt {{ 'cite-depth-active' if d == depth else '' }}"
+     href="/graph/{{ document.ref.doc_id }}?group=citations&depth={{ d }}"
+     {% if d == depth %}aria-current="true"{% endif %}>{{ d }}</a>
+  {% endfor %}
+</div>
+
+{% if not has_citations %}
+<p class="graph-empty">
+  This document has no in-vault citation links. A CITES edge forms only when a cited work is
+  ALSO in the vault — a lone document yields none. The references are still clickable
+  <span class="graph-legend-em">[[wikilinks]]</span> in the
+  <a class="related-link" href="/documents/{{ document.ref.doc_id }}">document body</a>.
+</p>
+{% else %}
+<div class="cite-columns">
+  <section class="cite-col">
+    <h2 class="cite-col-title">References
+      <span class="cite-col-sub">— what this transitively cites</span></h2>
+    {% if cites_reached %}
+    <ul class="cite-list">
+      {% for r in cites_reached %}{{ cite_row(r) }}{% endfor %}
+    </ul>
+    {% else %}
+    <p class="cite-empty">This document cites nothing else in the vault.</p>
+    {% endif %}
+  </section>
+  <section class="cite-col">
+    <h2 class="cite-col-title">Cited by
+      <span class="cite-col-sub">— what transitively cites this</span></h2>
+    {% if cited_by_reached %}
+    <ul class="cite-list">
+      {% for r in cited_by_reached %}{{ cite_row(r) }}{% endfor %}
+    </ul>
+    {% else %}
+    <p class="cite-empty">Nothing in the vault cites this document.</p>
+    {% endif %}
+  </section>
+</div>
+{% endif %}
+
+{% elif group == 'document' %}
 {# Document lens — neighbours ranked by shared-entity specificity, each with a strength
    bar + the connecting entities (the "why"). The lossless rendering of a ranking. #}
+{% if neighbor_count == 0 %}
+<p class="graph-empty">No related documents share a specific entity with this one — see the
+  <a class="related-link" href="/graph/{{ document.ref.doc_id }}?group=citations">citations</a>
+  view for its references.</p>
+{% else %}
 <ul class="rail-list">
   {% for d in related %}
   <li class="rail-row">
@@ -95,11 +168,17 @@
   </li>
   {% endfor %}
 </ul>
+{% endif %}
 
 {% else %}
 {# Concept lens (default) — related docs grouped UNDER the bridging entity. The bar +
    "bridges N" carry the honest signal; the top two bridges open by default, the rest are
    collapsed disclosures, and single-doc bridges fold into the tail. All server-rendered. #}
+{% if neighbor_count == 0 %}
+<p class="graph-empty">No related documents share a specific entity with this one — see the
+  <a class="related-link" href="/graph/{{ document.ref.doc_id }}?group=citations">citations</a>
+  view for its references.</p>
+{% else %}
 <ul class="bridge-list">
   {% for b in bridges_primary %}
   <li class="bridge">
@@ -144,12 +223,19 @@
   </ul>
 </details>
 {% endif %}
+{% endif %}
 
 {% endif %}{# group #}
 
 <p class="graph-legend">
+  {% if group == 'citations' %}
+  Each reach shows its <span class="graph-legend-em">shortest</span> hop-distance + an example
+  chain in citation order; each title opens the document. The 1-hop references also appear on
+  the <a class="related-link" href="/documents/{{ document.ref.doc_id }}">document page</a>.
+  {% else %}
   Bar = relatedness strength (Σ&nbsp;IDF specificity). Each entity links to its
   <span class="graph-legend-em">entity view</span>; each title opens the document.
+  {% endif %}
 </p>
 {% endif %}{# graph_available / empty #}
 {% endblock %}

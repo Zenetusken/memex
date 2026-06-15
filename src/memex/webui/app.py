@@ -2436,20 +2436,25 @@ def create_app() -> FastAPI:
         request: Request,
         doc_id: str,
         group: str = "concept",
+        depth: int = 3,
     ) -> HTMLResponse:
         """Render `doc_id`'s related-document neighbourhood as a server-rendered, ranked
         "Bridges" view (the redesign that retired the Cytoscape hairball — a 1-hop star has
         no topology to draw; the signal is a specificity RANKING + the entities that explain
-        WHY). Two lenses over the SAME graph data, toggled by `?group=`:
+        WHY). Three lenses over the SAME graph open, toggled by `?group=`:
 
           - `concept` (default) — `related_bridges`: related docs grouped UNDER the bridging
             ENTITY that connects them, ranked by Σ IDF×kind_weight (a rare concept shared by
             many docs wins). Answers "which concepts are this doc's connective tissue".
           - `document` — `related_documents`: the neighbours as a flat list ranked by
             shared-entity specificity, each with a strength bar + the connecting entities.
+          - `citations` — `citation_paths`: the TRANSITIVE citation lineage (multi-hop CITES),
+            both directions, at `?depth=N` (clamped [1,6]) — what this doc transitively
+            references and what transitively cites it, each reached doc at its SHORTEST hop +
+            an example chain. The deep view of the doc-view's 1-hop "References".
 
-        Both rank by the SAME ADR-0011 specificity model (NOT the unranked `neighbors()`).
-        Returns `graph_available=False` + a fallback panel when ryugraph isn't installed."""
+        The first two rank by the SAME ADR-0011 specificity model (NOT the unranked
+        `neighbors()`). Returns `graph_available=False` + a fallback when ryugraph is absent."""
         # GraphStore is re-exported at module top (see the import at the
         # head of this file) as a test seam — `tests/integration/test_webui.py`
         # monkeypatches `memex.webui.app.GraphStore.open`. This re-export
@@ -2457,7 +2462,8 @@ def create_app() -> FastAPI:
         # + core` import-direction rule documented in `src/memex/CLAUDE.md`,
         # and is justified by the testability win.
         doc_id = _validate_doc_id(doc_id)
-        group = group if group in ("concept", "document") else "concept"
+        group = group if group in ("concept", "document", "citations") else "concept"
+        depth = max(1, min(depth, 6))  # mirror citation_paths' own clamp for the depth selector
         settings = get_settings()
         try:
             doc = await read_document(settings.vault_path, doc_id)
@@ -2466,6 +2472,8 @@ def create_app() -> FastAPI:
 
         bridges: list[dict[str, Any]] = []
         related: list[dict[str, Any]] = []
+        cites_reached: list[dict[str, Any]] = []
+        cited_by_reached: list[dict[str, Any]] = []
         graph_available = True
         try:
             store = await GraphStore.open(settings.vault_path)
@@ -2482,10 +2490,24 @@ def create_app() -> FastAPI:
             graph_available = False
         else:
             try:
-                # Both lenses share one graph open — the document lens drives the header
-                # count + the alternate view; the bridge lens is the default render.
+                # All three lenses share one graph open — related/bridges drive the header
+                # counts + the entity lenses; the transitive citation lineage drives the
+                # citations lens. citation_paths on a doc with no CITES edges is an empty,
+                # near-free read, so computing both directions unconditionally is fine.
                 related = [r.model_dump() for r in await store.related_documents(doc_id, limit=50)]
                 bridges = [b.model_dump() for b in await store.related_bridges(doc_id)]
+                cites_reached = [
+                    r.model_dump()
+                    for r in (
+                        await store.citation_paths(doc_id, depth=depth, direction="cites")
+                    ).reached
+                ]
+                cited_by_reached = [
+                    r.model_dump()
+                    for r in (
+                        await store.citation_paths(doc_id, depth=depth, direction="cited_by")
+                    ).reached
+                ]
             finally:
                 await store.close()
 
@@ -2514,11 +2536,16 @@ def create_app() -> FastAPI:
             {
                 "document": doc,
                 "group": group,
+                "depth": depth,
                 "related": related,
                 "bridges_primary": primary,
                 "bridges_tail": tail,
                 "bridge_count": len(bridges),
                 "neighbor_count": len(related),
+                "cites_reached": cites_reached,
+                "cited_by_reached": cited_by_reached,
+                "citation_count": len(cites_reached) + len(cited_by_reached),
+                "has_citations": bool(cites_reached or cited_by_reached),
                 "graph_available": graph_available,
             },
         )

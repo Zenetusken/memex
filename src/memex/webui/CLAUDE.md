@@ -159,7 +159,7 @@ page** (air-gap + maintenance win; `static/cytoscape.min.js` + `static/graph.js`
 on disk but UNREFERENCED — `graph.css` keeps its retired `.cy-canvas`/`.inspector-*` block ONLY
 so `graph.js`'s classes stay covered by `scripts/check-tailwind-coverage.py`).
 
-Two **lenses** over the same graph data, toggled by `?group=` (plain `<a>` links → shareable
+Three **lenses** over the same graph open, toggled by `?group=` (plain `<a>` links → shareable
 URL, no JS):
 - **concept** (default) — `GraphStore.related_bridges(doc_id)`: related docs grouped UNDER the
   bridging ENTITY that connects them. Each bridge is a native `<details>` (top 2 `open`, rest
@@ -172,19 +172,38 @@ URL, no JS):
 - **document** — `related_documents` rendered as a flat strength-ranked rail (`.rail-*`): a
   left strength bar + the doc-title link + its connecting entities. The Ranked-Rail design as
   the alternate lens.
+- **citations** (2026-06-14) — `GraphStore.citation_paths(doc_id, depth, direction)`: the
+  TRANSITIVE CITES lineage (multi-hop chain following), the deep view of the doc-view's 1-hop
+  "References". Two `.cite-col` columns — *References* (`direction="cites"` = what this doc
+  transitively cites) + *Cited by* (`direction="cited_by"` = what transitively cites it) — each
+  a `.cite-list` of reached docs (the `cite_row` macro: title link + a `.cite-hops` shortest-hop
+  badge + a `.cite-chain` example path rendered ONLY for hops≥2, the path TITLES joined by
+  `.cite-arrow` `→` in citation order; the path carries titles not doc-ids, so only the reached
+  doc is a link). A no-JS **`.cite-depth` selector** (1–6, `?group=citations&depth=N`) re-runs
+  the traversal; the route clamps `depth` to `[1,6]` (mirroring `citation_paths`' own clamp). The
+  route computes `citation_paths` for BOTH directions on every `/graph` load (an empty, near-free
+  read when the doc has no CITES edges) so `has_citations` is always known. The doc-view
+  References eyebrow carries a `.related-lineage-link` ("full lineage →") into this lens.
 
 The route computes proportional bar percentages (ordinal sugar — the count/rank are the honest
 signal, so the % is never printed; WCAG 1.4.1). **Fail-open**: an `ImportError` from
-`GraphStore.open` → `graph_available=False` + the amber "graph store unavailable" panel; an
-empty neighbourhood → a quiet "No related documents found" note; a `VaultIntegrityError` on the
-doc → 404. Semantic `.bridge-*` / `.rail-*` / `.lens-*` CSS in `graph.css` (zinc + the one blue
-accent — the strength-bar fill is a quieted blue, like `.ans-answer`'s structural rule;
-secondary text floors at zinc-400). Reuses the shipped `.related-entity-link` / `.entity-kind`
-markup; NOT new Tailwind. The `webui → index/graph_store` test-seam edge is unchanged
-(`test_webui.py` monkeypatches `GraphStore.open`; the fake provides BOTH `related_documents` +
-`related_bridges`). Live-verified in Chrome (both lenses legible, clean console — the page ships
-zero scripts). Pinned by `test_webui.py` (`test_graph_renders_bridges_view` /
-`test_graph_document_lens_renders_ranked_list` / `…shows_unavailable…` / `…404s…`).
+`GraphStore.open` → `graph_available=False` + the amber "graph store unavailable" panel (and
+`cites_reached`/`cited_by_reached` stay `[]`, so `has_citations` is False — no citations lens
+content); the page now renders whenever `neighbor_count > 0 OR has_citations` (so a
+citations-only doc — related-docs-empty but CITES-linked — still shows, and the concept/document
+lenses carry an inline "no related documents" note pointing at the citations lens when
+`neighbor_count == 0`); the page-level empty note shows only when BOTH are empty; a
+`VaultIntegrityError` on the doc → 404. Semantic `.bridge-*` / `.rail-*` / `.cite-*` / `.lens-*`
+CSS in `graph.css` (zinc + the one blue accent — the strength-bar fill is a quieted blue, like
+`.ans-answer`'s structural rule; secondary text floors at zinc-400; the `.cite-columns` grid
+stacks at ≤720px). Reuses the shipped `.related-entity-link` / `.entity-kind` markup; NOT new
+Tailwind. The `webui → index/graph_store` test-seam edge is unchanged (`test_webui.py`
+monkeypatches `GraphStore.open`; the fake provides `related_documents` + `related_bridges` +
+`citation_paths`). Live-verified against the real graph (BGE depth-4 lineage renders the 2-hop
+`C-Pack → Contriever → SimCSE` chain; depth=1 truncates it). Pinned by `test_webui.py`
+(`test_graph_renders_bridges_view` / `test_graph_document_lens_renders_ranked_list` /
+`test_graph_citations_lens_renders_transitive_lineage` / `…depth_one_truncates_multihop` /
+`…shows_unavailable…` / `…404s…`).
 
 ## Entity-centric discovery view (`/entity` + `entity.html` + `.entity-*`, ADR-0011, 2026-05-28)
 

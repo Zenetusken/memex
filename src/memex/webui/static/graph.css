@@ -304,3 +304,90 @@
 }
 .rail-body { flex: 1 1 auto; min-width: 0; }
 .rail-title { font-size: 0.92rem; }
+
+/* Citations lens — the transitive CITES lineage (both directions). Reuses the page's zinc +
+   single blue accent; the depth selector mirrors .lens-* so the two controls read as kin. */
+.cite-depth {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0 0 1.1rem;
+  font-size: 0.78rem;
+}
+.cite-depth-label {
+  color: rgb(161 161 170);                 /* zinc-400 */
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.625rem;
+  margin-right: 0.25rem;
+}
+.cite-depth-opt {
+  color: rgb(161 161 170);                 /* zinc-400 — inactive */
+  text-decoration: none;
+  padding: 0.15rem 0.55rem;
+  border: 1px solid rgb(39 39 42);         /* zinc-800 */
+  border-radius: 0.25rem;
+  font-variant-numeric: tabular-nums;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.cite-depth-opt:hover { color: rgb(212 212 216); border-color: rgb(63 63 70); }
+.cite-depth-active,
+.cite-depth-active:hover {
+  color: rgb(147 197 253);                 /* blue-300 */
+  border-color: rgb(37 99 235 / 0.5);      /* blue-600 tint */
+  background: rgb(37 99 235 / 0.1);
+}
+
+.cite-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem 2rem;
+}
+@media (max-width: 720px) {
+  .cite-columns { grid-template-columns: 1fr; }   /* stack on narrow viewports */
+}
+.cite-col { min-width: 0; }
+.cite-col-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: rgb(228 228 231);                 /* zinc-200 */
+  margin: 0 0 0.6rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid rgb(39 39 42);  /* zinc-800 divider */
+}
+.cite-col-sub {
+  font-weight: 400;
+  font-size: 0.78rem;
+  color: rgb(161 161 170);                 /* zinc-400 */
+}
+.cite-list { list-style: none; padding: 0; margin: 0; }
+.cite-doc {
+  padding: 0.5rem 0;
+  border-top: 1px solid rgb(24 24 27);     /* zinc-900 — a quieter divider than the bridges */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.45rem;
+}
+.cite-doc:first-child { border-top: none; }
+.cite-hops {
+  flex: 0 0 auto;
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  color: rgb(161 161 170);                 /* zinc-400 */
+  border: 1px solid rgb(39 39 42);         /* zinc-800 */
+  border-radius: 0.2rem;
+  padding: 0.02rem 0.35rem;
+}
+.cite-chain {
+  flex: 1 0 100%;                          /* the chain wraps to its own line under the title */
+  font-size: 0.75rem;
+  color: rgb(161 161 170);                 /* zinc-400 */
+  line-height: 1.45;
+}
+.cite-arrow { color: rgb(63 63 70); }      /* zinc-700 decorative connector */
+.cite-empty {
+  font-size: 0.82rem;
+  color: rgb(161 161 170);                 /* zinc-400 */
+  margin: 0.2rem 0 0;
+}
