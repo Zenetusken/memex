@@ -27,9 +27,12 @@ see `realworld_corpora_2026_06_15`).
 `query_tables` synthetic-chunk seam). The synthetic chunk carries no table marker, so the numeric
 backstop skips it; it is a single substantive line, so `is_name_only_chunk` is False; `verify`
 still grounds it against the original cited chunks, and `route_after_verify` still refuses a
-zero-grounded draft — so `refusal_cf` cannot regress. The `• label, $value` shape fires on **2
-chunks vault-wide (both f1040; measured across 187 docs / 7,743 chunks)** → a deterministic no-op
-everywhere else. Default-ON; kill-switch `MEMEX_AGENTS__FORM_FIELD_RESOLVER_ENABLED=false`.
+zero-grounded draft — so the resolver can't FABRICATE, and `refusal_cf` can't regress for an
+ABSENT-value (within-doc) counterfactual. **It CAN regress on a CROSS-DOC-PRESENT counterfactual**
+(a value present in another vault doc, mis-attributed to the doc the query names) — see the SCOPE
+CAVEAT on `build_form_field_chunk`. The `• label, $value` shape fires on **2 chunks vault-wide
+(both f1040; measured across 187 docs / 7,743 chunks)** → a deterministic no-op everywhere else.
+Default-ON; kill-switch `MEMEX_AGENTS__FORM_FIELD_RESOLVER_ENABLED=false`.
 """
 
 from __future__ import annotations
