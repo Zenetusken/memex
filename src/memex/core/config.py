@@ -783,6 +783,15 @@ class AgentsSettings(BaseModel):
     # existing v5 feedback slot (no prompt-version change). The retried draft faces the
     # FULL verify gate ⇒ HARD-gate-safe. MEMEX_AGENTS__DENIAL_REFRAME_RETRY_ENABLED=false reverts.
     denial_reframe_retry_enabled: bool = True
+    # Deterministic FORM-FIELD resolver (Increment A, 2026-06-15, `agents/form_fields.py`): a born-
+    # digital form parses into a dense run-on `|cell|` wall where a labeled value sits among
+    # distractors (`• Single …, $15,750 • MFJ …, $31,500 • Head of household, $23,625`), so the 4B
+    # can't pick the asked value and drafts "not available" → the gates refuse (measured: 7/18 forms
+    # false-refusals + the f1040-04 cross-doc catch; retrieval is fine). The `resolve_form_field`
+    # node routes the query to the dominant `• label, $value` bullet (token-overlap, no LLM) and
+    # injects ONE verbatim `label: value` synthetic chunk. Additive + verbatim-or-drop ⇒ HARD-gate-
+    # safe; fires on 2 chunks vault-wide (both f1040). MEMEX_AGENTS__FORM_FIELD_RESOLVER_ENABLED=false.
+    form_field_resolver_enabled: bool = True
     # The code-only FTS term-query path (Phase-3 Lever A, 2026-06-09, ADR-0021 / audits/13):
     # when a /ask query NAMES a code identifier (snake_case / camelCase — see
     # `index/code_query.query_has_code_identifier`), the BM25 arm builds an OR'd-quoted-WHOLE-

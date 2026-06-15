@@ -606,6 +606,10 @@ class AnswerState(BaseModel):
     relevance_world_knowledge_guard: bool = True
     # Set from `agents.denial_reframe_retry_enabled` in `answer_query` (fail-open).
     denial_reframe_retry: bool = True
+    # Set from `agents.form_field_resolver_enabled` in `answer_query` (fail-open). The deterministic
+    # form-field disambiguation node (`resolve_form_field`): inject a clean `label: value` synthetic
+    # chunk for a `• label, $value` form bullet list, so the gates see the asked value unambiguously.
+    form_field_resolver_enabled: bool = True
 
     nodes_traversed: int = 0
     max_nodes_traversed: int = 20
@@ -1457,6 +1461,32 @@ async def query_tables(state: AnswerState) -> AnswerStateUpdate:
     # FULL augmented list — `reranked` is a plain field, so this REPLACES it
     # (returning only `[synthetic]` would wipe the real chunks). The spread
     # form is the same new-list replacement as `state.reranked + [synthetic]`.
+    return {
+        "reranked": [*state.reranked, synthetic],
+        "nodes_traversed": state.nodes_traversed + 1,
+    }
+
+
+async def resolve_form_field(state: AnswerState) -> AnswerStateUpdate:
+    """Deterministic form-field disambiguation (Increment A, `agents/form_fields.py`).
+
+    Runs between `query_tables` and `assess`. When a `• <label>, $<value>` form bullet list is in
+    the reranked set and the query routes confidently (token-overlap, single-dominant gate) to one
+    label, inject ONE clean synthetic `label: value` chunk so the gates see the asked value
+    unambiguously — instead of the 4B picking among adjacent distractor values in a run-on cell and
+    drafting "not available" (the measured forms false-refusal + the f1040-04 cross-doc catch).
+    Additive + verbatim-or-drop ⇒ HARD-gate-safe by construction; a deterministic no-op when no
+    bullet list / no confident route (fires on 2 chunks vault-wide, both f1040)."""
+    from memex.agents.form_fields import build_form_field_chunk
+
+    if not state.form_field_resolver_enabled or not state.reranked:
+        return {"nodes_traversed": state.nodes_traversed + 1}
+    synthetic = build_form_field_chunk(state.query, state.reranked)
+    if synthetic is None:
+        return {"nodes_traversed": state.nodes_traversed + 1}
+    logger.bind(node="resolve_form_field").info(
+        "injected", chunk_id=synthetic.chunk_id, text=synthetic.text[:90]
+    )
     return {
         "reranked": [*state.reranked, synthetic],
         "nodes_traversed": state.nodes_traversed + 1,
@@ -2799,6 +2829,7 @@ def build_answering_graph() -> CompiledStateGraph:
     g.add_node("rerank", rerank)
     g.add_node("augment_companion", augment_companion)
     g.add_node("query_tables", query_tables)
+    g.add_node("resolve_form_field", resolve_form_field)
     g.add_node("assess", assess)
     g.add_node("answer", answer)
     g.add_node("verify", verify)
@@ -2814,7 +2845,8 @@ def build_answering_graph() -> CompiledStateGraph:
     g.add_edge("expand_graph", "rerank")
     g.add_edge("rerank", "augment_companion")  # ADR-0018 B4: targeted on the reranked winners
     g.add_edge("augment_companion", "query_tables")
-    g.add_edge("query_tables", "assess")
+    g.add_edge("query_tables", "resolve_form_field")
+    g.add_edge("resolve_form_field", "assess")
     g.add_edge("answer", "verify")
     g.add_edge("regenerate", "answer")  # the loop
     g.add_edge("compose", END)
@@ -2948,6 +2980,12 @@ async def answer_query(
     except (ConfigurationError, MemexError):
         denial_reframe_retry = True
 
+    # The deterministic form-field resolver (Increment A), same fail-open pattern.
+    try:
+        form_field_resolver_enabled = get_settings().agents.form_field_resolver_enabled
+    except (ConfigurationError, MemexError):
+        form_field_resolver_enabled = True
+
     # Graph expansion is the param ANDed with the settings kill-switch (default on),
     # read fail-open — so `MEMEX_AGENTS__GRAPH_EXPANSION_ENABLED=false` disables it
     # globally (for the earns-its-keep A/B) while an explicit param=False still wins.
@@ -2985,6 +3023,7 @@ async def answer_query(
         citation_retarget=citation_retarget,
         relevance_world_knowledge_guard=relevance_world_knowledge_guard,
         denial_reframe_retry=denial_reframe_retry,
+        form_field_resolver_enabled=form_field_resolver_enabled,
         scope_doc_ids=scope_doc_ids or [],
         # The grounded multi-turn chat's bounded prior-chunk carry (Surface A). Default
         # None/[] → byte-identical to a bare `/ask`; `retrieve` unions these into the
