@@ -1,0 +1,510 @@
+{
+  "_description": "Real-world MODERN-PRINTED born-digital documents (US-gov, public domain): a NASA Science Mission Directorate science-vision plan (space science) + a USGS Scientific Investigations Report on volcano seismic monitoring (earth science). Fills the modern-printed answer-eval blind spot (only a synthetic fixture existed). Source PDFs stay LOCAL; only queries+baseline ship.",
+  "_doc_id": "8fb29f57-nasa-planetary-science",
+  "_multi_doc": true,
+  "_doc_ids": [
+    "8fb29f57-nasa-planetary-science",
+    "1e563abe-usgs-volcano-seismic"
+  ],
+  "_query_count": 25,
+  "_mix": {
+    "ans": 19,
+    "ref": 6
+  },
+  "_labelling_rule": "ANS: a concrete fact literally in the named doc; _anchor_phrase = a verbatim substring for gold resolution; answer_must_mention = whole-token any-of slots encoding the correct fact. REF (should_refuse): a plausible question whose specific answer is absent from BOTH corpus docs -> the system must refuse.",
+  "_created": "2026-06-15",
+  "_source_note": "Source PDFs are public-domain US-government works (17 USC 105), kept LOCAL (never committed); only this query set + the baseline ship. Authored by an adversarially-verified multi-agent pass, then resolved + live-eval-validated.",
+  "_baseline_answer_text_2026_06_15": {
+    "stack": "Qwen3.5-4B-AWQ orchestrator (ADR-0015) + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3 (cpu, device-pinned), co_residence_mode=manual",
+    "purpose": "First REAL-WORLD modern-printed answer-eval corpus (NASA SMD science-vision plan [space science] + USGS volcano-seismic Scientific Investigations Report [earth science] \u2014 public-domain US-gov born-digital prose). Fills the modern-printed blind spot (only a synthetic parse fixture existed). Multi-doc: tests cross-doc disambiguation + answer-TEXT correctness.",
+    "answered_count": 17,
+    "answerable_count": 19,
+    "refusal_rate_on_counterfactuals": 1.0,
+    "answer_text_checked": 17,
+    "answer_text_correct_count": 17,
+    "mean_answer_mention_recall": 1.0,
+    "n_runs": 2,
+    "byte_stable": true,
+    "false_refusals": [
+      "nasa-05",
+      "usgs-03"
+    ],
+    "answer_text_failures": [],
+    "notes": "CLEAN baseline \u2014 prose is the system's strength: every answered query is CORRECT (recall 1.0), HARD gate holds (refusal_cf=1.0, all 6 counterfactuals refuse), 0 answer-text catches, byte-stable N=2. Two deterministic FALSE-REFUSALS: nasa-05 (the 6 SMD Core Values span 6 sub-heading chunks -> the SAME multi-chunk-enumeration class as nist-01, see answer_text_eval_2026_06_13); usgs-03 (the relevance gate wrongly rejected the grounded '120 seconds to 50 hertz' broadband-sensitivity range as 'physically impossible' -> a world-knowledge over-refusal, residual of the assess_relevance class). Source PDFs public-domain US-gov (17 USC 105), kept LOCAL."
+  },
+  "queries": [
+    {
+      "qid": "nasa-01",
+      "question": "Which four cross-cutting Science Leadership Priorities does SMD rely on to achieve its goals?",
+      "_doc_id": "8fb29f57-nasa-planetary-science",
+      "_anchor_phrase": "SMD relies on four cross-cutting priorities: Exploration and Scientific Discovery, Innovation, Interconnectivity and Partnerships, and Inspiration",
+      "_expected_answer": "Exploration and Scientific Discovery, Innovation, Interconnectivity and Partnerships, and Inspiration.",
+      "_answer_type": "list",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "exploration"
+        ],
+        [
+          "innovation"
+        ],
+        [
+          "interconnectivity",
+          "partnerships"
+        ],
+        [
+          "inspiration"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "8fb29f57-nasa-planetary-science#41c1e8f988"
+      ]
+    },
+    {
+      "qid": "nasa-02",
+      "question": "Under the Artemis program, by what year is NASA preparing to send the first woman and next man to the Moon?",
+      "_doc_id": "8fb29f57-nasa-planetary-science",
+      "_anchor_phrase": "send the first woman and next man to the Moon by 2024 under the Artemis program",
+      "_expected_answer": "By 2024.",
+      "_answer_type": "single_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "2024"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "8fb29f57-nasa-planetary-science#545659ee84"
+      ]
+    },
+    {
+      "qid": "nasa-03",
+      "question": "What Kuiper Belt object did NASA's New Horizons spacecraft complete the first-ever fly-by of in 2019?",
+      "_doc_id": "8fb29f57-nasa-planetary-science",
+      "_anchor_phrase": "completed the first in human history fly-by of a Kuiper Belt object, Arrokoth",
+      "_expected_answer": "Arrokoth.",
+      "_answer_type": "single_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "arrokoth"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "8fb29f57-nasa-planetary-science#4661b74e66"
+      ]
+    },
+    {
+      "qid": "nasa-04",
+      "question": "What is the title of NASA's Science Mission Directorate vision document covering 2020-2024?",
+      "_doc_id": "8fb29f57-nasa-planetary-science",
+      "_anchor_phrase": "represents a departure from past Science Plans",
+      "_expected_answer": "Science 2020-2024: A Vision for Scientific Excellence.",
+      "_answer_type": "single_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "excellence"
+        ],
+        [
+          "2020-2024",
+          "vision"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "8fb29f57-nasa-planetary-science#40ade7e83c"
+      ]
+    },
+    {
+      "qid": "nasa-05",
+      "question": "Which six SMD Core Values are listed in the 'Who We Are' section?",
+      "_doc_id": "8fb29f57-nasa-planetary-science",
+      "_anchor_phrase": "incorporates the five NASA core values in all aspects of its work, as well as a sixth value of leadership",
+      "_expected_answer": "Leadership, Excellence, Integrity, Teamwork, Safety, and Inclusion.",
+      "_answer_type": "list",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "leadership"
+        ],
+        [
+          "excellence"
+        ],
+        [
+          "integrity"
+        ],
+        [
+          "teamwork"
+        ],
+        [
+          "safety"
+        ],
+        [
+          "inclusion"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "8fb29f57-nasa-planetary-science#7b9bda9869"
+      ]
+    },
+    {
+      "qid": "nasa-06",
+      "question": "What temperature can the heatshield of NASA's Parker Solar Probe withstand?",
+      "_doc_id": "8fb29f57-nasa-planetary-science",
+      "_anchor_phrase": "revolutionary heatshield capable of withstanding temperatures",
+      "_expected_answer": "Nearly 2,500 degrees Fahrenheit.",
+      "_answer_type": "single_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "2,500",
+          "2500"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "8fb29f57-nasa-planetary-science#b02989f766"
+      ]
+    },
+    {
+      "qid": "nasa-07",
+      "question": "Who signed the welcome message as Associate Administrator of the Science Mission Directorate?",
+      "_doc_id": "8fb29f57-nasa-planetary-science",
+      "_anchor_phrase": "Thomas H. Zurbuchen, Ph.D. Associate Administrator, Science Mission Directorate",
+      "_expected_answer": "Thomas H. Zurbuchen, Ph.D.",
+      "_answer_type": "single_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "zurbuchen"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "8fb29f57-nasa-planetary-science#345e18d845"
+      ]
+    },
+    {
+      "qid": "nasa-08",
+      "question": "What is the SMD-led initiative that enables rapid acquisition of lunar delivery services from American companies, and what does its acronym CLPS stand for?",
+      "_doc_id": "8fb29f57-nasa-planetary-science",
+      "_anchor_phrase": "SMD is leading NASA\u2019s Commercial Lunar Payload Services (CLPS) initiative to enable rapid acquisition",
+      "_expected_answer": "The Commercial Lunar Payload Services (CLPS) initiative.",
+      "_answer_type": "multi_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "clps"
+        ],
+        [
+          "commercial"
+        ],
+        [
+          "payload",
+          "payloads"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "8fb29f57-nasa-planetary-science#545659ee84"
+      ]
+    },
+    {
+      "qid": "nasa-09",
+      "question": "What does NASA's VIPER lunar rover acronym stand for?",
+      "_doc_id": "8fb29f57-nasa-planetary-science",
+      "_anchor_phrase": "VIPER Volatiles Investigating Polar Exploration Rover",
+      "_expected_answer": "Volatiles Investigating Polar Exploration Rover.",
+      "_answer_type": "single_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "volatiles"
+        ],
+        [
+          "polar"
+        ],
+        [
+          "exploration"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "8fb29f57-nasa-planetary-science#a6bcda4c39"
+      ]
+    },
+    {
+      "qid": "nasa-10",
+      "question": "What is the exact budget allocated to the Planetary Science Division under this 2020-2024 vision?",
+      "_doc_id": "",
+      "_anchor_phrase": "",
+      "_expected_answer": "Absent: the document is a high-level strategic vision; it references 'existing budgets' generically (line 159) but states NO dollar amounts for any division. A grep for dollar figures returns none, and the sibling USGS doc has no NASA budget data.",
+      "_answer_type": "counterfactual",
+      "should_refuse": true,
+      "answer_must_mention": [],
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "nasa-11",
+      "question": "How many sectors did TESS divide the southern sky into, and how far away is the Large Magellanic Cloud according to the TESS image caption?",
+      "_doc_id": "8fb29f57-nasa-planetary-science",
+      "_anchor_phrase": "divided the southern sky into 13 sectors",
+      "_expected_answer": "13 sectors; the Large Magellanic Cloud is about 163,000 light-years away.",
+      "_answer_type": "multi_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "13",
+          "thirteen"
+        ],
+        [
+          "163,000"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "8fb29f57-nasa-planetary-science#b61192e3de"
+      ]
+    },
+    {
+      "qid": "nasa-12",
+      "question": "Which company was awarded the contract to build the VIPER rover, and what was the contract's dollar value?",
+      "_doc_id": "",
+      "_anchor_phrase": "",
+      "_expected_answer": "Absent: VIPER is described only as a future CLPS science payload / polar-exploration rover (lines 227-231). The doc's only contract language is generic ('awarded initial surface task order awards to CLPS providers') with no company tied to VIPER and no dollar value; the sibling doc never mentions VIPER.",
+      "_answer_type": "counterfactual",
+      "should_refuse": true,
+      "answer_must_mention": [],
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "nasa-14",
+      "question": "What launch date does the document set for the James Webb Space Telescope?",
+      "_doc_id": "",
+      "_anchor_phrase": "",
+      "_expected_answer": "Absent: JWST is mentioned only as a future exoplanet-characterization tool for TOI 700d (lines 245-247); no launch date is given for it. The doc's 'launch' mentions are unrelated (Explorer 1, CLPS landers in July 2021). The sibling doc never mentions JWST.",
+      "_answer_type": "counterfactual",
+      "should_refuse": true,
+      "answer_must_mention": [],
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "usgs-01",
+      "question": "For a Level 4 volcano seismic network, how many broadband seismic stations are recommended within 20 km of the volcanic center?",
+      "_doc_id": "1e563abe-usgs-volcano-seismic",
+      "_anchor_phrase": "Twelve to 25 broadband seismic stations within 20",
+      "_expected_answer": "Twelve to 25 broadband seismic stations within 20 km of the volcanic center.",
+      "_answer_type": "single_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "twelve",
+          "12"
+        ],
+        [
+          "25",
+          "twenty-five"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "1e563abe-usgs-volcano-seismic#354061e500"
+      ]
+    },
+    {
+      "qid": "usgs-02",
+      "question": "What is the minimum number of seismic observations required to locate earthquakes and constrain timing, and how many are best for optimizing location quality?",
+      "_doc_id": "1e563abe-usgs-volcano-seismic",
+      "_anchor_phrase": "at least four seismic observations are required to locate earthquakes",
+      "_expected_answer": "At least four seismic observations are required; eight or more is best to optimize location quality.",
+      "_answer_type": "multi_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "four",
+          "4"
+        ],
+        [
+          "eight",
+          "8"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "1e563abe-usgs-volcano-seismic#ea63be1f52"
+      ]
+    },
+    {
+      "qid": "usgs-03",
+      "question": "What broadband sensitivity range is required for adequate detection of all types of volcanic seismicity?",
+      "_doc_id": "1e563abe-usgs-volcano-seismic",
+      "_anchor_phrase": "requires broadband sensitivity (120 seconds to 50 hertz)",
+      "_expected_answer": "Broadband sensitivity of 120 seconds to 50 hertz.",
+      "_answer_type": "single_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "120"
+        ],
+        [
+          "50"
+        ],
+        [
+          "hertz",
+          "hz",
+          "seconds"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "1e563abe-usgs-volcano-seismic#8fc54d3e93"
+      ]
+    },
+    {
+      "qid": "usgs-04",
+      "question": "What is the minimum sample rate recommended for new seismic installations, and what is the ideal goal sample rate?",
+      "_doc_id": "1e563abe-usgs-volcano-seismic",
+      "_anchor_phrase": "The minimum sample rate for new installations is 50 samples per second",
+      "_expected_answer": "Minimum 50 samples per second; ideal goal 100 samples per second.",
+      "_answer_type": "multi_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "50"
+        ],
+        [
+          "100"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "1e563abe-usgs-volcano-seismic#f5f2d190f9"
+      ]
+    },
+    {
+      "qid": "usgs-05",
+      "question": "How many broadband stations within 5 km of the source epicenter are needed just to locate VLP events?",
+      "_doc_id": "1e563abe-usgs-volcano-seismic",
+      "_anchor_phrase": "Locating these events requires at least three broadband stations",
+      "_expected_answer": "At least three broadband stations within 5 km of the source epicenter (preferably more).",
+      "_answer_type": "single_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "three",
+          "3"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "1e563abe-usgs-volcano-seismic#fcc61bb9a3"
+      ]
+    },
+    {
+      "qid": "usgs-06",
+      "question": "What does the abbreviation VLP stand for in this report, and what does ANSS stand for?",
+      "_doc_id": "1e563abe-usgs-volcano-seismic",
+      "_anchor_phrase": "ANSS Advanced National Seismic System GNSS Global Navigation Satellite System",
+      "_expected_answer": "VLP = very long period; ANSS = Advanced National Seismic System.",
+      "_answer_type": "multi_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "very"
+        ],
+        [
+          "advanced"
+        ],
+        [
+          "seismic"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "1e563abe-usgs-volcano-seismic#e94991883c"
+      ]
+    },
+    {
+      "qid": "usgs-07",
+      "question": "For Level 1 volcanoes, what is the ideal network's earthquake detection and crude-location magnitude threshold?",
+      "_doc_id": "1e563abe-usgs-volcano-seismic",
+      "_anchor_phrase": "For level 1 volcanoes, the ideal network would be able to detect",
+      "_expected_answer": "Detect earthquakes greater than M 1.5 and crudely locate earthquakes greater than M 3.",
+      "_answer_type": "multi_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "1.5"
+        ],
+        [
+          "3"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "1e563abe-usgs-volcano-seismic#6b81ecf197"
+      ]
+    },
+    {
+      "qid": "usgs-08",
+      "question": "What digitizer bit depth does the report recommend installing to greatly increase the seismic-energy range for on-scale recording?",
+      "_doc_id": "1e563abe-usgs-volcano-seismic",
+      "_anchor_phrase": "This problem can be mostly solved by installing modern digitizers (24+ bit)",
+      "_expected_answer": "Modern digitizers of 24+ bit.",
+      "_answer_type": "single_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "24"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "1e563abe-usgs-volcano-seismic#344dd1394e"
+      ]
+    },
+    {
+      "qid": "usgs-09",
+      "question": "What is the Scientific Investigations Report number and chapter for this seismic volcano-monitoring document?",
+      "_doc_id": "1e563abe-usgs-volcano-seismic",
+      "_anchor_phrase": "Scientific Investigations Report 2024\u20135062\u2013B",
+      "_expected_answer": "Scientific Investigations Report 2024-5062, Chapter B.",
+      "_answer_type": "single_fact",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "2024\u20135062",
+          "2024-5062",
+          "5062"
+        ],
+        [
+          "b"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "1e563abe-usgs-volcano-seismic#093d4dde44"
+      ]
+    },
+    {
+      "qid": "usgs-10",
+      "question": "How many short-period seismometer noise-floor decibel levels does this report specify for the broadband vault thermal-isolation test?",
+      "_doc_id": "",
+      "_anchor_phrase": "",
+      "_expected_answer": "Absent: the report discusses vaults that 'minimize thermal fluctuations and electronic noise' but never gives any decibel noise-floor figures or a numeric vault thermal-isolation test value.",
+      "_answer_type": "counterfactual",
+      "should_refuse": true,
+      "answer_must_mention": [],
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "usgs-11",
+      "question": "What total cost in U.S. dollars does the report estimate for deploying a Level 4 volcano seismic network?",
+      "_doc_id": "",
+      "_anchor_phrase": "",
+      "_expected_answer": "Absent: the report gives station counts and instrument recommendations but never provides any dollar cost or budget estimate for any network level (only 'cost effective' qualitative wording appears, no monetary figures).",
+      "_answer_type": "counterfactual",
+      "should_refuse": true,
+      "answer_must_mention": [],
+      "relevant_chunk_ids": []
+    },
+    {
+      "qid": "usgs-12",
+      "question": "What magnitude of dike intrusion did Donaldson and others (2017) attribute to the S-wave-splitting changes at Mount Ruapehu?",
+      "_doc_id": "",
+      "_anchor_phrase": "",
+      "_expected_answer": "Absent / conflated: the 10-km-long dike inference at Mount Ruapehu's 1998 eruption is attributed to Miller and Savage (2001) and Gerst and Savage (2004), not Donaldson and others (2017), who studied seismic velocity vs tilt at Kilauea; the question merges two unrelated studies, so the specific claim is not stated.",
+      "_answer_type": "counterfactual",
+      "should_refuse": true,
+      "answer_must_mention": [],
+      "relevant_chunk_ids": []
+    }
+  ],
+  "_resolved_at": "2026-06-15T02:57:54Z"
+}
