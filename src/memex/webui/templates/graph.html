@@ -96,7 +96,7 @@
      href="/graph/{{ document.ref.doc_id }}?group=document"
      {% if group == 'document' %}aria-current="true"{% endif %}>document</a>
   <a class="lens-opt {{ 'lens-opt-active' if group == 'citations' else '' }}"
-     href="/graph/{{ document.ref.doc_id }}?group=citations&depth={{ depth }}"
+     href="/graph/{{ document.ref.doc_id }}?group=citations&amp;depth={{ depth }}"
      {% if group == 'citations' %}aria-current="true"{% endif %}>citations</a>
 </div>
 
@@ -108,7 +108,7 @@
   <span class="cite-depth-label">depth</span>
   {% for d in range(1, 7) %}
   <a class="cite-depth-opt {{ 'cite-depth-active' if d == depth else '' }}"
-     href="/graph/{{ document.ref.doc_id }}?group=citations&depth={{ d }}"
+     href="/graph/{{ document.ref.doc_id }}?group=citations&amp;depth={{ d }}"
      {% if d == depth %}aria-current="true"{% endif %}>{{ d }}</a>
   {% endfor %}
 </div>

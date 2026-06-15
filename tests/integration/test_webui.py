@@ -1603,6 +1603,9 @@ async def test_graph_citations_lens_renders_transitive_lineage(
     # the lens toggle marks citations active + the depth selector is present
     assert "lens-opt-active" in r.text and "group=citations" in r.text
     assert "cite-depth" in r.text and "depth=1" in r.text and "depth=6" in r.text
+    # the multi-param hrefs HTML-escape the ampersand (valid HTML; no raw '&' in attributes)
+    assert "group=citations&amp;depth=" in r.text
+    assert "group=citations&depth=" not in r.text
 
 
 @pytest.mark.asyncio
