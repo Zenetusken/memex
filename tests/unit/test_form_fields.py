@@ -131,13 +131,36 @@ def test_build_multiply_synthetic_is_verbatim_span() -> None:
     assert syn.text in _W4_STEP3  # verbatim
 
 
-def test_multiply_value_verbatim_or_drop() -> None:
-    # value not actually present in the source → no synthetic (the fabrication boundary)
+def test_multiply_extract_and_build_is_verbatim() -> None:
+    # The fabrication boundary is STRUCTURAL: the value is sliced FROM the chunk text by the
+    # `$`-anchored regex, so a routed match always carries a value the doc literally states (the
+    # `value in c.text` re-check is always-true defense-in-depth, never an exercised "drop" branch).
     fields = extract_multiply_fields("Multiply the number of widgets by $77")
     assert [(d, v) for d, v, _ in fields] == [("the number of widgets", "$77")]
-    # ... but routed only when the chunk truly contains the value
     chunk = _w4_chunk("Multiply the number of widgets by $77")
-    assert build_form_field_chunk("multiply the number of widgets by", [chunk]) is not None
+    syn = build_form_field_chunk("multiply the number of widgets by", [chunk])
+    assert syn is not None and syn.text == "Multiply the number of widgets by $77"
+
+
+def test_route_multiply_no_op_on_tie() -> None:
+    # two segments with EQUAL (>=2) overlap → ambiguous → no-op (the single-dominant gate, not the
+    # >=2 floor): protects against shipping an arbitrary one of two equally-matching values.
+    fields = extract_multiply_fields(
+        "Multiply the number of widgets sold by $10 Multiply the number of widgets bought by $20"
+    )
+    assert len(fields) == 2
+    assert route_multiply_field("what is the number of widgets", fields) is None
+
+
+def test_cross_chunk_first_confident_route_wins() -> None:
+    # Documented precedence (form_fields.py): the FIRST chunk (in reranked order) that yields a
+    # confident route wins — both candidates are verbatim + verify-grounded, so order, not score,
+    # decides between two distinct form-value chunks. Both outcomes are HARD-gate-safe.
+    mult = _w4_chunk("Multiply the number of qualifying children by $2,200")
+    bullet = _chunk("• qualifying children credit, $2,200")
+    q = "qualifying children credit amount"
+    assert build_form_field_chunk(q, [mult, bullet]).chunk_id.endswith("#mult0001")
+    assert build_form_field_chunk(q, [bullet, mult]).chunk_id.endswith("#field0001")
 
 
 def test_bullet_path_unaffected_by_multiply_extension() -> None:
@@ -147,3 +170,12 @@ def test_bullet_path_unaffected_by_multiply_extension() -> None:
     )
     assert syn is not None and syn.chunk_id.endswith("#field0001")
     assert syn.text == "Standard deduction for Head of household: $23,625"
+
+
+def test_bullet_routed_but_no_multiply_falls_through_cleanly() -> None:
+    # The refactor's only behavior delta: a chunk whose bullets DON'T route now falls through to the
+    # multiply attempt on the same chunk. With no multiply line present, that fall-through is a clean
+    # no-op (it must not crash or mis-fire) — pins the dead-but-safe branch the review flagged.
+    cell = _chunk("• Single or Married filing separately, $15,750 • Head of household, $23,625")
+    # a query that overlaps no bullet label confidently AND has no multiply line → None
+    assert build_form_field_chunk("what is the catalog number", [cell]) is None
