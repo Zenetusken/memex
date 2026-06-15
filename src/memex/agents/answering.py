@@ -1468,15 +1468,17 @@ async def query_tables(state: AnswerState) -> AnswerStateUpdate:
 
 
 async def resolve_form_field(state: AnswerState) -> AnswerStateUpdate:
-    """Deterministic form-field disambiguation (Increment A, `agents/form_fields.py`).
+    """Deterministic form-field disambiguation (Increments A + D, `agents/form_fields.py`).
 
-    Runs between `query_tables` and `assess`. When a `• <label>, $<value>` form bullet list is in
-    the reranked set and the query routes confidently (token-overlap, single-dominant gate) to one
-    label, inject ONE clean synthetic `label: value` chunk so the gates see the asked value
-    unambiguously — instead of the 4B picking among adjacent distractor values in a run-on cell and
-    drafting "not available" (the measured forms false-refusal + the f1040-04 cross-doc catch).
-    Additive + verbatim-or-drop ⇒ HARD-gate-safe by construction; a deterministic no-op when no
-    bullet list / no confident route (fires on 2 chunks vault-wide, both f1040)."""
+    Runs between `query_tables` and `assess`. When the reranked set holds a form-value idiom and the
+    query routes confidently (token-overlap, single-dominant gate) to one match, inject ONE clean
+    synthetic chunk so the gates see the asked value unambiguously — instead of the 4B picking among
+    adjacent distractor values in a run-on cell and drafting "not available" (the measured forms
+    false-refusal + the f1040-04 cross-doc catch). Two idioms: `• <label>, $<value>` bullets
+    (Increment A → `label: value`) and `Multiply <desc> by $<value>` worksheet lines (Increment D →
+    the verbatim span; the W-4 Step-3 per-dependent credits). Additive + verbatim-or-drop ⇒
+    HARD-gate-safe by construction; a deterministic no-op when no idiom matches / no confident route
+    (fires on 3 chunks vault-wide: 2 f1040 bullet cells + 1 W-4 Step-3 multiply cell)."""
     from memex.agents.form_fields import build_form_field_chunk
 
     if not state.form_field_resolver_enabled or not state.reranked:
