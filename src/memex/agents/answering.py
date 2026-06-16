@@ -2403,7 +2403,11 @@ async def _provenance_scope_violation(state: AnswerState) -> str | None:
     stance). ADVISORY layer, post-verify — can only narrow, never admit.
     """
     from memex.core.config import get_settings
-    from memex.core.text import extract_provenance_source, provenance_tokens_match
+    from memex.core.text import (
+        extract_provenance_source,
+        provenance_tokens_match,
+        strip_content_hash,
+    )
 
     extracted = extract_provenance_source(state.query)
     if extracted is None or state.draft is None:
@@ -2421,7 +2425,8 @@ async def _provenance_scope_violation(state: AnswerState) -> str | None:
     if not cited:
         return None
     for ch in cited:
-        blob = " ".join([ch.document_id, ch.document_title, *ch.heading_path])
+        # strip the content-hash prefix so a numeric token ("941") can't collide with the doc_id hash
+        blob = " ".join([strip_content_hash(ch.document_id), ch.document_title, *ch.heading_path])
         if provenance_tokens_match(tokens, blob):
             return None  # the citation itself carries the named source
     import sqlite3
@@ -2443,7 +2448,7 @@ async def _provenance_scope_violation(state: AnswerState) -> str | None:
     named = [
         title or doc_id
         for doc_id, title in identities
-        if provenance_tokens_match(tokens, f"{doc_id} {title}")
+        if provenance_tokens_match(tokens, f"{strip_content_hash(doc_id)} {title}")
     ]
     if not named:
         return None

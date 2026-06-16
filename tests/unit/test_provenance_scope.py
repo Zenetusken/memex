@@ -162,21 +162,36 @@ class TestExtractDocNameReference:
         assert got == ("the developer guidelines", ["developer", "guidelines"])
 
     def test_comparison_cue_fails_open(self) -> None:
+        # the comparison-CUE guard fires on a SINGLE-doc-ref comparison (the >=2-refs guard can't):
+        # "differ"/"versus"/"relative to" name a doc to CONTRAST, not to scope to.
         for q in (
-            "Compare Form 1040 and Schedule 8812 child tax credit.",
-            "How does Form 1040 differ from Schedule 8812?",
+            "How does Form 1040 differ from the prior year?",
+            "Form 1040 versus the worksheet — which applies?",
+            "the deduction relative to Form 1040",
         ):
             assert extract_provenance_source(q) is None, q
+        # a TWO-ref comparison fails open via the distinct-refs guard (separate mechanism, below)
+        assert extract_provenance_source("Compare Form 1040 and Schedule 8812.") is None
 
     def test_two_distinct_doc_refs_fail_open(self) -> None:
-        # spans two docs → ambiguous which is THE source → no-op
+        # spans two docs → ambiguous which is THE source → no-op (the >=2-distinct-refs guard, NOT
+        # the comparison cue — "relate"/"differ" need not appear).
         assert extract_provenance_source("How does Schedule 8812 relate to Form 8995?") is None
+
+    def test_year_id_fails_open(self) -> None:
+        # a bare YEAR id is NON-scoping and substring-matches half the vault → dropped (the same
+        # `_PROVENANCE_YEAR_RE` guard the leading clause applies; the embedded path must match it).
+        assert extract_provenance_source("What were the main findings in publication 2024?") is None
+        assert extract_provenance_source("Did Form 2025 change anything?") is None
 
     def test_topic_frame_and_bare_form_fail_open(self) -> None:
         # no doc-class-noun + digit-id → no embedded match (a topic frame is not provenance)
         assert extract_provenance_source("In the Linux octal permission system, what is 755?") is None
         # "form" with no digit-bearing id → no-op (the specificity rule)
         assert extract_provenance_source("How do I fill out the form correctly?") is None
+        # common-English class-noun + a NON-id number → the <3-char/token filters drop it
+        assert extract_provenance_source("I need to fill out form 3 times this week.") is None
+        assert extract_provenance_source("Let's schedule 2 meetings about it.") is None
 
     def test_short_id_dropped(self) -> None:
         # a <3-char id ("17") is too unspecific to substring-adjudicate → no-op
@@ -484,3 +499,31 @@ async def test_f8812_legit_query_cited_to_schedule_passes(monkeypatch: pytest.Mo
     _patch_store(monkeypatch, [_F1040, _F1040S8])
     reason = await _provenance_scope_violation(_f8812_state(_F1040S8))
     assert reason is None
+
+
+@pytest.mark.asyncio
+async def test_numeric_token_does_not_collide_with_doc_id_hash(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A numeric form-id token ("941") must NOT false-fire by substring-matching the random sha8
+    prefix of an UNRELATED doc_id ("941" lives inside "2941523b-lib"). strip_content_hash drops the
+    hash so only the stem/title carry identity. WITHOUT the strip this REFUSES a correct answer."""
+    cited = ("abcd1234-employer-tax-guide", "Employer Tax Guide")  # the doc the answer came from
+    collider = ("2941523b-lib", "cli/src/lib.rs")  # an unrelated doc whose HASH contains "941"
+    _patch_store(monkeypatch, [cited, collider])
+    doc_id, title = cited
+    chunk = Chunk(
+        chunk_id=f"{doc_id}#c", document_id=doc_id, document_title=title,
+        text="Employer payroll taxes are reported quarterly.", heading_path=[],
+    )
+    state = AnswerState(
+        query="What does Form 941 report for employer taxes?",
+        reranked=[chunk],
+        draft=DraftAnswer(
+            summary="Form 941 reports employer payroll taxes quarterly.",
+            claims=[CitedClaim(
+                claim="Employer payroll taxes are reported quarterly.",
+                source_chunk_id=f"{doc_id}#c", confidence="high",
+            )],
+        ),
+        verification=VerificationResult(grounded=[0], ungrounded=[]),
+    )
+    assert await _provenance_scope_violation(state) is None  # no hash-collision false-fire

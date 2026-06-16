@@ -424,7 +424,8 @@ _PROVENANCE_DOC_NAME_RE = re.compile(
 )
 # A comparison query names a doc to CONTRAST, not to scope to — no provenance adjudication.
 _COMPARISON_CUE_RE = re.compile(
-    r"\b(?:compared?|compares|comparing|versus|vs\.?|difference between|compared to|par rapport)\b",
+    r"\b(?:compared?|compares|comparing|differs?|versus|vs\.?|difference between|"
+    r"compared to|relative to|as opposed to|par rapport)\b",
     flags=re.IGNORECASE,
 )
 
@@ -465,7 +466,9 @@ def _extract_doc_name_reference(query: str) -> tuple[str, list[str]] | None:
     query (the cross-doc-scope fix). Conservative: >= 2 DISTINCT doc references, or a comparison cue
     ("compare X and Y"), yield None — the query spans docs, not scopes to one. Only the IDENTIFIER is
     a usable token (the class noun is dropped; it would false-match a cited chunk citing another
-    "Schedule N"); the identifier must be >= 3 chars (drops the unspecific "Pub 17" short-id surface)."""
+    "Schedule N"); the identifier must be >= 3 chars (drops the unspecific "Pub 17" short-id surface)
+    and must NOT be a bare YEAR — "publication 2024" / "schedule 2024" is a NON-scoping shape and a
+    year substring-matches half the vault (the same `_PROVENANCE_YEAR_RE` guard the leading clause applies)."""
     matches = list(_PROVENANCE_DOC_NAME_RE.finditer(query))
     if not matches:
         return None
@@ -476,7 +479,10 @@ def _extract_doc_name_reference(query: str) -> tuple[str, list[str]] | None:
     m = matches[0]
     usable = [
         t for t in _PROVENANCE_TOKEN_RE.findall(m.group("id").lower())
-        if t not in _PROVENANCE_STOP and len(t) >= 3 and any(ch.isdigit() for ch in t)
+        if t not in _PROVENANCE_STOP
+        and len(t) >= 3
+        and any(ch.isdigit() for ch in t)
+        and not _PROVENANCE_YEAR_RE.match(t)
     ]
     if not usable:
         return None
@@ -503,10 +509,24 @@ def _fold_identity(s: str) -> str:
     return _IDENT_NORM_RE.sub("", folded)
 
 
+_CONTENT_HASH_PREFIX_RE = re.compile(r"^[0-9a-f]{8}-")
+
+
+def strip_content_hash(doc_id: str) -> str:
+    """The identity-bearing part of a content-addressed `<sha8>-<stem>` doc_id — drop the random
+    8-hex prefix. Without this, a short numeric provenance token ("941") substring-COLLIDES with the
+    random hash inside an UNRELATED doc_id (measured: 29% of 3-digit numbers hit ≥1 vault doc's hash,
+    e.g. "941" in "2941523b-lib") → a spurious provenance-scope refusal. The stem ("f1040" → "1040")
+    and the title carry the REAL identity; the hash never should. A doc_id with no sha8 prefix is
+    returned unchanged."""
+    return _CONTENT_HASH_PREFIX_RE.sub("", doc_id)
+
+
 def provenance_tokens_match(tokens: list[str], identity_blob: str) -> bool:
     """Whether ANY usable source token appears in *identity_blob* after accent folding
     and separator normalization. Substring direction: token-in-blob (a doc slug
-    concatenates words)."""
+    concatenates words). Callers should pass `strip_content_hash(doc_id)` (not the raw doc_id)
+    so a numeric token can't collide with the random sha8 prefix."""
     blob = _fold_identity(identity_blob)
     return any(_fold_identity(t) in blob for t in tokens)
 
