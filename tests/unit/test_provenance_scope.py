@@ -136,6 +136,53 @@ class TestExtractProvenanceSource:
         assert "développement" in got[1] and "directives" in got[1]
 
 
+class TestExtractDocNameReference:
+    """The EMBEDDED doc-class-noun recognizer (the cross-doc-scope fix): a doc-class noun
+    + digit-bearing identifier is an adjudicable source ANYWHERE in the query."""
+
+    def test_embedded_schedule_reference(self) -> None:
+        # the held-out f8812-07 case: embedded "does the 2025 Schedule 8812 list" — the leading
+        # "according to" clause does NOT match, the embedded recognizer does.
+        got = extract_provenance_source(
+            "What standard deduction amount does the 2025 Schedule 8812 list for head of household?"
+        )
+        assert got == ("Schedule 8812", ["8812"])  # class noun dropped; specific id kept
+
+    def test_embedded_on_form_and_w_dash_number(self) -> None:
+        assert extract_provenance_source("On the 2025 Schedule 8812, what is the credit?") == (
+            "Schedule 8812", ["8812"])
+        assert extract_provenance_source("What does Form W-4 Step 3 say?") == ("Form W-4", ["w-4"])
+        assert extract_provenance_source("the standard deduction on Form 1040 for single filers") == (
+            "Form 1040", ["1040"])
+
+    def test_leading_clause_takes_precedence(self) -> None:
+        # when BOTH a leading clause and an embedded ref are present, the leading wins (byte-identical
+        # to the original behavior wherever the leading clause matched).
+        got = extract_provenance_source("According to the developer guidelines, see Form 1040.")
+        assert got == ("the developer guidelines", ["developer", "guidelines"])
+
+    def test_comparison_cue_fails_open(self) -> None:
+        for q in (
+            "Compare Form 1040 and Schedule 8812 child tax credit.",
+            "How does Form 1040 differ from Schedule 8812?",
+        ):
+            assert extract_provenance_source(q) is None, q
+
+    def test_two_distinct_doc_refs_fail_open(self) -> None:
+        # spans two docs → ambiguous which is THE source → no-op
+        assert extract_provenance_source("How does Schedule 8812 relate to Form 8995?") is None
+
+    def test_topic_frame_and_bare_form_fail_open(self) -> None:
+        # no doc-class-noun + digit-id → no embedded match (a topic frame is not provenance)
+        assert extract_provenance_source("In the Linux octal permission system, what is 755?") is None
+        # "form" with no digit-bearing id → no-op (the specificity rule)
+        assert extract_provenance_source("How do I fill out the form correctly?") is None
+
+    def test_short_id_dropped(self) -> None:
+        # a <3-char id ("17") is too unspecific to substring-adjudicate → no-op
+        assert extract_provenance_source("What does Pub 17 say about deductions?") is None
+
+
 # ---------------------------------------------------------------- matching
 
 
@@ -373,3 +420,67 @@ async def test_node_kill_switch_skips_backstop(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr("memex.agents.answering.complete_structured", _responsive)
     out = await assess_relevance(_tg13_state(_LOG_LAYER_DOC, ["const _DEFAULT_MAX_LEN"]))
     assert out["relevance"].responsive is True
+
+
+# --------------------------------- the held-out f8812-07 cross-doc misattribution (audit-19+)
+
+_F1040 = ("3d31c226-f1040", "f1040")
+_F1040S8 = ("6936462d-f1040s8", "Schedule 8812 (Form 1040)")  # RETITLED (enabler A)
+_F1040S8_SLUG = ("6936462d-f1040s8", "f1040s8")  # the pre-retitle slug
+
+
+def _f8812_state(cited_doc: tuple[str, str]) -> AnswerState:
+    """The held-out leak: the 1040's HoH standard deduction ($23,625) cited as Schedule 8812's
+    (the synthetic chunk the bullet resolver injects, doc=1040), for an EMBEDDED doc-name query."""
+    doc_id, title = cited_doc
+    chunk = Chunk(
+        chunk_id=f"{doc_id}#field0001",
+        document_id=doc_id,
+        document_title=title,
+        text="Standard deduction for Head of household: $23,625",
+        heading_path=[],
+    )
+    return AnswerState(
+        query="What standard deduction amount does the 2025 Schedule 8812 list for head of household filers?",
+        reranked=[chunk],
+        draft=DraftAnswer(
+            summary="The 2025 Schedule 8812 lists a standard deduction of $23,625 for head of household.",
+            claims=[
+                CitedClaim(
+                    claim="Schedule 8812 lists a standard deduction of $23,625 for head of household filers.",
+                    source_chunk_id=f"{doc_id}#field0001",
+                    confidence="high",
+                )
+            ],
+        ),
+        verification=VerificationResult(grounded=[0], ungrounded=[]),
+    )
+
+
+@pytest.mark.asyncio
+async def test_f8812_cross_doc_misattribution_fires(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The robust layer: an EMBEDDED "Schedule 8812" reference whose grounded claim is cited to the
+    1040 (a DIFFERENT vault doc) → violation. Needs BOTH enablers: the broadened extractor (catches
+    the embedded ref) AND the retitle (so 'Schedule 8812' adjudicates to f1040s8)."""
+    _patch_store(monkeypatch, [_F1040, _F1040S8])
+    reason = await _provenance_scope_violation(_f8812_state(_F1040))
+    assert reason is not None
+    assert "Schedule 8812" in reason
+
+
+@pytest.mark.asyncio
+async def test_f8812_slug_title_fails_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    """WITHOUT the retitle (slug 'f1040s8'), 'Schedule 8812' matches no vault identity → no verdict.
+    This pins WHY the corpus-side retitle is the enabling change, not optional polish."""
+    _patch_store(monkeypatch, [_F1040, _F1040S8_SLUG])
+    reason = await _provenance_scope_violation(_f8812_state(_F1040))
+    assert reason is None
+
+
+@pytest.mark.asyncio
+async def test_f8812_legit_query_cited_to_schedule_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A genuine Schedule 8812 answer (cited to an f1040s8 chunk, whose identity now carries '8812')
+    is true provenance → no verdict. This is why the retitle does NOT over-refuse f8812-01..06."""
+    _patch_store(monkeypatch, [_F1040, _F1040S8])
+    reason = await _provenance_scope_violation(_f8812_state(_F1040S8))
+    assert reason is None

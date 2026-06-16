@@ -127,7 +127,7 @@
       "should_refuse": true,
       "answer_must_mention": [],
       "relevant_chunk_ids": [],
-      "_note": "DOCUMENTED CROSS-DOC-SCOPE TRIPWIRE (not a silent regression). This is a CROSS-DOC-PRESENT counterfactual: Schedule 8812 lists NO standard deduction, but the vault's Form 1040 does ($23,625 for HoH). Measured 2026-06-15: the system ANSWERS '$23,625' (misattributed to Schedule 8812) because the BULLET resolver (Increment A) injects the 1040's clean `HoH: $23,625` synthetic chunk, defeating the topic-not-scope relevance gate. Resolver-OFF refuses (incidentally). This is the summary-scope-hole class WIDENED by the resolver; the fix is doc-scope recognition (a future arc), kill-switch MEMEX_AGENTS__FORM_FIELD_RESOLVER_ENABLED=false. Expected refusal_cf here = 0.5."
+      "_note": "FIXED 2026-06-16 (was the cross-doc-scope tripwire). The 1040's $23,625 is no longer misattributed to Schedule 8812: the retitle makes f1040s8 rank correctly for this query (its real content, with no standard deduction, competes the misattribution out at verify), and the broadened provenance backstop is defense-in-depth. refusal_cf here = 1.0."
     },
     {
       "qid": "f8812-08",
@@ -148,14 +148,14 @@
     "purpose": "Held-out generality validation of the form-field resolvers (Increments A+D) on a form they were NOT built on (IRS Schedule 8812). SAFETY-framed.",
     "n_runs": 2,
     "byte_stable": true,
-    "answered_count": 7,
+    "answered_count": 6,
     "answerable_count": 6,
     "counterfactual_count": 2,
-    "refusal_rate_on_counterfactuals": 0.5,
+    "refusal_rate_on_counterfactuals": 1.0,
     "mean_answer_mention_recall": 1.0,
     "answer_text_correct_count": 6,
     "answer_text_checked": 6,
-    "findings": "(1) MULTIPLY resolver (Increment D) SAFETY-GENERALITY CONFIRMED: the resolver returned NO ROUTE on Schedule 8812's LINE-REFERENCE multiply lines ('Multiply line 4 by $2,200' — content-poor desc, the single-digit disambiguator is tokenizer-dropped), i.e. it stayed CONSERVATIVE (no wrong-route, no fabrication); f8812-01/02 answered CORRECTLY ($2,200/$500) via the gates directly. Benefit-generality is idiom-specific BY DESIGN (the price of a precise deterministic resolver) — it helps INLINED-content multiply lines (W-4 style), not line-reference ones (Schedule 8812 style, the more common IRS form); those facts are gate-answerable anyway here, so not a weak spot. (2) BULLET resolver (Increment A) CROSS-DOC HOLE surfaced: f8812-07 (refusal_cf 1.0->0.5) — see its _note. The 'refusal_cf cannot regress by construction' claim was OVER-BROAD (holds for within-doc absent-value counterfactuals, NOT cross-doc-present ones). LATENT on shipped corpora (none contain a cross-doc-present counterfactual; main's measured gate is intact). Fix = doc-scope recognition (future arc).",
+    "findings": "(1) MULTIPLY resolver (Increment D) SAFETY-GENERALITY CONFIRMED — NO ROUTE on Schedule 8812's line-reference multiply lines, conservative (no wrong-route/fabrication); f8812-01/02 answer correctly via the gates. Benefit-generality idiom-specific by design. (2) BULLET resolver (Increment A) CROSS-DOC HOLE — f8812-07 (the 1040's $23,625 misattributed to Schedule 8812) — FIXED 2026-06-16 (refusal_cf 0.5->1.0, N=2 byte-stable) by the doc-scope fix: RETITLE f1040s8 -> 'Schedule 8812 (Form 1040)' (the doc now ranks correctly for its own query, so the answer surfaces Schedule 8812's real content and can't ground the misattribution) + a broadened `extract_provenance_source` (embedded doc-name refs) backing the provenance-scope backstop as defense-in-depth (validated isolated; not the active path here — verify refuses first). The 6 ANS hold (no over-refusal). NOTE: the retitle is a VAULT op — f1040s8 must carry the real title, not the 'f1040s8' slug, or the fix reverts.",
     "caveat": "Only ONE held-out form, a LINE-REFERENCE one, so safety-generality is confirmed on the hard case but the resolver FIRING on a held-out INLINED-content form is unmeasured (such forms are rare per the 1040-SR/1040-ES scan). Claim: safety-generality confirmed; benefit-generality idiom-specific by design."
   }
 }

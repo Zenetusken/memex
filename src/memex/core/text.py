@@ -410,15 +410,31 @@ _PROVENANCE_YEAR_RE = re.compile(r"^(?:19|20)\d{2}$")
 _IDENT_NORM_RE = re.compile(r"[-_\s./|—–]")
 _DIACRITICS_RE = re.compile("[\\u0300-\\u036f]")  # NFD combining marks
 
+# Embedded DOC-NAME reference (audit-19 follow-up, the cross-doc-scope fix). Unlike the leading
+# "according to X," clause, a doc-CLASS noun + a digit-bearing IDENTIFIER ("Schedule 8812", "Form
+# 1040", "Pub 501", "Form W-4") is UNAMBIGUOUSLY a document reference ANYWHERE in the query — it is
+# not a topic frame ("In the Linux permission system…"), so it is safe to detect mid-sentence ("what
+# does the 2025 Schedule 8812 list…", "on Form 1040…"). The captured `id` MUST carry a digit (the
+# #256 single-token-specificity rule — every real form id has one; a bare "Form A" no-ops). Only the
+# IDENTIFIER becomes a usable token (the generic class noun "schedule"/"form" names no specific doc
+# and would false-MATCH a cited chunk whose heading mentions another "Schedule N").
+_PROVENANCE_DOC_NAME_RE = re.compile(
+    r"\b(?:form|schedule|publication|pub|formulaire|annexe)\s+(?:no\.?\s*)?(?P<id>[a-z]{0,3}-?\d[\w-]*)\b",
+    flags=re.IGNORECASE,
+)
+# A comparison query names a doc to CONTRAST, not to scope to — no provenance adjudication.
+_COMPARISON_CUE_RE = re.compile(
+    r"\b(?:compared?|compares|comparing|versus|vs\.?|difference between|compared to|par rapport)\b",
+    flags=re.IGNORECASE,
+)
 
-def extract_provenance_source(query: str) -> tuple[str, list[str]] | None:
-    """The (raw phrase, usable identity tokens) of a leading provenance clause, or
-    ``None`` when the query has no adjudicable named source. Returns ``None`` for
-    artifact-noun references, and an empty token list never escapes (treated as None).
-    A LONE usable token adjudicates only when it carries a digit (the "800-207"/"w-9"
-    doc-number shape) — the #256 single-token specificity gate: every measured legit
-    source is multi-token or a doc number, while lone alphabetic tokens ("guide",
-    "report") are the probed false-fire surface."""
+
+def _extract_leading_provenance(query: str) -> tuple[str, list[str]] | None:
+    """The (raw phrase, usable identity tokens) of a LEADING "according to X," clause, or None.
+
+    The original audit-18 extractor, UNCHANGED — a tight leading-clause match. Returns ``None`` for
+    artifact-noun references; an empty token list never escapes; a LONE usable token adjudicates only
+    when it carries a digit (the "800-207"/"w-9" doc-number shape, the #256 specificity gate)."""
     m = _PROVENANCE_SOURCE_RE.match(query.strip())
     if not m:
         return None
@@ -440,6 +456,42 @@ def extract_provenance_source(query: str) -> tuple[str, list[str]] | None:
     if len(usable) == 1 and not any(ch.isdigit() for ch in usable[0]):
         return None
     return phrase, usable
+
+
+def _extract_doc_name_reference(query: str) -> tuple[str, list[str]] | None:
+    """An EMBEDDED doc-class-noun reference ("Schedule 8812", "Form 1040"), or None.
+
+    A doc-class noun + digit-bearing identifier is unambiguously a document reference anywhere in the
+    query (the cross-doc-scope fix). Conservative: >= 2 DISTINCT doc references, or a comparison cue
+    ("compare X and Y"), yield None — the query spans docs, not scopes to one. Only the IDENTIFIER is
+    a usable token (the class noun is dropped; it would false-match a cited chunk citing another
+    "Schedule N"); the identifier must be >= 3 chars (drops the unspecific "Pub 17" short-id surface)."""
+    matches = list(_PROVENANCE_DOC_NAME_RE.finditer(query))
+    if not matches:
+        return None
+    if len({_fold_identity(m.group("id")) for m in matches}) >= 2:
+        return None  # >= 2 distinct doc references → ambiguous which is the source
+    if _COMPARISON_CUE_RE.search(query):
+        return None
+    m = matches[0]
+    usable = [
+        t for t in _PROVENANCE_TOKEN_RE.findall(m.group("id").lower())
+        if t not in _PROVENANCE_STOP and len(t) >= 3 and any(ch.isdigit() for ch in t)
+    ]
+    if not usable:
+        return None
+    return m.group(0).strip(), usable
+
+
+def extract_provenance_source(query: str) -> tuple[str, list[str]] | None:
+    """The (raw phrase, usable identity tokens) of a named source, or ``None``.
+
+    Two recognizers: (1) a LEADING "according to|per|selon|d'après X," clause (audit-18, unchanged);
+    (2) an EMBEDDED doc-class-noun reference ("…the 2025 Schedule 8812…", the cross-doc-scope fix).
+    The leading clause takes precedence; the embedded recognizer is a fallback so existing behavior is
+    byte-identical wherever (1) matches. The CALLER (`agents/answering.py`) fires the refusal only when
+    the named source matches ≥ 1 vault document identity AND no CITED chunk carries it."""
+    return _extract_leading_provenance(query) or _extract_doc_name_reference(query)
 
 
 def _fold_identity(s: str) -> str:
