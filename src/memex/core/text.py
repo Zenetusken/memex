@@ -526,7 +526,16 @@ def provenance_tokens_match(tokens: list[str], identity_blob: str) -> bool:
     """Whether ANY usable source token appears in *identity_blob* after accent folding
     and separator normalization. Substring direction: token-in-blob (a doc slug
     concatenates words). Callers should pass `strip_content_hash(doc_id)` (not the raw doc_id)
-    so a numeric token can't collide with the random sha8 prefix."""
+    so a numeric token can't collide with the random sha8 prefix.
+
+    KNOWN LIMITATION (not cleanly fixable): the folded SUBSTRING match is load-bearing for multi-part
+    doc numbers ("800-207" → "nist-sp-800-207"), so a short numeric token still matches a doc whose
+    stem/title legitimately CONTAINS that number as a CROSS-REFERENCE — "1040" matches Schedule 8812
+    (stem "f1040s8", title "...(Form 1040)") because it really is a 1040 schedule. This is harmless
+    AS LONG AS the doc that IS Form 1040 keeps "1040" in its OWN identity (so a Form-1040 answer
+    self-protects via the cited-chunk check). RETITLE POLICY: never retitle a doc to a name that
+    DROPS its own identifier — that is the only way this cross-reference match becomes a false
+    refusal (a token that misses its home doc + hits a cross-referencing sibling)."""
     blob = _fold_identity(identity_blob)
     return any(_fold_identity(t) in blob for t in tokens)
 
