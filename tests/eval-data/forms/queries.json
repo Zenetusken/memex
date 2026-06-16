@@ -17,22 +17,21 @@
   "_baseline_answer_text_2026_06_15": {
     "stack": "Qwen3.5-4B-AWQ orchestrator (ADR-0015) + EmbeddingGemma-300M (native prompts) + bge-reranker-v2-m3 (cpu, device-pinned), co_residence_mode=manual",
     "purpose": "First REAL-WORLD multi-form answer-eval corpus (IRS Form 1040 [2025] + Form W-4 [2026] — public-domain US-gov). Extends the forms category beyond forms-w9 with dense numbered-line / worksheet / table layouts. Multi-doc: tests form-field retrieval + cross-doc/cross-year disambiguation.",
-    "answered_count": 14,
+    "answered_count": 15,
     "answerable_count": 18,
     "refusal_rate_on_counterfactuals": 1.0,
-    "answer_text_checked": 14,
-    "answer_text_correct_count": 14,
+    "answer_text_checked": 15,
+    "answer_text_correct_count": 15,
     "mean_answer_mention_recall": 1.0,
     "n_runs": 2,
     "byte_stable": true,
     "false_refusals": [
       "f1040-05",
       "f1040-06",
-      "f1040-07",
       "f1040-09"
     ],
     "answer_text_failures": [],
-    "notes": "POST Increment D (the churn-free `Multiply <desc> by $N` resolver extension to `agents/form_fields.py`, default-ON). Increment A (the `• label, $value` bullet resolver) fixed f1040-03/04; Increment D adds the IRS-worksheet `Multiply ... by $N` idiom (W-4 Step 3), routing fw4-01 ($2,200 / qualifying children) and fw4-02 ($500 / other dependents) to a verbatim synthetic chunk. RESULT (forms N=2 byte-stable): answered 12->14, refusal_cf=1.0, amr=1.0, atc=14/14, ZERO regressions (all 12 previously-answered held). This is the ADDITIVE counterpart to the index-time form linearizer (Increment C), which was BUILT then REVERTED as a measured negative (net -1) because re-rendering the chunking body churns retrieval; an additive synthetic-chunk injection cannot. Blast radius: bullets fire on 2 f1040 cells, multiply on 1 W-4 Step-3 cell (3 chunks vault-wide). HARD-gate-safe by construction (additive + verbatim-or-drop; verify still grounds; zero-grounded refuses). RESIDUAL = 4 false-refusals (f1040-05 born-1961 line-item, f1040-06 $3 campaign checkbox, f1040-07 Form-8995 line-ref, f1040-09 Cat.No. truncation) — narrative/truncation patterns the additive resolver does not target; documented defer. Adversarially reviewed (3-lens workflow): HARD-gate-safety clean; the general-pattern + reranked-order properties are gate-safe documented tradeoffs."
+    "notes": "POST Increment D (the churn-free `Multiply <desc> by $N` resolver extension to `agents/form_fields.py`, default-ON). Increment A (the `• label, $value` bullet resolver) fixed f1040-03/04; Increment D adds the IRS-worksheet `Multiply ... by $N` idiom (W-4 Step 3), routing fw4-01 ($2,200 / qualifying children) and fw4-02 ($500 / other dependents) to a verbatim synthetic chunk. RESULT (forms N=2 byte-stable): answered 12->14, refusal_cf=1.0, amr=1.0, atc=14/14, ZERO regressions (all 12 previously-answered held). This is the ADDITIVE counterpart to the index-time form linearizer (Increment C), which was BUILT then REVERTED as a measured negative (net -1) because re-rendering the chunking body churns retrieval; an additive synthetic-chunk injection cannot. Blast radius: bullets fire on 2 f1040 cells, multiply on 1 W-4 Step-3 cell (3 chunks vault-wide). HARD-gate-safe by construction (additive + verbatim-or-drop; verify still grounds; zero-grounded refuses). RESIDUAL = 4 false-refusals (f1040-05 born-1961 line-item, f1040-06 $3 campaign checkbox, f1040-07 Form-8995 line-ref, f1040-09 Cat.No. truncation) — narrative/truncation patterns the additive resolver does not target; documented defer. Adversarially reviewed (3-lens workflow): HARD-gate-safety clean; the general-pattern + reranked-order properties are gate-safe documented tradeoffs. | UPDATE 2026-06-16: answered 14->15 (f1040-07 'Form 8995' flipped refuse->answer, amr=1.0, refusal_cf=1.0). NOT a code change: this session's held-out-validation ingest (Schedule 8812 added to the vault) shifted whole-vault retrieval for the forms queries. Residual false-refusals now 3 (f1040-05/06/09)."
   },
   "queries": [
     {
