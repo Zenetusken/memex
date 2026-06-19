@@ -493,3 +493,14 @@ def test_config_flag_default_on() -> None:
     from memex.core.config import AgentsSettings
 
     assert AgentsSettings().artifact_scope_enabled is True
+
+
+def test_title_overlap_folds_diacritics() -> None:
+    """An accented FR qualifier ('réseau', kept by atomise) must match the ASCII-folded doc-id slug
+    ('cr350-reseau') the title is built from — else the single-token gate / sibling expansion mis-fire."""
+    from memex.agents.artifact_scope import _title_overlap
+
+    assert _title_overlap(frozenset({"réseau"}), "cr350-diagramme-reseau")
+    assert _title_overlap(frozenset({"schéma"}), "cr350-schema-de-securite")
+    assert _title_overlap(frozenset({"reseau"}), "Réseau de campus")  # reverse: ASCII query, accented title
+    assert not _title_overlap(frozenset({"coupe"}), "cr350-reseau")  # genuine non-match still false

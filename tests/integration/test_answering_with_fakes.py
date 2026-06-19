@@ -2294,6 +2294,52 @@ async def test_retarget_kill_switch(monkeypatch: pytest.MonkeyPatch) -> None:
         set_settings(MemexSettings())
 
 
+async def test_retarget_respects_numeric_backstop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The retarget hole (audit): a fabricated cross-cell aggregate the BATCH verify rejects (so the
+    inline numeric backstop, which scans only the grounded set, never sees it → eligible) that the
+    1×1 retarget probe then re-grounds (the greedy mint) must NOT be promoted — the deterministic
+    backstop is re-applied at the promotion point. WITHOUT the fix this would answer the fabrication."""
+    table = Chunk(
+        chunk_id="d#tbl", document_id="d", document_title="D",
+        text="| Name | Amount |\n|---|---|\n| A | 1,000,000 |\n| B | 2,000,000 |",
+    )
+    state = {"verify": 0}
+
+    async def _hybrid(query: str, k: int = 50) -> list[Chunk]:
+        return [table]
+
+    async def _rerank(query: str, candidates: list[Chunk], top_k: int = 10) -> list[Chunk]:
+        return list(candidates[:top_k])
+
+    fab = "The total is 1,000,000 + 2,000,000 + 3,000,000."
+
+    async def fake_call(*, prompt: object, schema: type, **_kw: object) -> tuple[object, int]:
+        name = schema.__name__
+        if name == "SufficiencyAssessment":
+            return SufficiencyAssessment(sufficient=True, reason="ok"), 3
+        if name == "DraftAnswer":
+            return DraftAnswer(
+                summary=fab,
+                claims=[CitedClaim(claim=fab, source_chunk_id="d#tbl", confidence="high")],
+            ), 5
+        if name == "VerificationResult":
+            state["verify"] += 1
+            if state["verify"] == 1:
+                return schema(grounded=[], ungrounded=[0]), 4  # BATCH rejects → eligible, empty reason
+            return schema(grounded=[0], ungrounded=[]), 4  # the 1×1 probe re-grounds (the mint)
+        if name == "RelevanceAssessment":
+            return RelevanceAssessment(responsive=True, reason="on topic"), 2
+        raise AssertionError(f"unexpected schema {name}")
+
+    monkeypatch.setattr("memex.agents.answering.hybrid_search", _hybrid)
+    monkeypatch.setattr("memex.agents.answering.cross_encoder_rerank", _rerank)
+    monkeypatch.setattr("memex.agents.answering.complete_structured", fake_call)
+    monkeypatch.delenv("MEMEX_AGENTS__CITATION_RETARGET_ENABLED", raising=False)
+    resp = await answer_query("What is the total?", max_regenerate_attempts=0)
+    assert resp.answered is False  # backstop re-check blocked the retarget promotion of the sum
+    assert state["verify"] >= 2  # the probe DID run (so this exercises the re-check, not eligibility)
+
+
 # ---- M3: relevance world-knowledge override (audit-15) ----
 
 

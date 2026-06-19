@@ -34,6 +34,7 @@ answer-vs-refuse.
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
@@ -277,11 +278,19 @@ def detect_artifact_reference(query: str) -> ArtifactReference | None:
 _TITLE_SPLIT = re.compile(r"[^0-9a-zàâäçéèêëîïôöùûüÿœæ]+")
 
 
+def _strip_accents(s: str) -> str:
+    """NFD diacritic fold — so a French qualifier atom (`atomise` keeps accents: 'réseau') matches the
+    ASCII-folded doc-id SLUG ('cr350-reseau') the title is built from. Without this, an accented
+    single-token FR qualifier yields an empty `title_hit` → the single-token-specificity gate / the
+    sibling-by-title expansion silently mis-fire (a #256 cross-doc misattribution or a false-refuse)."""
+    return "".join(c for c in unicodedata.normalize("NFD", s) if not unicodedata.combining(c))
+
+
 def _title_overlap(qualifier_tokens: frozenset[str], title: str) -> bool:
     """True iff any qualifier atom appears as a token of the document title
     (tokenised the same atomic way — splits the doc-id slug + diacritics)."""
-    title_atoms = {t for t in _TITLE_SPLIT.split(title.lower()) if t}
-    return bool(qualifier_tokens & title_atoms)
+    title_atoms = {_strip_accents(t) for t in _TITLE_SPLIT.split(title.lower()) if t}
+    return bool({_strip_accents(q) for q in qualifier_tokens} & title_atoms)
 
 
 async def resolve_scope(

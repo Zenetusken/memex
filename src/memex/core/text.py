@@ -419,7 +419,9 @@ _DIACRITICS_RE = re.compile("[\\u0300-\\u036f]")  # NFD combining marks
 # IDENTIFIER becomes a usable token (the generic class noun "schedule"/"form" names no specific doc
 # and would false-MATCH a cited chunk whose heading mentions another "Schedule N").
 _PROVENANCE_DOC_NAME_RE = re.compile(
-    r"\b(?:form|schedule|publication|pub|formulaire|annexe)\s+(?:no\.?\s*)?(?P<id>[a-z]{0,3}-?\d[\w-]*)\b",
+    # "pub" alone is dropped: it collides with the pub/bar establishment sense ("pub 500 records"),
+    # a false-fire surface; "publication" stays (it never reads as a bar).
+    r"\b(?:form|schedule|publication|formulaire|annexe)\s+(?:no\.?\s*)?(?P<id>[a-z]{0,3}-?\d[\w-]*)\b",
     flags=re.IGNORECASE,
 )
 # A comparison query names a doc to CONTRAST, not to scope to — no provenance adjudication.
