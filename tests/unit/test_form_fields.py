@@ -179,3 +179,17 @@ def test_bullet_routed_but_no_multiply_falls_through_cleanly() -> None:
     cell = _chunk("• Single or Married filing separately, $15,750 • Head of household, $23,625")
     # a query that overlaps no bullet label confidently AND has no multiply line → None
     assert build_form_field_chunk("what is the catalog number", [cell]) is None
+
+
+def test_long_concept_does_not_truncate_value() -> None:
+    # A long bold concept run before the bullet must not push the (last) value past the 200-char
+    # synthetic-chunk truncation -> a malformed/truncated figure ($23,6) shipping as grounded.
+    long_bold = (
+        "Standard deduction worksheet for a taxpayer who can be claimed as a dependent on "
+        "another person's federal income tax return for the applicable tax year per the instructions"
+    )
+    cell = f"**{long_bold}** • Head of household, $23,625"
+    syn = build_form_field_chunk("Head of household standard deduction", [_chunk(cell)])
+    assert syn is not None
+    assert "$23,625" in syn.text  # the FULL value survives (concept dropped when it would truncate)
+    assert len(syn.text) <= 200

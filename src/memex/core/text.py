@@ -410,15 +410,34 @@ _PROVENANCE_YEAR_RE = re.compile(r"^(?:19|20)\d{2}$")
 _IDENT_NORM_RE = re.compile(r"[-_\s./|—–]")
 _DIACRITICS_RE = re.compile("[\\u0300-\\u036f]")  # NFD combining marks
 
+# Embedded DOC-NAME reference (audit-19 follow-up, the cross-doc-scope fix). Unlike the leading
+# "according to X," clause, a doc-CLASS noun + a digit-bearing IDENTIFIER ("Schedule 8812", "Form
+# 1040", "Pub 501", "Form W-4") is UNAMBIGUOUSLY a document reference ANYWHERE in the query — it is
+# not a topic frame ("In the Linux permission system…"), so it is safe to detect mid-sentence ("what
+# does the 2025 Schedule 8812 list…", "on Form 1040…"). The captured `id` MUST carry a digit (the
+# #256 single-token-specificity rule — every real form id has one; a bare "Form A" no-ops). Only the
+# IDENTIFIER becomes a usable token (the generic class noun "schedule"/"form" names no specific doc
+# and would false-MATCH a cited chunk whose heading mentions another "Schedule N").
+_PROVENANCE_DOC_NAME_RE = re.compile(
+    # "pub" alone is dropped: it collides with the pub/bar establishment sense ("pub 500 records"),
+    # a false-fire surface; "publication" stays (it never reads as a bar).
+    r"\b(?:form|schedule|publication|formulaire|annexe)\s+(?:no\.?\s*)?(?P<id>[a-z]{0,3}-?\d[\w-]*)\b",
+    flags=re.IGNORECASE,
+)
+# A comparison query names a doc to CONTRAST, not to scope to — no provenance adjudication.
+_COMPARISON_CUE_RE = re.compile(
+    r"\b(?:compared?|compares|comparing|differs?|versus|vs\.?|difference between|"
+    r"compared to|relative to|as opposed to|par rapport)\b",
+    flags=re.IGNORECASE,
+)
 
-def extract_provenance_source(query: str) -> tuple[str, list[str]] | None:
-    """The (raw phrase, usable identity tokens) of a leading provenance clause, or
-    ``None`` when the query has no adjudicable named source. Returns ``None`` for
-    artifact-noun references, and an empty token list never escapes (treated as None).
-    A LONE usable token adjudicates only when it carries a digit (the "800-207"/"w-9"
-    doc-number shape) — the #256 single-token specificity gate: every measured legit
-    source is multi-token or a doc number, while lone alphabetic tokens ("guide",
-    "report") are the probed false-fire surface."""
+
+def _extract_leading_provenance(query: str) -> tuple[str, list[str]] | None:
+    """The (raw phrase, usable identity tokens) of a LEADING "according to X," clause, or None.
+
+    The original audit-18 extractor, UNCHANGED — a tight leading-clause match. Returns ``None`` for
+    artifact-noun references; an empty token list never escapes; a LONE usable token adjudicates only
+    when it carries a digit (the "800-207"/"w-9" doc-number shape, the #256 specificity gate)."""
     m = _PROVENANCE_SOURCE_RE.match(query.strip())
     if not m:
         return None
@@ -442,6 +461,47 @@ def extract_provenance_source(query: str) -> tuple[str, list[str]] | None:
     return phrase, usable
 
 
+def _extract_doc_name_reference(query: str) -> tuple[str, list[str]] | None:
+    """An EMBEDDED doc-class-noun reference ("Schedule 8812", "Form 1040"), or None.
+
+    A doc-class noun + digit-bearing identifier is unambiguously a document reference anywhere in the
+    query (the cross-doc-scope fix). Conservative: >= 2 DISTINCT doc references, or a comparison cue
+    ("compare X and Y"), yield None — the query spans docs, not scopes to one. Only the IDENTIFIER is
+    a usable token (the class noun is dropped; it would false-match a cited chunk citing another
+    "Schedule N"); the identifier must be >= 3 chars (drops the unspecific "Pub 17" short-id surface)
+    and must NOT be a bare YEAR — "publication 2024" / "schedule 2024" is a NON-scoping shape and a
+    year substring-matches half the vault (the same `_PROVENANCE_YEAR_RE` guard the leading clause applies)."""
+    matches = list(_PROVENANCE_DOC_NAME_RE.finditer(query))
+    if not matches:
+        return None
+    if len({_fold_identity(m.group("id")) for m in matches}) >= 2:
+        return None  # >= 2 distinct doc references → ambiguous which is the source
+    if _COMPARISON_CUE_RE.search(query):
+        return None
+    m = matches[0]
+    usable = [
+        t for t in _PROVENANCE_TOKEN_RE.findall(m.group("id").lower())
+        if t not in _PROVENANCE_STOP
+        and len(t) >= 3
+        and any(ch.isdigit() for ch in t)
+        and not _PROVENANCE_YEAR_RE.match(t)
+    ]
+    if not usable:
+        return None
+    return m.group(0).strip(), usable
+
+
+def extract_provenance_source(query: str) -> tuple[str, list[str]] | None:
+    """The (raw phrase, usable identity tokens) of a named source, or ``None``.
+
+    Two recognizers: (1) a LEADING "according to|per|selon|d'après X," clause (audit-18, unchanged);
+    (2) an EMBEDDED doc-class-noun reference ("…the 2025 Schedule 8812…", the cross-doc-scope fix).
+    The leading clause takes precedence; the embedded recognizer is a fallback so existing behavior is
+    byte-identical wherever (1) matches. The CALLER (`agents/answering.py`) fires the refusal only when
+    the named source matches ≥ 1 vault document identity AND no CITED chunk carries it."""
+    return _extract_leading_provenance(query) or _extract_doc_name_reference(query)
+
+
 def _fold_identity(s: str) -> str:
     """Lowercase, strip diacritics (NFD), drop separators — so 'réseau' matches a
     title carrying 'réseau' or 'reseau', and '800-207' matches 'nist-sp-800-207'."""
@@ -451,10 +511,33 @@ def _fold_identity(s: str) -> str:
     return _IDENT_NORM_RE.sub("", folded)
 
 
+_CONTENT_HASH_PREFIX_RE = re.compile(r"^[0-9a-f]{8}-")
+
+
+def strip_content_hash(doc_id: str) -> str:
+    """The identity-bearing part of a content-addressed `<sha8>-<stem>` doc_id — drop the random
+    8-hex prefix. Without this, a short numeric provenance token ("941") substring-COLLIDES with the
+    random hash inside an UNRELATED doc_id (measured: 29% of 3-digit numbers hit ≥1 vault doc's hash,
+    e.g. "941" in "2941523b-lib") → a spurious provenance-scope refusal. The stem ("f1040" → "1040")
+    and the title carry the REAL identity; the hash never should. A doc_id with no sha8 prefix is
+    returned unchanged."""
+    return _CONTENT_HASH_PREFIX_RE.sub("", doc_id)
+
+
 def provenance_tokens_match(tokens: list[str], identity_blob: str) -> bool:
     """Whether ANY usable source token appears in *identity_blob* after accent folding
     and separator normalization. Substring direction: token-in-blob (a doc slug
-    concatenates words)."""
+    concatenates words). Callers should pass `strip_content_hash(doc_id)` (not the raw doc_id)
+    so a numeric token can't collide with the random sha8 prefix.
+
+    KNOWN LIMITATION (not cleanly fixable): the folded SUBSTRING match is load-bearing for multi-part
+    doc numbers ("800-207" → "nist-sp-800-207"), so a short numeric token still matches a doc whose
+    stem/title legitimately CONTAINS that number as a CROSS-REFERENCE — "1040" matches Schedule 8812
+    (stem "f1040s8", title "...(Form 1040)") because it really is a 1040 schedule. This is harmless
+    AS LONG AS the doc that IS Form 1040 keeps "1040" in its OWN identity (so a Form-1040 answer
+    self-protects via the cited-chunk check). RETITLE POLICY: never retitle a doc to a name that
+    DROPS its own identifier — that is the only way this cross-reference match becomes a false
+    refusal (a token that misses its home doc + hits a cross-referencing sibling)."""
     blob = _fold_identity(identity_blob)
     return any(_fold_identity(t) in blob for t in tokens)
 

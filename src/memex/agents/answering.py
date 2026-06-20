@@ -1948,6 +1948,32 @@ def _figure_supported_by_chunk(figure: float, chunk_numbers: list[float]) -> boo
     return False
 
 
+def _deterministic_backstop_demotes(
+    claim: CitedClaim, chunk: Chunk | None, *, numeric_enabled: bool, name_only_enabled: bool
+) -> bool:
+    """Whether the numeric-aggregate OR name-only deterministic backstop would demote this
+    (claim, chunk) pair. The SHARED check the verify node applies to LLM-grounded claims, RE-APPLIED
+    at the citation-retarget promotion point: a fabrication the BATCH verify rejected (so the inline
+    backstops, which only scan `valid_grounded`, never saw it) but the 1×1 retarget probe re-grounds
+    must NOT ship without the deterministic re-check (audit — the retarget hole). Mirrors the inline
+    numeric (table-only, `#sql0001`-exempt, unsupported-or-sum-expression) + name-only logic above so
+    the two stay one behaviour; respects the same kill-switches."""
+    if chunk is None:
+        return False
+    if (
+        numeric_enabled
+        and not chunk.chunk_id.endswith("#sql0001")
+        and _chunk_has_markdown_table(chunk.text)
+    ):
+        figures = _claim_scoped_figures(claim.claim)
+        unsupported = bool(figures) and not any(
+            _figure_supported_by_chunk(f, _chunk_numbers(chunk.text)) for f in figures
+        )
+        if unsupported or _claim_is_sum_expression(claim.claim):
+            return True
+    return bool(name_only_enabled and claim_grounded_only_by_name(claim.claim, chunk.text))
+
+
 async def verify(state: AnswerState) -> AnswerStateUpdate:
     """Independent grounding check.
 
@@ -2281,6 +2307,18 @@ async def verify(state: AnswerState) -> AnswerStateUpdate:
                     continue
                 retarget_tokens += probe_tok
                 if 0 in probe_res.grounded and 0 not in probe_res.ungrounded:
+                    # RE-APPLY the deterministic backstops before promoting: the 1×1 probe is the
+                    # greedy rubber-stamp the numeric/name-only backstops exist to overrule, and a
+                    # BATCH-rejected fabrication never passed through them (they scan only the
+                    # already-grounded set). Without this, a fabricated aggregate the batch rejected
+                    # could be re-grounded here and shipped (the retarget hole).
+                    if _deterministic_backstop_demotes(
+                        claim,
+                        chunk_by_id.get(cand.chunk_id),
+                        numeric_enabled=state.numeric_grounding_backstop,
+                        name_only_enabled=state.name_only_grounding_backstop,
+                    ):
+                        continue  # a deterministic backstop blocks this candidate
                     log.info(
                         "verify.citation_retargeted",
                         claim_index=i,
@@ -2403,7 +2441,11 @@ async def _provenance_scope_violation(state: AnswerState) -> str | None:
     stance). ADVISORY layer, post-verify — can only narrow, never admit.
     """
     from memex.core.config import get_settings
-    from memex.core.text import extract_provenance_source, provenance_tokens_match
+    from memex.core.text import (
+        extract_provenance_source,
+        provenance_tokens_match,
+        strip_content_hash,
+    )
 
     extracted = extract_provenance_source(state.query)
     if extracted is None or state.draft is None:
@@ -2421,7 +2463,8 @@ async def _provenance_scope_violation(state: AnswerState) -> str | None:
     if not cited:
         return None
     for ch in cited:
-        blob = " ".join([ch.document_id, ch.document_title, *ch.heading_path])
+        # strip the content-hash prefix so a numeric token ("941") can't collide with the doc_id hash
+        blob = " ".join([strip_content_hash(ch.document_id), ch.document_title, *ch.heading_path])
         if provenance_tokens_match(tokens, blob):
             return None  # the citation itself carries the named source
     import sqlite3
@@ -2443,7 +2486,7 @@ async def _provenance_scope_violation(state: AnswerState) -> str | None:
     named = [
         title or doc_id
         for doc_id, title in identities
-        if provenance_tokens_match(tokens, f"{doc_id} {title}")
+        if provenance_tokens_match(tokens, f"{strip_content_hash(doc_id)} {title}")
     ]
     if not named:
         return None

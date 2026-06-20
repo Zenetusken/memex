@@ -329,7 +329,14 @@ def _aggregate_column_grounded_in_question(question: str, column_label: str) -> 
         if len(t) >= 3 and t not in _COLUMN_TOKEN_STOP and not t.isdigit()
     ]
     if not col_tokens:
-        return True  # a label with no content tokens makes no substitutable claim
+        # A generic-token label ("Total ($)", "Number") makes no SUBSTITUTABLE column claim, so this
+        # column-scoped gate passes. KNOWN RESIDUAL (audit): it therefore can't catch a WRONG-TABLE
+        # aggregate over a near-twin generic "Total" column (10-K Director vs Executive comp). That is
+        # a TABLE-selection concern, not column substitution — defended upstream by `nearest_table_
+        # caption` + the synthetic chunk's verbatim caption framing + the relevance gate, NOT here. A
+        # section-token fallback was considered but risks over-refusal (a legit question whose subject
+        # isn't lexically in the caption) — deferred pending a measured near-twin eval case.
+        return True
     return all((t in q_folded) or (t.rstrip("s") in q_folded) for t in col_tokens)
 
 

@@ -200,7 +200,14 @@ def build_form_field_chunk(query: str, chunks: list[Chunk]) -> Chunk | None:
             concept, label, value = routed
             if label in c.text and value in c.text:  # always-true for a routed match (verbatim slice)
                 prefix = f"{concept} for " if concept else ""
-                return _synthetic_field_chunk(c, "field0001", f"{prefix}{label}: {value}")
+                synthetic = f"{prefix}{label}: {value}"
+                # The VALUE is last, so a long bold `concept` run could push it past the
+                # _MAX_FIELD_TEXT truncation in _synthetic_field_chunk → a malformed/truncated number
+                # ($23,6) shipping as grounded. Drop the concept (label≤80 + value always fit) rather
+                # than ship a truncated figure.
+                if len(synthetic) > _MAX_FIELD_TEXT:
+                    synthetic = f"{label}: {value}"
+                return _synthetic_field_chunk(c, "field0001", synthetic)
         # 2) multiply worksheet lines (Increment D)
         mfields = extract_multiply_fields(c.text)
         mrouted = route_multiply_field(query, mfields) if mfields else None
