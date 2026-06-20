@@ -1,0 +1,57 @@
+name: Tests
+
+# Enforces the three local gates on every PR that touches the package or
+# its tests, and on push to main: ruff (lint), pyright (strict types over
+# src/memex), and the hermetic pytest suite. Before this workflow the
+# gates were trust-the-author / local-only (only benchmark.yml ran in CI);
+# a stale `noqa` slipped past on main exactly because nothing enforced
+# `ruff check` — see the PR#4/#5 post-mortem.
+#
+# The whole suite is hermetic + fake-mode (model I/O is faked, not GPU- or
+# vLLM-backed), so it runs on the standard CPU ubuntu-latest runner. We do
+# NOT install the `serve` extra: vLLM is never imported from `src/memex`
+# (Memex talks to it over the OpenAI-compatible HTTP endpoint, ADR-0001),
+# so it's dead weight for both pyright and the tests. The cu129 torch wheel
+# (from the `models` extra) installs fine without a GPU — it's only used for
+# its types (pyright) and CPU-path fakes (pytest).
+
+on:
+  pull_request:
+    paths:
+      - "src/memex/**"
+      - "tests/**"
+      - "scripts/**"
+      - "stubs/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/test.yml"
+  push:
+    branches: [main]
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        # Mirrors the local dev sync minus `serve` (vLLM is unused in src;
+        # it's the heaviest, most GPU-coupled extra). `models`+`parse`+`audio`
+        # provide every lib the hermetic suite imports at runtime and that
+        # pyright resolves statically; `dev` brings ruff/pyright/pytest.
+        run: uv sync --extra models --extra parse --extra dev --extra audio
+
+      - name: Lint (ruff)
+        run: uv run ruff check src/memex tests
+
+      - name: Type-check (pyright --strict src/memex)
+        run: uv run pyright src/memex
+
+      - name: Test (pytest)
+        run: uv run pytest -q
