@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-import mint_binding_data as M  # noqa: E402
+import mint_binding_data as M
 
 
 def test_unit_transforms_millions_to_billions() -> None:
