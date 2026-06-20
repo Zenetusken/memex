@@ -16,15 +16,14 @@ name: Tests
 # its types (pyright) and CPU-path fakes (pytest).
 
 on:
+  # Deliberately NO paths filter. This gate is meant to be a REQUIRED
+  # status check in branch protection, and a required check WITH a paths
+  # filter dead-locks any PR that doesn't touch those paths — GitHub
+  # leaves it stuck "Expected — waiting for status" and the PR can't
+  # merge. The hermetic suite is ~47s on cached deps, so running it on
+  # every PR is cheap and it's the only shape that's cleanly requireable.
+  # (benchmark.yml keeps its paths filter — it's advisory, not required.)
   pull_request:
-    paths:
-      - "src/memex/**"
-      - "tests/**"
-      - "scripts/**"
-      - "stubs/**"
-      - "pyproject.toml"
-      - "uv.lock"
-      - ".github/workflows/test.yml"
   push:
     branches: [main]
 
