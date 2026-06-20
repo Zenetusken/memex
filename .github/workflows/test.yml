@@ -33,10 +33,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.0
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        # Exact release pins (verified to resolve): setup-uv has no floating
+        # `v8` major tag yet — only specific releases like v8.2.0 — so a
+        # bare `@v8` fails to resolve. Exact pins are also reproducible.
+        uses: astral-sh/setup-uv@v8.2.0
         with:
           enable-cache: true
 
