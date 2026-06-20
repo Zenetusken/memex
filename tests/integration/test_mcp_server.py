@@ -428,7 +428,7 @@ async def test_citation_paths_tool(
 
     class _FakeStore:
         @classmethod
-        async def open(cls, vault_path: Path) -> "_FakeStore":
+        async def open(cls, vault_path: Path) -> _FakeStore:
             return cls()
 
         async def citation_paths(

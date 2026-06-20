@@ -16,13 +16,13 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from binding_checker_vendor import HallucinationDataset, HallucinationSample  # noqa: E402
+from binding_checker_vendor import HallucinationDataset, HallucinationSample
 
 _MODEL = "KRLabsOrg/lettucedect-base-modernbert-en-v1"
 
 
 @pytest.fixture(scope="module")
-def tokenizer():  # noqa: ANN201
+def tokenizer():
     transformers = pytest.importorskip("transformers")
     try:
         return transformers.AutoTokenizer.from_pretrained(_MODEL, local_files_only=True)
