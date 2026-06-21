@@ -1,0 +1,721 @@
+{
+  "_description": "Legal/regulatory real-doc corpus: two cross-referencing US statutes (FOIA 5 U.S.C. 552 + Privacy Act 5 U.S.C. 552a). Stresses the CROSS-REFERENCE + DEFINED-TERM failure mode — grounding a claim that depends on a specific numbered exemption/subsection/condition or a precise statutory definition, where general world knowledge of FOIA/Privacy-Act is insufficient (memorization-resistant). Public-domain US-gov PDFs (govinfo.gov); sources LOCAL in ~/corpus-drop/legal, not committed.",
+  "_multi_doc": true,
+  "_doc_ids": [
+    "c944789d-foia-5usc552",
+    "284d4ccc-privacy-act-5usc552a"
+  ],
+  "_query_count": 29,
+  "_mix": "24 answerable / 5 counterfactual (4 near-miss + 1 empty-retrieval)",
+  "_labelling_rule": "_anchor_phrase = verbatim distinctive substring of the answer chunk; resolve fills relevant_chunk_ids. answer_must_mention = list-of-lists of required answer elements (synonyms within each inner list). Counterfactuals carry _counterfactual_mode.",
+  "_created": "2026-06-20",
+  "_source_note": "FOIA=foia-5usc552.pdf (5 U.S.C. 552), PrivacyAct=privacy-act-5usc552a.pdf (5 U.S.C. 552a); both govinfo USCODE-2023-title5.",
+  "_authoring": "generate(2 deep-readers)->adversarial-verify(per-candidate) workflow + deterministic resolve + full-eval gate.",
+  "queries": [
+    {
+      "qid": "foia-01",
+      "question": "Under FOIA's definitions, what does the term \"search\" mean for purposes of paragraph (a)(3) when an agency responds to a records request?",
+      "_doc_id": "c944789d-foia-5usc552",
+      "_category": "defined-term",
+      "_anchor_phrase": "means to review, manually or by automated means, agency records for the purpose of locating",
+      "_expected_answer": "\"Search\" means to review, manually or by automated means, agency records for the purpose of locating those records which are responsive to a request.",
+      "_answer_type": "definition",
+      "_grounding_quote": "(D) For purposes of this paragraph, the term ‘‘search’’ means to review, manually or by automated means, agency records for the purpose of locating those records which are responsive to a request.",
+      "_memorization_resistance": "The statute supplies a precise, narrow defined-term boundary at (a)(3)(D): \"search\" = review (manually or by automated means) for the purpose of LOCATING responsive records. A model relying on the ordinary meaning of \"search\" would not reproduce this exact statutory scope, which counterintuitively equates search with \"review\" even though search and review are separate fee categories elsewhere in the statute.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "review",
+          "examine"
+        ],
+        [
+          "manually",
+          "by automated means",
+          "automated"
+        ],
+        [
+          "locating",
+          "responsive"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "c944789d-foia-5usc552#9e736d2897"
+      ]
+    },
+    {
+      "qid": "foia-02",
+      "question": "In FOIA's expedited-processing provisions, how does the statute define a \"compelling need\"?",
+      "_doc_id": "c944789d-foia-5usc552",
+      "_category": "defined-term",
+      "_anchor_phrase": "could reasonably be expected to pose an imminent threat to the life or physical safety of an individual",
+      "_expected_answer": "A compelling need means (I) that a failure to obtain the records on an expedited basis could reasonably be expected to pose an imminent threat to the life or physical safety of an individual; or (II) with respect to a person primarily engaged in disseminating information, urgency to inform the public concerning actual or alleged Federal Government activity.",
+      "_answer_type": "definition",
+      "_grounding_quote": "(v) For purposes of this subparagraph, the term ‘‘compelling need’’ means— (I) that a failure to obtain requested records on an expedited basis under this paragraph could reasonably be expected to pose an imminent threat to the life or physical safety of an individual; or (II) with respect to a request made by a person primarily engaged in disseminating information, urgency to inform the public concerning actual or alleged Federal Government activity.",
+      "_memorization_resistance": "Requires the exact two-pronged statutory definition at (a)(6)(E)(v) (imminent threat to life/safety + urgency to inform the public concerning actual or alleged Federal Government activity), not a general notion of urgency; answer_must_mention enforces both prongs.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "imminent threat",
+          "threat to the life",
+          "physical safety"
+        ],
+        [
+          "disseminating information",
+          "urgency to inform the public"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "c944789d-foia-5usc552#486ef6ca43"
+      ]
+    },
+    {
+      "qid": "foia-03",
+      "question": "FOIA says \"exceptional circumstances\" can let a court grant an agency more time. What does that term expressly NOT include?",
+      "_doc_id": "c944789d-foia-5usc552",
+      "_category": "defined-term",
+      "_anchor_phrase": "does not include a delay that results from a predictable agency workload",
+      "_expected_answer": "The term \"exceptional circumstances\" does not include a delay that results from a predictable agency workload of requests, unless the agency demonstrates reasonable progress in reducing its backlog of pending requests.",
+      "_answer_type": "short_explanation",
+      "_grounding_quote": "(ii) For purposes of this subparagraph, the term ‘‘exceptional circumstances’’ does not include a delay that results from a predictable agency workload of requests under this section, unless the agency demonstrates reasonable progress in reducing its backlog of pending requests.",
+      "_memorization_resistance": "The exclusion (predictable workload does NOT count, with the backlog-progress carve-out) is a specific negative-scope rule in (a)(6)(C)(ii) that general FOIA knowledge would not supply verbatim.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "predictable agency workload",
+          "predictable workload",
+          "workload"
+        ],
+        [
+          "backlog",
+          "reducing its backlog"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "c944789d-foia-5usc552#f0575183d1",
+        "c944789d-foia-5usc552#464bff5e28"
+      ]
+    },
+    {
+      "qid": "foia-04",
+      "question": "For FOIA fee purposes, how does the statute define \"a representative of the news media\"?",
+      "_doc_id": "c944789d-foia-5usc552",
+      "_category": "defined-term",
+      "_anchor_phrase": "gathers information of potential interest to a segment of the public, uses its editorial skills",
+      "_expected_answer": "It means any person or entity that gathers information of potential interest to a segment of the public, uses its editorial skills to turn the raw materials into a distinct work, and distributes that work to an audience.",
+      "_answer_type": "definition",
+      "_grounding_quote": "In this clause, the term ‘‘a representative of the news media’’ means any person or entity that gathers information of potential interest to a segment of the public, uses its editorial skills to turn the raw materials into a distinct work, and distributes that work to an audience.",
+      "_memorization_resistance": "Requires the exact three-element statutory test in the fee clause (gathers information of potential interest to a segment of the public / uses editorial skills to turn raw materials into a distinct work / distributes that work to an audience), not a lay description of a journalist.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "gathers information",
+          "gathers"
+        ],
+        [
+          "editorial skills"
+        ],
+        [
+          "distributes",
+          "distinct work"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "c944789d-foia-5usc552#ee16816cc3"
+      ]
+    },
+    {
+      "qid": "foia-05",
+      "question": "Under FOIA's definition of \"record\" in subsection (f), is information held by a private contractor on the agency's behalf included, and under what condition?",
+      "_doc_id": "c944789d-foia-5usc552",
+      "_category": "defined-term",
+      "_anchor_phrase": "maintained for an agency by an entity under Government contract, for the purposes of records management",
+      "_expected_answer": "Yes — \"record\" includes information that is maintained for an agency by an entity under Government contract, for the purposes of records management.",
+      "_answer_type": "short_explanation",
+      "_grounding_quote": "(B) any information described under subparagraph (A) that is maintained for an agency by an entity under Government contract, for the purposes of records management.",
+      "_memorization_resistance": "The contractor-held-records inclusion at (f)(2)(B) is conditioned specifically on being \"for the purposes of records management\" — a precise post-2007 statutory boundary (added by Pub. L. 110-175 Sec. 9) not derivable from general FOIA knowledge.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "entity under Government contract",
+          "Government contract",
+          "contractor"
+        ],
+        [
+          "records management"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "c944789d-foia-5usc552#b89834fde2"
+      ]
+    },
+    {
+      "qid": "foia-06",
+      "question": "Which FOIA exemption protects geological and geophysical information and data, including maps, concerning wells?",
+      "_doc_id": "c944789d-foia-5usc552",
+      "_category": "cross-reference",
+      "_anchor_phrase": "geological and geophysical information and data, including maps, concerning wells",
+      "_expected_answer": "Exemption (b)(9).",
+      "_answer_type": "single_fact",
+      "_grounding_quote": "(9) geological and geophysical information and data, including maps, concerning wells.",
+      "_memorization_resistance": "The well-data exemption is the ninth and final enumerated exemption under subsection (b); identifying the exact number requires reading the enumerated list in subsection (b), not general FOIA familiarity.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "(b)(9)",
+          "exemption 9",
+          "ninth exemption",
+          "exemption (9)"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "c944789d-foia-5usc552#a97522360f",
+        "c944789d-foia-5usc552#f99a4ff9b7"
+      ]
+    },
+    {
+      "qid": "foia-07",
+      "question": "FOIA's exemption for inter-agency or intra-agency memorandums has a time limit on the deliberative process privilege. After how many years does that privilege no longer apply?",
+      "_doc_id": "c944789d-foia-5usc552",
+      "_category": "provision-detail",
+      "_anchor_phrase": "the deliberative process privilege shall not apply to records created 25 years or more before",
+      "_expected_answer": "The deliberative process privilege does not apply to records created 25 years or more before the date on which the records were requested.",
+      "_answer_type": "single_fact",
+      "_grounding_quote": "(5) inter-agency or intra-agency memorandums or letters that would not be available by law to a party other than an agency in litigation with the agency, provided that the deliberative process privilege shall not apply to records created 25 years or more before the date on which the records were requested;",
+      "_memorization_resistance": "The 25-year sunset on the deliberative-process privilege within exemption (b)(5) is a specific numeric provision detail added by the 2016 FOIA Improvement Act, not part of the classic statement of Exemption 5.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "25 years",
+          "twenty-five years",
+          "25"
+        ],
+        [
+          "deliberative process"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "c944789d-foia-5usc552#a97522360f"
+      ]
+    },
+    {
+      "qid": "foia-08",
+      "question": "Under FOIA, an agency may not require advance payment of a fee unless the requester previously failed to pay in a timely fashion or the agency determines the fee will exceed what dollar amount?",
+      "_doc_id": "c944789d-foia-5usc552",
+      "_category": "provision-detail",
+      "_anchor_phrase": "No agency may require advance payment of any fee unless the requester has previously failed to pay",
+      "_expected_answer": "$250.",
+      "_answer_type": "single_fact",
+      "_grounding_quote": "(v) No agency may require advance payment of any fee unless the requester has previously failed to pay fees in a timely fashion, or the agency has determined that the fee will exceed $250.",
+      "_memorization_resistance": "The exact $250 advance-payment threshold at (a)(4)(A)(v) is a precise dollar figure that cannot be recalled from general FOIA knowledge.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "$250",
+          "250"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "c944789d-foia-5usc552#36af4baf38"
+      ]
+    },
+    {
+      "qid": "foia-09",
+      "question": "In a FOIA lawsuit, within how many days after service must the defendant serve an answer or otherwise plead to the complaint, absent a court direction for good cause?",
+      "_doc_id": "c944789d-foia-5usc552",
+      "_category": "provision-detail",
+      "_anchor_phrase": "shall serve an answer or otherwise plead to any complaint made under this subsection within thirty days",
+      "_expected_answer": "Within thirty days after service of the pleading in which the complaint is made.",
+      "_answer_type": "single_fact",
+      "_grounding_quote": "(C) Notwithstanding any other provision of law, the defendant shall serve an answer or otherwise plead to any complaint made under this subsection within thirty days after service upon the defendant of the pleading in which such complaint is made, unless the court otherwise directs for good cause shown.",
+      "_memorization_resistance": "The 30-day answer/plead deadline at (a)(4)(C) is a specific litigation-timing rule distinct from (and easily confused with) FOIA's 20-day response clock at (a)(6)(A)(i); the in-text 'unless the court otherwise directs for good cause shown' qualifier pins the answer to this exact provision.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "thirty days",
+          "30 days",
+          "thirty",
+          "30"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "c944789d-foia-5usc552#130161ce2d"
+      ]
+    },
+    {
+      "qid": "foia-10",
+      "question": "FOIA requires an agency to assign an individualized tracking number for a request. The tracking-number requirement applies to requests that will take longer than how many days to process?",
+      "_doc_id": "c944789d-foia-5usc552",
+      "_category": "provision-detail",
+      "_anchor_phrase": "assign an individualized tracking number for each request received that will take longer than ten days",
+      "_expected_answer": "Requests that will take longer than ten days to process.",
+      "_answer_type": "single_fact",
+      "_grounding_quote": "(A) establish a system to assign an individualized tracking number for each request received that will take longer than ten days to process and provide to each person making a request the tracking number assigned to the request; and",
+      "_memorization_resistance": "The \"longer than ten days\" trigger for the tracking-number system at (a)(7)(A) is a precise threshold easily confused with the famous 20-day determination clock and with FOIA's other 10-day provisions (the 10-day commencement rule and the 10-day expedited-processing determination).",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "ten days",
+          "10 days",
+          "ten",
+          "10"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "c944789d-foia-5usc552#f7a1d3880f"
+      ]
+    },
+    {
+      "qid": "foia-11",
+      "question": "Under FOIA's proactive-disclosure rules in subsection (a)(2), records must be made available for public inspection if they have been requested how many times?",
+      "_doc_id": "c944789d-foia-5usc552",
+      "_category": "provision-detail",
+      "_anchor_phrase": "that have been requested 3 or more",
+      "_expected_answer": "Records that have been requested 3 or more times.",
+      "_answer_type": "single_fact",
+      "_grounding_quote": "(II) that have been requested 3 or more / times; and (the source splits this across two markdown list items: \"- (II) that have been requested 3 or more\" followed by \"- times; and\", under (a)(2)(D)(ii))",
+      "_memorization_resistance": "The \"3 or more times\" frequently-requested-records rule at (a)(2)(D)(ii)(II) is a specific numeric threshold from the 2016 FOIA Improvement Act amendment, not general FOIA knowledge.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "3 or more",
+          "three or more",
+          "3",
+          "three"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "c944789d-foia-5usc552#0bf81fb887"
+      ]
+    },
+    {
+      "qid": "foia-12",
+      "question": "What is the statute of limitations — the deadline after a final agency denial — for filing a FOIA lawsuit in federal district court under 5 U.S.C. § 552?",
+      "_doc_id": "c944789d-foia-5usc552",
+      "_category": "counterfactual-nearmiss",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE — 5 U.S.C. § 552 (FOIA) states no limitations period (deadline) for filing a FOIA lawsuit. The text only sets a 20-day agency determination clock (a)(6)(A)(i), a 30-day deadline for the defendant to answer a complaint (a)(4)(C), and a 'not less than 90 days' administrative appeal window (a)(6)(A)(i)(III)(aa) — none of which is a statute of limitations to bring suit. Note: the 'within two years' period in the Privacy Act, 5 U.S.C. § 552a(g)(5), is a DIFFERENT statute and a different cause of action; it does not supply a FOIA suit-filing deadline. The text does not answer this question.",
+      "_answer_type": "refusal",
+      "_grounding_quote": "Confirmed ABSENT from both statutes: no provision of 5 U.S.C. § 552 states a limitations period for filing a FOIA lawsuit (grep for 'limitation'/'years from'/'brought within'/'cause of action' returns no suit-filing deadline; the only 'X years from the date' hit is an unrelated Executive Order Working Group termination). The near-miss texts are verbatim present — 'the defendant shall serve an answer or otherwise plead to any complaint made under this subsection within thirty days after service' (a)(4)(C); 'determine within 20 days' (a)(6)(A)(i); 'within a period determined by the head of the agency that is not less than 90 days after the date of such adverse determination' (a)(6)(A)(i)(III)(aa) — but none is a statute of limitations to bring suit. The Privacy Act's 'within two years from the date on which the cause of action arises' (§ 552a(g)(5)) is a different statute and cause of action, not a FOIA suit-filing deadline.",
+      "_memorization_resistance": "The question is phrased to pull the FOIA 30-day defendant-answer clock (a)(4)(C), the 20-day determination clock, or the not-less-than-90-day appeal window as if one were the suit-filing deadline, and — across the combined corpus — to pull the Privacy Act's 'within two years from the date on which the cause of action arises' (§ 552a(g)(5)) as a false FOIA answer. Correct refusal requires recognizing from the text that none of the FOIA timing provisions is a limitations period and that the PA two-year window belongs to a separate statute/cause of action; § 552's actual SOL (28 U.S.C. § 2401(a)) is in neither document.",
+      "should_refuse": true,
+      "answer_must_mention": [],
+      "relevant_chunk_ids": [],
+      "_counterfactual_mode": "near-miss"
+    },
+    {
+      "qid": "foia-13",
+      "question": "Under 5 U.S.C. § 552, what is the maximum per-page dollar amount an agency may charge for duplicating records?",
+      "_doc_id": "c944789d-foia-5usc552",
+      "_category": "counterfactual-nearmiss",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE — § 552 sets no per-page dollar duplication charge. It limits fees to \"reasonable standard charges\" for duplication and waives fees for the first one hundred pages of duplication (for certain non-commercial/news-media requesters), but states no fixed per-page rate; the only dollar figure in the statute is the $250 advance-payment threshold.",
+      "_answer_type": "refusal",
+      "_grounding_quote": "The fee provisions limit charges to “reasonable standard charges for document ... duplication” (a)(4)(A)(ii) and waive fees for “the first one hundred pages of duplication” (a)(4)(A)(iv)(II); the only dollar figure in the statute is the $250 advance-payment threshold in (a)(4)(A)(v) — no per-page dollar amount is stated anywhere.",
+      "_memorization_resistance": "Retrieval surfaces the fee/duplication and 100-free-pages provisions, tempting a model to fabricate a specific per-page rate (e.g. the common $0.10/page found in agency FOIA fee SCHEDULES, which is not in the statute itself); the statute only says \"reasonable standard charges,\" so the correct response is refusal.",
+      "should_refuse": true,
+      "answer_must_mention": [],
+      "relevant_chunk_ids": [],
+      "_counterfactual_mode": "near-miss"
+    },
+    {
+      "qid": "foia-14",
+      "question": "According to 5 U.S.C. § 552, what is the maximum prison sentence an agency official can receive for willfully and unlawfully withholding records from a requester?",
+      "_doc_id": "c944789d-foia-5usc552",
+      "_category": "counterfactual-nearmiss",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE — § 552 (FOIA) specifies NO criminal penalty or prison sentence for withholding records; its enforcement is civil (court-ordered production, attorney fees, contempt, and a Special Counsel disciplinary referral). The only criminal penalties in this title appear in the Privacy Act, § 552a(i), and even those are misdemeanors 'fined not more than $5,000' for wrongful DISCLOSURE — not withholding — with no term of imprisonment specified anywhere. No maximum prison sentence exists to state.",
+      "_answer_type": "refusal",
+      "_grounding_quote": "FOIA § 552 enforcement is civil — injunctive production (a)(4)(B), attorney fees (a)(4)(E), a Special Counsel disciplinary referral (a)(4)(F), and 'the district court may punish for contempt the responsible employee' (a)(4)(G); no criminal prison term appears in § 552. The only 'CRIMINAL PENALTIES' in the title are in § 552a(i), which make the named conduct 'a misdemeanor and fined not more than $5,000' — a fine, not imprisonment, and for disclosure rather than withholding.",
+      "_memorization_resistance": "FOIA contains no criminal-penalty provision at all, so any specific prison-term answer is fabricated. The trap is real: § 552a(i) is explicitly headed 'CRIMINAL PENALTIES' and keys on 'willfully' and 'officer or employee of an agency', so a model may latch onto it and invent a sentence — yet the actual text imposes only a '$5,000' fine (no imprisonment) and is for wrongful disclosure, not withholding. Distinguishing this requires the statutory text, not general FOIA knowledge.",
+      "should_refuse": true,
+      "answer_must_mention": [],
+      "relevant_chunk_ids": [],
+      "_counterfactual_mode": "near-miss"
+    },
+    {
+      "qid": "pa-01",
+      "question": "Under the Privacy Act's definitions, who qualifies as an \"individual\"?",
+      "_doc_id": "284d4ccc-privacy-act-5usc552a",
+      "_category": "defined-term",
+      "_anchor_phrase": "an alien lawfully admitted for permanent residence",
+      "_expected_answer": "An \"individual\" means a citizen of the United States or an alien lawfully admitted for permanent residence.",
+      "_answer_type": "definition",
+      "_grounding_quote": "(2) the term ‘‘individual’’ means a citizen of the United States or an alien lawfully admitted for permanent residence;",
+      "_memorization_resistance": "The statutory definition is narrower than the colloquial sense of 'individual' (any person). A model relying on general knowledge would likely say 'any natural person'; the text restricts it to a US citizen OR a lawful permanent resident alien, excluding e.g. non-resident aliens — a boundary only the verbatim (a)(2) text supplies.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "citizen"
+        ],
+        [
+          "alien",
+          "lawfully admitted",
+          "permanent residence",
+          "permanent resident"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "284d4ccc-privacy-act-5usc552a#9b751ab167"
+      ]
+    },
+    {
+      "qid": "pa-02",
+      "question": "How does the Privacy Act define a \"routine use\" of a record?",
+      "_doc_id": "284d4ccc-privacy-act-5usc552a",
+      "_category": "defined-term",
+      "_anchor_phrase": "the use of such record for a purpose which is compatible with the purpose for which it was collected",
+      "_expected_answer": "A \"routine use\" means, with respect to the disclosure of a record, the use of such record for a purpose which is compatible with the purpose for which it was collected.",
+      "_answer_type": "definition",
+      "_grounding_quote": "(7) the term ‘‘routine use’’ means, with respect to the disclosure of a record, the use of such record for a purpose which is compatible with the purpose for which it was collected;",
+      "_memorization_resistance": "The defining word is 'compatible' tied to the original collection purpose — a precise statutory boundary, not a generic 'normal/ordinary use'. A model must read (a)(7) to capture the compatibility-with-collection-purpose test rather than guessing at a plain-English meaning.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "compatible"
+        ],
+        [
+          "purpose for which it was collected",
+          "collected"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "284d4ccc-privacy-act-5usc552a#9b751ab167"
+      ]
+    },
+    {
+      "qid": "pa-03",
+      "question": "What is a \"statistical record\" under the Privacy Act, and which statutory provision is carved out as an exception to the rule that it not be used in making determinations about an identifiable individual?",
+      "_doc_id": "284d4ccc-privacy-act-5usc552a",
+      "_category": "defined-term",
+      "_anchor_phrase": "maintained for statistical research or reporting purposes only and not used in whole or in part in making any determination about an identifiable individual, except as provided by section 8 of title 13",
+      "_expected_answer": "A statistical record is a record in a system of records maintained for statistical research or reporting purposes only and not used in whole or in part in making any determination about an identifiable individual, except as provided by section 8 of title 13.",
+      "_answer_type": "definition",
+      "_grounding_quote": "(6) the term ‘‘statistical record’’ means a record in a system of records maintained for statistical research or reporting purposes only and not used in whole or in part in making any determination about an identifiable individual, except as provided by section 8 of title 13;",
+      "_memorization_resistance": "Requires both the defined-term boundary (statistical-only, no determinations) AND resolving the specific cross-reference 'section 8 of title 13' (the Census confidentiality statute) — a precise carve-out a model cannot supply from general FOIA/Privacy knowledge.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "statistical research",
+          "reporting"
+        ],
+        [
+          "determination about an identifiable individual",
+          "identifiable individual"
+        ],
+        [
+          "section 8 of title 13",
+          "title 13"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "284d4ccc-privacy-act-5usc552a#9b751ab167"
+      ]
+    },
+    {
+      "qid": "pa-04",
+      "question": "In subsection (a)(1) of the Privacy Act, the term \"agency\" is defined by reference to which provision of section 552?",
+      "_doc_id": "284d4ccc-privacy-act-5usc552a",
+      "_category": "cross-reference",
+      "_anchor_phrase": "means agency as defined in section 552(e)",
+      "_expected_answer": "The term \"agency\" means agency as defined in section 552(e) of this title.",
+      "_answer_type": "single_fact",
+      "_grounding_quote": "(1) the term ‘‘agency’’ means agency as defined in section 552(e)[1] of this title;",
+      "_memorization_resistance": "The operative text in § 552a(a)(1) cites section 552(e) specifically (with a footnote flag [1]); an editorial note in the same statute states 552(e) was redesignated section 552(f) by Pub. L. 99-570. A model that 'knows FOIA' would likely cite 552(f), the current designation. Answering with the literal cross-reference 552(e) as written in (a)(1) requires reading this exact text, not recalling the modern FOIA structure. The anchor 'means agency as defined in section 552(e)' (without 'any') also disambiguates this § 552a definition from the near-identical § 552b(a)(1) 'means any agency, as defined in section 552(e)'.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "552(e)",
+          "section 552(e)"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "284d4ccc-privacy-act-5usc552a#9b751ab167"
+      ]
+    },
+    {
+      "qid": "pa-05",
+      "question": "For how long must an agency retain the accounting of a disclosure made under the Privacy Act?",
+      "_doc_id": "284d4ccc-privacy-act-5usc552a",
+      "_category": "provision-detail",
+      "_anchor_phrase": "retain the accounting made under paragraph (1) of this subsection for at least five years or the life of the record, whichever is longer",
+      "_expected_answer": "The agency must retain the accounting for at least five years or the life of the record, whichever is longer, after the disclosure for which the accounting is made.",
+      "_answer_type": "single_fact",
+      "_grounding_quote": "(2) retain the accounting made under paragraph (1) of this subsection for at least five years or the life of the record, whichever is longer, after the disclosure for which the accounting is made;",
+      "_memorization_resistance": "An exact retention period (five years OR the life of the record, whichever is longer) from (c)(2). The 'whichever is longer' tie-breaker and the exact number are memorization-resistant; a general-knowledge guess would not reliably produce both prongs.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "five years",
+          "5 years"
+        ],
+        [
+          "life of the record"
+        ],
+        [
+          "whichever is longer",
+          "longer"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "284d4ccc-privacy-act-5usc552a#44d2502651"
+      ]
+    },
+    {
+      "qid": "pa-06",
+      "question": "If a court finds a Privacy Act violation was intentional or willful, what is the minimum amount the United States is liable for in actual damages?",
+      "_doc_id": "284d4ccc-privacy-act-5usc552a",
+      "_category": "provision-detail",
+      "_anchor_phrase": "but in no case shall a person entitled to recovery receive less than the sum of $1,000",
+      "_expected_answer": "In no case shall a person entitled to recovery receive less than the sum of $1,000 (the floor for actual damages), plus the costs of the action and reasonable attorney fees.",
+      "_answer_type": "single_fact",
+      "_grounding_quote": "(4) In any suit brought under the provisions of subsection (g)(1)(C) or (D) of this section in which the court determines that the agency acted in a manner which was intentional or willful, the United States shall be liable to the individual in an amount equal to the sum of— (A) actual damages sustained by the individual as a result of the refusal or failure, but in no case shall a person entitled to recovery receive less than the sum of $1,000; and (B) the costs of the action together with reasonable attorney fees as determined by the court.",
+      "_memorization_resistance": "The exact statutory minimum ($1,000) under (g)(4)(A), gated on an intentional-or-willful finding. The number is a precise provision-detail; it is also easily confused with other dollar figures, so correct answering requires reading the civil-remedies text specifically.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "$1,000",
+          "1,000",
+          "one thousand"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "284d4ccc-privacy-act-5usc552a#7cbc13c8eb",
+        "284d4ccc-privacy-act-5usc552a#9c5eacd3dc"
+      ]
+    },
+    {
+      "qid": "pa-07",
+      "question": "What is the limitations period for bringing a civil action to enforce a liability created under the Privacy Act?",
+      "_doc_id": "284d4ccc-privacy-act-5usc552a",
+      "_category": "provision-detail",
+      "_anchor_phrase": "within two years from the date on which the cause of action arises",
+      "_expected_answer": "The action may be brought within two years from the date on which the cause of action arises (with a special rule extending it to two years after the individual discovers a material and willful misrepresentation).",
+      "_answer_type": "single_fact",
+      "_grounding_quote": "An action to enforce any liability created under this section may be brought in the district court of the United States in the district in which the complainant resides, or has his principal place of business, or in which the agency records are situated, or in the District of Columbia, without regard to the amount in controversy, within two years from the date on which the cause of action arises, except that where an agency has materially and willfully misrepresented any information required under this section to be disclosed to an individual and the information so misrepresented is material to establishment of the liability of the agency to the individual under this section, the action may be brought at any time within two years after discovery by the individual of the misrepresentation.",
+      "_memorization_resistance": "A precise statute-of-limitations figure (two years) under Privacy Act subsection (g)(5). It is distinct from FOIA's administrative deadlines (FOIA contains no such provision), and the exact period plus the two-years-after-discovery extension for material/willful misrepresentation is memorization-resistant.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "two years",
+          "2 years"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "284d4ccc-privacy-act-5usc552a#7cbc13c8eb"
+      ]
+    },
+    {
+      "qid": "pa-08",
+      "question": "What criminal penalty does an officer or employee face for willfully disclosing individually identifiable Privacy Act records to someone not entitled to receive them?",
+      "_doc_id": "284d4ccc-privacy-act-5usc552a",
+      "_category": "provision-detail",
+      "_anchor_phrase": "willfully discloses the material in any manner to any person or agency not entitled to receive it, shall be guilty of a misdemeanor and fined not more than $5,000",
+      "_expected_answer": "Such an officer or employee is guilty of a misdemeanor and fined not more than $5,000.",
+      "_answer_type": "single_fact",
+      "_grounding_quote": "willfully discloses the material in any manner to any person or agency not entitled to receive it, shall be guilty of a misdemeanor and fined not more than $5,000.",
+      "_memorization_resistance": "Exact penalty ($5,000) and offense class (misdemeanor) from subsection (i)(1). The discriminator is that this is the CRIMINAL fine — easily conflated with the $1,000 civil-damages floor in (g)(4) (line 305 of the same statute) — so a correct answer requires distinguishing the (i) penalty text from the (g)(4) civil remedy.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "$5,000",
+          "5,000",
+          "five thousand"
+        ],
+        [
+          "misdemeanor",
+          "criminal"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "284d4ccc-privacy-act-5usc552a#7cbc13c8eb",
+        "284d4ccc-privacy-act-5usc552a#504dce89fa"
+      ]
+    },
+    {
+      "qid": "pa-09",
+      "question": "Under the Privacy Act, what is the maximum duration a computer matching agreement may remain in effect?",
+      "_doc_id": "284d4ccc-privacy-act-5usc552a",
+      "_category": "provision-detail",
+      "_anchor_phrase": "shall remain in effect only for such period, not to exceed 18 months",
+      "_expected_answer": "A matching agreement shall remain in effect only for such period, not to exceed 18 months, as the agency's Data Integrity Board determines is appropriate.",
+      "_answer_type": "single_fact",
+      "_grounding_quote": "(C) Such an agreement shall remain in effect only for such period, not to exceed 18 months, as the Data Integrity Board of the agency determines is appropriate in light of the purposes, and length of time necessary for the conduct, of the matching program.",
+      "_memorization_resistance": "The exact cap (18 months) from (o)(2)(C). A model cannot reliably produce this specific figure from general knowledge of the Computer Matching amendments; nearby distractors (30-day effectiveness delay, 3-month renewal window, one-additional-year renewal) require the verbatim provision to disambiguate.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "18 months",
+          "eighteen months"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "284d4ccc-privacy-act-5usc552a#bd8ceefc9c"
+      ]
+    },
+    {
+      "qid": "pa-10",
+      "question": "The Privacy Act's specific exemptions in subsection (k) include systems maintained in connection with providing protective services to the President. Which statutory provision authorizes those protective services?",
+      "_doc_id": "284d4ccc-privacy-act-5usc552a",
+      "_category": "cross-reference",
+      "_anchor_phrase": "providing protective services to the President of the United States or other individuals pursuant to section 3056 of title 18",
+      "_expected_answer": "Systems maintained in connection with providing protective services to the President of the United States or other individuals pursuant to section 3056 of title 18.",
+      "_answer_type": "single_fact",
+      "_grounding_quote": "(3) maintained in connection with providing protective services to the President of the United States or other individuals pursuant to section 3056 of title 18;",
+      "_memorization_resistance": "Requires resolving the specific cross-reference (section 3056 of title 18, the Secret Service protective-services statute) embedded in exemption (k)(3). The exact citation is not derivable from general Privacy Act knowledge.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "section 3056 of title 18",
+          "3056 of title 18",
+          "section 3056"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "284d4ccc-privacy-act-5usc552a#59a24ccb8e"
+      ]
+    },
+    {
+      "qid": "pa-11",
+      "question": "Among the Privacy Act's conditions of disclosure, disclosure to a consumer reporting agency is permitted in accordance with which statutory provision?",
+      "_doc_id": "284d4ccc-privacy-act-5usc552a",
+      "_category": "cross-reference",
+      "_anchor_phrase": "to a consumer reporting agency in accordance with section 3711(e) of title 31",
+      "_expected_answer": "Disclosure to a consumer reporting agency is permitted in accordance with section 3711(e) of title 31.",
+      "_answer_type": "single_fact",
+      "_grounding_quote": "(12) to a consumer reporting agency in accordance with section 3711(e) of title 31.",
+      "_memorization_resistance": "Requires the precise cross-reference (section 3711(e) of title 31) in disclosure condition (b)(12). The exact subsection letter (e) and title number are memorization-resistant and not part of general Privacy Act knowledge — the amendment notes show the reference was previously 3711(f) and earlier 31 U.S.C. 952(d).",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "3711(e)",
+          "section 3711(e)"
+        ],
+        [
+          "title 31"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "284d4ccc-privacy-act-5usc552a#44d2502651"
+      ]
+    },
+    {
+      "qid": "pa-12",
+      "question": "When an individual requests amendment of a record under the Privacy Act, within how many days must the agency acknowledge receipt of the request?",
+      "_doc_id": "284d4ccc-privacy-act-5usc552a",
+      "_category": "provision-detail",
+      "_anchor_phrase": "after the date of receipt of such request, acknowledge in writing such receipt",
+      "_expected_answer": "Not later than 10 days (excluding Saturdays, Sundays, and legal public holidays) after the date of receipt of the request, the agency must acknowledge in writing such receipt.",
+      "_answer_type": "single_fact",
+      "_grounding_quote": "(A) not later than 10 days (excluding Sat- urdays, Sundays, and legal public holidays) after the date of receipt of such request, acknowledge in writing such receipt; and",
+      "_memorization_resistance": "Exact deadline (10 working days, excluding weekends/holidays) for amendment-request acknowledgment under (d)(2)(A). This is distinct from the 30-day amendment-review period in (d)(3) and from any access deadline, so correct answering requires reading the specific (d)(2)(A) text rather than general Privacy Act knowledge.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "10 days",
+          "ten days"
+        ],
+        [
+          "acknowledge",
+          "acknowledgment",
+          "acknowledgement",
+          "acknowledging"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "284d4ccc-privacy-act-5usc552a#8a3f5d2de3"
+      ]
+    },
+    {
+      "qid": "pa-13",
+      "question": "Can a federal agency invoke a FOIA (section 552) exemption to withhold a record from the individual it pertains to, where that record is otherwise accessible to the individual under the Privacy Act?",
+      "_doc_id": "284d4ccc-privacy-act-5usc552a",
+      "_category": "cross-reference",
+      "_anchor_phrase": "No agency shall rely on any exemption contained in section 552 of this title to withhold from an individual any record which is otherwise accessible",
+      "_expected_answer": "No. No agency shall rely on any exemption contained in section 552 of this title to withhold from an individual any record which is otherwise accessible to such individual under the provisions of this section.",
+      "_answer_type": "short_explanation",
+      "_grounding_quote": "(t)(1) EFFECT OF OTHER LAWS.—No agency shall rely on any exemption contained in section 552 of this title to withhold from an individual any record which is otherwise accessible to such individual under the provisions of this section.",
+      "_memorization_resistance": "Requires resolving the interplay between the two cross-referenced statutes via subsection (t)(1) — the bar on using a section 552 (FOIA) exemption to defeat Privacy Act access. The directional rule (and its reciprocal in (t)(2)) is a specific statutory mechanism, not general knowledge.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "no",
+          "may not",
+          "cannot",
+          "shall not"
+        ],
+        [
+          "section 552",
+          "552",
+          "FOIA"
+        ],
+        [
+          "otherwise accessible",
+          "accessible"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "284d4ccc-privacy-act-5usc552a#4ff262e5f1"
+      ]
+    },
+    {
+      "qid": "pa-14",
+      "question": "Within how many days must a federal agency respond to an individual's initial request to gain access to (inspect) his own record under subsection (d)(1) of the Privacy Act?",
+      "_doc_id": "284d4ccc-privacy-act-5usc552a",
+      "_category": "counterfactual-nearmiss",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE — Subsection (d)(1) requires the agency to permit access 'upon request' but states NO numeric deadline for the initial access request. The 10-day and 30-day periods in the text apply only to amendment requests (acknowledgment under (d)(2)(A) and review under (d)(3)), not to the (d)(1) access request itself.",
+      "_answer_type": "refusal",
+      "_grounding_quote": "Subsection (d)(1) says only 'upon request... permit him... to review the record' with no day-count; the only numeric deadlines — 10 days (d)(2)(A) and 30 days (d)(3) — govern amendment acknowledgment and review, not initial access. No access-response deadline is stated in either statute (FOIA's 20-day rule applies to FOIA requests, not Privacy Act access).",
+      "_memorization_resistance": "Retrieval pulls the look-alike (d)(2)(A) '10 days' and (d)(3) '30 days' time limits, which sound responsive but govern amendment, not access. A model tempted to map FOIA's 20-day rule onto Privacy Act access would fabricate; the access deadline is genuinely absent from (d)(1).",
+      "should_refuse": true,
+      "answer_must_mention": [],
+      "relevant_chunk_ids": [],
+      "_counterfactual_mode": "near-miss"
+    },
+    {
+      "qid": "pa-16",
+      "question": "Under the Privacy Act, what minimum AES encryption key length must agencies use to secure systems of records?",
+      "_doc_id": "284d4ccc-privacy-act-5usc552a",
+      "_category": "counterfactual-empty",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE — Neither the Privacy Act nor the FOIA statute specifies any encryption algorithm or key length. Subsection (e)(10) only requires 'appropriate administrative, technical, and physical safeguards' in general terms, with no technical standard, AES reference, or key-length figure.",
+      "_answer_type": "refusal",
+      "_grounding_quote": "The only safeguards language is (e)(10): 'establish appropriate administrative, technical, and physical safeguards to insure the security and confidentiality of records' — no encryption standard, AES, or key length appears in either statute.",
+      "_memorization_resistance": "AES / key-length is a modern infosec concept absent from a 1974 statute; the closest text is the generic (e)(10) 'appropriate ... safeguards.' A model might fabricate a specific standard (e.g. AES-256) to seem authoritative, but no such requirement exists in either document.",
+      "should_refuse": true,
+      "answer_must_mention": [],
+      "relevant_chunk_ids": [],
+      "_counterfactual_mode": "empty-retrieval"
+    }
+  ],
+  "_resolved_at": "2026-06-20T22:10:11Z",
+  "_baseline_2026_06_20": {
+    "config": "CO_RESIDENCE_MODE=manual RERANKER_DEVICE=cpu EMBEDDER_DEVICE=cuda; orchestrator Qwen3.5-4B-AWQ via daemon",
+    "result_N2_byte_stable": {
+      "query_count": 29,
+      "answered": 20,
+      "refused": 9,
+      "error": 0,
+      "refusal_cf": 1.0,
+      "halluc": 0,
+      "mean_citation_precision": 0.9655,
+      "mean_citation_precision_answered_only": 0.95,
+      "mean_answer_mention_recall": 1.0,
+      "answer_text_correct": "20/20 checked"
+    },
+    "HARD_GATES": "refusal_cf==1.0 (5/5 counterfactuals refused) + 0 hallucinations -> PASSES rebaseline.py.",
+    "FINDING_weak_spot_parse_fragmentation_false_refusals": {
+      "qids": [
+        "foia-05",
+        "foia-08",
+        "foia-11",
+        "pa-12"
+      ],
+      "what": "Answerable specific values ARE in the statute but PyMuPDF split them across list items / hyphen-wraps ('requested 3 or more\\n\\ntimes', 'Sat-\\n\\nurdays', the $250 advance-payment threshold, the contractor-record clause), so the grounding gate can't ground the fragmented value -> FALSE REFUSAL. Re-verified genuine against source. Same class as the forms dense-value false-refusals; NEW upstream cause = parser fragmentation. NOTE: a false refusal on an ANSWERABLE query is a QUALITY issue, NOT a HARD-gate failure (refusal_cf counts only counterfactuals).",
+      "fix_note": "The tempting parser de-fragmentation is a MUTATIVE re-render (re-chunk -> ANN churn = the measured-NEGATIVE forms index-linearizer / W6 trap). Safe fix is ADDITIVE (synthetic de-fragmented chunk, a la resolve_form_field), measure-gated. VALIDATE the fragmentation->refusal hypothesis with a clean-text probe BEFORE building. BANKED, not done."
+    },
+    "pa15_removed_why": "pa-15 ('civil penalty SEPARATE FROM actual damages') was a FLAWED counterfactual: its premise is false (the Privacy Act has no separate civil penalty), but that has a DEFENSIBLE GROUNDED answer. The system answered CORRECTLY (captured live): it grounded the real $1,000 actual-damages floor AND stated 'do not state a separate civil penalty amount distinct from actual damages' -- a correct premise-REJECTION, NOT a fabrication. denial_reframe_retry reframed an over-strict denial into a correct grounded clarification = the ADR-0022 false-refusal-reduction machinery working AS INTENDED. The should_refuse=true label was wrong (a correct grounded answer mislabeled as a hallucination) + near-redundant with pa-06. Removed for a clean corpus. LESSON: a near-miss counterfactual must have NO defensible grounded answer; a false-premise question often does.",
+    "regression": "full rebaseline.py sweep 2026-06-20: every other answer-eval corpus held refusal_cf==1.0/halluc=0; no drift from the 2-doc ingest.",
+    "authoring": "generate(2 deep-readers)->adversarial-verify(per-candidate, 35 agents) workflow + deterministic resolve(24/24 anchors) + N=2 + full-suite regression + live answer-text capture (the pa-15 correction)."
+  }
+}
