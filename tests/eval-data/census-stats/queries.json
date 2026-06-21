@@ -1,0 +1,552 @@
+{
+  "_description": "Statistical/numeric TABLE-RAG corpus: 2 dense US Census P60 reports — Poverty in the US 2022 (P60-280) + Health Insurance Coverage in the US 2022 (P60-281). Stresses the table-RAG / text-to-SQL + numeric-grounding path: specific table-cell retrieval, prose-numeric grounding, AGGREGATE/compute (the row-vs-aggregate fabrication boundary), + near-miss counterfactuals (a value that looks like it belongs but isn't in the table). Public-domain census.gov PDFs; sources LOCAL in ~/corpus-drop/census-stats, not committed.",
+  "_PARSE_NOTE": "INGESTED WITH --force-docling (Docling/TableFormer), NOT the default PyMuPDF route. KEY FINDING: PyMuPDF's born-digital route MANGLES these dense Census tables (collapses rows/columns into run-on mega-cells → text-to-SQL gets garbage); Docling/TableFormer PRESERVES the structure (well-formed GFM, value-per-cell). => a parse-ROUTING fix candidate: route table-dense born-digital docs to Docling. ~12.6 min/doc.",
+  "_MISLABEL_NOTE": "Filenames/slugs say 'income-p60-280' + 'poverty-p60-281' but the ACTUAL content (verified by H1) is Poverty (P60-280) + Health Insurance (P60-281) — I assumed the P60 numbering without verifying (a measure-don't-assert miss). doc_ids retain the wrong slug (load-bearing id); FRONTMATTER TITLES retitled to the correct content. Queries are content-valid (agents read the real content; verifier validated every value).",
+  "_multi_doc": true,
+  "_doc_ids": [
+    "6c5d9798-income-p60-280-2022",
+    "c666d164-poverty-p60-281-2022"
+  ],
+  "_query_count": 26,
+  "_mix": "19 answerable / 7 counterfactual",
+  "_categories": {
+    "cell-retrieval": 10,
+    "prose-numeric": 4,
+    "aggregate": 5,
+    "counterfactual-nearmiss": 5,
+    "counterfactual-empty": 2
+  },
+  "_created": "2026-06-21",
+  "_source_note": "Poverty=p60-280.pdf, HealthInsurance=p60-281.pdf; census.gov/content/dam/.../2023/demo/. Docling-parsed.",
+  "_authoring": "generate(2 deep-readers)->adversarial-verify(per-candidate, 31-agent workflow `.claude/workflows/census-table-corpus-author.js`) — 29/29 survived, values verified verbatim against the Docling tables.",
+  "queries": [
+    {
+      "qid": "pov-01",
+      "question": "In the 2022 poverty report, what was the official poverty rate (percent) for Hispanic (any race) people in 2022?",
+      "_doc_id": "6c5d9798-income-p60-280-2022",
+      "_category": "cell-retrieval",
+      "_anchor_phrase": "17.1 |   16.9 | -0.2",
+      "_expected_answer": "16.9",
+      "_answer_type": "single_value",
+      "_grounding_quote": "| Hispanic (any race)               |   17.1 |   16.9 | -0.2     |",
+      "_memorization_resistance": "Requires the exact Figure 2 / Table A-1 cell (Hispanic official poverty percent, 2022 column = 16.9) from the 2022 Census poverty report (P60-280). A model cannot recall this specific demographic-by-year Census cell from general knowledge, and it sits adjacent to the 2021 value 17.1, a built-in distractor.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "16.9",
+          "16.9 percent"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "6c5d9798-income-p60-280-2022#32f1ac98e6"
+      ]
+    },
+    {
+      "qid": "pov-02",
+      "question": "According to Table A-1 of the report, how many Black people (number, in thousands) were below the poverty level in 2022?",
+      "_doc_id": "6c5d9798-income-p60-280-2022",
+      "_category": "cell-retrieval",
+      "_anchor_phrase": "44,520 |                       7,626",
+      "_expected_answer": "7,626",
+      "_answer_type": "single_value",
+      "_grounding_quote": "| Black. . . . | 43,980 | 8,583 | 476 | 19.5 | 1.1 | 44,520 | 7,626 | 392 | 17.1 | 0.9 | *-957 | *-2.4 |",
+      "_memorization_resistance": "The Below-poverty Number cell for Black, 2022 (7,626 thousand) is a precise Table A-1 value; the 2021 count 8,583 sits in the same row as a near-distractor, so answering requires reading the correct year column (the 7th data column, '2022 Below poverty Number') rather than recalling a memorized figure.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "7,626",
+          "7626"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "6c5d9798-income-p60-280-2022#844f3bce0b",
+        "6c5d9798-income-p60-280-2022#7ca985a83d"
+      ]
+    },
+    {
+      "qid": "pov-03",
+      "question": "What was the Supplemental Poverty Measure (SPM) rate in 2022 for people 65 years and older?",
+      "_doc_id": "6c5d9798-income-p60-280-2022",
+      "_category": "cell-retrieval",
+      "_anchor_phrase": "65 years and older                |   10.7 |   14.1 |",
+      "_expected_answer": "14.1",
+      "_answer_type": "single_value",
+      "_grounding_quote": "| 65 years and older                |   10.7 |   14.1 |",
+      "_memorization_resistance": "The 2022 SPM rate for the 65-and-older group (14.1) is a specific cell in the Figure 4 SPM-rates table (2021/2022 columns); the same-row 2021 value 10.7 is a distractor, and the official poverty rate 10.2 for the same age group (a different table, line 224) is a cross-table near-miss the model must not substitute. The exact value is not recoverable from general knowledge.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "14.1",
+          "14.1 percent"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "6c5d9798-income-p60-280-2022#3a43ddd565"
+      ]
+    },
+    {
+      "qid": "pov-04",
+      "question": "In the official-plus vs SPM comparison table for 2022 (Figure 7), what was the SPM rate for married-couple type units?",
+      "_doc_id": "6c5d9798-income-p60-280-2022",
+      "_category": "cell-retrieval",
+      "_anchor_phrase": "5.4 |   7.6 | *2.1",
+      "_expected_answer": "7.6",
+      "_answer_type": "single_value",
+      "_grounding_quote": "| Married couple                    |          5.4 |   7.6 | *2.1                         |",
+      "_memorization_resistance": "Figure 7's SPM cell for married-couple units (7.6) sits beside the official+ value 5.4 and the difference *2.1; answering requires selecting the correct SPM column of a specific row in a specific comparison table — not retrievable from general knowledge. The value 7.6 also appears for the same row in the separate 2021/2022 trend table, so the anchor must pin Figure 7 specifically.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "7.6",
+          "7.6 percent"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "6c5d9798-income-p60-280-2022#0daee40137"
+      ]
+    },
+    {
+      "qid": "pov-05",
+      "question": "By how many percentage points did Social Security benefits decrease the overall (all people) SPM rate in 2022, according to Table B-7?",
+      "_doc_id": "6c5d9798-income-p60-280-2022",
+      "_category": "cell-retrieval",
+      "_anchor_phrase": "-8.75 | 0.19",
+      "_expected_answer": "-8.75",
+      "_answer_type": "single_value",
+      "_grounding_quote": "| Social Security. . . . . . . . . . . . . .                                                       |                 -8.75 | 0.19                              | -1.87                     | 0.22                                  | -3.73                     | 0.17                                  | -34.72                        |                                      0.67 |",
+      "_memorization_resistance": "Table B-7's 2022 All-people Social Security estimate (-8.75 pp) is a precise four-significant-figure cell that appears exactly once in the report; the prose rounds it to 8.7 pp, the 2021 row is -8.01, and the 65-and-older cell is -34.72, so a model must read the exact 2022 All-people element row rather than recall a memorized program effect.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "-8.75",
+          "8.75",
+          "-8.7",
+          "8.7"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "6c5d9798-income-p60-280-2022#e742c5bf86"
+      ]
+    },
+    {
+      "qid": "pov-07",
+      "question": "How many million people did Social Security move out of SPM poverty in 2022, as stated in the report?",
+      "_doc_id": "6c5d9798-income-p60-280-2022",
+      "_category": "prose-numeric",
+      "_anchor_phrase": "28.9 million people out of SPM poverty",
+      "_expected_answer": "28.9 million",
+      "_answer_type": "single_value",
+      "_grounding_quote": "28.9 million people out of SPM poverty. Meanwhile, refundable tax credits moved 6.4 million people out of SPM poverty, down from 9.6 million people in 2021 (Figure 11 and Table B-8).",
+      "_memorization_resistance": "",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "28.9",
+          "28.9 million",
+          "28,930",
+          "28930"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "6c5d9798-income-p60-280-2022#88c3ebfd06"
+      ]
+    },
+    {
+      "qid": "pov-08",
+      "question": "By how many percentage points did the SPM rate for female reference person units increase from 2021 to 2022?",
+      "_doc_id": "6c5d9798-income-p60-280-2022",
+      "_category": "prose-numeric",
+      "_anchor_phrase": "an increase of 10.9 percentage points",
+      "_expected_answer": "10.9 percentage points",
+      "_answer_type": "single_value",
+      "_grounding_quote": "The SPM rate for female reference person units was 22.6 percent, an increase of 10.9 percentage points from 2021.",
+      "_memorization_resistance": "The +10.9 pp change is stated in prose (22.6 percent in 2022 vs 11.7 percent in 2021, per Table A line 327); it is explicitly the largest year-to-year SPM unit change, a specific value tied to this report's tables that cannot be recalled from general knowledge.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "10.9",
+          "10.9 percentage points"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "6c5d9798-income-p60-280-2022#a8c2f1ef3d"
+      ]
+    },
+    {
+      "qid": "pov-09",
+      "question": "Using Table A-1, how many more people (in thousands) were below the poverty level in the South than in the West in 2022?",
+      "_doc_id": "6c5d9798-income-p60-280-2022",
+      "_category": "aggregate",
+      "_anchor_phrase": "16,830",
+      "_expected_answer": "8,466",
+      "_answer_type": "single_value",
+      "_grounding_quote": "South . . . | 128,000 | 16,830 | 644 | 13.2 | 0.5 | (2022 Below poverty Number = 16,830); West . . . | 77,970 | 8,364 | 422 | 10.7 | 0.5 | (2022 Below poverty Number = 8,364). 16,830 - 8,364 = 8,466.",
+      "_memorization_resistance": "The difference 16,830 - 8,364 = 8,466 is not tabulated anywhere in either report (grep confirms absence); it requires the text-to-SQL path to fetch two specific 2022 Below-poverty Number cells (South 16,830, West 8,364) from Table A-1 and subtract, stressing the recompute-vs-fabricate boundary rather than a memorized total.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "8,466",
+          "8466"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "6c5d9798-income-p60-280-2022#0dd5472239",
+        "6c5d9798-income-p60-280-2022#8d2be6cbdd"
+      ]
+    },
+    {
+      "qid": "pov-10",
+      "question": "In 2022, which group had a higher official poverty rate: Black people or Hispanic (any race) people?",
+      "_doc_id": "6c5d9798-income-p60-280-2022",
+      "_category": "aggregate",
+      "_anchor_phrase": "Black. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .",
+      "_expected_answer": "Black (17.1 percent vs 16.9 percent for Hispanic)",
+      "_answer_type": "comparison",
+      "_grounding_quote": "| Black                             |   19.5 |   17.1 | *-2.4    | (2021 then 2022) and | Hispanic (any race)               |   17.1 |   16.9 | -0.2     | — 2022 official poverty rates: Black 17.1, Hispanic 16.9",
+      "_memorization_resistance": "Requires comparing two specific 2022 official-poverty cells (Black 17.1 vs Hispanic 16.9); no column states the comparison and the values are only 0.2 apart, so only reading both exact 2022 cells resolves which is higher.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "Black"
+        ],
+        [
+          "17.1"
+        ],
+        [
+          "16.9"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "6c5d9798-income-p60-280-2022#76be97cf22",
+        "6c5d9798-income-p60-280-2022#8bb23ca086"
+      ]
+    },
+    {
+      "qid": "pov-11",
+      "question": "Combining the Midwest and Northeast, how many people (in thousands) were below the poverty level in those two regions in 2022 according to Table A-1?",
+      "_doc_id": "6c5d9798-income-p60-280-2022",
+      "_category": "aggregate",
+      "_anchor_phrase": "6,648",
+      "_expected_answer": "12,731",
+      "_answer_type": "single_value",
+      "_grounding_quote": "Northeast: | 56,310 | 6,083 | 410 | 10.8 | ; Midwest: | 67,830 | 6,648 | 372 | 9.8 |",
+      "_memorization_resistance": "The sum 6,083 + 6,648 = 12,731 is not tabulated; it requires fetching two specific 2022 region 'Below poverty Number' cells (Northeast 6,083, Midwest 6,648) from Table A-1 and adding them, exercising the recompute path and the row-vs-aggregate fabrication boundary (the gate must compute, not invent a plausible-looking regional total).",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "12,731",
+          "12731"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "6c5d9798-income-p60-280-2022#0dd5472239",
+        "6c5d9798-income-p60-280-2022#8d2be6cbdd"
+      ]
+    },
+    {
+      "qid": "pov-12",
+      "question": "What was the median household income for Hispanic households in 2022 according to this report?",
+      "_doc_id": "6c5d9798-income-p60-280-2022",
+      "_category": "counterfactual-nearmiss",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE — this report covers poverty rates and counts, not median household income; no income-dollar figure for Hispanic households appears in either this Poverty report or the companion Health Insurance report.",
+      "_answer_type": "refusal",
+      "_grounding_quote": "The doc with this doc_id is titled 'Poverty in the United States: 2022' (P60-280) and reports poverty rates/counts (e.g., Hispanic official poverty rate row: '| Hispanic (any race) ... 16.9 |'); its only dollar values are poverty thresholds (e.g., '| Four people . . . . . . . . | 29,950 |') and example-family income figures — NO median household income by race. The only 'median household income' text is non-numeric methodology prose (the NEWS project and SAIPE program descriptions). The companion doc (c666d164) is 'Health Insurance Coverage in the United States: 2022' (P60-281), not an income report. The general-knowledge ~74,580 even appears only as an unrelated 2009 population cell in Table A-3.",
+      "_memorization_resistance": "The filename labels this doc 'income-p60-280' (though it parses as the Poverty report), so a model may fabricate a plausible 2022 median-household-income figure (general knowledge says ~$74,580), but no such value for Hispanic households exists in either corpus doc; the temptation is heightened because '74,580' actually appears as an unrelated population count in Table A-3 and income-by-race looks like it belongs in a P60 report.",
+      "should_refuse": true,
+      "answer_must_mention": [],
+      "relevant_chunk_ids": [],
+      "_counterfactual_mode": "near-miss"
+    },
+    {
+      "qid": "pov-13",
+      "question": "What was the official poverty rate for Black women in 2022 in this report?",
+      "_doc_id": "6c5d9798-income-p60-280-2022",
+      "_category": "counterfactual-nearmiss",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE — the report breaks out poverty by race and by sex separately, but provides no race-by-sex cross-tabulation, so there is no Black-female poverty rate cell.",
+      "_answer_type": "refusal",
+      "_grounding_quote": "Table A-1 / Figure 2 list Race and Hispanic Origin (Black 17.1) and Sex (Male 10.5, Female 12.5) as separate one-dimensional sections; no table crosses race with sex, so a 'Black women' poverty rate is not present in the document.",
+      "_memorization_resistance": "A model may fabricate by combining the real Black rate (17.1) and Female rate (12.5) into a plausible 'Black female' figure, but the report provides no race-by-sex cross-tab; the breakdown looks like it belongs in a demographic poverty table but is absent.",
+      "should_refuse": true,
+      "answer_must_mention": [],
+      "relevant_chunk_ids": [],
+      "_counterfactual_mode": "near-miss"
+    },
+    {
+      "qid": "pov-14",
+      "question": "What was the official poverty rate in the United States in 2023 according to this report?",
+      "_doc_id": "6c5d9798-income-p60-280-2022",
+      "_category": "counterfactual-nearmiss",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE — the report (P60-280, Poverty in the United States: 2022) covers 2021 and 2022 with a historical series to 1959; it contains no 2023 poverty rate. The 2023 strings in the document are the CPS survey year, the September 2023 issue date, and working-paper references, not a 2023 estimate (the latest official rate reported is 11.5 percent for 2022).",
+      "_answer_type": "refusal",
+      "_grounding_quote": "The official poverty series runs 1959-2022 (Table A-3: 'Poverty Status of People by Age, Race, and Hispanic Origin: 1959 to 2022'); the latest reported value is 'The official poverty rate in 2022 was 11.5 percent', and no 2023 poverty rate is reported anywhere in the document.",
+      "_memorization_resistance": "A model may supply a plausible 2023 rate (e.g., ~11.1) by extrapolating from the 2022 value of 11.5 percent, but the report's data stop at 2022; '2023' appears only as the CPS survey year, the issue date, and working-paper references, making this a tempting year-near-miss the gate must refuse.",
+      "should_refuse": true,
+      "answer_must_mention": [],
+      "relevant_chunk_ids": [],
+      "_counterfactual_mode": "near-miss"
+    },
+    {
+      "qid": "pov-15",
+      "question": "What was the average ticket price for a New York Yankees home game in 2022 according to this report?",
+      "_doc_id": "6c5d9798-income-p60-280-2022",
+      "_category": "counterfactual-empty",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE — wholly off-topic; this is a U.S. Census Bureau income/poverty report (P60 series, CPS ASEC) and contains nothing about sports or ticket prices.",
+      "_answer_type": "refusal",
+      "_grounding_quote": "Both reports are Census Bureau P60-series releases on income and poverty in the United States built from CPS ASEC data; grep for yankee/ticket/baseball/sport/stadium/MLB returns 0 hits in either body — no content on baseball, sports, or ticket pricing.",
+      "_memorization_resistance": "",
+      "should_refuse": true,
+      "answer_must_mention": [],
+      "relevant_chunk_ids": [],
+      "_counterfactual_mode": "empty-retrieval"
+    },
+    {
+      "qid": "hins-02",
+      "question": "What was the 2022 percent of people covered by Medicaid according to Table 1?",
+      "_doc_id": "c666d164-poverty-p60-281-2022",
+      "_category": "cell-retrieval",
+      "_anchor_phrase": "62,050 |                        1,112 | 18.8",
+      "_expected_answer": "18.8",
+      "_answer_type": "single_value",
+      "_grounding_quote": "| /emspace/emspaceMedicaid 2 . . . . . . . . . . . . . . . .          |        61,940 |                          843 | 18.9           | 0.3                          |        62,050 |                        1,112 | 18.8           | 0.3                          | -0.1                                 |",
+      "_memorization_resistance": "Requires the 2022 Percent cell for Medicaid specifically (18.8), which is easily confused with the 2021 Medicaid value (18.9) or the Medicare 2022 value (18.7) in neighbouring rows of Table 1.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "18.8",
+          "18.8 percent",
+          "18.8%"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "c666d164-poverty-p60-281-2022#acbfdd2c27"
+      ]
+    },
+    {
+      "qid": "hins-03",
+      "question": "How many people in thousands had TRICARE coverage in 2022?",
+      "_doc_id": "c666d164-poverty-p60-281-2022",
+      "_category": "cell-retrieval",
+      "_anchor_phrase": "7,817 |                          485 | 2.4",
+      "_expected_answer": "7,817",
+      "_answer_type": "single_value",
+      "_grounding_quote": "| /emspace/emspaceTRICARE 2 . . . . . . . . . . . . . . . .           |         8,299 |                          527 | 2.5            | 0.2                          |         7,817 |                          485 | 2.4            | 0.1                          | *-0.2                                |",
+      "_memorization_resistance": "The 2022 Number for TRICARE (7,817 thousand) is a low-salience, privacy-rounded CPS ASEC estimate (DRB CBDRB-FY23-0432, additional rounding) that a model cannot recall; the 2021 value (8,299) sits one column over in the same row as a distractor.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "7,817",
+          "7817"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "c666d164-poverty-p60-281-2022#7b17c1d998"
+      ]
+    },
+    {
+      "qid": "hins-04",
+      "question": "In Table A-1, what was the 2022 private insurance coverage rate for Asian people?",
+      "_doc_id": "c666d164-poverty-p60-281-2022",
+      "_category": "cell-retrieval",
+      "_anchor_phrase": "21,550         | 94.1    | 0.6         | 72.2              | 1.3",
+      "_expected_answer": "72.2",
+      "_answer_type": "single_value",
+      "_grounding_quote": "| Asian . . . . . . . . . . . . . . . . . . . . . . . . . . .                                    | 21,550         | 94.1    | 0.6         | 72.2              | 1.3               | 27.8                      | 1.2                       | 5.9         | 0.6         |",
+      "_memorization_resistance": "",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "72.2",
+          "72.2 percent",
+          "72.2%"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "c666d164-poverty-p60-281-2022#d1578dd13a"
+      ]
+    },
+    {
+      "qid": "hins-05",
+      "question": "According to Table A-2, what was the 2022 uninsured rate (percent) for adults aged 26 to 64 with no high school diploma?",
+      "_doc_id": "c666d164-poverty-p60-281-2022",
+      "_category": "cell-retrieval",
+      "_anchor_phrase": "No high school diploma . . . . . . . . . . . .",
+      "_expected_answer": "31.2",
+      "_answer_type": "single_value",
+      "_grounding_quote": "| No high school diploma . . . . . . . . . . . .                                                         |         13,330 |            68.8 |                           1.4 |                                       35.6 |                                                      1.4 |                                      36.5 |                                                     1.4 |                           31.2 |                                    1.4 |",
+      "_memorization_resistance": "",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "31.2",
+          "31.2 percent",
+          "31.2%"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "c666d164-poverty-p60-281-2022#f78471704e",
+        "c666d164-poverty-p60-281-2022#705e90e118"
+      ]
+    },
+    {
+      "qid": "hins-06",
+      "question": "In the 2022 income-to-poverty table (Table A-3), what was the public health insurance coverage rate for people below 100 percent of poverty?",
+      "_doc_id": "c666d164-poverty-p60-281-2022",
+      "_category": "cell-retrieval",
+      "_anchor_phrase": "65.3 |                                                                          1.1",
+      "_expected_answer": "65.3",
+      "_answer_type": "single_value",
+      "_grounding_quote": "| Below 100 percent of poverty . . . . . . .                                                 |         37,820 |                                 83.5 |                                                0.9 |                                                            23.7 |                                                                           0.9 |                                                           65.3 |                                                                          1.1 |                        16.5 |                                       0.9 |",
+      "_memorization_resistance": "Public-coverage cell for the below-100%-of-poverty group in the 2022 panel of Table A-3 (65.3) — a precise CPS ASEC value no model recalls from general knowledge; the 2021-panel value (66.7) is a genuine adjacent-row distractor that punishes guessing.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "65.3",
+          "65.3 percent",
+          "65.3%"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "c666d164-poverty-p60-281-2022#481c9b7fef"
+      ]
+    },
+    {
+      "qid": "hins-07",
+      "question": "What percentage of full-time, year-round workers were covered through a private insurance plan in 2022, per the narrative?",
+      "_doc_id": "c666d164-poverty-p60-281-2022",
+      "_category": "prose-numeric",
+      "_anchor_phrase": "84.8 percent of full-time, year-round workers",
+      "_expected_answer": "84.8",
+      "_answer_type": "single_value",
+      "_grounding_quote": "In 2022, 84.8 percent of full-time, year-round workers and 66.0 percent of those working less than full-time, year-round were covered through a private insurance plan.",
+      "_memorization_resistance": "A prose statistic (84.8%) for private coverage among full-time, year-round workers; the corresponding Table A-2 row 'Worked full-time, year-round' cell reads 84.7 due to rounding (confirmed at line 600), so the model must read the narrative value, not the table cell. Not recoverable from general knowledge.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "84.8",
+          "84.8 percent",
+          "84.8%"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "c666d164-poverty-p60-281-2022#f6eff3a5d7"
+      ]
+    },
+    {
+      "qid": "hins-08",
+      "question": "The report states the uninsured rate for working-age adults aged 19 to 64 in poverty in expansion states was what percent in 2022?",
+      "_doc_id": "c666d164-poverty-p60-281-2022",
+      "_category": "prose-numeric",
+      "_anchor_phrase": "in poverty was 17.0 percent in expansion states",
+      "_expected_answer": "17.0",
+      "_answer_type": "single_value",
+      "_grounding_quote": "In 2022, the uninsured rate for adults aged 19 to 64 in poverty was 17.0 percent in expansion states, compared with 37.9 percent in nonexpansion states (Figure 6).",
+      "_memorization_resistance": "Prose value 17.0% for a narrow cross-tab (in-poverty × expansion-state × 2022) found only in the Figure 6 discussion; the paired 37.9% nonexpansion value is the in-sentence distractor.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "17.0",
+          "17.0 percent",
+          "17%",
+          "17 percent"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "c666d164-poverty-p60-281-2022#4596d1674f"
+      ]
+    },
+    {
+      "qid": "hins-09",
+      "question": "What was the difference in the 2022 uninsured rate between working-age adults aged 19 to 25 and those aged 45 to 64?",
+      "_doc_id": "c666d164-poverty-p60-281-2022",
+      "_category": "aggregate",
+      "_anchor_phrase": "19 to 25 had the highest rate (14.0 percent)",
+      "_expected_answer": "5.4 percentage points (14.0 − 8.6)",
+      "_answer_type": "single_value",
+      "_grounding_quote": "Among working-age adults, those aged 19 to 25 had the highest rate (14.0 percent) uninsured for the entire calendar year of 2022, followed by those aged 26 to 34 (12.5 percent), adults aged 35 to 44 (11.2 percent), and those aged 45 to 64 (8.6 percent).",
+      "_memorization_resistance": "Requires subtracting two distinct 2022 prose cells (14.0 − 8.6 = 5.4); the difference is not printed anywhere in either report, forcing a recompute rather than retrieval of a fabricated single cell.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "5.4",
+          "5.4 percentage points",
+          "5.4 points"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "c666d164-poverty-p60-281-2022#a8fd536ff5"
+      ]
+    },
+    {
+      "qid": "hins-10",
+      "question": "Combining the 2022 numbers from Table 1, how many more people in thousands had Medicaid than TRICARE coverage in 2022?",
+      "_doc_id": "c666d164-poverty-p60-281-2022",
+      "_category": "aggregate",
+      "_anchor_phrase": "18.9           | 0.3                          |        62,050",
+      "_expected_answer": "54,233 (62,050 − 7,817)",
+      "_answer_type": "single_value",
+      "_grounding_quote": "| /emspace/emspaceMedicaid 2 . . . . . . . . . . . . . . . .          |        61,940 |                          843 | 18.9           | 0.3                          |        62,050 | ...  (2022 Number = 62,050); | /emspace/emspaceTRICARE 2 . . . . . . . . . . . . . . . .           |         8,299 |                          527 | 2.5            | 0.2                          |         7,817 | ...  (2022 Number = 7,817) — Table 1.",
+      "_memorization_resistance": "The gate must subtract two 2022 count cells (62,050 − 7,817 = 54,233) from Table 1 — a value present in no row; tests the row-vs-aggregate boundary where a model might fabricate a single plausible 'difference' cell.",
+      "should_refuse": false,
+      "answer_must_mention": [
+        [
+          "54,233",
+          "54233"
+        ]
+      ],
+      "relevant_chunk_ids": [
+        "c666d164-poverty-p60-281-2022#acbfdd2c27"
+      ]
+    },
+    {
+      "qid": "hins-12",
+      "question": "What was the uninsured rate in the United States in 2020 according to this report's Table 1?",
+      "_doc_id": "c666d164-poverty-p60-281-2022",
+      "_category": "counterfactual-nearmiss",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE — Table 1 covers only 2021 and 2022; no 2020 uninsured rate appears anywhere in this report.",
+      "_answer_type": "refusal",
+      "_grounding_quote": "Table 1 columns are '2021 Number / 2021 Percent', '2022 Number / 2022 Percent', plus 'Change in percent (2022 less 2021)'. The Uninsured 6 row reports 8.3 (2021) and 7.9 (2022). No 2020 column exists; Tables A-1, A-2, and A-3 are all titled 'by Selected Characteristics: 2021 and 2022', so no 2020 uninsured rate appears anywhere in this report.",
+      "_memorization_resistance": "A 2020 uninsured rate looks like it belongs (it is the real metric one year earlier, ~8.6-9.2% in reality) but is absent from this 2021/2022-only report; a model may fabricate a plausible ~9% figure. Absent from the companion Poverty report too (zero 'uninsured' hits), so corpus-safe.",
+      "should_refuse": true,
+      "answer_must_mention": [],
+      "relevant_chunk_ids": [],
+      "_counterfactual_mode": "near-miss"
+    },
+    {
+      "qid": "hins-13",
+      "question": "What was the 2022 uninsured rate specifically for Hispanic children living in the West, per this report?",
+      "_doc_id": "c666d164-poverty-p60-281-2022",
+      "_category": "counterfactual-nearmiss",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE — the report gives uninsured rates for Hispanic children (8.6 percent) and for children in the West (4.2 percent) as separate breakdowns, but never crosses race/Hispanic origin with region for children; that intersection is not tabulated.",
+      "_answer_type": "refusal",
+      "_grounding_quote": "Line 265: 'the uninsured rate did not change for Black children, Asian children, or Hispanic children, who had uninsured rates of 4.7 percent, 4.1 percent, and 8.6 percent, respectively.' Line 269: 'The uninsured rates for children in the Midwest (3.3 percent), the South (7.7 percent), and the West (4.2 percent) were not statistically different from 2021.' These are separate marginal breakdowns; no race x region cell for children exists in any table, and the INC/poverty companion report reports no uninsured rates at all.",
+      "_memorization_resistance": "Both component breakdowns (Hispanic children 8.6%; West children 4.2%) appear in the doc, making a crossed cell look retrievable, so a model could splice them or fabricate a plausible number; but the intersection is never tabulated. The cross-tab is also absent from the companion Poverty report.",
+      "should_refuse": true,
+      "answer_must_mention": [],
+      "relevant_chunk_ids": [],
+      "_counterfactual_mode": "near-miss"
+    },
+    {
+      "qid": "hins-14",
+      "question": "What was the median household income in the United States in 2022 according to this report?",
+      "_doc_id": "c666d164-poverty-p60-281-2022",
+      "_category": "counterfactual-empty",
+      "_anchor_phrase": "",
+      "_expected_answer": "REFUSE — this report (P60-281) is the Health Insurance Coverage report; it contains no median-household-income figure (it reports no dollar income values at all). The 2022 median household income (~$74,580) is the subject of the separate 'Income in the United States: 2022' report (P60-279), which is not part of this corpus.",
+      "_answer_type": "refusal",
+      "_grounding_quote": "Neither corpus document reports a 2022 median household income. The doc under test (c666d164, titled 'Health Insurance Coverage in the United States: 2022', P60-281) has no median-income text and no income dollar figures — its only '$' is 'Penalty for Private Use $300'. The sibling doc (6c5d9798, despite its 'income' slug, is actually 'Poverty in the United States: 2022', P60-280) also has no median household income — its only dollar figures are a hypothetical family example ($12,500/$36,000 vs the $35,801 threshold). NOTE — VERBATIM COLLISION: the real 2022 U.S. median household income, $74,580, appears as the token '74,580' in the poverty doc (line 839) but it is a 2009 under-18 population count in thousands (the column runs ~70,000-74,000 across all years), NOT a median income; a numeric backstop checking verbatim presence could false-pass a fabricated '$74,580'. The actual Income report (P60-279) that headlines $74,580 is not in this corpus; the health-insurance doc only references the companion 'Income in the United States: 2022' report by name (it does not reproduce its figures).",
+      "_memorization_resistance": "Median household income is wholly off-topic for a health-insurance report and absent from both corpus documents, yet a model may recall the real ~$74,580 2022 figure from general knowledge and answer despite no grounding in THIS document. The collision is sharper than typical: the exact token '74,580' is physically present in the sibling poverty doc (a 2009 population count), so a model that fabricates '$74,580' could survive a naive verbatim numeric backstop — the correct answer still requires recognizing the value is not a 2022 median income in EITHER report and refusing.",
+      "should_refuse": true,
+      "answer_must_mention": [],
+      "relevant_chunk_ids": [],
+      "_counterfactual_mode": "empty-retrieval"
+    }
+  ],
+  "_resolved_at": "2026-06-21T05:24:39Z",
+  "_dropped_anchor_unresolvable": "pov-06/hins-01/hins-11 (table-cell anchors: dot-leader/footnote/whitespace mismatch with the chunk text — a table-RAG anchoring difficulty; values verified present but not verbatim-resolvable)."
+}
