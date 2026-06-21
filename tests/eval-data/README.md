@@ -19,7 +19,7 @@ tests/eval-data/
 ├── summary/              ← grounded document-summary eval (memex eval-summary; 2026-05-27)
 ├── handwritten/          ← HANDWRITTEN C++ note, cs-notes-1 (10 q; 2026-05-27; first corpus to exercise the scan→VLM parse route)
 ├── linux-fundamentals/   ← Linux Essentials course, 16 real born-digital PDFs (18 q; 2026-06-07; NEW DOMAIN — the `modern-printed` real-doc category; refusal_cf=1.0 N=3)
-└── legal-statutes/       ← FOIA §552 + Privacy Act §552a, 2 cross-referencing US statutes (29 q; 2026-06-20; legal/regulatory — cross-reference + defined-term stress; N=2 byte-stable; refusal_cf=1.0. Surfaced a parse-fragmentation false-refusal cluster — answerable values split across list items/hyphen-wraps defeat grounding; see queries.json `_baseline_2026_06_20`)
+└── legal-statutes/       ← FOIA §552 + Privacy Act §552a, 2 cross-referencing US statutes (29 q; 2026-06-20; legal/regulatory — cross-reference + defined-term stress; N=2 byte-stable; refusal_cf=1.0. Surfaced 4 answerable false refusals; an empirics-first probe (`scripts/parse_fragmentation_probe.py`) REFUTED the parse-fragmentation guess → 3 are gate over-refusals on visible top-ranked values (ADR-0022 class) + 1 truncation-horizon (foia-08, value past the ~1800-char budget); see queries.json `_baseline_2026_06_20`)
 ```
 
 Each subdirectory holds a `queries.json` (+ optional notes). Source PDFs are

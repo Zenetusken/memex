@@ -704,18 +704,23 @@
       "answer_text_correct": "20/20 checked"
     },
     "HARD_GATES": "refusal_cf==1.0 (5/5 counterfactuals refused) + 0 hallucinations -> PASSES rebaseline.py.",
-    "FINDING_weak_spot_parse_fragmentation_false_refusals": {
-      "qids": [
-        "foia-05",
-        "foia-08",
-        "foia-11",
-        "pa-12"
-      ],
-      "what": "Answerable specific values ARE in the statute but PyMuPDF split them across list items / hyphen-wraps ('requested 3 or more\\n\\ntimes', 'Sat-\\n\\nurdays', the $250 advance-payment threshold, the contractor-record clause), so the grounding gate can't ground the fragmented value -> FALSE REFUSAL. Re-verified genuine against source. Same class as the forms dense-value false-refusals; NEW upstream cause = parser fragmentation. NOTE: a false refusal on an ANSWERABLE query is a QUALITY issue, NOT a HARD-gate failure (refusal_cf counts only counterfactuals).",
-      "fix_note": "The tempting parser de-fragmentation is a MUTATIVE re-render (re-chunk -> ANN churn = the measured-NEGATIVE forms index-linearizer / W6 trap). Safe fix is ADDITIVE (synthetic de-fragmented chunk, a la resolve_form_field), measure-gated. VALIDATE the fragmentation->refusal hypothesis with a clean-text probe BEFORE building. BANKED, not done."
-    },
     "pa15_removed_why": "pa-15 ('civil penalty SEPARATE FROM actual damages') was a FLAWED counterfactual: its premise is false (the Privacy Act has no separate civil penalty), but that has a DEFENSIBLE GROUNDED answer. The system answered CORRECTLY (captured live): it grounded the real $1,000 actual-damages floor AND stated 'do not state a separate civil penalty amount distinct from actual damages' -- a correct premise-REJECTION, NOT a fabrication. denial_reframe_retry reframed an over-strict denial into a correct grounded clarification = the ADR-0022 false-refusal-reduction machinery working AS INTENDED. The should_refuse=true label was wrong (a correct grounded answer mislabeled as a hallucination) + near-redundant with pa-06. Removed for a clean corpus. LESSON: a near-miss counterfactual must have NO defensible grounded answer; a false-premise question often does.",
     "regression": "full rebaseline.py sweep 2026-06-20: every other answer-eval corpus held refusal_cf==1.0/halluc=0; no drift from the 2-doc ingest.",
-    "authoring": "generate(2 deep-readers)->adversarial-verify(per-candidate, 35 agents) workflow + deterministic resolve(24/24 anchors) + N=2 + full-suite regression + live answer-text capture (the pa-15 correction)."
+    "authoring": "generate(2 deep-readers)->adversarial-verify(per-candidate, 35 agents) workflow + deterministic resolve(24/24 anchors) + N=2 + full-suite regression + live answer-text capture (the pa-15 correction).",
+    "FINDING_4_false_refusals_diagnosed": {
+      "headline": "4 answerable queries (foia-05/08/11, pa-12) refused. An EMPIRICS-FIRST probe (scripts/parse_fragmentation_probe.py) REFUTED the initial 'parse-fragmentation' hypothesis: the MD-level list/hyphen splits NORMALIZE AWAY in the chunk text. NOT a new parse weak spot. (Recorded so the wrong cause isn't re-walked.)",
+      "OBSERVED_per_query_fact": {
+        "foia-08": "gold 36af4baf38 reranked #1; '$250' present at char offset 1854 in a 2260-char chunk; the answer/compose path truncates each chunk to ~1800 chars (assess 1200).",
+        "foia-05": "gold b89834fde2 reranked #4 (in top-5); answer present at offset 1404 (within budget); refusal_reason='topic mismatch' (relevance gate).",
+        "foia-11": "gold 0bf81fb887 reranked #2 (in top-5); answer 'requested 3 or more times' present CONTIGUOUS at offset 496 (the MD '3 or more\\n\\ntimes' split normalized away in the chunk); refusal_reason='not in the documents' (grounding).",
+        "pa-12": "gold 8a3f5d2de3 reranked #1; '10 days' present at offset 461 (within budget); refusal_reason=\"couldn't ground 1 claim after 0 attempts\" (grounding)."
+      },
+      "INFERRED_hedged": {
+        "foia-08": "STRONG INFERENCE: TRUNCATION-HORIZON — value sits past the ~1800-char compose budget, so the gate likely never sees it. Promote to OBSERVED via a truncated-vs-full grounding test (NOT yet run; shades into the fix experiment).",
+        "foia-05_foia-11_pa-12": "REASONABLE INFERENCE (labeled): gate over-refusal on a VISIBLE, top-ranked, present value = the ADR-0022 false-refusal class. NOT shown identical to existing residuals — the 3 refusal_reasons DIFFER (relevance topic-mismatch / two distinct grounding failures) = 3 mechanisms, do NOT collapse to one bucket."
+      },
+      "LEVER_VERDICT": "The 'parse-fragmentation ADDITIVE fix' is a NO-GO — refuted BEFORE any fix code (the structured-workflow empirics-first gate doing its job). foia-08's TRUNCATION-HORIZON is the one genuinely-new, cleanly-isolated candidate: value-centric/structured truncation (keep the query-relevant span) is a DIFFERENT mechanism than the measured-negative global budget-RAISE (forms Increment B) → UNTESTED, NOT negative; it's the deep-research's flagged surgical direction. NOTE: the resolve_form_field additive-synthetic-chunk shortcut does NOT transfer here (statutory prose has no label:value structure, so one can't deterministically know '$250' is the answer). The 3 gate over-refusals = documented-hard ADR-0022 defer.",
+      "probe": "scripts/parse_fragmentation_probe.py"
+    }
   }
 }
