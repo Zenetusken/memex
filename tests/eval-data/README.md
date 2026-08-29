@@ -25,6 +25,9 @@ tests/eval-data/
 
 Each subdirectory holds a `queries.json` (+ optional notes). Source PDFs are
 **not** committed — only the query sets are (eval material stays local).
+Enforced mechanically: `.gitignore` ignores everything here outside the
+whitelist shapes, and the CI `eval-data-scope` job fails any breach (plus any
+new/changed file carrying a literal home-directory path).
 
 Run outputs land under `tests/eval-results/` (gitignored — these are timestamped + regenerable and shouldn't be versioned).
 
