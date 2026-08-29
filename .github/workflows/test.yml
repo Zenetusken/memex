@@ -57,3 +57,53 @@ jobs:
 
       - name: Test (pytest)
         run: uv run pytest -q
+
+  # The eval-data CONVENTION guard (2026-08-29): source documents (the real
+  # PDFs, personal statements, anything that isn't a query set) stay LOCAL —
+  # only queries.json + baselines ship. Two checks, both fail-fast and
+  # dependency-free (pure git/grep, no uv install):
+  #   (1) the tracked tests/eval-data/ tree must match the whitelist shapes;
+  #   (2) no file added/modified in this run may carry a literal home-dir
+  #       path (audit logs etc. must use ~-relative paths, not the real
+  #       username — the grep pattern is built by string concatenation so
+  #       this file doesn't trip its own check).
+  # Deliberately NOT merged into the `gates` job and NOT paths-filtered: it
+  # must also be requireable as a status check without dead-locking PRs that
+  # don't touch eval-data (the PR#5 lesson in the header above).
+  eval-data-scope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7.0.0
+        with:
+          fetch-depth: 0   # both diff endpoints (base + head) must exist on push AND PR
+
+      - name: Eval-data whitelist (source docs never ship)
+        run: |
+          set -euo pipefail
+          allowed='^(tests/eval-data/README\.md|tests/eval-data/table-split-baseline\.json|tests/eval-data/[^/]+/queries\.json|tests/eval-data/report-structure/(baseline|decks)\.json)$'
+          bad=$(git ls-files tests/eval-data/ | grep -vE "$allowed" || true)
+          if [ -n "$bad" ]; then
+            echo "::error::eval-data convention breach — only query sets + baselines may be committed (source docs stay LOCAL):"
+            printf '  %s\n' $bad
+            exit 1
+          fi
+          echo "eval-data tree is whitelist-clean ($(git ls-files tests/eval-data/ | wc -l) files)"
+
+      - name: No home-dir paths in files added or modified this run
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          pat="/h""ome/"   # string-concatenated: this file must not contain the literal
+          git diff --name-only --diff-filter=ACMR -z "$base" "$GITHUB_SHA" > /tmp/changed.$$
+          bad=$(xargs -0 -r grep -l "$pat" < /tmp/changed.$$ || true)
+          if [ -n "$bad" ]; then
+            echo "::error::files added/modified this run must not contain a literal home-dir path (use ~-relative):"
+            printf '  %s\n' $bad
+            exit 1
+          fi
+          echo "no home-dir paths in the $(tr -cd '\0' < /tmp/changed.$$ | wc -c) file(s) touched this run"

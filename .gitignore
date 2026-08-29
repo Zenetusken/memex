@@ -66,3 +66,17 @@ node_modules/
 
 # mkdocs build output (`uv run mkdocs build` → site/; regenerable, never committed)
 /site/
+
+# Eval source documents stay LOCAL — only query sets + baselines ship
+# (tests/eval-data/ convention; mechanically enforced in CI by the
+# eval-data-scope job). Ignore everything under tests/eval-data/ except
+# the whitelisted shapes, so a personal source PDF dropped there can
+# never be `git add`ed by accident. The dirs must be re-included first
+# (git won't descend into an ignored directory to apply a re-include).
+tests/eval-data/**
+!tests/eval-data/**/
+!tests/eval-data/**/queries.json
+!tests/eval-data/README.md
+!tests/eval-data/**/baseline.json
+!tests/eval-data/**/decks.json
+!tests/eval-data/table-split-baseline.json
